@@ -1,5 +1,6 @@
 ARG VARIANT=bookworm-slim
-FROM --platform=linux/arm64 debian:${VARIANT}
+ARG PLATFORM=""
+FROM ${PLATFORM}debian:${VARIANT}
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
