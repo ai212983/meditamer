@@ -35,8 +35,9 @@ embassy = [
 log = { version = "0.4", default-features = false }
 esp-idf-svc = { version = "0.49", default-features = false }
 embassy-time = { version = "0.3.1", features = ["generic-queue-8"] }
-port-expander = "0.6.1"
+port-expander = { version = "0.6.1", features = ["std"] }
 embedded-hal-bus = { version = "0.2.0", features = ["std"] }
+lazy_static = "1.5.0"
 
 [build-dependencies]
 embuild = "0.32.0"
