@@ -1,8 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-which idf.py >/dev/null || {
-    source ~/export-esp.sh >/dev/null 2>&1
-}
+set -euo pipefail
+
+if [[ -f "$HOME/export-esp.sh" ]]; then
+    # Ensure Xtensa toolchain is available for linking.
+    # shellcheck disable=SC1090
+    source "$HOME/export-esp.sh"
+fi
 
 case "$1" in
 "" | "release")
