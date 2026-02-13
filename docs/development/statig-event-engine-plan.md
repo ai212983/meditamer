@@ -84,7 +84,6 @@ Inputs to the machine:
 - `Tick(MotionFeatures, now_ms)`
 - `ImuFault`
 - `ImuRecovered`
-- `ConfigUpdated`
 
 Outputs/actions:
 
@@ -139,7 +138,6 @@ Config should cover:
 - Thresholds and timing windows.
 - Cooldown and veto windows.
 - Action mapping (`BacklightTrigger`, later buzzer/UI actions).
-- Optional profiles (`default`, `lab`, `strict`) selected at compile time.
 
 Design constraint:
 
@@ -258,15 +256,6 @@ Exit criteria:
   - Mitigation: per-side capture set and side-balanced acceptance checks.
 - Risk: hard-to-debug rejects.
   - Mitigation: mandatory reject reason + state tracing.
-
-## Rollback Plan
-
-- Keep old detector path behind compile-time feature flag during migration:
-  - `event-engine-statig` (new) vs `event-engine-legacy` (old).
-- Do not delete old path until:
-  - parity met,
-  - validation matrix passed on hardware.
-- Keep one fallback static config profile embedded as emergency default.
 
 ## Next Session Checklist
 

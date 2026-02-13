@@ -22,6 +22,7 @@ use esp_hal::{
     Async,
 };
 use meditamer::{
+    event_engine::{EngineTraceSample, EventEngine, SensorFrame},
     inkplate_hal::InkplateHal,
     platform::{BusyDelay, HalI2c},
 };
@@ -61,26 +62,9 @@ const IMU_INIT_RETRY_MS: u64 = 2_000;
 const BACKLIGHT_MAX_BRIGHTNESS: u8 = 63;
 const BACKLIGHT_HOLD_MS: u64 = 3_000;
 const BACKLIGHT_FADE_MS: u64 = 2_000;
-const TRIPLE_TAP_MIN_MS: u64 = 55;
-const TRIPLE_TAP_MAX_MS: u64 = 700;
-const TRIPLE_TAP_LAST_MAX_MS: u64 = 900;
-const TRIPLE_TAP_COOLDOWN_MS: u64 = 900;
-const TAP_DEBOUNCE_MS: u64 = 110;
-const TAP_SEQ_FINISH_DEBOUNCE_MS: u64 = 55;
-const TAP_JERK_L1_MIN: i32 = 900;
-const TAP_JERK_STRONG_L1_MIN: i32 = 2_600;
-const TAP_JERK_SEQ_CONT_MIN: i32 = 650;
-const TAP_PREV_JERK_QUIET_MAX: i32 = 1_100;
-const TAP_GYRO_L1_SWING_MAX: i32 = 14_000;
-const TAP_GYRO_VETO_HOLD_MS: u64 = 180;
-const TAP_TRACE_ENABLED: bool = true;
+const TAP_TRACE_ENABLED: bool = false;
 const TAP_TRACE_SAMPLE_MS: u64 = 25;
 const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
-const LSM6_TAP_SRC_Z_BIT: u8 = 0x01;
-const LSM6_TAP_SRC_Y_BIT: u8 = 0x02;
-const LSM6_TAP_SRC_X_BIT: u8 = 0x04;
-const LSM6_TAP_SRC_SINGLE_TAP_BIT: u8 = 0x20;
-const LSM6_TAP_SRC_TAP_EVENT_BIT: u8 = 0x40;
 static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 4> = Channel::new();
 static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 32> = Channel::new();
 
@@ -114,6 +98,11 @@ struct TapTraceSample {
     seq_count: u8,
     tap_candidate: u8,
     cand_src: u8,
+    state_id: u8,
+    reject_reason: u8,
+    candidate_score: u16,
+    window_ms: u16,
+    cooldown_active: u8,
     jerk_l1: i32,
     motion_veto: u8,
     gyro_l1: i32,
@@ -237,7 +226,7 @@ async fn time_sync_task(mut uart: SerialUart) {
     if TAP_TRACE_ENABLED {
         let _ = uart
             .write_async(
-                b"tap_trace,ms,tap_src,seq,cand,csrc,jerk,veto,gyro,int1,int2,pgood,batt_pct,gx,gy,gz,ax,ay,az\r\n",
+                b"tap_trace,ms,tap_src,seq,cand,csrc,state,reject,score,window,cooldown,jerk,veto,gyro,int1,int2,pgood,batt_pct,gx,gy,gz,ax,ay,az\r\n",
             )
             .await;
     }
@@ -280,12 +269,17 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
     let mut line = heapless::String::<256>::new();
     let _ = write!(
         &mut line,
-        "tap_trace,{},{:#04x},{},{},{:#04x},{},{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
+        "tap_trace,{},{:#04x},{},{},{:#04x},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
         sample.t_ms,
         sample.tap_src,
         sample.seq_count,
         sample.tap_candidate,
         sample.cand_src,
+        sample.state_id,
+        sample.reject_reason,
+        sample.candidate_score,
+        sample.window_ms,
+        sample.cooldown_active,
         sample.jerk_l1,
         sample.motion_veto,
         sample.gyro_l1,
@@ -301,30 +295,6 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
         sample.az
     );
     let _ = uart.write_async(line.as_bytes()).await;
-}
-
-fn accel_l1_jerk_and_axis(
-    prev: Option<(i16, i16, i16)>,
-    current: (i16, i16, i16),
-) -> (i32, u8) {
-    let Some((px, py, pz)) = prev else {
-        return (0, 0);
-    };
-
-    let dx = (current.0 as i32 - px as i32).abs();
-    let dy = (current.1 as i32 - py as i32).abs();
-    let dz = (current.2 as i32 - pz as i32).abs();
-    let total = dx + dy + dz;
-
-    let axis = if dx >= dy && dx >= dz {
-        LSM6_TAP_SRC_X_BIT
-    } else if dy >= dx && dy >= dz {
-        LSM6_TAP_SRC_Y_BIT
-    } else {
-        LSM6_TAP_SRC_Z_BIT
-    };
-
-    (total, axis)
 }
 
 fn parse_timeset_command(line: &[u8]) -> Option<TimeSyncCommand> {
@@ -411,16 +381,8 @@ async fn display_task(mut context: DisplayContext) {
     let mut screen_initialized = false;
     let mut imu_double_tap_ready = false;
     let mut imu_retry_at = Instant::now();
-    let mut tap_sequence: Option<(u8, Instant, u8)> = None;
-    let mut last_triple_tap_at: Option<Instant> = None;
-    let mut last_tap_candidate_at: Option<Instant> = None;
-    let mut last_tap_accel: Option<(i16, i16, i16)> = None;
-    let mut last_tap_candidate_flag = 0u8;
-    let mut last_tap_candidate_src = 0u8;
-    let mut last_tap_jerk_l1 = 0i32;
-    let mut last_tap_motion_veto = 0u8;
-    let mut last_tap_gyro_l1 = 0i32;
-    let mut last_big_gyro_at: Option<Instant> = None;
+    let mut event_engine = EventEngine::default();
+    let mut last_engine_trace = EngineTraceSample::default();
     let mut last_detect_tap_src = 0u8;
     let mut last_detect_int1 = 0u8;
     let trace_epoch = Instant::now();
@@ -487,6 +449,12 @@ async fn display_task(mut context: DisplayContext) {
 
         if !imu_double_tap_ready && Instant::now() >= imu_retry_at {
             imu_double_tap_ready = context.inkplate.lsm6ds3_init_double_tap().unwrap_or(false);
+            if imu_double_tap_ready {
+                let now_ms = Instant::now()
+                    .saturating_duration_since(trace_epoch)
+                    .as_millis();
+                last_engine_trace = event_engine.imu_recovered(now_ms).trace;
+            }
             imu_retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
         }
 
@@ -498,157 +466,37 @@ async fn display_task(mut context: DisplayContext) {
             ) {
                 (Ok(tap_src), Ok(int1), Ok((gx, gy, gz, ax, ay, az))) => {
                     let now = Instant::now();
+                    let now_ms = now.saturating_duration_since(trace_epoch).as_millis();
                     last_detect_tap_src = tap_src;
                     last_detect_int1 = if int1 { 1 } else { 0 };
-                    let gyro_l1 =
-                        i32::from(gx).abs() + i32::from(gy).abs() + i32::from(gz).abs();
-                    last_tap_gyro_l1 = gyro_l1;
-                    if gyro_l1 >= TAP_GYRO_L1_SWING_MAX {
-                        last_big_gyro_at = Some(now);
-                    }
-                    let gyro_veto_active = last_big_gyro_at.is_some_and(|last| {
-                        now.saturating_duration_since(last).as_millis() < TAP_GYRO_VETO_HOLD_MS
+
+                    let output = event_engine.tick(SensorFrame {
+                        now_ms,
+                        tap_src,
+                        int1,
+                        gx,
+                        gy,
+                        gz,
+                        ax,
+                        ay,
+                        az,
                     });
-                    last_tap_motion_veto = if gyro_veto_active { 1 } else { 0 };
+                    last_engine_trace = output.trace;
 
-                    let tap_axis_mask =
-                        tap_src & (LSM6_TAP_SRC_X_BIT | LSM6_TAP_SRC_Y_BIT | LSM6_TAP_SRC_Z_BIT);
-                    let has_axis_tap = tap_axis_mask != 0;
-                    let has_single_tap = (tap_src & LSM6_TAP_SRC_SINGLE_TAP_BIT) != 0;
-                    let has_tap_event = (tap_src & LSM6_TAP_SRC_TAP_EVENT_BIT) != 0;
-                    let prev_jerk_l1 = last_tap_jerk_l1;
-                    let (jerk_l1, jerk_axis) = accel_l1_jerk_and_axis(last_tap_accel, (ax, ay, az));
-                    last_tap_accel = Some((ax, ay, az));
-                    last_tap_jerk_l1 = jerk_l1;
-                    let candidate_axis = if has_axis_tap { tap_axis_mask } else { jerk_axis };
-                    let (seq_count, seq_axis) = tap_sequence
-                        .map(|(count, _, axis)| (count, axis))
-                        .unwrap_or((0, 0));
-                    let axis_matches_sequence =
-                        seq_axis == 0 || candidate_axis == 0 || (seq_axis & candidate_axis) != 0;
-
-                    let moderate_jerk = jerk_l1 >= TAP_JERK_L1_MIN;
-                    let strong_jerk = jerk_l1 >= TAP_JERK_STRONG_L1_MIN;
-                    let src_axis = has_axis_tap;
-                    let src_single = has_single_tap;
-                    let src_int1 = int1;
-                    let src_tap_event = has_tap_event;
-                    let src_jerk_axis = has_axis_tap && moderate_jerk;
-                    // Fallback for weak-side taps where tap_src bits are flaky: strong impulse on quiet baseline.
-                    let src_jerk_only =
-                        !has_axis_tap && strong_jerk && prev_jerk_l1 <= TAP_PREV_JERK_QUIET_MAX;
-                    // If 2 taps already passed, allow weaker 3rd impulse when axis remains consistent.
-                    let src_seq_finish_assist =
-                        seq_count >= 2 && axis_matches_sequence && jerk_l1 >= TAP_JERK_SEQ_CONT_MIN;
-                    let fused_tap_candidate = src_jerk_only
-                        || src_seq_finish_assist
-                        || (src_axis && (src_single || src_int1 || src_tap_event || src_jerk_axis));
-
-                    let mut cand_src = 0u8;
-                    if src_axis {
-                        cand_src |= 0x01;
-                    }
-                    if src_single {
-                        cand_src |= 0x02;
-                    }
-                    if src_int1 {
-                        cand_src |= 0x04;
-                    }
-                    if src_tap_event {
-                        cand_src |= 0x08;
-                    }
-                    if src_jerk_axis {
-                        cand_src |= 0x10;
-                    }
-                    if src_jerk_only {
-                        cand_src |= 0x20;
-                    }
-                    if gyro_veto_active {
-                        cand_src |= 0x40;
-                    }
-                    if src_seq_finish_assist {
-                        cand_src |= 0x80;
-                    }
-
-                    let debounce_window_ms = if src_seq_finish_assist {
-                        TAP_SEQ_FINISH_DEBOUNCE_MS
-                    } else {
-                        TAP_DEBOUNCE_MS
-                    };
-                    let debounced = last_tap_candidate_at.is_some_and(|last| {
-                        now.saturating_duration_since(last).as_millis() < debounce_window_ms
-                    });
-                    // Veto only when candidate is motion-derived; keep explicit tap-axis/single events.
-                    let motion_only_candidate = src_jerk_only || src_seq_finish_assist;
-                    let veto_candidate = gyro_veto_active && motion_only_candidate;
-                    let saw_tap_event = fused_tap_candidate && !debounced && !veto_candidate;
-                    last_tap_candidate_flag = if saw_tap_event { 1 } else { 0 };
-                    last_tap_candidate_src = cand_src;
-
-                    let in_cooldown = last_triple_tap_at.is_some_and(|last| {
-                        now.saturating_duration_since(last).as_millis() < TRIPLE_TAP_COOLDOWN_MS
-                    });
-
-                    if tap_sequence.is_some_and(|(count, last_at, _)| {
-                        let max_gap = if count >= 2 {
-                            TRIPLE_TAP_LAST_MAX_MS
-                        } else {
-                            TRIPLE_TAP_MAX_MS
-                        };
-                        now.saturating_duration_since(last_at).as_millis() > max_gap
-                    }) {
-                        tap_sequence = None;
-                    }
-
-                    if saw_tap_event {
-                        last_tap_candidate_at = Some(now);
-                        if let Some((count, last_at, axis)) = tap_sequence {
-                            if !axis_matches_sequence {
-                                tap_sequence = Some((1, now, candidate_axis));
-                                continue;
-                            }
-                            let dt = now.saturating_duration_since(last_at).as_millis();
-                            let max_gap = if count >= 2 {
-                                TRIPLE_TAP_LAST_MAX_MS
-                            } else {
-                                TRIPLE_TAP_MAX_MS
-                            };
-                            if (TRIPLE_TAP_MIN_MS..=max_gap).contains(&dt) {
-                                let next_count = count.saturating_add(1);
-                                if next_count >= 3 {
-                                    tap_sequence = None;
-                                    if !in_cooldown {
-                                        last_triple_tap_at = Some(now);
-                                        trigger_backlight_cycle(
-                                            &mut context.inkplate,
-                                            &mut backlight_cycle_start,
-                                            &mut backlight_level,
-                                        );
-                                    }
-                                } else {
-                                    let next_axis = if axis != 0 { axis } else { candidate_axis };
-                                    tap_sequence = Some((next_count, now, next_axis));
-                                }
-                            } else {
-                                tap_sequence = Some((1, now, candidate_axis));
-                            }
-                        } else {
-                            tap_sequence = Some((1, now, candidate_axis));
-                        }
+                    if output.actions.contains_backlight_trigger() {
+                        trigger_backlight_cycle(
+                            &mut context.inkplate,
+                            &mut backlight_cycle_start,
+                            &mut backlight_level,
+                        );
                     }
                 }
                 _ => {
                     imu_double_tap_ready = false;
-                    tap_sequence = None;
-                    last_triple_tap_at = None;
-                    last_tap_candidate_at = None;
-                    last_tap_accel = None;
-                    last_tap_candidate_flag = 0;
-                    last_tap_candidate_src = 0;
-                    last_tap_jerk_l1 = 0;
-                    last_tap_motion_veto = 0;
-                    last_tap_gyro_l1 = 0;
-                    last_big_gyro_at = None;
+                    let now_ms = Instant::now()
+                        .saturating_duration_since(trace_epoch)
+                        .as_millis();
+                    last_engine_trace = event_engine.imu_fault(now_ms).trace;
                     last_detect_tap_src = 0;
                     last_detect_int1 = 0;
                     imu_retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
@@ -675,18 +523,22 @@ async fn display_task(mut context: DisplayContext) {
                     context.inkplate.lsm6ds3_read_motion_raw(),
                 ) {
                     (Ok(int2), Ok((gx, gy, gz, ax, ay, az))) => {
-                        let seq_count = tap_sequence.map(|(count, _, _)| count).unwrap_or(0);
                         let battery_percent_i16 = battery_percent.map_or(-1, i16::from);
                         let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
                         let sample = TapTraceSample {
                             t_ms,
                             tap_src: last_detect_tap_src,
-                            seq_count,
-                            tap_candidate: last_tap_candidate_flag,
-                            cand_src: last_tap_candidate_src,
-                            jerk_l1: last_tap_jerk_l1,
-                            motion_veto: last_tap_motion_veto,
-                            gyro_l1: last_tap_gyro_l1,
+                            seq_count: last_engine_trace.seq_count,
+                            tap_candidate: last_engine_trace.tap_candidate,
+                            cand_src: last_engine_trace.candidate_source_mask,
+                            state_id: last_engine_trace.state_id.as_u8(),
+                            reject_reason: last_engine_trace.reject_reason.as_u8(),
+                            candidate_score: last_engine_trace.candidate_score.0,
+                            window_ms: last_engine_trace.window_ms,
+                            cooldown_active: last_engine_trace.cooldown_active,
+                            jerk_l1: last_engine_trace.jerk_l1,
+                            motion_veto: last_engine_trace.motion_veto,
+                            gyro_l1: last_engine_trace.gyro_l1,
                             int1: last_detect_int1,
                             int2: if int2 { 1 } else { 0 },
                             power_good: tap_trace_power_good,

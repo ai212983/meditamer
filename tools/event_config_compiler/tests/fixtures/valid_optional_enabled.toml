@@ -1,0 +1,33 @@
+[triple_tap]
+enabled = true
+min_gap_ms = 60
+max_gap_ms = 720
+last_max_gap_ms = 920
+cooldown_ms = 950
+debounce_ms = 100
+seq_finish_debounce_ms = 60
+gyro_veto_hold_ms = 190
+
+[triple_tap.thresholds]
+jerk_l1_min = 920
+jerk_strong_l1_min = 2500
+jerk_seq_cont_min = 680
+prev_jerk_quiet_max = 1000
+gyro_l1_swing_max = 14500
+
+[triple_tap.weights]
+axis_weight = 25
+single_tap_weight = 20
+int1_weight = 10
+tap_event_weight = 15
+jerk_axis_weight = 8
+jerk_only_weight = 22
+seq_finish_weight = 18
+
+[optional_events]
+pickup_enabled = true
+placement_enabled = true
+stillness_start_enabled = true
+stillness_end_enabled = true
+near_intent_enabled = true
+far_intent_enabled = true

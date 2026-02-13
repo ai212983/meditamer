@@ -7,6 +7,7 @@ The firmware now targets `esp-hal` (`xtensa-esp32-none-elf`) as the primary and 
 ## Event Engine Plan
 
 - `docs/development/statig-event-engine-plan.md`: phased migration plan for replacing in-task heuristic tap logic with a `statig`-based generic sensor-event engine.
+- `docs/development/event-engine-guide.md`: practical developer guide for tuning and modifying the current event engine implementation.
 
 ## Display Runtime Behavior
 

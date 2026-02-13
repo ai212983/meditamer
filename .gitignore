@@ -4,4 +4,5 @@
 
 /.embuild
 /target
+/tools/event_config_compiler/target
 /Cargo.lock
