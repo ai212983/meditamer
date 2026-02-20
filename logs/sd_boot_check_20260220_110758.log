@@ -1,0 +1,42 @@
+[0;32mI (13) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (13) boot: compile time Jun  7 2023 07:48:23[0m
+[0;32mI (15) boot: Multicore bootloader[0m
+[0;32mI (19) boot: chip revision: v3.1[0m
+[0;32mI (23) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (27) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (32) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (36) boot: Enabling RNG early entropy source...[0m
+[0;32mI (42) boot: Partition Table:[0m
+[0;32mI (45) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (53) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (60) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (67) boot:  2 factory          factory app      00 00 00010000 003f0000[0m
+[0;32mI (75) boot: End of partition table[0m
+[0;32mI (79) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=c85f4h (820724) map[0m
+[0;32mI (384) esp_image: segment 1: paddr=000d861c vaddr=3ffb0000 size=020e0h (  8416) load[0m
+[0;32mI (387) esp_image: segment 2: paddr=000da704 vaddr=40080000 size=01dbch (  7612) load[0m
+[0;32mI (393) esp_image: segment 3: paddr=000dc4c8 vaddr=00000000 size=03b50h ( 15184) [0m
+[0;32mI (403) esp_image: segment 4: paddr=000e0020 vaddr=400d0020 size=1cd3ch (118076) map[0m
+[0;32mI (450) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (450) boot: Disabling RNG early entropy source...[0m
+sdprobe[boot]: card_detected version=v2+ capacity=sdhc_or_sdxc
+
+====================== PANIC ======================
+panicked at /Users/dimitri/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixed-1.30.0/src/arith.rs:572:1:
+overflow
+
+Backtrace:
+
+0x400ea38e
+0x400db42f
+0x400db734
+0x400da38e
+0x400d8b1d
+0x400dd9fa
+0x400da6f6
+0x400da667
+0x400d5a59
+0x4008107a
+
+
+

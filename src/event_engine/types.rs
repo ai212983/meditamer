@@ -31,7 +31,7 @@ pub struct MotionFeatures {
 #[repr(u8)]
 pub enum EventKind {
     #[default]
-    TripleTap = 1,
+    DoubleTap = 1,
     Pickup = 2,
     Placement = 3,
     StillnessStart = 4,

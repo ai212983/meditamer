@@ -1,0 +1,22 @@
+[0;32mI (13) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (13) boot: compile time Jun  7 2023 07:48:23[0m
+[0;32mI (15) boot: Multicore bootloader[0m
+[0;32mI (19) boot: chip revision: v3.1[0m
+[0;32mI (23) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (27) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (32) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (36) boot: Enabling RNG early entropy source...[0m
+[0;32mI (42) boot: Partition Table:[0m
+[0;32mI (45) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (53) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (60) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (67) boot:  2 factory          factory app      00 00 00010000 003f0000[0m
+[0;32mI (75) boot: End of partition table[0m
+[0;32mI (79) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=707d8h (460760) map[0m
+[0;32mI (254) esp_image: segment 1: paddr=00080800 vaddr=3ffb0000 size=020d0h (  8400) load[0m
+[0;32mI (258) esp_image: segment 2: paddr=000828d8 vaddr=40080000 size=01dbch (  7612) load[0m
+[0;32mI (263) esp_image: segment 3: paddr=0008469c vaddr=00000000 size=0b97ch ( 47484) [0m
+[0;32mI (285) esp_image: segment 4: paddr=00090020 vaddr=400d0020 size=1c6d8h (116440) map[0m
+[0;32mI (329) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (329) boot: Disabling RNG early entropy source...[0m
+sdprobe[boot]: card_detected version=v2+ capacity=sdhc_or_sdxc

@@ -1,0 +1,1 @@
+[2026-02-20T11:22:04Z WARN ] Pre-connection option 'NoReset' was selected. Connection may fail if the chip is not in bootloader or flasher stub mode.

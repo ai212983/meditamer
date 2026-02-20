@@ -71,6 +71,8 @@ where
 
         self.pin_mode_internal(IO_INT_ADDR, FRONTLIGHT_EN, PinMode::Output)?;
         self.digital_write_internal(IO_INT_ADDR, FRONTLIGHT_EN, false)?;
+        self.pin_mode_internal(IO_INT_ADDR, SD_PMOS_PIN, PinMode::Output)?;
+        self.digital_write_internal(IO_INT_ADDR, SD_PMOS_PIN, true)?;
         self.pin_mode_internal(IO_INT_ADDR, BUZZ_EN, PinMode::Output)?;
         self.digital_write_internal(IO_INT_ADDR, BUZZ_EN, true)?;
 

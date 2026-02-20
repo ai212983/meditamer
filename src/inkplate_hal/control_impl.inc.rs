@@ -79,6 +79,17 @@ where
         self.digital_write_internal(IO_INT_ADDR, WAKEUP, enabled)
     }
 
+    pub fn sd_card_power_on(&mut self) -> Result<(), I2C::Error> {
+        self.pin_mode_internal(IO_INT_ADDR, SD_PMOS_PIN, PinMode::Output)?;
+        self.digital_write_internal(IO_INT_ADDR, SD_PMOS_PIN, false)?;
+        self.delay.delay_ms(50);
+        Ok(())
+    }
+
+    pub fn sd_card_power_off(&mut self) -> Result<(), I2C::Error> {
+        self.pin_mode_internal(IO_INT_ADDR, SD_PMOS_PIN, PinMode::Input)
+    }
+
     pub fn fuel_gauge_soc(&mut self) -> Result<u16, I2C::Error> {
         self.wake_fuel_gauge()?;
         self.read_i2c_reg_u16_le(FUEL_GAUGE_ADDR, BQ27441_COMMAND_SOC)

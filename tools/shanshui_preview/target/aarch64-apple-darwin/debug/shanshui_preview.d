@@ -1,0 +1,1 @@
+/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/shanshui_preview: /Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/src/../../../src/shanshui.rs /Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/src/main.rs

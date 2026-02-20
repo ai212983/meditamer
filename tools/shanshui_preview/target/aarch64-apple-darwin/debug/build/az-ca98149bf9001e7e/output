@@ -1,0 +1,6 @@
+$ mkdir -p "/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/build/az-ca98149bf9001e7e/out/try_track_caller"
+$ cd "/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/build/az-ca98149bf9001e7e/out/try_track_caller"
+$ printf '%s' "// try_tra"... > "/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/build/az-ca98149bf9001e7e/out/try_track_caller/try_track_caller.rs"
+$ cd "/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/build/az-ca98149bf9001e7e/out/try_track_caller" && "/Users/dimitri/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc" "try_track_caller.rs" "--emit=dep-info,metadata" >& /dev/null
+cargo:rustc-cfg=track_caller
+$ rm -r "/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/shanshui_preview/target/aarch64-apple-darwin/debug/build/az-ca98149bf9001e7e/out/try_track_caller"

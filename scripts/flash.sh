@@ -6,6 +6,17 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mode="${1:-release}"
 set_time_after_flash="${FLASH_SET_TIME_AFTER_FLASH:-1}"
 timeset_tz="${TIMESET_TZ:-Europe/Berlin}"
+resolved_port="${ESPFLASH_PORT:-}"
+
+if [[ -z "$resolved_port" ]]; then
+    shopt -s nullglob
+    candidates=(/dev/cu.usbserial* /dev/tty.usbserial* /dev/cu.usbmodem* /dev/tty.usbmodem*)
+    shopt -u nullglob
+    if (( ${#candidates[@]} == 1 )); then
+        resolved_port="${candidates[0]}"
+        echo "Using detected serial port: $resolved_port"
+    fi
+fi
 
 if [[ -f "$HOME/export-esp.sh" ]]; then
     # Ensure Xtensa toolchain is available for linking.
@@ -16,16 +27,16 @@ fi
 case "$mode" in
 "release")
     cargo build --release
-    if [[ -n "${ESPFLASH_PORT:-}" ]]; then
-        espflash flash -p "$ESPFLASH_PORT" -c esp32 target/xtensa-esp32-none-elf/release/meditamer
+    if [[ -n "$resolved_port" ]]; then
+        espflash flash -p "$resolved_port" -c esp32 target/xtensa-esp32-none-elf/release/meditamer
     else
         espflash flash -c esp32 target/xtensa-esp32-none-elf/release/meditamer
     fi
     ;;
 "debug")
     cargo build
-    if [[ -n "${ESPFLASH_PORT:-}" ]]; then
-        espflash flash -p "$ESPFLASH_PORT" -c esp32 target/xtensa-esp32-none-elf/debug/meditamer
+    if [[ -n "$resolved_port" ]]; then
+        espflash flash -p "$resolved_port" -c esp32 target/xtensa-esp32-none-elf/debug/meditamer
     else
         espflash flash -c esp32 target/xtensa-esp32-none-elf/debug/meditamer
     fi
@@ -37,10 +48,10 @@ case "$mode" in
 esac
 
 if [[ "$set_time_after_flash" == "1" ]]; then
-    if [[ -n "${ESPFLASH_PORT:-}" ]]; then
+    if [[ -n "$resolved_port" ]]; then
         echo "Setting device time from timezone: $timeset_tz"
-        TZ="$timeset_tz" "$script_dir/timeset.sh"
+        ESPFLASH_PORT="$resolved_port" TZ="$timeset_tz" "$script_dir/timeset.sh"
     else
-        echo "Skipping TIMESET: ESPFLASH_PORT is not set (required by scripts/timeset.sh)." >&2
+        echo "Skipping TIMESET: set ESPFLASH_PORT or connect a single USB serial device." >&2
     fi
 fi

@@ -9,7 +9,7 @@ pub struct EventRegistration {
 pub fn event_registry(config: &EventEngineConfig) -> [EventRegistration; 7] {
     [
         EventRegistration {
-            kind: EventKind::TripleTap,
+            kind: EventKind::DoubleTap,
             enabled: config.triple_tap.enabled,
         },
         EventRegistration {

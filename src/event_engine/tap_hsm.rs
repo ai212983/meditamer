@@ -145,7 +145,7 @@ impl TapHsm {
         context
             .actions
             .push(EngineAction::EventDetected(EventDetected {
-                kind: EventKind::TripleTap,
+                kind: EventKind::DoubleTap,
                 confidence: Self::confidence_from_score(score),
                 source_mask,
             }));
@@ -306,11 +306,15 @@ impl TapHsm {
                 }
 
                 if dt <= self.config.triple_tap.max_gap_ms {
-                    self.seq_last_tap_ms = Some(frame.now_ms);
-                    if self.seq_axis == 0 {
-                        self.seq_axis = assessment.candidate_axis;
+                    self.clear_sequence();
+                    if self.in_cooldown(frame.now_ms) {
+                        self.reject_with_reason(RejectReason::CooldownActive);
+                        return Transition(State::triggered_cooldown());
                     }
-                    return Transition(State::tap_seq2());
+
+                    self.last_trigger_at_ms = Some(frame.now_ms);
+                    Self::push_trigger_actions(context, assessment.score, assessment.source_mask);
+                    return Transition(State::triggered_cooldown());
                 }
 
                 self.start_sequence(frame.now_ms, assessment.candidate_axis);

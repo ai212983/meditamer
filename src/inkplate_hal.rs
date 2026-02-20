@@ -65,6 +65,7 @@ const GPIO0_ENABLE: u8 = 8;
 const INT_APDS: u8 = 9;
 const BATTERY_MEAS_EN: u8 = 9;
 const FRONTLIGHT_EN: u8 = 10;
+const SD_PMOS_PIN: u8 = 11;
 const BUZZ_EN: u8 = 12;
 const INT2_LSM: u8 = 13;
 const INT1_LSM: u8 = 14;

@@ -17,6 +17,9 @@ opt-level = "s"
 debug = true
 opt-level = "z"
 
+[profile.dev.package.esp-storage]
+opt-level = 2
+
 [features]
 default = ["esp-hal-runtime", "graphics"]
 esp-hal-runtime = []
@@ -35,7 +38,11 @@ embassy-sync = "0.7.0"
 embedded-graphics = { version = "0.8.1", optional = true }
 heapless = { version = "0.8.0", optional = true }
 u8g2-fonts = { version = "0.7.2", optional = true }
+fixed = { version = "1.29.0", default-features = false }
+fixed-sqrt = { version = "0.2.5", default-features = false }
 statig = "0.4.1"
+esp-storage = { version = "0.8.1", features = ["esp32"] }
+embedded-storage = "0.3.1"
 
 [build-dependencies]
 event_config_compiler = { path = "tools/event_config_compiler" }
