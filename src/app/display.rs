@@ -72,7 +72,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
 
     run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe);
     if touch_wizard.is_active() {
-        touch_wizard.render(&mut context.inkplate);
+        touch_wizard.render_full(&mut context.inkplate);
         screen_initialized = true;
     } else if touch_wizard_requested {
         render_touch_wizard_waiting_screen(&mut context.inkplate);
@@ -178,7 +178,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     touch_wizard_requested = true;
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
-                        touch_wizard.render(&mut context.inkplate);
+                        touch_wizard.render_full(&mut context.inkplate);
                         screen_initialized = true;
                     } else {
                         touch_wizard = TouchCalibrationWizard::new(false);
@@ -380,7 +380,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
-                    touch_wizard.render(&mut context.inkplate);
+                    touch_wizard.render_full(&mut context.inkplate);
                     screen_initialized = true;
                 }
             } else {

@@ -52,7 +52,15 @@ impl TouchCalibrationWizard {
         !matches!(self.phase, WizardPhase::Closed)
     }
 
-    pub(crate) fn render(&self, display: &mut InkplateDriver) {
+    pub(crate) fn render_full(&self, display: &mut InkplateDriver) {
+        self.render_with_refresh(display, true);
+    }
+
+    pub(crate) fn render_partial(&self, display: &mut InkplateDriver) {
+        self.render_with_refresh(display, false);
+    }
+
+    fn render_with_refresh(&self, display: &mut InkplateDriver, full_refresh: bool) {
         if !self.is_active() {
             return;
         }
@@ -78,7 +86,11 @@ impl TouchCalibrationWizard {
         };
         draw_centered_text(display, &META_FONT, footer, height - 42);
 
-        let _ = display.display_bw(false);
+        if full_refresh {
+            let _ = display.display_bw(false);
+        } else {
+            let _ = display.display_bw_partial(false);
+        }
     }
 
     pub(crate) fn handle_event(
@@ -124,7 +136,7 @@ impl TouchCalibrationWizard {
         }
 
         if changed {
-            self.render(display);
+            self.render_partial(display);
         }
         WizardDispatch::Consumed
     }
