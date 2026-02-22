@@ -16,6 +16,9 @@ const WIZARD_SWIPE_RELEASE_MIN_DX_PX: i32 = 72;
 const WIZARD_SWIPE_RELEASE_MAX_ABS_DY_PX: i32 = 180;
 const WIZARD_SWIPE_RELEASE_DOMINANCE_X100: i32 = 115;
 const WIZARD_SWIPE_RELEASE_MAX_DURATION_MS: u16 = 1_600;
+const SWIPE_TRACE_MAX_POINTS: usize = 32;
+const CONTINUE_BUTTON_WIDTH: i32 = 192;
+const CONTINUE_BUTTON_HEIGHT: i32 = 52;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WizardPhase {
@@ -39,6 +42,8 @@ pub(crate) struct TouchCalibrationWizard {
     phase: WizardPhase,
     hint: &'static str,
     last_tap: Option<TapAttempt>,
+    swipe_trace: SwipeTrace,
+    last_swipe: Option<SwipeAttempt>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +51,34 @@ struct TapAttempt {
     x: i32,
     y: i32,
     hit: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SwipePoint {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SwipeTrace {
+    points: [SwipePoint; SWIPE_TRACE_MAX_POINTS],
+    len: u8,
+}
+
+impl Default for SwipeTrace {
+    fn default() -> Self {
+        Self {
+            points: [SwipePoint::default(); SWIPE_TRACE_MAX_POINTS],
+            len: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SwipeAttempt {
+    start: SwipePoint,
+    end: SwipePoint,
+    accepted: bool,
 }
 
 impl TouchCalibrationWizard {
@@ -58,6 +91,8 @@ impl TouchCalibrationWizard {
             },
             hint: "",
             last_tap: None,
+            swipe_trace: SwipeTrace::default(),
+            last_swipe: None,
         }
     }
 
@@ -98,6 +133,12 @@ impl TouchCalibrationWizard {
                 draw_tap_attempt_feedback(display, tx, ty, last_tap);
             }
         }
+        if self.shows_swipe_debug() {
+            draw_swipe_debug(display, self.swipe_trace, self.last_swipe, width, height);
+        }
+        if self.shows_continue_button() {
+            draw_continue_button(display, width, height);
+        }
 
         let footer = if self.hint.is_empty() {
             "Follow the target and gesture prompts."
@@ -127,7 +168,16 @@ impl TouchCalibrationWizard {
         let prev_phase = self.phase;
         let mut changed = false;
 
-        if matches!(self.phase, WizardPhase::Complete) {
+        if matches!(
+            event.kind,
+            TouchEventKind::Down | TouchEventKind::Tap | TouchEventKind::LongPress
+        ) && self.shows_continue_button()
+            && self.continue_button_hit(event.x as i32, event.y as i32, width, height)
+        {
+            changed = self.on_continue_button();
+        }
+
+        if !changed && matches!(self.phase, WizardPhase::Complete) {
             match event.kind {
                 TouchEventKind::Down | TouchEventKind::Tap | TouchEventKind::LongPress => {
                     self.phase = WizardPhase::Closed;
@@ -136,12 +186,14 @@ impl TouchCalibrationWizard {
                 }
                 _ => {}
             }
-        } else {
+        } else if !changed {
             match event.kind {
                 TouchEventKind::Down => {
                     // Handle tap-target steps on Down for more immediate and reliable feedback.
                     if self.is_tap_step() || matches!(self.phase, WizardPhase::Intro) {
                         changed = self.on_tap(event.x, event.y, width, height);
+                    } else if matches!(self.phase, WizardPhase::SwipeRight) {
+                        changed = self.on_swipe_trace_down(event.x as i32, event.y as i32);
                     }
                 }
                 TouchEventKind::Tap => {
@@ -158,6 +210,11 @@ impl TouchCalibrationWizard {
                         changed = self.on_tap(event.x, event.y, width, height);
                     }
                 }
+                TouchEventKind::Move => {
+                    if matches!(self.phase, WizardPhase::SwipeRight) {
+                        changed = self.on_swipe_trace_move(event.x as i32, event.y as i32);
+                    }
+                }
                 TouchEventKind::LongPress => {
                     // Fallback for panels where Tap classification is timing-sensitive.
                     if matches!(self.phase, WizardPhase::Intro) {
@@ -172,7 +229,6 @@ impl TouchCalibrationWizard {
                     self.last_tap = None;
                     changed = true;
                 }
-                _ => {}
             }
         }
 
@@ -232,6 +288,7 @@ impl TouchCalibrationWizard {
                     self.phase = WizardPhase::SwipeRight;
                     self.hint = "Tap targets complete.";
                     self.last_tap = None;
+                    self.clear_swipe_debug();
                 } else {
                     self.hint = "Missed bottom-right target. See marker.";
                     self.last_tap = Some(TapAttempt { x: px, y: py, hit });
@@ -279,8 +336,30 @@ impl TouchCalibrationWizard {
                 self.phase = WizardPhase::Complete;
                 self.hint = "Calibration complete. Tap to continue.";
                 self.last_tap = None;
+                self.last_swipe = Some(SwipeAttempt {
+                    start: SwipePoint {
+                        x: event.start_x as i32,
+                        y: event.start_y as i32,
+                    },
+                    end: SwipePoint {
+                        x: event.x as i32,
+                        y: event.y as i32,
+                    },
+                    accepted: true,
+                });
             } else {
                 self.hint = "Swipe right farther (mostly horizontal).";
+                self.last_swipe = Some(SwipeAttempt {
+                    start: SwipePoint {
+                        x: event.start_x as i32,
+                        y: event.start_y as i32,
+                    },
+                    end: SwipePoint {
+                        x: event.x as i32,
+                        y: event.y as i32,
+                    },
+                    accepted: false,
+                });
             }
         }
 
@@ -314,6 +393,99 @@ impl TouchCalibrationWizard {
             self.phase,
             WizardPhase::TapCenter | WizardPhase::TapTopLeft | WizardPhase::TapBottomRight
         )
+    }
+
+    fn clear_swipe_debug(&mut self) {
+        self.swipe_trace = SwipeTrace::default();
+        self.last_swipe = None;
+    }
+
+    fn on_swipe_trace_down(&mut self, x: i32, y: i32) -> bool {
+        self.swipe_trace = SwipeTrace::default();
+        self.swipe_trace.points[0] = SwipePoint { x, y };
+        self.swipe_trace.len = 1;
+        true
+    }
+
+    fn on_swipe_trace_move(&mut self, x: i32, y: i32) -> bool {
+        if self.swipe_trace.len == 0 {
+            return self.on_swipe_trace_down(x, y);
+        }
+        let last_idx = self.swipe_trace.len.saturating_sub(1) as usize;
+        let last = self.swipe_trace.points[last_idx];
+        if squared_distance_i32(x, y, last.x, last.y) < 9 {
+            return false;
+        }
+        if (self.swipe_trace.len as usize) < SWIPE_TRACE_MAX_POINTS {
+            self.swipe_trace.points[self.swipe_trace.len as usize] = SwipePoint { x, y };
+            self.swipe_trace.len = self.swipe_trace.len.saturating_add(1);
+        } else {
+            let mut idx = 1usize;
+            while idx < SWIPE_TRACE_MAX_POINTS {
+                self.swipe_trace.points[idx - 1] = self.swipe_trace.points[idx];
+                idx += 1;
+            }
+            self.swipe_trace.points[SWIPE_TRACE_MAX_POINTS - 1] = SwipePoint { x, y };
+        }
+        true
+    }
+
+    fn shows_swipe_debug(&self) -> bool {
+        matches!(self.phase, WizardPhase::SwipeRight | WizardPhase::Complete)
+    }
+
+    fn shows_continue_button(&self) -> bool {
+        !matches!(self.phase, WizardPhase::Closed)
+    }
+
+    fn continue_button_hit(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
+        let (left, top, w, h) = continue_button_bounds(width, height);
+        x >= left && x < left + w && y >= top && y < top + h
+    }
+
+    fn on_continue_button(&mut self) -> bool {
+        let prev_phase = self.phase;
+        let prev_hint = self.hint;
+        let prev_last_tap = self.last_tap;
+        let prev_swipe_trace = self.swipe_trace;
+        let prev_last_swipe = self.last_swipe;
+
+        match self.phase {
+            WizardPhase::Intro => {
+                self.phase = WizardPhase::TapCenter;
+                self.hint = "Manual continue: step 1.";
+            }
+            WizardPhase::TapCenter => {
+                self.phase = WizardPhase::TapTopLeft;
+                self.hint = "Manual continue: step 2.";
+                self.last_tap = None;
+            }
+            WizardPhase::TapTopLeft => {
+                self.phase = WizardPhase::TapBottomRight;
+                self.hint = "Manual continue: step 3.";
+                self.last_tap = None;
+            }
+            WizardPhase::TapBottomRight => {
+                self.phase = WizardPhase::SwipeRight;
+                self.hint = "Manual continue: swipe step.";
+                self.last_tap = None;
+                self.clear_swipe_debug();
+            }
+            WizardPhase::SwipeRight => {
+                self.phase = WizardPhase::Complete;
+                self.hint = "Manual continue. Tap to exit.";
+            }
+            WizardPhase::Complete => {
+                self.phase = WizardPhase::Closed;
+            }
+            WizardPhase::Closed => {}
+        }
+
+        self.phase != prev_phase
+            || self.hint != prev_hint
+            || self.last_tap != prev_last_tap
+            || self.swipe_trace != prev_swipe_trace
+            || self.last_swipe != prev_last_swipe
     }
 
     fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
@@ -442,6 +614,97 @@ fn draw_target(display: &mut InkplateDriver, x: i32, y: i32) {
     let _ = Line::new(Point::new(x, y - 10), Point::new(x, y + 10))
         .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(display);
+}
+
+fn draw_swipe_debug(
+    display: &mut InkplateDriver,
+    trace: SwipeTrace,
+    attempt: Option<SwipeAttempt>,
+    width: i32,
+    height: i32,
+) {
+    let mid_y = height / 2 + 22;
+    let guide_left = width / 5;
+    let guide_right = width * 4 / 5;
+
+    let _ = Line::new(
+        Point::new(guide_left, mid_y),
+        Point::new(guide_right, mid_y),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+    .draw(display);
+    let _ = Line::new(
+        Point::new(guide_right - 16, mid_y - 8),
+        Point::new(guide_right, mid_y),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+    .draw(display);
+    let _ = Line::new(
+        Point::new(guide_right - 16, mid_y + 8),
+        Point::new(guide_right, mid_y),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+    .draw(display);
+
+    if trace.len >= 2 {
+        let mut idx = 1usize;
+        while idx < trace.len as usize {
+            let a = trace.points[idx - 1];
+            let b = trace.points[idx];
+            let _ = Line::new(Point::new(a.x, a.y), Point::new(b.x, b.y))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+                .draw(display);
+            idx += 1;
+        }
+    } else if trace.len == 1 {
+        let p = trace.points[0];
+        let _ = Circle::new(Point::new(p.x - 3, p.y - 3), 6)
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display);
+    }
+
+    if let Some(attempt) = attempt {
+        let _ = Circle::new(Point::new(attempt.start.x - 4, attempt.start.y - 4), 8)
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display);
+        if attempt.accepted {
+            let _ = Circle::new(Point::new(attempt.end.x - 5, attempt.end.y - 5), 10)
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+                .draw(display);
+        } else {
+            let _ = Line::new(
+                Point::new(attempt.end.x - 7, attempt.end.y - 7),
+                Point::new(attempt.end.x + 7, attempt.end.y + 7),
+            )
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display);
+            let _ = Line::new(
+                Point::new(attempt.end.x - 7, attempt.end.y + 7),
+                Point::new(attempt.end.x + 7, attempt.end.y - 7),
+            )
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display);
+        }
+    }
+}
+
+fn draw_continue_button(display: &mut InkplateDriver, width: i32, height: i32) {
+    let (left, top, w, h) = continue_button_bounds(width, height);
+    let _ = Rectangle::new(
+        Point::new(left, top),
+        Size::new(w.max(1) as u32, h.max(1) as u32),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+    .draw(display);
+    draw_centered_text(display, &META_FONT, "CONTINUE", top + h / 2);
+}
+
+fn continue_button_bounds(width: i32, height: i32) -> (i32, i32, i32, i32) {
+    let w = CONTINUE_BUTTON_WIDTH.min(width - 24).max(80);
+    let h = CONTINUE_BUTTON_HEIGHT;
+    let left = (width - w) / 2;
+    let top = height - 108;
+    (left, top, w, h)
 }
 
 fn draw_tap_attempt_feedback(
