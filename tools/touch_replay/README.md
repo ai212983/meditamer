@@ -20,6 +20,31 @@ The tool prints decoded events as CSV and exits non-zero if expected kinds do no
 tools/touch_replay/run_fixtures.sh
 ```
 
+## Capture real traces from device
+
+1. Capture serial monitor output while interacting with the touch panel:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-XXXX scripts/touch_capture.sh
+```
+
+2. Build replay fixtures from that capture:
+
+```bash
+scripts/make_touch_fixture.sh logs/touch_trace_YYYYMMDD_HHMMSS.log my_real_case
+```
+
+This produces:
+
+- `tools/touch_replay/fixtures/my_real_case_trace.csv`
+- `tools/touch_replay/fixtures/my_real_case_expected.txt`
+
+3. Replay and verify:
+
+```bash
+tools/touch_replay/run_fixtures.sh
+```
+
 ## Expected file format
 
 One event kind per line:
