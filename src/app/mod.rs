@@ -5,6 +5,7 @@ mod runtime;
 mod serial;
 pub(crate) mod store;
 mod touch;
+mod touch_calibration_wizard;
 pub(crate) mod types;
 
 use embassy_time::{Duration, Instant, Ticker};

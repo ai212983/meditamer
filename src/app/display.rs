@@ -6,9 +6,9 @@ use crate::sd_probe;
 use super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_EVENT_TRACE_ENABLED,
-        TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS, TOUCH_TRACE_ENABLED,
-        TOUCH_TRACE_SAMPLES, UI_TICK_MS,
+        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_CALIBRATION_WIZARD_ENABLED,
+        TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS,
+        TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES, UI_TICK_MS,
     },
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
@@ -19,6 +19,7 @@ use super::{
         FaceDownToggleState,
     },
     touch::TouchEngine,
+    touch_calibration_wizard::{TouchCalibrationWizard, WizardDispatch},
     types::{
         AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState, TouchEvent,
         TouchEventKind, TouchSwipeDirection, TouchTraceSample,
@@ -54,6 +55,9 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut backlight_cycle_start: Option<Instant> = None;
     let mut backlight_level = 0u8;
     let mut touch_ready = context.inkplate.touch_init().unwrap_or(false);
+    let mut touch_wizard =
+        TouchCalibrationWizard::new(TOUCH_CALIBRATION_WIZARD_ENABLED && touch_ready);
+    let mut touch_wizard_completed = !TOUCH_CALIBRATION_WIZARD_ENABLED;
     let mut touch_retry_at = Instant::now();
     let mut touch_next_sample_at = Instant::now();
     let mut touch_engine = TouchEngine::default();
@@ -68,6 +72,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     }
 
     run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe);
+    if touch_wizard.is_active() {
+        touch_wizard.render(&mut context.inkplate);
+        screen_initialized = true;
+    }
 
     loop {
         let app_wait_ms = next_loop_wait_ms(
@@ -87,41 +95,69 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             Ok(event) => match event {
                 AppEvent::Refresh { uptime_seconds } => {
                     last_uptime_seconds = uptime_seconds;
-                    if display_mode == DisplayMode::Clock {
-                        let do_full_refresh = !screen_initialized
-                            || update_count % super::config::FULL_REFRESH_EVERY_N_UPDATES == 0;
-                        super::render::render_clock_update(
-                            &mut context.inkplate,
-                            uptime_seconds,
-                            time_sync,
-                            battery_percent,
-                            do_full_refresh,
-                        );
-                        update_count = update_count.wrapping_add(1);
-                    } else {
-                        render_visual_update(
-                            &mut context.inkplate,
-                            display_mode,
-                            uptime_seconds,
-                            time_sync,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
-                        )
-                        .await;
-                        update_count = 0;
+                    if !touch_wizard.is_active() {
+                        if display_mode == DisplayMode::Clock {
+                            let do_full_refresh = !screen_initialized
+                                || update_count % super::config::FULL_REFRESH_EVERY_N_UPDATES == 0;
+                            super::render::render_clock_update(
+                                &mut context.inkplate,
+                                uptime_seconds,
+                                time_sync,
+                                battery_percent,
+                                do_full_refresh,
+                            );
+                            update_count = update_count.wrapping_add(1);
+                        } else {
+                            render_visual_update(
+                                &mut context.inkplate,
+                                display_mode,
+                                uptime_seconds,
+                                time_sync,
+                                &mut pattern_nonce,
+                                &mut first_visual_seed_pending,
+                            )
+                            .await;
+                            update_count = 0;
+                        }
+                        screen_initialized = true;
                     }
-                    screen_initialized = true;
                 }
                 AppEvent::BatteryTick => {
                     if let Some(sampled_percent) = sample_battery_percent(&mut context.inkplate) {
                         battery_percent = Some(sampled_percent);
                     }
 
-                    if screen_initialized {
-                        if display_mode == DisplayMode::Clock {
-                            render_battery_update(&mut context.inkplate, battery_percent);
+                    if !touch_wizard.is_active() {
+                        if screen_initialized {
+                            if display_mode == DisplayMode::Clock {
+                                render_battery_update(&mut context.inkplate, battery_percent);
+                            }
+                        } else if display_mode == DisplayMode::Clock {
+                            render_active_mode(
+                                &mut context.inkplate,
+                                display_mode,
+                                last_uptime_seconds,
+                                time_sync,
+                                battery_percent,
+                                &mut pattern_nonce,
+                                &mut first_visual_seed_pending,
+                                true,
+                            )
+                            .await;
+                            screen_initialized = true;
                         }
-                    } else if display_mode == DisplayMode::Clock {
+                    }
+                }
+                AppEvent::TimeSync(cmd) => {
+                    let uptime_now = Instant::now().as_secs().min(u32::MAX as u64) as u32;
+                    last_uptime_seconds = last_uptime_seconds.max(uptime_now);
+                    time_sync = Some(TimeSyncState {
+                        unix_epoch_utc_seconds: cmd.unix_epoch_utc_seconds,
+                        tz_offset_minutes: cmd.tz_offset_minutes,
+                        sync_instant: Instant::now(),
+                    });
+                    update_count = 0;
+                    if !touch_wizard.is_active() {
                         render_active_mode(
                             &mut context.inkplate,
                             display_mode,
@@ -136,68 +172,50 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         screen_initialized = true;
                     }
                 }
-                AppEvent::TimeSync(cmd) => {
-                    let uptime_now = Instant::now().as_secs().min(u32::MAX as u64) as u32;
-                    last_uptime_seconds = last_uptime_seconds.max(uptime_now);
-                    time_sync = Some(TimeSyncState {
-                        unix_epoch_utc_seconds: cmd.unix_epoch_utc_seconds,
-                        tz_offset_minutes: cmd.tz_offset_minutes,
-                        sync_instant: Instant::now(),
-                    });
-                    update_count = 0;
-                    render_active_mode(
-                        &mut context.inkplate,
-                        display_mode,
-                        last_uptime_seconds,
-                        time_sync,
-                        battery_percent,
-                        &mut pattern_nonce,
-                        &mut first_visual_seed_pending,
-                        true,
-                    )
-                    .await;
-                    screen_initialized = true;
-                }
                 AppEvent::ForceRepaint => {
-                    update_count = 0;
-                    render_active_mode(
-                        &mut context.inkplate,
-                        display_mode,
-                        last_uptime_seconds,
-                        time_sync,
-                        battery_percent,
-                        &mut pattern_nonce,
-                        &mut first_visual_seed_pending,
-                        true,
-                    )
-                    .await;
-                    screen_initialized = true;
+                    if !touch_wizard.is_active() {
+                        update_count = 0;
+                        render_active_mode(
+                            &mut context.inkplate,
+                            display_mode,
+                            last_uptime_seconds,
+                            time_sync,
+                            battery_percent,
+                            &mut pattern_nonce,
+                            &mut first_visual_seed_pending,
+                            true,
+                        )
+                        .await;
+                        screen_initialized = true;
+                    }
                 }
                 AppEvent::ForceMarbleRepaint => {
-                    let seed = next_visual_seed(
-                        last_uptime_seconds,
-                        time_sync,
-                        &mut pattern_nonce,
-                        &mut first_visual_seed_pending,
-                    );
-                    if display_mode == DisplayMode::Shanshui {
-                        render_shanshui_update(
-                            &mut context.inkplate,
-                            seed,
+                    if !touch_wizard.is_active() {
+                        let seed = next_visual_seed(
                             last_uptime_seconds,
                             time_sync,
-                        )
-                        .await;
-                    } else {
-                        render_suminagashi_update(
-                            &mut context.inkplate,
-                            seed,
-                            last_uptime_seconds,
-                            time_sync,
-                        )
-                        .await;
+                            &mut pattern_nonce,
+                            &mut first_visual_seed_pending,
+                        );
+                        if display_mode == DisplayMode::Shanshui {
+                            render_shanshui_update(
+                                &mut context.inkplate,
+                                seed,
+                                last_uptime_seconds,
+                                time_sync,
+                            )
+                            .await;
+                        } else {
+                            render_suminagashi_update(
+                                &mut context.inkplate,
+                                seed,
+                                last_uptime_seconds,
+                                time_sync,
+                            )
+                            .await;
+                        }
+                        screen_initialized = true;
                     }
-                    screen_initialized = true;
                 }
                 AppEvent::SdProbe => {
                     run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe);
@@ -347,6 +365,11 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             if touch_ready {
                 esp_println::println!("touch: recovered");
                 touch_next_sample_at = Instant::now();
+                if !touch_wizard_completed && !touch_wizard.is_active() {
+                    touch_wizard = TouchCalibrationWizard::new(true);
+                    touch_wizard.render(&mut context.inkplate);
+                    screen_initialized = true;
+                }
             } else {
                 touch_retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
             }
@@ -368,6 +391,45 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         if TOUCH_EVENT_TRACE_ENABLED {
                             let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
                         }
+
+                        if touch_wizard.is_active() {
+                            if TOUCH_FEEDBACK_ENABLED
+                                && matches!(
+                                    touch_event.kind,
+                                    TouchEventKind::Down | TouchEventKind::Move
+                                )
+                            {
+                                draw_touch_feedback_dot(
+                                    &mut context.inkplate,
+                                    touch_event.x,
+                                    touch_event.y,
+                                );
+                                touch_feedback_dirty = true;
+                            }
+
+                            match touch_wizard.handle_event(&mut context.inkplate, touch_event) {
+                                WizardDispatch::Inactive => {}
+                                WizardDispatch::Consumed => continue,
+                                WizardDispatch::Finished => {
+                                    touch_wizard_completed = true;
+                                    update_count = 0;
+                                    render_active_mode(
+                                        &mut context.inkplate,
+                                        display_mode,
+                                        last_uptime_seconds,
+                                        time_sync,
+                                        battery_percent,
+                                        &mut pattern_nonce,
+                                        &mut first_visual_seed_pending,
+                                        true,
+                                    )
+                                    .await;
+                                    screen_initialized = true;
+                                    continue;
+                                }
+                            }
+                        }
+
                         handle_touch_event(
                             touch_event,
                             &mut context,
