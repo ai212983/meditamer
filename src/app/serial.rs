@@ -5,9 +5,13 @@ use embassy_time::{with_timeout, Duration};
 use super::{
     config::{
         APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN, TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES,
+        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN, TOUCH_EVENT_TRACE_ENABLED,
+        TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES,
     },
-    types::{AppEvent, SerialUart, TapTraceSample, TimeSyncCommand, TouchTraceSample},
+    types::{
+        AppEvent, SerialUart, TapTraceSample, TimeSyncCommand, TouchEvent, TouchEventKind,
+        TouchSwipeDirection, TouchTraceSample,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -39,8 +43,19 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
             )
             .await;
     }
+    if TOUCH_EVENT_TRACE_ENABLED {
+        let _ = uart
+            .write_async(b"touch_event,ms,kind,x,y,start_x,start_y,duration_ms,count\r\n")
+            .await;
+    }
 
     loop {
+        if TOUCH_EVENT_TRACE_ENABLED {
+            while let Ok(event) = TOUCH_EVENT_TRACE_SAMPLES.try_receive() {
+                write_touch_event_trace_sample(&mut uart, event).await;
+            }
+        }
+
         if TOUCH_TRACE_ENABLED {
             while let Ok(sample) = TOUCH_TRACE_SAMPLES.try_receive() {
                 write_touch_trace_sample(&mut uart, sample).await;
@@ -171,6 +186,38 @@ async fn write_touch_trace_sample(uart: &mut SerialUart, sample: TouchTraceSampl
         sample.raw[7]
     );
     let _ = uart.write_async(line.as_bytes()).await;
+}
+
+async fn write_touch_event_trace_sample(uart: &mut SerialUart, event: TouchEvent) {
+    let mut line = heapless::String::<144>::new();
+    let _ = write!(
+        &mut line,
+        "touch_event,{},{},{},{},{},{},{},{}\r\n",
+        event.t_ms,
+        touch_event_kind_label(event.kind),
+        event.x,
+        event.y,
+        event.start_x,
+        event.start_y,
+        event.duration_ms,
+        event.touch_count
+    );
+    let _ = uart.write_async(line.as_bytes()).await;
+}
+
+fn touch_event_kind_label(kind: TouchEventKind) -> &'static str {
+    match kind {
+        TouchEventKind::Down => "down",
+        TouchEventKind::Move => "move",
+        TouchEventKind::Up => "up",
+        TouchEventKind::Tap => "tap",
+        TouchEventKind::LongPress => "long_press",
+        TouchEventKind::Swipe(TouchSwipeDirection::Left) => "swipe_left",
+        TouchEventKind::Swipe(TouchSwipeDirection::Right) => "swipe_right",
+        TouchEventKind::Swipe(TouchSwipeDirection::Up) => "swipe_up",
+        TouchEventKind::Swipe(TouchSwipeDirection::Down) => "swipe_down",
+        TouchEventKind::Cancel => "cancel",
+    }
 }
 
 fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {

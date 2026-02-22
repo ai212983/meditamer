@@ -6,8 +6,9 @@ use crate::sd_probe;
 use super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS,
-        TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES, UI_TICK_MS,
+        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_EVENT_TRACE_ENABLED,
+        TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS, TOUCH_TRACE_ENABLED,
+        TOUCH_TRACE_SAMPLES, UI_TICK_MS,
     },
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
@@ -364,6 +365,9 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         .as_millis();
                     let output = touch_engine.tick(t_ms, sample);
                     for touch_event in output.events.into_iter().flatten() {
+                        if TOUCH_EVENT_TRACE_ENABLED {
+                            let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
+                        }
                         handle_touch_event(
                             touch_event,
                             &mut context,
