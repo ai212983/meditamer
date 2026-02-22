@@ -99,9 +99,9 @@ where
     pub fn touch_hardware_reset(&mut self) -> Result<(), I2C::Error> {
         self.pin_mode_internal(IO_EXT_ADDR, TOUCHSCREEN_RST, PinMode::Output)?;
         self.digital_write_internal(IO_EXT_ADDR, TOUCHSCREEN_RST, false)?;
-        self.delay.delay_ms(15);
+        self.delay.delay_ms(30);
         self.digital_write_internal(IO_EXT_ADDR, TOUCHSCREEN_RST, true)?;
-        self.delay.delay_ms(15);
+        self.delay.delay_ms(30);
         Ok(())
     }
 
@@ -111,10 +111,14 @@ where
 
     pub fn touch_software_reset_read_hello(&mut self) -> Result<[u8; 4], I2C::Error> {
         self.i2c_write(TOUCHSCREEN_ADDR, &TOUCH_SOFT_RESET_CMD)?;
-        self.delay.delay_ms(20);
-
         let mut hello = [0u8; 4];
-        self.i2c_read(TOUCHSCREEN_ADDR, &mut hello)?;
+        for _ in 0..8 {
+            self.delay.delay_ms(20);
+            self.i2c_read(TOUCHSCREEN_ADDR, &mut hello)?;
+            if hello == TOUCH_HELLO_PACKET {
+                break;
+            }
+        }
         Ok(hello)
     }
 
@@ -149,7 +153,7 @@ where
 
     pub fn touch_init_with_status(&mut self) -> Result<TouchInitStatus, I2C::Error> {
         self.touch_power_enabled(true)?;
-        self.delay.delay_ms(100);
+        self.delay.delay_ms(180);
         self.touch_hardware_reset()?;
 
         let mut last_hello = [0u8; 4];
