@@ -4,6 +4,7 @@ mod render;
 mod runtime;
 mod serial;
 pub(crate) mod store;
+mod touch;
 pub(crate) mod types;
 
 use embassy_time::{Duration, Instant, Ticker};

@@ -16,6 +16,7 @@ pub(crate) enum AppEvent {
     Refresh { uptime_seconds: u32 },
     BatteryTick,
     TimeSync(TimeSyncCommand),
+    Touch(TouchEvent),
     ForceRepaint,
     ForceMarbleRepaint,
     SdProbe,
@@ -66,6 +67,45 @@ impl DisplayMode {
             _ => None,
         }
     }
+
+    pub(crate) fn toggled_reverse(self) -> Self {
+        match self {
+            Self::Clock => Self::Shanshui,
+            Self::Suminagashi => Self::Clock,
+            Self::Shanshui => Self::Suminagashi,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TouchSwipeDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TouchEventKind {
+    Down,
+    Move,
+    Up,
+    Tap,
+    LongPress,
+    Swipe(TouchSwipeDirection),
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TouchEvent {
+    pub(crate) kind: TouchEventKind,
+    pub(crate) t_ms: u64,
+    pub(crate) x: u16,
+    pub(crate) y: u16,
+    pub(crate) start_x: u16,
+    pub(crate) start_y: u16,
+    pub(crate) duration_ms: u16,
+    pub(crate) touch_count: u8,
 }
 
 #[derive(Clone, Copy)]

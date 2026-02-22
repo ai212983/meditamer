@@ -6,7 +6,7 @@ use crate::sd_probe;
 use super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS,
+        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_EVENTS, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS,
         TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES, UI_TICK_MS,
     },
     render::{
@@ -17,8 +17,10 @@ use super::{
         run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle,
         FaceDownToggleState,
     },
+    touch::TouchEngine,
     types::{
-        AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState, TouchTraceSample,
+        AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState, TouchEventKind,
+        TouchSwipeDirection, TouchTraceSample,
     },
 };
 
@@ -48,6 +50,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_ready = context.inkplate.touch_init().unwrap_or(false);
     let mut touch_retry_at = Instant::now();
     let mut touch_next_sample_at = Instant::now();
+    let mut touch_engine = TouchEngine::default();
 
     if touch_ready {
         esp_println::println!("touch: ready");
@@ -59,6 +62,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe);
 
     loop {
+        while let Ok(touch_event) = TOUCH_EVENTS.try_receive() {
+            let _ = APP_EVENTS.try_send(AppEvent::Touch(touch_event));
+        }
+
         match with_timeout(Duration::from_millis(UI_TICK_MS), APP_EVENTS.receive()).await {
             Ok(event) => match event {
                 AppEvent::Refresh { uptime_seconds } => {
@@ -178,6 +185,55 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 AppEvent::SdProbe => {
                     run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe);
                 }
+                AppEvent::Touch(event) => match event.kind {
+                    TouchEventKind::Tap => {
+                        trigger_backlight_cycle(
+                            &mut context.inkplate,
+                            &mut backlight_cycle_start,
+                            &mut backlight_level,
+                        );
+                    }
+                    TouchEventKind::LongPress => {
+                        update_count = 0;
+                        render_active_mode(
+                            &mut context.inkplate,
+                            display_mode,
+                            last_uptime_seconds,
+                            time_sync,
+                            battery_percent,
+                            &mut pattern_nonce,
+                            &mut first_visual_seed_pending,
+                            true,
+                        )
+                        .await;
+                        screen_initialized = true;
+                    }
+                    TouchEventKind::Swipe(direction) => {
+                        display_mode = match direction {
+                            TouchSwipeDirection::Right | TouchSwipeDirection::Down => {
+                                display_mode.toggled()
+                            }
+                            TouchSwipeDirection::Left | TouchSwipeDirection::Up => {
+                                display_mode.toggled_reverse()
+                            }
+                        };
+                        context.mode_store.save_mode(display_mode);
+                        update_count = 0;
+                        render_active_mode(
+                            &mut context.inkplate,
+                            display_mode,
+                            last_uptime_seconds,
+                            time_sync,
+                            battery_percent,
+                            &mut pattern_nonce,
+                            &mut first_visual_seed_pending,
+                            true,
+                        )
+                        .await;
+                        screen_initialized = true;
+                    }
+                    _ => {}
+                },
             },
             Err(_) => {}
         }
@@ -325,8 +381,13 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             let now = Instant::now();
             match context.inkplate.touch_read_sample(0) {
                 Ok(sample) => {
+                    let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
+                    let output = touch_engine.tick(t_ms, sample);
+                    for touch_event in output.events.into_iter().flatten() {
+                        let _ = TOUCH_EVENTS.try_send(touch_event);
+                    }
+
                     if TOUCH_TRACE_ENABLED && sample.touch_count > 0 {
-                        let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
                         let _ = TOUCH_TRACE_SAMPLES
                             .try_send(TouchTraceSample::from_sample(t_ms, sample));
                     }
