@@ -132,6 +132,18 @@ Host-side config regression tests:
 scripts/test_event_config_host.sh
 ```
 
+Host-side event engine state-machine tests:
+
+```bash
+scripts/test_event_engine_host.sh
+```
+
+Host-side tooling lint (clippy):
+
+```bash
+scripts/lint_host_tools.sh
+```
+
 Flash and capture:
 
 ```bash

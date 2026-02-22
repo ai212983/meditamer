@@ -19,9 +19,20 @@ fi
 
 (
   cd /tmp
-  RUSTUP_TOOLCHAIN="$toolchain" cargo test \
+  RUSTUP_TOOLCHAIN="$toolchain" cargo clippy \
     --locked \
     --manifest-path "$repo_root/tools/event_config_compiler/Cargo.toml" \
     --target "$host_target" \
+    --all-targets \
+    -- \
+    -D warnings \
+    "$@"
+  RUSTUP_TOOLCHAIN="$toolchain" cargo clippy \
+    --locked \
+    --manifest-path "$repo_root/tools/event_engine_host_harness/Cargo.toml" \
+    --target "$host_target" \
+    --all-targets \
+    -- \
+    -D warnings \
     "$@"
 )

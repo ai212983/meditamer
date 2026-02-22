@@ -3,33 +3,44 @@ name: Continuous Integration
 on:
   push:
     paths-ignore:
-      - "**/README.md"
+      - "**/*.md"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust-checks:
     name: Rust Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         action:
           - command: build
-            args: --release
+            args: --locked --release
           - command: fmt
             args: --all -- --check --color always
           - command: clippy
-            args: --all-features --workspace --bins --lib -- -D warnings
+            args: --locked --all-features --workspace --bins --lib -- -D warnings
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Rust
-        uses: esp-rs/xtensa-toolchain@v1.5
+        uses: esp-rs/xtensa-toolchain@v1.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           default: true
           buildtargets: esp32
@@ -42,12 +53,17 @@ jobs:
   event-config-regression:
     name: Event Config Regression (Host)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup stable Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Run host config regression suite
         run: scripts/test_event_config_host.sh
+      - name: Run host event engine suite
+        run: scripts/test_event_engine_host.sh
+      - name: Host tooling clippy
+        run: scripts/lint_host_tools.sh
