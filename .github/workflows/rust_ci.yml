@@ -65,5 +65,7 @@ jobs:
         run: scripts/test_event_config_host.sh
       - name: Run host event engine suite
         run: scripts/test_event_engine_host.sh
+      - name: Run host touch replay suite
+        run: scripts/test_touch_replay_host.sh
       - name: Host tooling clippy
         run: scripts/lint_host_tools.sh

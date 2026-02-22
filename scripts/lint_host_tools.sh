@@ -35,4 +35,12 @@ fi
     -- \
     -D warnings \
     "$@"
+  RUSTUP_TOOLCHAIN="$toolchain" cargo clippy \
+    --locked \
+    --manifest-path "$repo_root/tools/touch_replay/Cargo.toml" \
+    --target "$host_target" \
+    --all-targets \
+    -- \
+    -D warnings \
+    "$@"
 )

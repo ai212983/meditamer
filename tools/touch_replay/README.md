@@ -5,17 +5,14 @@ Deterministic touch-gesture replay harness for the statig touch engine.
 ## Usage
 
 ```bash
-RUSTFLAGS='' cargo +stable-aarch64-apple-darwin run \
-  --target aarch64-apple-darwin \
+cargo run \
+  --target "$(rustc -vV | awk '/^host:/ {print $2}')" \
   --manifest-path tools/touch_replay/Cargo.toml -- \
   tools/touch_replay/fixtures/tap_trace.csv \
   --expect tools/touch_replay/fixtures/tap_expected.txt
 ```
 
 The tool prints decoded events as CSV and exits non-zero if expected kinds do not match.
-
-The `RUSTFLAGS=''` override is required because the firmware root config injects ESP linker flags that
-are not valid for host binaries.
 
 ## Run bundled fixtures
 
