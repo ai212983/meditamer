@@ -225,10 +225,26 @@ where
         }
 
         let raw = self.touch_read_raw_data()?;
-        let touch_count = (raw[7].count_ones() as u8).min(2);
+        let bit_count = (raw[7].count_ones() as u8).min(2);
+        let mut raw_points = [(0u16, 0u16); 2];
+        for (idx, raw_point) in raw_points.iter_mut().enumerate() {
+            *raw_point = Self::touch_decode_xy(&raw, idx);
+        }
+        // Some idle/no-data reads still report non-zero status bits in raw[7].
+        // Prefer decoded coordinate validity to avoid phantom touches.
+        let coord_count = raw_points
+            .iter()
+            .filter(|(x, y)| *x != 0 || *y != 0)
+            .count() as u8;
+        let touch_count = if coord_count == 0 {
+            0
+        } else {
+            bit_count.max(1).min(coord_count)
+        };
+
         let mut points = [TouchPoint::default(); 2];
         for (idx, point) in points.iter_mut().enumerate() {
-            let (x_raw, y_raw) = Self::touch_decode_xy(&raw, idx);
+            let (x_raw, y_raw) = raw_points[idx];
             *point = self.touch_transform_point(x_raw, y_raw, rotation);
         }
 
