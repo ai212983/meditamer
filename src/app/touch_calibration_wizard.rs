@@ -125,7 +125,9 @@ impl TouchCalibrationWizard {
         match event.kind {
             TouchEventKind::Down => {
                 // Handle tap-target steps on Down for more immediate and reliable feedback.
-                if self.is_tap_step() || matches!(self.phase, WizardPhase::Intro) {
+                if self.is_tap_step()
+                    || matches!(self.phase, WizardPhase::Intro | WizardPhase::Complete)
+                {
                     changed = self.on_tap(event.x, event.y, width, height);
                 }
             }
