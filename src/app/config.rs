@@ -80,7 +80,7 @@ pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
 pub(crate) const TOUCH_TRACE_ENABLED: bool = true;
 pub(crate) const TOUCH_EVENT_TRACE_ENABLED: bool = true;
-pub(crate) const TOUCH_CALIBRATION_WIZARD_ENABLED: bool = true;
+pub(crate) const TOUCH_CALIBRATION_WIZARD_ENABLED: bool = false;
 pub(crate) const TOUCH_SAMPLE_MS: u64 = 20;
 pub(crate) const TOUCH_INIT_RETRY_MS: u64 = 2_000;
 

@@ -229,6 +229,36 @@ impl TouchCalibrationWizard {
     }
 }
 
+pub(crate) fn render_touch_wizard_waiting_screen(display: &mut InkplateDriver) {
+    let width = display.width() as i32;
+    let height = display.height() as i32;
+    let _ = display.clear(BinaryColor::Off);
+
+    draw_frame(display, width, height);
+    draw_centered_text(display, &TITLE_FONT, "TOUCH CALIBRATION WIZARD", 40);
+    draw_centered_text(display, &META_FONT, "Waiting For Touch Controller", 86);
+    draw_centered_text(
+        display,
+        &META_FONT,
+        "Touch init failed or disconnected.",
+        126,
+    );
+    draw_centered_text(
+        display,
+        &META_FONT,
+        "Keep device powered and wait for retry.",
+        158,
+    );
+    draw_centered_text(
+        display,
+        &META_FONT,
+        "Wizard will start automatically.",
+        height - 42,
+    );
+
+    let _ = display.display_bw(false);
+}
+
 fn draw_frame(display: &mut InkplateDriver, width: i32, height: i32) {
     let style = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
     let _ = Rectangle::new(
