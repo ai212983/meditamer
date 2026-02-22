@@ -65,6 +65,10 @@ impl TouchCalibrationWizard {
         !matches!(self.phase, WizardPhase::Closed)
     }
 
+    pub(crate) fn is_waiting_exit_tap(&self) -> bool {
+        matches!(self.phase, WizardPhase::Complete)
+    }
+
     pub(crate) fn render_full(&self, display: &mut InkplateDriver) {
         self.render_with_refresh(display, true);
     }

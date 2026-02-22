@@ -413,7 +413,26 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         let mut wizard_events: [Option<TouchEvent>; 2] = [None, None];
                         if sample.touch_count > 0 {
                             let point = sample.points[0];
-                            if !wizard_contact_active {
+                            if touch_wizard.is_waiting_exit_tap() {
+                                if !wizard_contact_active {
+                                    wizard_contact_active = true;
+                                    wizard_down_ms = t_ms;
+                                    wizard_start_x = point.x;
+                                    wizard_start_y = point.y;
+                                }
+                                wizard_last_x = point.x;
+                                wizard_last_y = point.y;
+                                wizard_events[0] = Some(make_touch_event(
+                                    TouchEventKind::Down,
+                                    t_ms,
+                                    point.x,
+                                    point.y,
+                                    wizard_start_x,
+                                    wizard_start_y,
+                                    0,
+                                    1,
+                                ));
+                            } else if !wizard_contact_active {
                                 wizard_contact_active = true;
                                 wizard_down_ms = t_ms;
                                 wizard_start_x = point.x;
