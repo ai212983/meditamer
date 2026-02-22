@@ -11,7 +11,7 @@ use super::{
 };
 
 const TARGET_RADIUS_PX: i32 = 26;
-const TARGET_HIT_RADIUS_PX: i32 = 40;
+const TARGET_HIT_RADIUS_PX: i32 = 72;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WizardPhase {
@@ -154,27 +154,27 @@ impl TouchCalibrationWizard {
             }
             WizardPhase::TapCenter => {
                 if self.tap_hits_target(px, py, width, height) {
-                    self.phase = WizardPhase::TapTopLeft;
                     self.hint = "Center accepted.";
                 } else {
-                    self.hint = "Missed center target. Tap ring.";
+                    self.hint = "Center offset detected. Continuing.";
                 }
+                self.phase = WizardPhase::TapTopLeft;
             }
             WizardPhase::TapTopLeft => {
                 if self.tap_hits_target(px, py, width, height) {
-                    self.phase = WizardPhase::TapBottomRight;
                     self.hint = "Top-left accepted.";
                 } else {
-                    self.hint = "Missed top-left target. Tap ring.";
+                    self.hint = "Top-left offset detected. Continuing.";
                 }
+                self.phase = WizardPhase::TapBottomRight;
             }
             WizardPhase::TapBottomRight => {
                 if self.tap_hits_target(px, py, width, height) {
-                    self.phase = WizardPhase::SwipeRight;
                     self.hint = "Tap targets complete.";
                 } else {
-                    self.hint = "Missed bottom-right target. Tap ring.";
+                    self.hint = "Bottom-right offset detected. Continuing.";
                 }
+                self.phase = WizardPhase::SwipeRight;
             }
             WizardPhase::SwipeRight => {
                 self.hint = "Swipe right to complete.";
