@@ -125,12 +125,10 @@ impl TouchCalibrationWizard {
 
         if matches!(self.phase, WizardPhase::Complete) {
             match event.kind {
-                TouchEventKind::Down
-                | TouchEventKind::Move
-                | TouchEventKind::Up
-                | TouchEventKind::Tap
-                | TouchEventKind::LongPress => {
-                    changed = self.on_tap(event.x, event.y, width, height);
+                TouchEventKind::Down | TouchEventKind::Tap | TouchEventKind::LongPress => {
+                    self.phase = WizardPhase::Closed;
+                    self.last_tap = None;
+                    changed = true;
                 }
                 _ => {}
             }
@@ -138,9 +136,7 @@ impl TouchCalibrationWizard {
             match event.kind {
                 TouchEventKind::Down => {
                     // Handle tap-target steps on Down for more immediate and reliable feedback.
-                    if self.is_tap_step()
-                        || matches!(self.phase, WizardPhase::Intro | WizardPhase::Complete)
-                    {
+                    if self.is_tap_step() || matches!(self.phase, WizardPhase::Intro) {
                         changed = self.on_tap(event.x, event.y, width, height);
                     }
                 }
