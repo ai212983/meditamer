@@ -314,6 +314,10 @@ impl TouchHsm {
                     (1, Some(point)) => {
                         self.last_point = point;
                         if now_ms.saturating_sub(self.down_ms) >= TOUCH_DEBOUNCE_DOWN_MS {
+                            // Anchor the interaction origin after debounce has stabilized.
+                            // This avoids swipe/drag bias from a noisy first contact sample.
+                            self.down_point = point;
+                            self.last_move_emit_point = point;
                             self.emit_event(context, TouchEventKind::Down, *now_ms, point, 1);
                             Transition(State::pressed())
                         } else {
@@ -568,5 +572,41 @@ mod tests {
         drain_kinds(engine.tick(60, sample0()), &mut events);
 
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn down_origin_is_anchored_after_debounce() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        // First sample is noisy; stabilized point appears by debounce boundary.
+        let _ = engine.tick(0, sample1(40, 40));
+        let output = engine.tick(35, sample1(100, 120));
+        for event in output.events.into_iter().flatten() {
+            events.push(event);
+        }
+        let _ = engine.tick(80, sample0());
+        let output = engine.tick(120, sample0());
+        for event in output.events.into_iter().flatten() {
+            events.push(event);
+        }
+
+        let down = events
+            .iter()
+            .find(|ev| matches!(ev.kind, TouchEventKind::Down))
+            .expect("missing down event");
+        assert_eq!(down.start_x, 100);
+        assert_eq!(down.start_y, 120);
+
+        let up = events
+            .iter()
+            .find(|ev| matches!(ev.kind, TouchEventKind::Up))
+            .expect("missing up event");
+        assert_eq!(up.start_x, 100);
+        assert_eq!(up.start_y, 120);
+
+        assert!(events
+            .iter()
+            .any(|ev| matches!(ev.kind, TouchEventKind::Tap)));
     }
 }
