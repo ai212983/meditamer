@@ -24,6 +24,10 @@ use super::{
     },
 };
 
+const TOUCH_FEEDBACK_ENABLED: bool = true;
+const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
+const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 90;
+
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut update_count = 0u32;
@@ -51,6 +55,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_retry_at = Instant::now();
     let mut touch_next_sample_at = Instant::now();
     let mut touch_engine = TouchEngine::default();
+    let mut touch_feedback_dirty = false;
+    let mut touch_feedback_next_flush_at = Instant::now();
 
     if touch_ready {
         esp_println::println!("touch: ready");
@@ -186,6 +192,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe);
                 }
                 AppEvent::Touch(event) => match event.kind {
+                    TouchEventKind::Down | TouchEventKind::Move if TOUCH_FEEDBACK_ENABLED => {
+                        draw_touch_feedback_dot(&mut context.inkplate, event.x, event.y);
+                        touch_feedback_dirty = true;
+                    }
                     TouchEventKind::Tap => {
                         trigger_backlight_cycle(
                             &mut context.inkplate,
@@ -236,6 +246,13 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 },
             },
             Err(_) => {}
+        }
+
+        if touch_feedback_dirty && Instant::now() >= touch_feedback_next_flush_at {
+            let _ = context.inkplate.display_bw_partial(false);
+            touch_feedback_dirty = false;
+            touch_feedback_next_flush_at =
+                Instant::now() + Duration::from_millis(TOUCH_FEEDBACK_MIN_REFRESH_MS);
         }
 
         if !imu_double_tap_ready && Instant::now() >= imu_retry_at {
@@ -520,5 +537,30 @@ fn run_sd_probe(
 
     if inkplate.sd_card_power_off().is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
+    }
+}
+
+fn draw_touch_feedback_dot(display: &mut super::types::InkplateDriver, x: u16, y: u16) {
+    let cx = x as i32;
+    let cy = y as i32;
+    let radius = TOUCH_FEEDBACK_RADIUS_PX.max(1);
+    let radius_sq = radius * radius;
+    let width = display.width() as i32;
+    let height = display.height() as i32;
+
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dy * dy > radius_sq {
+                continue;
+            }
+
+            let px = cx + dx;
+            let py = cy + dy;
+            if px < 0 || py < 0 || px >= width || py >= height {
+                continue;
+            }
+
+            display.set_pixel_bw(px as usize, py as usize, true);
+        }
     }
 }
