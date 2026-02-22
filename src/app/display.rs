@@ -27,6 +27,7 @@ use super::{
 const TOUCH_FEEDBACK_ENABLED: bool = true;
 const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
 const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 90;
+const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 4;
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
@@ -350,11 +351,17 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
         }
 
-        if touch_ready && Instant::now() >= touch_next_sample_at {
-            let now = Instant::now();
+        let mut sampled_touch_count = 0u8;
+        while touch_ready
+            && sampled_touch_count < TOUCH_MAX_CATCHUP_SAMPLES
+            && Instant::now() >= touch_next_sample_at
+        {
+            let sample_instant = Instant::now();
             match context.inkplate.touch_read_sample(0) {
                 Ok(sample) => {
-                    let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
+                    let t_ms = sample_instant
+                        .saturating_duration_since(trace_epoch)
+                        .as_millis();
                     let output = touch_engine.tick(t_ms, sample);
                     for touch_event in output.events.into_iter().flatten() {
                         handle_touch_event(
@@ -383,11 +390,14 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 Err(_) => {
                     touch_ready = false;
                     let _ = context.inkplate.touch_shutdown();
-                    touch_retry_at = now + Duration::from_millis(TOUCH_INIT_RETRY_MS);
+                    touch_retry_at = sample_instant + Duration::from_millis(TOUCH_INIT_RETRY_MS);
                     esp_println::println!("touch: read_error; retrying");
+                    break;
                 }
             }
-            touch_next_sample_at = now + Duration::from_millis(TOUCH_SAMPLE_MS);
+
+            sampled_touch_count = sampled_touch_count.saturating_add(1);
+            touch_next_sample_at += Duration::from_millis(TOUCH_SAMPLE_MS);
         }
 
         run_backlight_timeline(
