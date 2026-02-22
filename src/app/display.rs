@@ -72,7 +72,20 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             let _ = APP_EVENTS.try_send(AppEvent::Touch(touch_event));
         }
 
-        match with_timeout(Duration::from_millis(UI_TICK_MS), APP_EVENTS.receive()).await {
+        let app_wait_ms = next_loop_wait_ms(
+            touch_ready,
+            touch_retry_at,
+            touch_next_sample_at,
+            imu_double_tap_ready,
+            imu_retry_at,
+            touch_feedback_dirty,
+            touch_feedback_next_flush_at,
+            TAP_TRACE_ENABLED && imu_double_tap_ready,
+            tap_trace_next_sample_at,
+            tap_trace_aux_next_sample_at,
+        );
+
+        match with_timeout(Duration::from_millis(app_wait_ms), APP_EVENTS.receive()).await {
             Ok(event) => match event {
                 AppEvent::Refresh { uptime_seconds } => {
                     last_uptime_seconds = uptime_seconds;
@@ -424,6 +437,51 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             &mut backlight_cycle_start,
             &mut backlight_level,
         );
+    }
+}
+
+fn next_loop_wait_ms(
+    touch_ready: bool,
+    touch_retry_at: Instant,
+    touch_next_sample_at: Instant,
+    imu_ready: bool,
+    imu_retry_at: Instant,
+    touch_feedback_dirty: bool,
+    touch_feedback_next_flush_at: Instant,
+    tap_trace_active: bool,
+    tap_trace_next_sample_at: Instant,
+    tap_trace_aux_next_sample_at: Instant,
+) -> u64 {
+    let now = Instant::now();
+    let mut wait_ms = UI_TICK_MS;
+
+    if touch_ready {
+        wait_ms = wait_ms.min(ms_until(now, touch_next_sample_at));
+    } else {
+        wait_ms = wait_ms.min(ms_until(now, touch_retry_at));
+    }
+
+    if !imu_ready {
+        wait_ms = wait_ms.min(ms_until(now, imu_retry_at));
+    }
+
+    if touch_feedback_dirty {
+        wait_ms = wait_ms.min(ms_until(now, touch_feedback_next_flush_at));
+    }
+
+    if tap_trace_active {
+        wait_ms = wait_ms.min(ms_until(now, tap_trace_next_sample_at));
+        wait_ms = wait_ms.min(ms_until(now, tap_trace_aux_next_sample_at));
+    }
+
+    wait_ms
+}
+
+fn ms_until(now: Instant, deadline: Instant) -> u64 {
+    if deadline <= now {
+        0
+    } else {
+        deadline.saturating_duration_since(now).as_millis()
     }
 }
 
