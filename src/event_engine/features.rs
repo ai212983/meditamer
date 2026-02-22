@@ -292,6 +292,9 @@ mod tests {
 
         let later = SensorFrame {
             now_ms: 1_100,
+            gx: 0,
+            gy: 0,
+            gz: 0,
             ..frame
         };
         let (features, _) = compute_motion_features(later, None, 0, last_big_gyro, &config);
@@ -299,6 +302,9 @@ mod tests {
 
         let much_later = SensorFrame {
             now_ms: 1_250,
+            gx: 0,
+            gy: 0,
+            gz: 0,
             ..frame
         };
         let (features, _) = compute_motion_features(much_later, None, 0, last_big_gyro, &config);

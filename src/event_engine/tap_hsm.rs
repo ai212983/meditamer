@@ -305,22 +305,8 @@ impl TapHsm {
                     return Handled;
                 }
 
-                if dt <= self.config.triple_tap.max_gap_ms {
-                    self.clear_sequence();
-                    if self.in_cooldown(frame.now_ms) {
-                        self.reject_with_reason(RejectReason::CooldownActive);
-                        return Transition(State::triggered_cooldown());
-                    }
-
-                    self.last_trigger_at_ms = Some(frame.now_ms);
-                    Self::push_trigger_actions(context, assessment.score, assessment.source_mask);
-                    return Transition(State::triggered_cooldown());
-                }
-
                 self.start_sequence(frame.now_ms, assessment.candidate_axis);
-                self.reject_with_reason(RejectReason::GapTooLong);
-                Self::push_counter_reset(context, RejectReason::GapTooLong);
-                Handled
+                Transition(State::tap_seq2())
             }
             TapHsmEvent::ImuRecovered { now_ms } => {
                 self.update_fault_trace(EngineStateId::TapSeq1, *now_ms);
@@ -364,13 +350,6 @@ impl TapHsm {
                     self.start_sequence(frame.now_ms, assessment.candidate_axis);
                     self.reject_with_reason(RejectReason::GapTooShort);
                     Self::push_counter_reset(context, RejectReason::GapTooShort);
-                    return Transition(State::tap_seq1());
-                }
-
-                if dt > self.config.triple_tap.last_max_gap_ms {
-                    self.start_sequence(frame.now_ms, assessment.candidate_axis);
-                    self.reject_with_reason(RejectReason::GapTooLong);
-                    Self::push_counter_reset(context, RejectReason::GapTooLong);
                     return Transition(State::tap_seq1());
                 }
 
@@ -479,5 +458,53 @@ impl TapHsm {
             }
             _ => Handled,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event_engine::features::{
+        LSM6_TAP_SRC_SINGLE_TAP_BIT, LSM6_TAP_SRC_TAP_EVENT_BIT, LSM6_TAP_SRC_Z_BIT,
+    };
+
+    fn candidate_frame(now_ms: u64) -> SensorFrame {
+        SensorFrame {
+            now_ms,
+            tap_src: LSM6_TAP_SRC_Z_BIT | LSM6_TAP_SRC_SINGLE_TAP_BIT | LSM6_TAP_SRC_TAP_EVENT_BIT,
+            int1: true,
+            ..SensorFrame::default()
+        }
+    }
+
+    #[test]
+    fn third_candidate_triggers_after_sequence_progression() {
+        let mut engine = EventEngine::default();
+
+        let first = engine.tick(candidate_frame(1_000));
+        assert!(!first.actions.contains_backlight_trigger());
+
+        let second = engine.tick(candidate_frame(1_200));
+        assert!(!second.actions.contains_backlight_trigger());
+        assert_eq!(second.trace.state_id, EngineStateId::TapSeq1);
+        assert_eq!(second.trace.reject_reason, RejectReason::None);
+
+        let third = engine.tick(candidate_frame(1_400));
+        assert!(third.actions.contains_backlight_trigger());
+        assert_eq!(third.trace.state_id, EngineStateId::TapSeq2);
+        assert_eq!(third.trace.reject_reason, RejectReason::None);
+    }
+
+    #[test]
+    fn long_gap_in_tap_seq2_rejects_without_triggering() {
+        let mut engine = EventEngine::default();
+
+        let _ = engine.tick(candidate_frame(1_000));
+        let _ = engine.tick(candidate_frame(1_200));
+        let late = engine.tick(candidate_frame(2_200));
+
+        assert!(!late.actions.contains_backlight_trigger());
+        assert_eq!(late.trace.state_id, EngineStateId::TapSeq2);
+        assert_eq!(late.trace.reject_reason, RejectReason::GapTooLong);
     }
 }

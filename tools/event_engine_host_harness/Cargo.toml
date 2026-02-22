@@ -1,0 +1,10 @@
+[package]
+name = "event_engine_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+statig = "0.4.1"
+
+[build-dependencies]
+event_config_compiler = { path = "../event_config_compiler" }
