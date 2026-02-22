@@ -31,7 +31,7 @@ use super::{
 
 const TOUCH_FEEDBACK_ENABLED: bool = true;
 const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
-const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 90;
+const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 45;
 const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 4;
 
 #[embassy_executor::task]

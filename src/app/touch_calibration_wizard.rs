@@ -12,6 +12,10 @@ use super::{
 
 const TARGET_RADIUS_PX: i32 = 26;
 const TARGET_HIT_RADIUS_PX: i32 = TARGET_RADIUS_PX;
+const WIZARD_SWIPE_RELEASE_MIN_DX_PX: i32 = 72;
+const WIZARD_SWIPE_RELEASE_MAX_ABS_DY_PX: i32 = 180;
+const WIZARD_SWIPE_RELEASE_DOMINANCE_X100: i32 = 115;
+const WIZARD_SWIPE_RELEASE_MAX_DURATION_MS: u16 = 1_600;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WizardPhase {
@@ -116,12 +120,26 @@ impl TouchCalibrationWizard {
 
         let width = display.width() as i32;
         let height = display.height() as i32;
+        let prev_phase = self.phase;
         let mut changed = false;
         match event.kind {
+            TouchEventKind::Down => {
+                // Some panels report stable Down sooner than Tap/Up at the intro step.
+                if matches!(self.phase, WizardPhase::Intro) {
+                    changed = self.on_tap(event.x, event.y, width, height);
+                }
+            }
             TouchEventKind::Tap => {
                 changed = self.on_tap(event.x, event.y, width, height);
             }
-            TouchEventKind::Up | TouchEventKind::LongPress => {
+            TouchEventKind::Up => {
+                if matches!(self.phase, WizardPhase::SwipeRight) {
+                    changed = self.on_swipe_release(event);
+                } else {
+                    changed = self.on_tap(event.x, event.y, width, height);
+                }
+            }
+            TouchEventKind::LongPress => {
                 // Fallback for panels where Tap classification is timing-sensitive.
                 changed = self.on_tap(event.x, event.y, width, height);
             }
@@ -142,7 +160,11 @@ impl TouchCalibrationWizard {
         }
 
         if changed {
-            self.render_partial(display);
+            if matches!(prev_phase, WizardPhase::Intro) {
+                self.render_full(display);
+            } else {
+                self.render_partial(display);
+            }
         }
         WizardDispatch::Consumed
     }
@@ -223,6 +245,46 @@ impl TouchCalibrationWizard {
             _ => {}
         }
         self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
+    }
+
+    fn on_swipe_release(&mut self, event: TouchEvent) -> bool {
+        let prev_phase = self.phase;
+        let prev_hint = self.hint;
+        let prev_last_tap = self.last_tap;
+
+        if matches!(self.phase, WizardPhase::SwipeRight) {
+            if self.release_matches_right_swipe(event) {
+                self.phase = WizardPhase::Complete;
+                self.hint = "Calibration complete. Tap to continue.";
+                self.last_tap = None;
+            } else {
+                self.hint = "Swipe right farther (mostly horizontal).";
+            }
+        }
+
+        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
+    }
+
+    fn release_matches_right_swipe(&self, event: TouchEvent) -> bool {
+        let dx = event.x as i32 - event.start_x as i32;
+        let dy = event.y as i32 - event.start_y as i32;
+        let abs_dx = dx.abs();
+        let abs_dy = dy.abs();
+
+        if event.duration_ms > WIZARD_SWIPE_RELEASE_MAX_DURATION_MS {
+            return false;
+        }
+        if dx < WIZARD_SWIPE_RELEASE_MIN_DX_PX {
+            return false;
+        }
+        if abs_dy > WIZARD_SWIPE_RELEASE_MAX_ABS_DY_PX {
+            return false;
+        }
+        if abs_dx * 100 < abs_dy * WIZARD_SWIPE_RELEASE_DOMINANCE_X100 {
+            return false;
+        }
+
+        true
     }
 
     fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {

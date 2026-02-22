@@ -1,14 +1,14 @@
 use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
-const TOUCH_DEBOUNCE_DOWN_MS: u64 = 30;
-const TOUCH_DEBOUNCE_UP_MS: u64 = 35;
-const TOUCH_DRAG_START_PX: i32 = 14;
-const TOUCH_MOVE_DEADZONE_PX: i32 = 8;
+const TOUCH_DEBOUNCE_DOWN_MS: u64 = 18;
+const TOUCH_DEBOUNCE_UP_MS: u64 = 22;
+const TOUCH_DRAG_START_PX: i32 = 10;
+const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
 const TOUCH_TAP_MAX_MS: u64 = 280;
-const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 96;
-const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 550;
-const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 140;
+const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 72;
+const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 1_000;
+const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 120;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TouchPoint {
