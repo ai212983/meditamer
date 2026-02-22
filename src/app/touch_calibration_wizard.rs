@@ -12,10 +12,8 @@ use super::{
 
 const TARGET_RADIUS_PX: i32 = 26;
 const TARGET_HIT_RADIUS_PX: i32 = TARGET_RADIUS_PX;
-const WIZARD_SWIPE_RELEASE_MIN_DX_PX: i32 = 72;
-const WIZARD_SWIPE_RELEASE_MAX_ABS_DY_PX: i32 = 180;
-const WIZARD_SWIPE_RELEASE_DOMINANCE_X100: i32 = 115;
 const WIZARD_SWIPE_RELEASE_MAX_DURATION_MS: u16 = 1_600;
+const WIZARD_SWIPE_DEBUG_MIN_DISTANCE_PX: i32 = 40;
 const SWIPE_TRACE_MAX_POINTS: usize = 32;
 const CONTINUE_BUTTON_WIDTH: i32 = 192;
 const CONTINUE_BUTTON_HEIGHT: i32 = 52;
@@ -100,10 +98,6 @@ impl TouchCalibrationWizard {
         !matches!(self.phase, WizardPhase::Closed)
     }
 
-    pub(crate) fn is_waiting_exit_tap(&self) -> bool {
-        matches!(self.phase, WizardPhase::Complete)
-    }
-
     pub(crate) fn render_full(&self, display: &mut InkplateDriver) {
         self.render_with_refresh(display, true);
     }
@@ -177,16 +171,7 @@ impl TouchCalibrationWizard {
             changed = self.on_continue_button();
         }
 
-        if !changed && matches!(self.phase, WizardPhase::Complete) {
-            match event.kind {
-                TouchEventKind::Down | TouchEventKind::Tap | TouchEventKind::LongPress => {
-                    self.phase = WizardPhase::Closed;
-                    self.last_tap = None;
-                    changed = true;
-                }
-                _ => {}
-            }
-        } else if !changed {
+        if !changed {
             match event.kind {
                 TouchEventKind::Down => {
                     // Handle tap-target steps on Down for more immediate and reliable feedback.
@@ -295,11 +280,11 @@ impl TouchCalibrationWizard {
                 }
             }
             WizardPhase::SwipeRight => {
-                self.hint = "Swipe right to complete.";
+                self.hint = "Swipe debug mode. Use CONTINUE when done.";
                 self.last_tap = None;
             }
             WizardPhase::Complete => {
-                self.phase = WizardPhase::Closed;
+                self.hint = "Press CONTINUE to exit.";
                 self.last_tap = None;
             }
             WizardPhase::Closed => {}
@@ -312,29 +297,38 @@ impl TouchCalibrationWizard {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
         let prev_last_tap = self.last_tap;
+        let prev_last_swipe = self.last_swipe;
         match self.phase {
-            WizardPhase::SwipeRight if matches!(direction, TouchSwipeDirection::Right) => {
-                self.phase = WizardPhase::Complete;
-                self.hint = "Calibration complete. Tap to continue.";
-                self.last_tap = None;
-            }
             WizardPhase::SwipeRight => {
-                self.hint = "Wrong direction. Swipe right.";
+                self.hint = match direction {
+                    TouchSwipeDirection::Left => "Swipe detected: LEFT.",
+                    TouchSwipeDirection::Right => "Swipe detected: RIGHT.",
+                    TouchSwipeDirection::Up => "Swipe detected: UP.",
+                    TouchSwipeDirection::Down => "Swipe detected: DOWN.",
+                };
             }
             _ => {}
         }
-        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
+        self.phase != prev_phase
+            || self.hint != prev_hint
+            || self.last_tap != prev_last_tap
+            || self.last_swipe != prev_last_swipe
     }
 
     fn on_swipe_release(&mut self, event: TouchEvent) -> bool {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
         let prev_last_tap = self.last_tap;
+        let prev_last_swipe = self.last_swipe;
 
         if matches!(self.phase, WizardPhase::SwipeRight) {
-            if self.release_matches_right_swipe(event) {
-                self.phase = WizardPhase::Complete;
-                self.hint = "Calibration complete. Tap to continue.";
+            if let Some(direction) = self.classify_release_direction(event) {
+                self.hint = match direction {
+                    TouchSwipeDirection::Left => "Swipe detected: LEFT.",
+                    TouchSwipeDirection::Right => "Swipe detected: RIGHT.",
+                    TouchSwipeDirection::Up => "Swipe detected: UP.",
+                    TouchSwipeDirection::Down => "Swipe detected: DOWN.",
+                };
                 self.last_tap = None;
                 self.last_swipe = Some(SwipeAttempt {
                     start: SwipePoint {
@@ -348,7 +342,7 @@ impl TouchCalibrationWizard {
                     accepted: true,
                 });
             } else {
-                self.hint = "Swipe right farther (mostly horizontal).";
+                self.hint = "Swipe too short/unclear. Try again.";
                 self.last_swipe = Some(SwipeAttempt {
                     start: SwipePoint {
                         x: event.start_x as i32,
@@ -363,29 +357,36 @@ impl TouchCalibrationWizard {
             }
         }
 
-        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
+        self.phase != prev_phase
+            || self.hint != prev_hint
+            || self.last_tap != prev_last_tap
+            || self.last_swipe != prev_last_swipe
     }
 
-    fn release_matches_right_swipe(&self, event: TouchEvent) -> bool {
+    fn classify_release_direction(&self, event: TouchEvent) -> Option<TouchSwipeDirection> {
         let dx = event.x as i32 - event.start_x as i32;
         let dy = event.y as i32 - event.start_y as i32;
         let abs_dx = dx.abs();
         let abs_dy = dy.abs();
+        let major = abs_dx.max(abs_dy);
 
         if event.duration_ms > WIZARD_SWIPE_RELEASE_MAX_DURATION_MS {
-            return false;
+            return None;
         }
-        if dx < WIZARD_SWIPE_RELEASE_MIN_DX_PX {
-            return false;
+        if major < WIZARD_SWIPE_DEBUG_MIN_DISTANCE_PX {
+            return None;
         }
-        if abs_dy > WIZARD_SWIPE_RELEASE_MAX_ABS_DY_PX {
-            return false;
+        if abs_dx >= abs_dy {
+            if dx >= 0 {
+                Some(TouchSwipeDirection::Right)
+            } else {
+                Some(TouchSwipeDirection::Left)
+            }
+        } else if dy >= 0 {
+            Some(TouchSwipeDirection::Down)
+        } else {
+            Some(TouchSwipeDirection::Up)
         }
-        if abs_dx * 100 < abs_dy * WIZARD_SWIPE_RELEASE_DOMINANCE_X100 {
-            return false;
-        }
-
-        true
     }
 
     fn is_tap_step(&self) -> bool {
@@ -473,7 +474,7 @@ impl TouchCalibrationWizard {
             }
             WizardPhase::SwipeRight => {
                 self.phase = WizardPhase::Complete;
-                self.hint = "Manual continue. Tap to exit.";
+                self.hint = "Swipe debug complete. Press CONTINUE to exit.";
             }
             WizardPhase::Complete => {
                 self.phase = WizardPhase::Closed;
@@ -513,7 +514,7 @@ impl TouchCalibrationWizard {
             WizardPhase::TapCenter => "Tap the center target.",
             WizardPhase::TapTopLeft => "Tap the top-left target.",
             WizardPhase::TapBottomRight => "Tap the bottom-right target.",
-            WizardPhase::SwipeRight => "Swipe right across the screen.",
+            WizardPhase::SwipeRight => "Exercise swipes in any direction.",
             WizardPhase::Complete => "Calibration complete.",
             WizardPhase::Closed => "",
         }
@@ -525,8 +526,8 @@ impl TouchCalibrationWizard {
             WizardPhase::TapCenter => "Aim inside the ring.",
             WizardPhase::TapTopLeft => "Aim inside the ring.",
             WizardPhase::TapBottomRight => "Aim inside the ring.",
-            WizardPhase::SwipeRight => "Start left, end right, one finger.",
-            WizardPhase::Complete => "Tap anywhere to continue.",
+            WizardPhase::SwipeRight => "Use CONTINUE when swipe debug is done.",
+            WizardPhase::Complete => "Exit only with CONTINUE button.",
             WizardPhase::Closed => "",
         }
     }
