@@ -175,6 +175,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     }
                 }
                 AppEvent::StartTouchCalibrationWizard => {
+                    esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
                     touch_wizard_requested = true;
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
