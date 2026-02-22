@@ -11,7 +11,7 @@ use super::{
 };
 
 const TARGET_RADIUS_PX: i32 = 26;
-const TARGET_HIT_RADIUS_PX: i32 = 72;
+const TARGET_HIT_RADIUS_PX: i32 = TARGET_RADIUS_PX;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WizardPhase {
@@ -34,6 +34,14 @@ pub(crate) enum WizardDispatch {
 pub(crate) struct TouchCalibrationWizard {
     phase: WizardPhase,
     hint: &'static str,
+    last_tap: Option<TapAttempt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TapAttempt {
+    x: i32,
+    y: i32,
+    hit: bool,
 }
 
 impl TouchCalibrationWizard {
@@ -45,6 +53,7 @@ impl TouchCalibrationWizard {
                 WizardPhase::Closed
             },
             hint: "",
+            last_tap: None,
         }
     }
 
@@ -77,6 +86,9 @@ impl TouchCalibrationWizard {
 
         if let Some((tx, ty)) = self.target_point(width, height) {
             draw_target(display, tx, ty);
+            if let Some(last_tap) = self.last_tap {
+                draw_tap_attempt_feedback(display, tx, ty, last_tap);
+            }
         }
 
         let footer = if self.hint.is_empty() {
@@ -106,13 +118,6 @@ impl TouchCalibrationWizard {
         let height = display.height() as i32;
         let mut changed = false;
         match event.kind {
-            TouchEventKind::Down => {
-                if matches!(self.phase, WizardPhase::Intro) {
-                    self.phase = WizardPhase::TapCenter;
-                    self.hint = "Step 1 started.";
-                    changed = true;
-                }
-            }
             TouchEventKind::Tap => {
                 changed = self.on_tap(event.x, event.y, width, height);
             }
@@ -125,6 +130,7 @@ impl TouchCalibrationWizard {
             }
             TouchEventKind::Cancel => {
                 self.hint = "Touch canceled. Retry current step.";
+                self.last_tap = None;
                 changed = true;
             }
             _ => {}
@@ -146,62 +152,77 @@ impl TouchCalibrationWizard {
         let py = y as i32;
         let prev_phase = self.phase;
         let prev_hint = self.hint;
+        let prev_last_tap = self.last_tap;
 
         match self.phase {
             WizardPhase::Intro => {
                 self.phase = WizardPhase::TapCenter;
-                self.hint = "Step 1 started.";
+                self.hint = "Step 1 started. Tap center target.";
+                self.last_tap = None;
             }
             WizardPhase::TapCenter => {
-                if self.tap_hits_target(px, py, width, height) {
+                let hit = self.tap_hits_target(px, py, width, height);
+                if hit {
+                    self.phase = WizardPhase::TapTopLeft;
                     self.hint = "Center accepted.";
+                    self.last_tap = None;
                 } else {
-                    self.hint = "Center offset detected. Continuing.";
+                    self.hint = "Missed center target. See marker.";
+                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
                 }
-                self.phase = WizardPhase::TapTopLeft;
             }
             WizardPhase::TapTopLeft => {
-                if self.tap_hits_target(px, py, width, height) {
+                let hit = self.tap_hits_target(px, py, width, height);
+                if hit {
+                    self.phase = WizardPhase::TapBottomRight;
                     self.hint = "Top-left accepted.";
+                    self.last_tap = None;
                 } else {
-                    self.hint = "Top-left offset detected. Continuing.";
+                    self.hint = "Missed top-left target. See marker.";
+                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
                 }
-                self.phase = WizardPhase::TapBottomRight;
             }
             WizardPhase::TapBottomRight => {
-                if self.tap_hits_target(px, py, width, height) {
+                let hit = self.tap_hits_target(px, py, width, height);
+                if hit {
+                    self.phase = WizardPhase::SwipeRight;
                     self.hint = "Tap targets complete.";
+                    self.last_tap = None;
                 } else {
-                    self.hint = "Bottom-right offset detected. Continuing.";
+                    self.hint = "Missed bottom-right target. See marker.";
+                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
                 }
-                self.phase = WizardPhase::SwipeRight;
             }
             WizardPhase::SwipeRight => {
                 self.hint = "Swipe right to complete.";
+                self.last_tap = None;
             }
             WizardPhase::Complete => {
                 self.phase = WizardPhase::Closed;
+                self.last_tap = None;
             }
             WizardPhase::Closed => {}
         }
 
-        self.phase != prev_phase || self.hint != prev_hint
+        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
     }
 
     fn on_swipe(&mut self, direction: TouchSwipeDirection) -> bool {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
+        let prev_last_tap = self.last_tap;
         match self.phase {
             WizardPhase::SwipeRight if matches!(direction, TouchSwipeDirection::Right) => {
                 self.phase = WizardPhase::Complete;
                 self.hint = "Calibration complete. Tap to continue.";
+                self.last_tap = None;
             }
             WizardPhase::SwipeRight => {
                 self.hint = "Wrong direction. Swipe right.";
             }
             _ => {}
         }
-        self.phase != prev_phase || self.hint != prev_hint
+        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
     }
 
     fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
@@ -330,6 +351,36 @@ fn draw_target(display: &mut InkplateDriver, x: i32, y: i32) {
     let _ = Line::new(Point::new(x, y - 10), Point::new(x, y + 10))
         .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
         .draw(display);
+}
+
+fn draw_tap_attempt_feedback(
+    display: &mut InkplateDriver,
+    target_x: i32,
+    target_y: i32,
+    tap: TapAttempt,
+) {
+    let _ = Line::new(Point::new(target_x, target_y), Point::new(tap.x, tap.y))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(display);
+
+    if tap.hit {
+        let _ = Circle::new(Point::new(tap.x - 5, tap.y - 5), 10)
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+            .draw(display);
+    } else {
+        let _ = Line::new(
+            Point::new(tap.x - 7, tap.y - 7),
+            Point::new(tap.x + 7, tap.y + 7),
+        )
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(display);
+        let _ = Line::new(
+            Point::new(tap.x - 7, tap.y + 7),
+            Point::new(tap.x + 7, tap.y - 7),
+        )
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(display);
+    }
 }
 
 fn squared_distance_i32(ax: i32, ay: i32, bx: i32, by: i32) -> i32 {
