@@ -122,44 +122,58 @@ impl TouchCalibrationWizard {
         let height = display.height() as i32;
         let prev_phase = self.phase;
         let mut changed = false;
-        match event.kind {
-            TouchEventKind::Down => {
-                // Handle tap-target steps on Down for more immediate and reliable feedback.
-                if self.is_tap_step()
-                    || matches!(self.phase, WizardPhase::Intro | WizardPhase::Complete)
-                {
+
+        if matches!(self.phase, WizardPhase::Complete) {
+            match event.kind {
+                TouchEventKind::Down
+                | TouchEventKind::Move
+                | TouchEventKind::Up
+                | TouchEventKind::Tap
+                | TouchEventKind::LongPress => {
                     changed = self.on_tap(event.x, event.y, width, height);
                 }
+                _ => {}
             }
-            TouchEventKind::Tap => {
-                // Keep Tap as Intro fallback, but avoid double-processing tap-step touches
-                // that were already handled on Down.
-                if matches!(self.phase, WizardPhase::Intro) {
-                    changed = self.on_tap(event.x, event.y, width, height);
+        } else {
+            match event.kind {
+                TouchEventKind::Down => {
+                    // Handle tap-target steps on Down for more immediate and reliable feedback.
+                    if self.is_tap_step()
+                        || matches!(self.phase, WizardPhase::Intro | WizardPhase::Complete)
+                    {
+                        changed = self.on_tap(event.x, event.y, width, height);
+                    }
                 }
-            }
-            TouchEventKind::Up => {
-                if matches!(self.phase, WizardPhase::SwipeRight) {
-                    changed = self.on_swipe_release(event);
-                } else if matches!(self.phase, WizardPhase::Intro) {
-                    changed = self.on_tap(event.x, event.y, width, height);
+                TouchEventKind::Tap => {
+                    // Keep Tap as Intro fallback, but avoid double-processing tap-step touches
+                    // that were already handled on Down.
+                    if matches!(self.phase, WizardPhase::Intro) {
+                        changed = self.on_tap(event.x, event.y, width, height);
+                    }
                 }
-            }
-            TouchEventKind::LongPress => {
-                // Fallback for panels where Tap classification is timing-sensitive.
-                if matches!(self.phase, WizardPhase::Intro) {
-                    changed = self.on_tap(event.x, event.y, width, height);
+                TouchEventKind::Up => {
+                    if matches!(self.phase, WizardPhase::SwipeRight) {
+                        changed = self.on_swipe_release(event);
+                    } else if matches!(self.phase, WizardPhase::Intro) {
+                        changed = self.on_tap(event.x, event.y, width, height);
+                    }
                 }
+                TouchEventKind::LongPress => {
+                    // Fallback for panels where Tap classification is timing-sensitive.
+                    if matches!(self.phase, WizardPhase::Intro) {
+                        changed = self.on_tap(event.x, event.y, width, height);
+                    }
+                }
+                TouchEventKind::Swipe(direction) => {
+                    changed = self.on_swipe(direction);
+                }
+                TouchEventKind::Cancel => {
+                    self.hint = "Touch canceled. Retry current step.";
+                    self.last_tap = None;
+                    changed = true;
+                }
+                _ => {}
             }
-            TouchEventKind::Swipe(direction) => {
-                changed = self.on_swipe(direction);
-            }
-            TouchEventKind::Cancel => {
-                self.hint = "Touch canceled. Retry current step.";
-                self.last_tap = None;
-                changed = true;
-            }
-            _ => {}
         }
 
         let finished = matches!(self.phase, WizardPhase::Closed);
