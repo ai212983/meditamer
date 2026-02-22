@@ -124,24 +124,30 @@ impl TouchCalibrationWizard {
         let mut changed = false;
         match event.kind {
             TouchEventKind::Down => {
-                // Some panels report stable Down sooner than Tap/Up at the intro step.
-                if matches!(self.phase, WizardPhase::Intro) {
+                // Handle tap-target steps on Down for more immediate and reliable feedback.
+                if self.is_tap_step() || matches!(self.phase, WizardPhase::Intro) {
                     changed = self.on_tap(event.x, event.y, width, height);
                 }
             }
             TouchEventKind::Tap => {
-                changed = self.on_tap(event.x, event.y, width, height);
+                // Keep Tap as Intro fallback, but avoid double-processing tap-step touches
+                // that were already handled on Down.
+                if matches!(self.phase, WizardPhase::Intro) {
+                    changed = self.on_tap(event.x, event.y, width, height);
+                }
             }
             TouchEventKind::Up => {
                 if matches!(self.phase, WizardPhase::SwipeRight) {
                     changed = self.on_swipe_release(event);
-                } else {
+                } else if matches!(self.phase, WizardPhase::Intro) {
                     changed = self.on_tap(event.x, event.y, width, height);
                 }
             }
             TouchEventKind::LongPress => {
                 // Fallback for panels where Tap classification is timing-sensitive.
-                changed = self.on_tap(event.x, event.y, width, height);
+                if matches!(self.phase, WizardPhase::Intro) {
+                    changed = self.on_tap(event.x, event.y, width, height);
+                }
             }
             TouchEventKind::Swipe(direction) => {
                 changed = self.on_swipe(direction);
@@ -285,6 +291,13 @@ impl TouchCalibrationWizard {
         }
 
         true
+    }
+
+    fn is_tap_step(&self) -> bool {
+        matches!(
+            self.phase,
+            WizardPhase::TapCenter | WizardPhase::TapTopLeft | WizardPhase::TapBottomRight
+        )
     }
 
     fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {

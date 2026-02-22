@@ -27,8 +27,11 @@ impl TouchEngine {
     }
 
     pub(crate) fn tick(&mut self, now_ms: u64, sample: HalTouchSample) -> TouchEngineOutput {
+        // Hardware occasionally reports phantom multi-touch counts for a single finger.
+        // Normalize to 0/1 in the app pipeline to keep gesture classification stable.
+        let normalized_count = if sample.touch_count == 0 { 0 } else { 1 };
         let core_sample = core::TouchSample {
-            touch_count: sample.touch_count,
+            touch_count: normalized_count,
             points: [
                 core::TouchPoint {
                     x: sample.points[0].x,
