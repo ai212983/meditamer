@@ -801,8 +801,13 @@ async fn display_task(mut context: DisplayContext) {
                         &mut first_visual_seed_pending,
                     );
                     if display_mode == DisplayMode::Shanshui {
-                        render_shanshui_update(&mut context.inkplate, seed, last_uptime_seconds, time_sync)
-                            .await;
+                        render_shanshui_update(
+                            &mut context.inkplate,
+                            seed,
+                            last_uptime_seconds,
+                            time_sync,
+                        )
+                        .await;
                     } else {
                         render_suminagashi_update(
                             &mut context.inkplate,
@@ -1118,11 +1123,21 @@ async fn render_active_mode(
             force_full,
         ),
         DisplayMode::Suminagashi => {
-            let seed = next_visual_seed(uptime_seconds, time_sync, pattern_nonce, first_visual_seed_pending);
+            let seed = next_visual_seed(
+                uptime_seconds,
+                time_sync,
+                pattern_nonce,
+                first_visual_seed_pending,
+            );
             render_suminagashi_update(display, seed, uptime_seconds, time_sync).await;
         }
         DisplayMode::Shanshui => {
-            let seed = next_visual_seed(uptime_seconds, time_sync, pattern_nonce, first_visual_seed_pending);
+            let seed = next_visual_seed(
+                uptime_seconds,
+                time_sync,
+                pattern_nonce,
+                first_visual_seed_pending,
+            );
             render_shanshui_update(display, seed, uptime_seconds, time_sync).await;
         }
     }
@@ -1144,8 +1159,12 @@ async fn render_visual_update(
     );
     match mode {
         DisplayMode::Clock => {}
-        DisplayMode::Suminagashi => render_suminagashi_update(display, seed, uptime_seconds, time_sync).await,
-        DisplayMode::Shanshui => render_shanshui_update(display, seed, uptime_seconds, time_sync).await,
+        DisplayMode::Suminagashi => {
+            render_suminagashi_update(display, seed, uptime_seconds, time_sync).await
+        }
+        DisplayMode::Shanshui => {
+            render_shanshui_update(display, seed, uptime_seconds, time_sync).await
+        }
     }
 }
 
