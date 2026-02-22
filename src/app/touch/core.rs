@@ -6,6 +6,7 @@ const TOUCH_DRAG_START_PX: i32 = 10;
 const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
 const TOUCH_TAP_MAX_MS: u64 = 280;
+const TOUCH_TAP_MAX_TRAVEL_PX: i32 = 24;
 const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 72;
 const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 1_000;
 const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 120;
@@ -257,19 +258,23 @@ impl TouchHsm {
 
         self.emit_event(context, TouchEventKind::Up, release_ms, release_point, 0);
 
-        if self.drag_active {
-            if let Some(direction) = self.classify_swipe(release_ms, release_point) {
-                self.emit_event(
-                    context,
-                    TouchEventKind::Swipe(direction),
-                    release_ms,
-                    release_point,
-                    0,
-                );
-            }
+        // Classify swipe from final release vector even if drag state wasn't latched.
+        if let Some(direction) = self.classify_swipe(release_ms, release_point) {
+            self.emit_event(
+                context,
+                TouchEventKind::Swipe(direction),
+                release_ms,
+                release_point,
+                0,
+            );
         } else {
             let duration = release_ms.saturating_sub(self.down_ms);
-            if !self.long_press_emitted && duration <= TOUCH_TAP_MAX_MS {
+            let travel_sq = squared_distance(release_point, self.down_point);
+            let tap_travel_sq = TOUCH_TAP_MAX_TRAVEL_PX * TOUCH_TAP_MAX_TRAVEL_PX;
+            if !self.long_press_emitted
+                && duration <= TOUCH_TAP_MAX_MS
+                && travel_sq <= tap_travel_sq
+            {
                 self.emit_event(context, TouchEventKind::Tap, release_ms, release_point, 0);
             }
         }
@@ -608,5 +613,22 @@ mod tests {
         assert!(events
             .iter()
             .any(|ev| matches!(ev.kind, TouchEventKind::Tap)));
+    }
+
+    #[test]
+    fn jitter_drag_still_emits_tap_when_release_is_near() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        // Jitter briefly crosses drag threshold but total release travel remains tap-like.
+        drain_kinds(engine.tick(0, sample1(200, 200)), &mut events);
+        drain_kinds(engine.tick(35, sample1(200, 200)), &mut events);
+        drain_kinds(engine.tick(70, sample1(212, 205)), &mut events);
+        drain_kinds(engine.tick(95, sample0()), &mut events);
+        drain_kinds(engine.tick(130, sample0()), &mut events);
+
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Tap)));
     }
 }
