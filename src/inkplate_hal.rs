@@ -80,6 +80,8 @@ const TOUCH_HELLO_PACKET: [u8; 4] = [0x55, 0x55, 0x55, 0x55];
 const TOUCH_GET_X_RES_CMD: [u8; 4] = [0x53, 0x60, 0x00, 0x00];
 const TOUCH_GET_Y_RES_CMD: [u8; 4] = [0x53, 0x63, 0x00, 0x00];
 const TOUCH_GET_POWER_STATE_CMD: [u8; 4] = [0x53, 0x50, 0x00, 0x01];
+const TOUCH_SOFT_RESET_POLL_INTERVAL_MS: u32 = 20;
+const TOUCH_SOFT_RESET_TIMEOUT_MS: u32 = 1_000;
 
 const BEEP_FREQ_MIN_HZ: i32 = 572;
 const BEEP_FREQ_MAX_HZ: i32 = 2933;

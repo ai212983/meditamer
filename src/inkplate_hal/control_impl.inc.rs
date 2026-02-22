@@ -112,8 +112,11 @@ where
     pub fn touch_software_reset_read_hello(&mut self) -> Result<[u8; 4], I2C::Error> {
         self.i2c_write(TOUCHSCREEN_ADDR, &TOUCH_SOFT_RESET_CMD)?;
         let mut hello = [0u8; 4];
-        for _ in 0..8 {
-            self.delay.delay_ms(20);
+        let attempts = TOUCH_SOFT_RESET_TIMEOUT_MS
+            .saturating_div(TOUCH_SOFT_RESET_POLL_INTERVAL_MS)
+            .max(1);
+        for _ in 0..attempts {
+            self.delay.delay_ms(TOUCH_SOFT_RESET_POLL_INTERVAL_MS);
             self.i2c_read(TOUCHSCREEN_ADDR, &mut hello)?;
             if hello == TOUCH_HELLO_PACKET {
                 break;
