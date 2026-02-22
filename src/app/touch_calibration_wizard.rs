@@ -90,37 +90,50 @@ impl TouchCalibrationWizard {
             return WizardDispatch::Inactive;
         }
 
-        let mut finished = false;
+        let width = display.width() as i32;
+        let height = display.height() as i32;
+        let mut changed = false;
         match event.kind {
+            TouchEventKind::Down => {
+                if matches!(self.phase, WizardPhase::Intro) {
+                    self.phase = WizardPhase::TapCenter;
+                    self.hint = "Step 1 started.";
+                    changed = true;
+                }
+            }
             TouchEventKind::Tap => {
-                self.on_tap(
-                    event.x,
-                    event.y,
-                    display.width() as i32,
-                    display.height() as i32,
-                );
-                finished = matches!(self.phase, WizardPhase::Closed);
+                changed = self.on_tap(event.x, event.y, width, height);
+            }
+            TouchEventKind::Up | TouchEventKind::LongPress => {
+                // Fallback for panels where Tap classification is timing-sensitive.
+                changed = self.on_tap(event.x, event.y, width, height);
             }
             TouchEventKind::Swipe(direction) => {
-                self.on_swipe(direction);
+                changed = self.on_swipe(direction);
             }
             TouchEventKind::Cancel => {
                 self.hint = "Touch canceled. Retry current step.";
+                changed = true;
             }
             _ => {}
         }
 
+        let finished = matches!(self.phase, WizardPhase::Closed);
         if finished {
             return WizardDispatch::Finished;
         }
 
-        self.render(display);
+        if changed {
+            self.render(display);
+        }
         WizardDispatch::Consumed
     }
 
-    fn on_tap(&mut self, x: u16, y: u16, width: i32, height: i32) {
+    fn on_tap(&mut self, x: u16, y: u16, width: i32, height: i32) -> bool {
         let px = x as i32;
         let py = y as i32;
+        let prev_phase = self.phase;
+        let prev_hint = self.hint;
 
         match self.phase {
             WizardPhase::Intro => {
@@ -159,9 +172,13 @@ impl TouchCalibrationWizard {
             }
             WizardPhase::Closed => {}
         }
+
+        self.phase != prev_phase || self.hint != prev_hint
     }
 
-    fn on_swipe(&mut self, direction: TouchSwipeDirection) {
+    fn on_swipe(&mut self, direction: TouchSwipeDirection) -> bool {
+        let prev_phase = self.phase;
+        let prev_hint = self.hint;
         match self.phase {
             WizardPhase::SwipeRight if matches!(direction, TouchSwipeDirection::Right) => {
                 self.phase = WizardPhase::Complete;
@@ -172,6 +189,7 @@ impl TouchCalibrationWizard {
             }
             _ => {}
         }
+        self.phase != prev_phase || self.hint != prev_hint
     }
 
     fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
