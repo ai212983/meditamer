@@ -41,6 +41,8 @@ This produces:
 - `tools/touch_replay/fixtures/my_real_case_trace.csv`
 - `tools/touch_replay/fixtures/my_real_case_expected.txt`
 
+When capture logs contain `touch_event,...` lines, expected kinds are sourced directly from device-decoded events. Otherwise they are derived from replay output.
+
 3. Replay and verify:
 
 ```bash

@@ -48,27 +48,39 @@ fi
 mkdir -p "$fixtures_dir"
 trace_csv="$fixtures_dir/${fixture_name}_trace.csv"
 expected_txt="$fixtures_dir/${fixture_name}_expected.txt"
+tmp_device_expected="$(mktemp -t touch_device_expected.XXXXXX)"
 
 if [[ ${#normalize_arg[@]} -gt 0 ]]; then
-  "$importer" "$capture_path" "$trace_csv" "${normalize_arg[@]}"
+  "$importer" \
+    "$capture_path" \
+    "$trace_csv" \
+    "${normalize_arg[@]}" \
+    --events-output "$tmp_device_expected"
 else
-  "$importer" "$capture_path" "$trace_csv"
+  "$importer" "$capture_path" "$trace_csv" --events-output "$tmp_device_expected"
 fi
 
 tmp_events="$(mktemp -t touch_replay_events.XXXXXX)"
-trap 'rm -f "$tmp_events"' EXIT
+trap 'rm -f "$tmp_events" "$tmp_device_expected"' EXIT
 
-(
-  cd /tmp
-  RUSTFLAGS='' RUSTUP_TOOLCHAIN="$toolchain" cargo run \
-    --locked \
-    --target "$host_target" \
-    --manifest-path "$manifest_path" -- \
-    "$trace_csv" \
-    >"$tmp_events"
-)
+if [[ -s "$tmp_device_expected" ]]; then
+  cp "$tmp_device_expected" "$expected_txt"
+  echo "used decoded touch_event stream for expected kinds -> $expected_txt" >&2
+else
+  echo "no touch_event rows found; deriving expected kinds from replay output" >&2
 
-awk -F, '/^event,/{print $3}' "$tmp_events" >"$expected_txt"
+  (
+    cd /tmp
+    RUSTFLAGS='' RUSTUP_TOOLCHAIN="$toolchain" cargo run \
+      --locked \
+      --target "$host_target" \
+      --manifest-path "$manifest_path" -- \
+      "$trace_csv" \
+      >"$tmp_events"
+  )
+
+  awk -F, '/^event,/{print $3}' "$tmp_events" >"$expected_txt"
+fi
 
 if [[ ! -s "$expected_txt" ]]; then
   echo "warning: expected event file is empty: $expected_txt" >&2
