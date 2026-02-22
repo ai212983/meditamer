@@ -17,6 +17,7 @@ use super::{
 #[derive(Clone, Copy)]
 enum SerialCommand {
     TimeSync(TimeSyncCommand),
+    TouchWizard,
     Repaint,
     RepaintMarble,
     Metrics,
@@ -89,6 +90,16 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                     let _ = uart.write_async(b"REPAINT OK\r\n").await;
                                 } else {
                                     let _ = uart.write_async(b"REPAINT BUSY\r\n").await;
+                                }
+                            }
+                            SerialCommand::TouchWizard => {
+                                if APP_EVENTS
+                                    .try_send(AppEvent::StartTouchCalibrationWizard)
+                                    .is_ok()
+                                {
+                                    let _ = uart.write_async(b"TOUCH_WIZARD OK\r\n").await;
+                                } else {
+                                    let _ = uart.write_async(b"TOUCH_WIZARD BUSY\r\n").await;
                                 }
                             }
                             SerialCommand::RepaintMarble => {
@@ -227,6 +238,9 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
     }
+    if parse_touch_wizard_command(line) {
+        return Some(SerialCommand::TouchWizard);
+    }
     if parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
     }
@@ -281,6 +295,11 @@ fn parse_repaint_marble_command(line: &[u8]) -> bool {
 fn parse_metrics_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"METRICS" || cmd == b"PERF"
+}
+
+fn parse_touch_wizard_command(line: &[u8]) -> bool {
+    let cmd = trim_ascii_whitespace(line);
+    cmd == b"TOUCH_WIZARD" || cmd == b"TOUCH_CAL" || cmd == b"CAL_TOUCH"
 }
 
 fn parse_sdprobe_command(line: &[u8]) -> bool {

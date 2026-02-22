@@ -172,6 +172,14 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         screen_initialized = true;
                     }
                 }
+                AppEvent::StartTouchCalibrationWizard => {
+                    touch_wizard_completed = false;
+                    if touch_ready {
+                        touch_wizard = TouchCalibrationWizard::new(true);
+                        touch_wizard.render(&mut context.inkplate);
+                        screen_initialized = true;
+                    }
+                }
                 AppEvent::ForceRepaint => {
                     if !touch_wizard.is_active() {
                         update_count = 0;
