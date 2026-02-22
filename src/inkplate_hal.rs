@@ -21,11 +21,13 @@ pub const E_INK_HEIGHT: usize = 600;
 const FRAMEBUFFER_BYTES: usize = E_INK_WIDTH * E_INK_HEIGHT / 8;
 
 const IO_INT_ADDR: u8 = 0x20;
+const IO_EXT_ADDR: u8 = 0x21;
 const TPS65186_ADDR: u8 = 0x48;
 const FRONTLIGHT_DIGIPOT_ADDR: u8 = 0x2E;
 const BUZZER_DIGIPOT_ADDR: u8 = 0x2F;
 const FUEL_GAUGE_ADDR: u8 = 0x55;
 const LSM6DS3_ADDR: u8 = 0x6B;
+const TOUCHSCREEN_ADDR: u8 = 0x15;
 const PWR_GOOD_OK: u8 = 0b1111_1010;
 const BQ27441_COMMAND_SOC: u8 = 0x1C;
 const LSM6DS3_REG_WHO_AM_I: u8 = 0x0F;
@@ -70,6 +72,14 @@ const BUZZ_EN: u8 = 12;
 const INT2_LSM: u8 = 13;
 const INT1_LSM: u8 = 14;
 const FG_GPOUT: u8 = 15;
+const TOUCHSCREEN_EN: u8 = 0;
+const TOUCHSCREEN_RST: u8 = 1;
+
+const TOUCH_SOFT_RESET_CMD: [u8; 4] = [0x77, 0x77, 0x77, 0x77];
+const TOUCH_HELLO_PACKET: [u8; 4] = [0x55, 0x55, 0x55, 0x55];
+const TOUCH_GET_X_RES_CMD: [u8; 4] = [0x53, 0x60, 0x00, 0x00];
+const TOUCH_GET_Y_RES_CMD: [u8; 4] = [0x53, 0x63, 0x00, 0x00];
+const TOUCH_GET_POWER_STATE_CMD: [u8; 4] = [0x53, 0x50, 0x00, 0x01];
 
 const BEEP_FREQ_MIN_HZ: i32 = 572;
 const BEEP_FREQ_MAX_HZ: i32 = 2933;
@@ -125,7 +135,28 @@ impl<E> From<E> for InkplateHalError<E> {
 #[derive(Clone, Copy)]
 pub struct ProbeStatus {
     pub io_internal: bool,
+    pub io_external: bool,
     pub tps65186: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TouchInitStatus {
+    Ready { x_res: u16, y_res: u16 },
+    HelloMismatch { hello: [u8; 4] },
+    ZeroResolution { x_res: u16, y_res: u16 },
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TouchPoint {
+    pub x: u16,
+    pub y: u16,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TouchSample {
+    pub touch_count: u8,
+    pub points: [TouchPoint; 2],
+    pub raw: [u8; 8],
 }
 
 #[derive(Clone, Copy)]
@@ -142,7 +173,10 @@ pub struct InkplateHal<I2C, D> {
     i2c: I2C,
     delay: D,
     io_regs_int: [u8; 23],
+    io_regs_ext: [u8; 23],
     battery_gate_active_high: Option<bool>,
+    touch_x_res: u16,
+    touch_y_res: u16,
     pin_lut: [u32; 256],
     panel_fast_ready: bool,
     panel_on: bool,

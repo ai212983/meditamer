@@ -2,6 +2,7 @@ use embassy_time::{with_timeout, Duration, Instant};
 use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 
 use crate::sd_probe;
+use meditamer::inkplate_hal::TouchInitStatus;
 
 use super::{
     config::{
@@ -56,7 +57,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut tap_trace_power_good: i16 = -1;
     let mut backlight_cycle_start: Option<Instant> = None;
     let mut backlight_level = 0u8;
-    let mut touch_ready = context.inkplate.touch_init().unwrap_or(false);
+    let mut touch_ready = try_touch_init_with_logs(&mut context.inkplate, "boot");
     let mut touch_wizard_requested = TOUCH_CALIBRATION_WIZARD_ENABLED;
     let mut touch_wizard = TouchCalibrationWizard::new(touch_wizard_requested && touch_ready);
     let mut touch_retry_at = Instant::now();
@@ -65,10 +66,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_feedback_dirty = false;
     let mut touch_feedback_next_flush_at = Instant::now();
 
-    if touch_ready {
-        esp_println::println!("touch: ready");
-    } else {
-        esp_println::println!("touch: init_failed");
+    if !touch_ready {
         touch_retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
     }
 
@@ -377,9 +375,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         }
 
         if !touch_ready && Instant::now() >= touch_retry_at {
-            touch_ready = context.inkplate.touch_init().unwrap_or(false);
+            touch_ready = try_touch_init_with_logs(&mut context.inkplate, "retry");
             if touch_ready {
-                esp_println::println!("touch: recovered");
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
@@ -605,6 +602,59 @@ fn ms_until(now: Instant, deadline: Instant) -> u64 {
         0
     } else {
         deadline.saturating_duration_since(now).as_millis()
+    }
+}
+
+fn try_touch_init_with_logs(display: &mut super::types::InkplateDriver, phase: &str) -> bool {
+    match display.touch_init_with_status() {
+        Ok(TouchInitStatus::Ready { x_res, y_res }) => {
+            esp_println::println!(
+                "touch: ready phase={} x_res={} y_res={}",
+                phase,
+                x_res,
+                y_res
+            );
+            true
+        }
+        Ok(TouchInitStatus::HelloMismatch { hello }) => {
+            let probes = display.probe_devices();
+            esp_println::println!(
+                "touch: init_failed phase={} reason=hello_mismatch hello={:02x}{:02x}{:02x}{:02x} probe_int={} probe_ext={} probe_pwr={}",
+                phase,
+                hello[0],
+                hello[1],
+                hello[2],
+                hello[3],
+                probes.io_internal,
+                probes.io_external,
+                probes.tps65186
+            );
+            false
+        }
+        Ok(TouchInitStatus::ZeroResolution { x_res, y_res }) => {
+            let probes = display.probe_devices();
+            esp_println::println!(
+                "touch: init_failed phase={} reason=zero_resolution x_res={} y_res={} probe_int={} probe_ext={} probe_pwr={}",
+                phase,
+                x_res,
+                y_res,
+                probes.io_internal,
+                probes.io_external,
+                probes.tps65186
+            );
+            false
+        }
+        Err(_) => {
+            let probes = display.probe_devices();
+            esp_println::println!(
+                "touch: init_failed phase={} reason=i2c_error probe_int={} probe_ext={} probe_pwr={}",
+                phase,
+                probes.io_internal,
+                probes.io_external,
+                probes.tps65186
+            );
+            false
+        }
     }
 }
 
