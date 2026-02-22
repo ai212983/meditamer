@@ -31,6 +31,10 @@ run_case() {
 (
   cd /tmp
   run_case tap_trace.csv tap_expected.txt
+  run_case diagonal_drag_no_swipe_trace.csv diagonal_drag_no_swipe_expected.txt
+  run_case swipe_left_trace.csv swipe_left_expected.txt
   run_case swipe_right_trace.csv swipe_right_expected.txt
+  run_case swipe_up_trace.csv swipe_up_expected.txt
+  run_case swipe_down_trace.csv swipe_down_expected.txt
   run_case multitouch_cancel_trace.csv multitouch_cancel_expected.txt
 )

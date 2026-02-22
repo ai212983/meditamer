@@ -20,6 +20,8 @@ The tool prints decoded events as CSV and exits non-zero if expected kinds do no
 tools/touch_replay/run_fixtures.sh
 ```
 
+Bundled fixtures cover tap, all swipe directions, multitouch cancel, and a diagonal drag that must not classify as swipe.
+
 ## Capture real traces from device
 
 1. Capture serial monitor output while interacting with the touch panel:
