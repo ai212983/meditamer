@@ -16,7 +16,6 @@ pub(crate) enum AppEvent {
     Refresh { uptime_seconds: u32 },
     BatteryTick,
     TimeSync(TimeSyncCommand),
-    Touch(TouchEvent),
     ForceRepaint,
     ForceMarbleRepaint,
     SdProbe,
