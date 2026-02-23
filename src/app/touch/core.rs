@@ -314,9 +314,27 @@ impl TouchHsm {
                 let (count, point) = sample_primary(sample);
                 match (count, point) {
                     (0, _) => {
+                        let elapsed = now_ms.saturating_sub(self.down_ms);
+                        if elapsed >= TOUCH_DEBOUNCE_DOWN_MS
+                            && elapsed <= TOUCH_DEBOUNCE_DOWN_ABORT_MS
+                        {
+                            // A short press can release before we observe another stable `count=1`
+                            // sample. Convert it into a valid interaction instead of dropping it.
+                            self.emit_event(
+                                context,
+                                TouchEventKind::Down,
+                                *now_ms,
+                                self.last_point,
+                                1,
+                            );
+                            self.release_ms = *now_ms;
+                            self.release_point = self.last_point;
+                            self.finalize_release(context);
+                            return Transition(State::idle());
+                        }
                         // Some panels briefly drop to zero on first contact.
                         // Keep waiting for a stable press unless the gap persists.
-                        if now_ms.saturating_sub(self.down_ms) >= TOUCH_DEBOUNCE_DOWN_ABORT_MS {
+                        if elapsed >= TOUCH_DEBOUNCE_DOWN_ABORT_MS {
                             self.reset_interaction();
                             Transition(State::idle())
                         } else {
@@ -633,6 +651,22 @@ mod tests {
         drain_kinds(engine.tick(70, sample1(212, 205)), &mut events);
         drain_kinds(engine.tick(95, sample0()), &mut events);
         drain_kinds(engine.tick(130, sample0()), &mut events);
+
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Tap)));
+    }
+
+    #[test]
+    fn short_press_release_during_down_debounce_emits_tap() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        // Press starts, then touch count flickers to zero before a stable second count=1 sample.
+        // Engine should still produce a real tap interaction.
+        drain_kinds(engine.tick(0, sample1(180, 220)), &mut events);
+        drain_kinds(engine.tick(8, sample0()), &mut events);
+        drain_kinds(engine.tick(16, sample0()), &mut events);
 
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
