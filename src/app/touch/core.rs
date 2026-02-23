@@ -2,6 +2,7 @@ use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
 const TOUCH_DEBOUNCE_DOWN_MS: u64 = 12;
 const TOUCH_DEBOUNCE_UP_MS: u64 = 16;
+const TOUCH_DEBOUNCE_DOWN_ABORT_MS: u64 = 40;
 const TOUCH_DRAG_START_PX: i32 = 10;
 const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
@@ -313,8 +314,14 @@ impl TouchHsm {
                 let (count, point) = sample_primary(sample);
                 match (count, point) {
                     (0, _) => {
-                        self.reset_interaction();
-                        Transition(State::idle())
+                        // Some panels briefly drop to zero on first contact.
+                        // Keep waiting for a stable press unless the gap persists.
+                        if now_ms.saturating_sub(self.down_ms) >= TOUCH_DEBOUNCE_DOWN_ABORT_MS {
+                            self.reset_interaction();
+                            Transition(State::idle())
+                        } else {
+                            Handled
+                        }
                     }
                     (1, Some(point)) => {
                         self.last_point = point;
