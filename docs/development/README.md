@@ -71,6 +71,27 @@ scripts/build.sh [debug|release]
 
 Default is `release` when no argument is provided.
 
+## Embedded Tests (Xtensa)
+
+The project now includes an `embedded-test` harness target:
+
+- test binary: `embedded_smoke_test`
+- source: `tests/embedded_smoke_test.rs`
+
+`embedded-test` requires `probe-rs` as test runner. Keep the default firmware runner as-is and override runner only for test commands:
+
+```bash
+CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
+  cargo test --test embedded_smoke_test --no-run
+```
+
+When you are ready to run on hardware:
+
+```bash
+CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
+  cargo test --test embedded_smoke_test
+```
+
 ## Flash
 
 Set the serial port and flash:
@@ -155,6 +176,36 @@ If you prefer manual write:
 ```bash
 stty -f /dev/cu.usbserial-540 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw
 printf 'TIMESET %s %s\r\n' "$(date -u +%s)" "-300" > /dev/cu.usbserial-540
+```
+
+## SD Card Hardware Test
+
+Automated UART-driven SD/FAT end-to-end validation:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+```
+
+Defaults:
+
+- uses current flashed firmware (does **not** flash by default)
+- captures monitor log under `logs/`
+- default suite (`SDCARD_TEST_SUITE=all`) verifies:
+  - baseline flow: `SDPROBE`, FAT mkdir/write/read/append/stat/truncate/rename/remove, and `SDRWVERIFY`
+  - burst/backpressure flow: burst command sequence without host pacing
+  - failure-path flow: non-empty-dir remove rejection, rename collision rejection, parser `CMD ERR` for oversized payload
+
+Optional env vars:
+
+- `SDCARD_TEST_FLASH_FIRST=1` to flash first (mode arg defaults to `debug`)
+- `SDCARD_TEST_VERIFY_LBA` (default `2048`)
+- `SDCARD_TEST_BASE_PATH` to override test directory path on SD card
+- `SDCARD_TEST_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
+
+Burst/backpressure regression only:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
 ```
 
 ## Soak Script
