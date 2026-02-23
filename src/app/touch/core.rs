@@ -318,8 +318,9 @@ impl TouchHsm {
                         if elapsed >= TOUCH_DEBOUNCE_DOWN_MS
                             && elapsed <= TOUCH_DEBOUNCE_DOWN_ABORT_MS
                         {
-                            // A short press can release before we observe another stable `count=1`
-                            // sample. Convert it into a valid interaction instead of dropping it.
+                            // A short release can happen before we observe another stable `count=1`
+                            // sample. Emit Down, then debounce release so quick recovery can
+                            // continue as one interaction (important for fast swipes).
                             self.emit_event(
                                 context,
                                 TouchEventKind::Down,
@@ -329,8 +330,7 @@ impl TouchHsm {
                             );
                             self.release_ms = *now_ms;
                             self.release_point = self.last_point;
-                            self.finalize_release(context);
-                            return Transition(State::idle());
+                            return Transition(State::debounce_up());
                         }
                         // Some panels briefly drop to zero on first contact.
                         // Keep waiting for a stable press unless the gap persists.
@@ -667,6 +667,7 @@ mod tests {
         drain_kinds(engine.tick(0, sample1(180, 220)), &mut events);
         drain_kinds(engine.tick(8, sample0()), &mut events);
         drain_kinds(engine.tick(16, sample0()), &mut events);
+        drain_kinds(engine.tick(40, sample0()), &mut events);
 
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
