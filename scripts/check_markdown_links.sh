@@ -37,7 +37,7 @@ if (( ${#files[@]} == 0 )); then
 fi
 
 declare -a lychee_args
-lychee_args=(--no-progress --exclude-mail --exclude '^data:image/')
+lychee_args=(--no-progress --exclude '^data:image/')
 
 if [[ "${MARKDOWN_LINKS_ONLINE:-0}" != "1" ]]; then
   # Keep the hook fast/reliable by skipping remote network checks by default.
