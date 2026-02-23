@@ -1,0 +1,5 @@
+pre-commit:
+  parallel: true
+  commands:
+    markdown-links:
+      run: scripts/check_markdown_links.sh
