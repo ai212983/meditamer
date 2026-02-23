@@ -12,8 +12,6 @@ use super::{
 
 const TARGET_RADIUS_PX: i32 = 26;
 const TARGET_HIT_RADIUS_PX: i32 = TARGET_RADIUS_PX;
-const WIZARD_SWIPE_RELEASE_MAX_DURATION_MS: u16 = 1_600;
-const WIZARD_SWIPE_DEBUG_MIN_DISTANCE_PX: i32 = 24;
 const SWIPE_TRACE_MAX_POINTS: usize = 32;
 const CONTINUE_BUTTON_WIDTH: i32 = 192;
 const CONTINUE_BUTTON_HEIGHT: i32 = 52;
@@ -207,7 +205,7 @@ impl TouchCalibrationWizard {
                     }
                 }
                 TouchEventKind::Swipe(direction) => {
-                    changed = self.on_swipe(direction);
+                    changed = self.on_swipe_event(event, direction);
                 }
                 TouchEventKind::Cancel => {
                     self.hint = "Touch canceled. Retry current step.";
@@ -293,7 +291,7 @@ impl TouchCalibrationWizard {
         self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
     }
 
-    fn on_swipe(&mut self, direction: TouchSwipeDirection) -> bool {
+    fn on_swipe_event(&mut self, event: TouchEvent, direction: TouchSwipeDirection) -> bool {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
         let prev_last_tap = self.last_tap;
@@ -306,6 +304,17 @@ impl TouchCalibrationWizard {
                     TouchSwipeDirection::Up => "Swipe detected: UP.",
                     TouchSwipeDirection::Down => "Swipe detected: DOWN.",
                 };
+                self.last_swipe = Some(SwipeAttempt {
+                    start: SwipePoint {
+                        x: event.start_x as i32,
+                        y: event.start_y as i32,
+                    },
+                    end: SwipePoint {
+                        x: event.x as i32,
+                        y: event.y as i32,
+                    },
+                    accepted: true,
+                });
             }
             _ => {}
         }
@@ -322,71 +331,24 @@ impl TouchCalibrationWizard {
         let prev_last_swipe = self.last_swipe;
 
         if matches!(self.phase, WizardPhase::SwipeRight) {
-            if let Some(direction) = self.classify_release_direction(event) {
-                self.hint = match direction {
-                    TouchSwipeDirection::Left => "Swipe detected: LEFT.",
-                    TouchSwipeDirection::Right => "Swipe detected: RIGHT.",
-                    TouchSwipeDirection::Up => "Swipe detected: UP.",
-                    TouchSwipeDirection::Down => "Swipe detected: DOWN.",
-                };
-                self.last_tap = None;
-                self.last_swipe = Some(SwipeAttempt {
-                    start: SwipePoint {
-                        x: event.start_x as i32,
-                        y: event.start_y as i32,
-                    },
-                    end: SwipePoint {
-                        x: event.x as i32,
-                        y: event.y as i32,
-                    },
-                    accepted: true,
-                });
-            } else {
-                self.hint = "Swipe too short/unclear. Try again.";
-                self.last_swipe = Some(SwipeAttempt {
-                    start: SwipePoint {
-                        x: event.start_x as i32,
-                        y: event.start_y as i32,
-                    },
-                    end: SwipePoint {
-                        x: event.x as i32,
-                        y: event.y as i32,
-                    },
-                    accepted: false,
-                });
-            }
+            self.hint = "Release observed (no swipe classified).";
+            self.last_swipe = Some(SwipeAttempt {
+                start: SwipePoint {
+                    x: event.start_x as i32,
+                    y: event.start_y as i32,
+                },
+                end: SwipePoint {
+                    x: event.x as i32,
+                    y: event.y as i32,
+                },
+                accepted: false,
+            });
         }
 
         self.phase != prev_phase
             || self.hint != prev_hint
             || self.last_tap != prev_last_tap
             || self.last_swipe != prev_last_swipe
-    }
-
-    fn classify_release_direction(&self, event: TouchEvent) -> Option<TouchSwipeDirection> {
-        let dx = event.x as i32 - event.start_x as i32;
-        let dy = event.y as i32 - event.start_y as i32;
-        let abs_dx = dx.abs();
-        let abs_dy = dy.abs();
-        let major = abs_dx.max(abs_dy);
-
-        if event.duration_ms > WIZARD_SWIPE_RELEASE_MAX_DURATION_MS {
-            return None;
-        }
-        if major < WIZARD_SWIPE_DEBUG_MIN_DISTANCE_PX {
-            return None;
-        }
-        if abs_dx >= abs_dy {
-            if dx >= 0 {
-                Some(TouchSwipeDirection::Right)
-            } else {
-                Some(TouchSwipeDirection::Left)
-            }
-        } else if dy >= 0 {
-            Some(TouchSwipeDirection::Down)
-        } else {
-            Some(TouchSwipeDirection::Up)
-        }
     }
 
     fn is_tap_step(&self) -> bool {

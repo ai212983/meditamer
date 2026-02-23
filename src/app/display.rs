@@ -32,10 +32,7 @@ use super::{
 const TOUCH_FEEDBACK_ENABLED: bool = true;
 const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
 const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 30;
-const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 4;
-const WIZARD_RELEASE_DEBOUNCE_MS: u64 = 24;
-const WIZARD_TOUCH_SAMPLE_MS: u64 = 6;
-const WIZARD_TOUCH_MAX_CATCHUP_SAMPLES: u8 = 10;
+const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 8;
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
@@ -66,13 +63,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_retry_at = Instant::now();
     let mut touch_next_sample_at = Instant::now();
     let mut touch_engine = TouchEngine::default();
-    let mut wizard_contact_active = false;
-    let mut wizard_down_ms = 0u64;
-    let mut wizard_start_x = 0u16;
-    let mut wizard_start_y = 0u16;
-    let mut wizard_last_x = 0u16;
-    let mut wizard_last_y = 0u16;
-    let mut wizard_release_candidate_since: Option<u64> = None;
     let mut touch_feedback_dirty = false;
     let mut touch_feedback_next_flush_at = Instant::now();
 
@@ -186,8 +176,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
                 AppEvent::StartTouchCalibrationWizard => {
                     esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
-                    wizard_contact_active = false;
-                    wizard_release_candidate_since = None;
                     touch_wizard_requested = true;
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
@@ -392,8 +380,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             if touch_ready {
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
-                    wizard_contact_active = false;
-                    wizard_release_candidate_since = None;
                     touch_wizard = TouchCalibrationWizard::new(true);
                     touch_wizard.render_full(&mut context.inkplate);
                     screen_initialized = true;
@@ -403,14 +389,9 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
         }
 
-        let touch_max_catchup_samples = if touch_wizard.is_active() {
-            WIZARD_TOUCH_MAX_CATCHUP_SAMPLES
-        } else {
-            TOUCH_MAX_CATCHUP_SAMPLES
-        };
         let mut sampled_touch_count = 0u8;
         while touch_ready
-            && sampled_touch_count < touch_max_catchup_samples
+            && sampled_touch_count < TOUCH_MAX_CATCHUP_SAMPLES
             && Instant::now() >= touch_next_sample_at
         {
             let sample_instant = Instant::now();
@@ -419,127 +400,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     let t_ms = sample_instant
                         .saturating_duration_since(trace_epoch)
                         .as_millis();
-
-                    if touch_wizard.is_active() {
-                        let mut wizard_events: [Option<TouchEvent>; 2] = [None, None];
-                        if sample.touch_count > 0 {
-                            let point = sample.points[0];
-                            wizard_release_candidate_since = None;
-                            if !wizard_contact_active {
-                                wizard_contact_active = true;
-                                wizard_down_ms = t_ms;
-                                wizard_start_x = point.x;
-                                wizard_start_y = point.y;
-                                wizard_last_x = point.x;
-                                wizard_last_y = point.y;
-                                wizard_events[0] = Some(make_touch_event(
-                                    TouchEventKind::Down,
-                                    t_ms,
-                                    point.x,
-                                    point.y,
-                                    wizard_start_x,
-                                    wizard_start_y,
-                                    0,
-                                    1,
-                                ));
-                            } else {
-                                wizard_last_x = point.x;
-                                wizard_last_y = point.y;
-                                let duration_ms =
-                                    t_ms.saturating_sub(wizard_down_ms).min(u16::MAX as u64) as u16;
-                                wizard_events[0] = Some(make_touch_event(
-                                    TouchEventKind::Move,
-                                    t_ms,
-                                    point.x,
-                                    point.y,
-                                    wizard_start_x,
-                                    wizard_start_y,
-                                    duration_ms,
-                                    1,
-                                ));
-                            }
-                        } else if wizard_contact_active {
-                            // ELAN reads occasionally flicker to zero for a single sample during
-                            // an active finger contact. Debounce release to avoid splitting one
-                            // physical swipe into multiple short touches.
-                            let zero_since = if let Some(since) = wizard_release_candidate_since {
-                                since
-                            } else {
-                                wizard_release_candidate_since = Some(t_ms);
-                                t_ms
-                            };
-                            if t_ms.saturating_sub(zero_since) >= WIZARD_RELEASE_DEBOUNCE_MS {
-                                let duration_ms =
-                                    t_ms.saturating_sub(wizard_down_ms).min(u16::MAX as u64) as u16;
-                                wizard_events[0] = Some(make_touch_event(
-                                    TouchEventKind::Up,
-                                    t_ms,
-                                    wizard_last_x,
-                                    wizard_last_y,
-                                    wizard_start_x,
-                                    wizard_start_y,
-                                    duration_ms,
-                                    0,
-                                ));
-                                wizard_contact_active = false;
-                                wizard_release_candidate_since = None;
-                            }
-                        } else {
-                            wizard_release_candidate_since = None;
-                        }
-
-                        for touch_event in wizard_events.into_iter().flatten() {
-                            if TOUCH_EVENT_TRACE_ENABLED {
-                                let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
-                            }
-
-                            if TOUCH_FEEDBACK_ENABLED
-                                && matches!(
-                                    touch_event.kind,
-                                    TouchEventKind::Down | TouchEventKind::Move
-                                )
-                            {
-                                draw_touch_feedback_dot(
-                                    &mut context.inkplate,
-                                    touch_event.x,
-                                    touch_event.y,
-                                );
-                                touch_feedback_dirty = true;
-                            }
-
-                            match touch_wizard.handle_event(&mut context.inkplate, touch_event) {
-                                WizardDispatch::Inactive => {}
-                                WizardDispatch::Consumed => {}
-                                WizardDispatch::Finished => {
-                                    touch_wizard_requested = false;
-                                    wizard_contact_active = false;
-                                    wizard_release_candidate_since = None;
-                                    update_count = 0;
-                                    render_active_mode(
-                                        &mut context.inkplate,
-                                        display_mode,
-                                        last_uptime_seconds,
-                                        time_sync,
-                                        battery_percent,
-                                        &mut pattern_nonce,
-                                        &mut first_visual_seed_pending,
-                                        true,
-                                    )
-                                    .await;
-                                    screen_initialized = true;
-                                }
-                            }
-                        }
-
-                        if TOUCH_TRACE_ENABLED && sample.touch_count > 0 {
-                            let _ = TOUCH_TRACE_SAMPLES
-                                .try_send(TouchTraceSample::from_sample(t_ms, sample));
-                        }
-
-                        sampled_touch_count = sampled_touch_count.saturating_add(1);
-                        touch_next_sample_at += Duration::from_millis(WIZARD_TOUCH_SAMPLE_MS);
-                        continue;
-                    }
 
                     let output = touch_engine.tick(t_ms, sample);
                     for touch_event in output.events.into_iter().flatten() {
@@ -610,8 +470,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
                 Err(_) => {
                     touch_ready = false;
-                    wizard_contact_active = false;
-                    wizard_release_candidate_since = None;
                     let _ = context.inkplate.touch_shutdown();
                     touch_retry_at = sample_instant + Duration::from_millis(TOUCH_INIT_RETRY_MS);
                     esp_println::println!("touch: read_error; retrying");
@@ -912,28 +770,6 @@ fn run_sd_probe(
 
     if inkplate.sd_card_power_off().is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
-    }
-}
-
-fn make_touch_event(
-    kind: TouchEventKind,
-    t_ms: u64,
-    x: u16,
-    y: u16,
-    start_x: u16,
-    start_y: u16,
-    duration_ms: u16,
-    touch_count: u8,
-) -> TouchEvent {
-    TouchEvent {
-        kind,
-        t_ms,
-        x,
-        y,
-        start_x,
-        start_y,
-        duration_ms,
-        touch_count,
     }
 }
 
