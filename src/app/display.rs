@@ -1,8 +1,7 @@
 use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
-
-use crate::sd_probe;
+use sdcard::runtime as sd_ops;
 
 use super::{
     config::{
@@ -77,7 +76,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         touch_retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
     }
 
-    run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe);
+    run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe).await;
     if touch_wizard.is_active() {
         touch_wizard.render_full(&mut context.inkplate).await;
         screen_initialized = true;
@@ -263,7 +262,127 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     }
                 }
                 AppEvent::SdProbe => {
-                    run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe);
+                    run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe).await;
+                }
+                AppEvent::SdRwVerify { lba } => {
+                    run_sd_rw_verify("manual", lba, &mut context.inkplate, &mut context.sd_probe)
+                        .await;
+                }
+                AppEvent::SdFatList { path, path_len } => {
+                    run_sd_fat_ls(
+                        "manual",
+                        &path,
+                        path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatRead { path, path_len } => {
+                    run_sd_fat_read(
+                        "manual",
+                        &path,
+                        path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatWrite {
+                    path,
+                    path_len,
+                    data,
+                    data_len,
+                } => {
+                    run_sd_fat_write(
+                        "manual",
+                        &path,
+                        path_len,
+                        &data,
+                        data_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatStat { path, path_len } => {
+                    run_sd_fat_stat(
+                        "manual",
+                        &path,
+                        path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatMkdir { path, path_len } => {
+                    run_sd_fat_mkdir(
+                        "manual",
+                        &path,
+                        path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatRemove { path, path_len } => {
+                    run_sd_fat_remove(
+                        "manual",
+                        &path,
+                        path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatRename {
+                    src_path,
+                    src_path_len,
+                    dst_path,
+                    dst_path_len,
+                } => {
+                    run_sd_fat_rename(
+                        "manual",
+                        &src_path,
+                        src_path_len,
+                        &dst_path,
+                        dst_path_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatAppend {
+                    path,
+                    path_len,
+                    data,
+                    data_len,
+                } => {
+                    run_sd_fat_append(
+                        "manual",
+                        &path,
+                        path_len,
+                        &data,
+                        data_len,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
+                }
+                AppEvent::SdFatTruncate {
+                    path,
+                    path_len,
+                    size,
+                } => {
+                    run_sd_fat_truncate(
+                        "manual",
+                        &path,
+                        path_len,
+                        size,
+                        &mut context.inkplate,
+                        &mut context.sd_probe,
+                    )
+                    .await;
                 }
             }
         }
@@ -670,115 +789,175 @@ fn ms_until(now: Instant, deadline: Instant) -> u64 {
     }
 }
 
-fn run_sd_probe(
+async fn run_sd_probe(
     reason: &str,
     inkplate: &mut super::types::InkplateDriver,
     sd_probe: &mut super::types::SdProbeDriver,
 ) {
-    if inkplate.sd_card_power_on().is_err() {
-        esp_println::println!("sdprobe[{}]: power_on_error", reason);
-        return;
-    }
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_probe(reason, sd_probe, &mut power).await;
+}
 
-    let result = sd_probe.probe();
+async fn run_sd_rw_verify(
+    reason: &str,
+    lba: u32,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_rw_verify(reason, lba, sd_probe, &mut power).await;
+}
 
-    match result {
-        Ok(status) => {
-            let version = match status.version {
-                sd_probe::SdCardVersion::V1 => "v1.x",
-                sd_probe::SdCardVersion::V2 => "v2+",
-            };
-            let capacity = if status.high_capacity {
-                "sdhc_or_sdxc"
-            } else {
-                "sdsc"
-            };
-            let filesystem = match status.filesystem {
-                sd_probe::SdFilesystem::ExFat => "exfat",
-                sd_probe::SdFilesystem::Fat32 => "fat32",
-                sd_probe::SdFilesystem::Fat16 => "fat16",
-                sd_probe::SdFilesystem::Fat12 => "fat12",
-                sd_probe::SdFilesystem::Ntfs => "ntfs",
-                sd_probe::SdFilesystem::Unknown => "unknown",
-            };
-            let gib_x100 = status
-                .capacity_bytes
-                .saturating_mul(100)
-                .saturating_div(1024 * 1024 * 1024);
-            let gib_int = gib_x100 / 100;
-            let gib_frac = gib_x100 % 100;
-            esp_println::println!(
-                "sdprobe[{}]: card_detected version={} capacity={} fs={} bytes={} size_gib={}.{:02}",
-                reason,
-                version,
-                capacity,
-                filesystem,
-                status.capacity_bytes,
-                gib_int,
-                gib_frac
-            );
-        }
-        Err(err) => match err {
-            sd_probe::SdProbeError::Spi(spi_err) => {
-                esp_println::println!("sdprobe[{}]: not_detected spi_error={:?}", reason, spi_err);
-            }
-            sd_probe::SdProbeError::Cmd0Failed(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd0_r1=0x{:02x}", reason, r1);
-            }
-            sd_probe::SdProbeError::Cmd8Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd8_r1=0x{:02x}", reason, r1);
-            }
-            sd_probe::SdProbeError::Cmd8EchoMismatch(r7) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd8_echo={:02x}{:02x}{:02x}{:02x}",
-                    reason,
-                    r7[0],
-                    r7[1],
-                    r7[2],
-                    r7[3]
-                );
-            }
-            sd_probe::SdProbeError::Acmd41Timeout(r1) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected acmd41_last_r1=0x{:02x}",
-                    reason,
-                    r1
-                );
-            }
-            sd_probe::SdProbeError::Cmd58Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd58_r1=0x{:02x}", reason, r1);
-            }
-            sd_probe::SdProbeError::Cmd9Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd9_r1=0x{:02x}", reason, r1);
-            }
-            sd_probe::SdProbeError::Cmd17Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd17_r1=0x{:02x}", reason, r1);
-            }
-            sd_probe::SdProbeError::NoResponse(cmd) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd{}_no_response", reason, cmd);
-            }
-            sd_probe::SdProbeError::DataTokenTimeout(cmd) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd{}_data_token_timeout",
-                    reason,
-                    cmd
-                );
-            }
-            sd_probe::SdProbeError::DataTokenUnexpected(cmd, token) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd{}_data_token=0x{:02x}",
-                    reason,
-                    cmd,
-                    token
-                );
-            }
-            sd_probe::SdProbeError::CapacityDecodeFailed => {
-                esp_println::println!("sdprobe[{}]: not_detected capacity_decode_failed", reason);
-            }
-        },
-    }
+async fn run_sd_fat_ls(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_ls(reason, path_buf, path_len, sd_probe, &mut power).await;
+}
 
-    if inkplate.sd_card_power_off().is_err() {
-        esp_println::println!("sdprobe[{}]: power_off_error", reason);
-    }
+async fn run_sd_fat_read(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_read(reason, path_buf, path_len, sd_probe, &mut power).await;
+}
+
+async fn run_sd_fat_write(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    data_buf: &[u8],
+    data_len: u16,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_write(
+        reason, path_buf, path_len, data_buf, data_len, sd_probe, &mut power,
+    )
+    .await;
+}
+
+async fn run_sd_fat_stat(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_stat(reason, path_buf, path_len, sd_probe, &mut power).await;
+}
+
+async fn run_sd_fat_mkdir(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_mkdir(reason, path_buf, path_len, sd_probe, &mut power).await;
+}
+
+async fn run_sd_fat_remove(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_remove(reason, path_buf, path_len, sd_probe, &mut power).await;
+}
+
+async fn run_sd_fat_rename(
+    reason: &str,
+    src_path_buf: &[u8],
+    src_path_len: u8,
+    dst_path_buf: &[u8],
+    dst_path_len: u8,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_rename(
+        reason,
+        src_path_buf,
+        src_path_len,
+        dst_path_buf,
+        dst_path_len,
+        sd_probe,
+        &mut power,
+    )
+    .await;
+}
+
+async fn run_sd_fat_append(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    data_buf: &[u8],
+    data_len: u16,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_append(
+        reason, path_buf, path_len, data_buf, data_len, sd_probe, &mut power,
+    )
+    .await;
+}
+
+async fn run_sd_fat_truncate(
+    reason: &str,
+    path_buf: &[u8],
+    path_len: u8,
+    size: u32,
+    inkplate: &mut super::types::InkplateDriver,
+    sd_probe: &mut super::types::SdProbeDriver,
+) {
+    let mut power = |action| match action {
+        sd_ops::SdPowerAction::On => inkplate.sd_card_power_on(),
+        sd_ops::SdPowerAction::Off => inkplate.sd_card_power_off(),
+    };
+    sd_ops::run_sd_fat_truncate(reason, path_buf, path_len, size, sd_probe, &mut power).await;
 }

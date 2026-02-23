@@ -1,16 +1,20 @@
+use embassy_time::Timer;
 use esp_hal::{
     gpio::Output,
     spi::{master::Spi, Error as SpiError},
-    Blocking,
+    Async,
 };
 
 const SD_CMD0: u8 = 0;
 const SD_CMD8: u8 = 8;
 const SD_CMD9: u8 = 9;
+const SD_CMD16: u8 = 16;
 const SD_CMD17: u8 = 17;
+const SD_CMD24: u8 = 24;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
+pub const SD_SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SdCardVersion {
@@ -45,10 +49,15 @@ pub enum SdProbeError {
     Acmd41Timeout(u8),
     Cmd58Unexpected(u8),
     Cmd9Unexpected(u8),
+    Cmd16Unexpected(u8),
     Cmd17Unexpected(u8),
+    Cmd24Unexpected(u8),
     NoResponse(u8),
     DataTokenTimeout(u8),
     DataTokenUnexpected(u8, u8),
+    WriteDataRejected(u8),
+    WriteBusyTimeout,
+    NotInitialized,
     CapacityDecodeFailed,
 }
 
@@ -59,23 +68,91 @@ impl From<SpiError> for SdProbeError {
 }
 
 pub struct SdCardProbe<'d> {
-    spi: Spi<'d, Blocking>,
+    spi: Spi<'d, Async>,
     cs: Output<'d>,
+    high_capacity: Option<bool>,
 }
 
 impl<'d> SdCardProbe<'d> {
-    pub fn new(spi: Spi<'d, Blocking>, mut cs: Output<'d>) -> Self {
+    pub fn new(spi: Spi<'d, Async>, mut cs: Output<'d>) -> Self {
         cs.set_high();
-        Self { spi, cs }
+        Self {
+            spi,
+            cs,
+            high_capacity: None,
+        }
     }
 
-    pub fn probe(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+    pub async fn init(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+        self.probe().await
+    }
+
+    pub async fn read_sector(
+        &mut self,
+        lba: u32,
+        out: &mut [u8; SD_SECTOR_SIZE],
+    ) -> Result<(), SdProbeError> {
+        let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
+        *out = self.read_data_sector_512(lba, high_capacity).await?;
+        Ok(())
+    }
+
+    pub async fn write_sector(
+        &mut self,
+        lba: u32,
+        data: &[u8; SD_SECTOR_SIZE],
+    ) -> Result<(), SdProbeError> {
+        let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
+        let arg = if high_capacity {
+            lba
+        } else {
+            lba.saturating_mul(SD_SECTOR_SIZE as u32)
+        };
+
+        let cmd24_r1 = self
+            .send_command_hold_cs(SD_CMD24, arg, 0xFF, &mut [])
+            .await?;
+        if cmd24_r1 != 0x00 {
+            self.end_transaction().await;
+            return Err(SdProbeError::Cmd24Unexpected(cmd24_r1));
+        }
+
+        let _ = self.transfer_byte(0xFF).await?;
+        let _ = self.transfer_byte(0xFE).await?;
+        for &byte in data.iter() {
+            let _ = self.transfer_byte(byte).await?;
+        }
+        // Data CRC16 is ignored in SPI mode unless CRC is explicitly enabled.
+        let _ = self.transfer_byte(0xFF).await?;
+        let _ = self.transfer_byte(0xFF).await?;
+
+        let response = self.transfer_byte(0xFF).await? & 0x1F;
+        if response != 0x05 {
+            self.end_transaction().await;
+            return Err(SdProbeError::WriteDataRejected(response));
+        }
+
+        let mut released = false;
+        for _ in 0..200_000 {
+            if self.transfer_byte(0xFF).await? == 0xFF {
+                released = true;
+                break;
+            }
+        }
+        self.end_transaction().await;
+        if !released {
+            return Err(SdProbeError::WriteBusyTimeout);
+        }
+        Ok(())
+    }
+
+    pub async fn probe(&mut self) -> Result<SdProbeStatus, SdProbeError> {
         self.cs.set_high();
-        self.send_dummy_clocks(10)?;
+        self.send_dummy_clocks(10).await?;
 
         let mut cmd0_r1 = 0xFFu8;
         for _ in 0..16 {
-            cmd0_r1 = self.send_command(SD_CMD0, 0, 0x95, &mut [])?;
+            cmd0_r1 = self.send_command(SD_CMD0, 0, 0x95, &mut []).await?;
             if cmd0_r1 == 0x01 {
                 break;
             }
@@ -85,7 +162,9 @@ impl<'d> SdCardProbe<'d> {
         }
 
         let mut r7 = [0u8; 4];
-        let cmd8_r1 = self.send_command(SD_CMD8, 0x0000_01AA, 0x87, &mut r7)?;
+        let cmd8_r1 = self
+            .send_command(SD_CMD8, 0x0000_01AA, 0x87, &mut r7)
+            .await?;
         let card_version = if cmd8_r1 == 0x01 {
             if r7[2] != 0x01 || r7[3] != 0xAA {
                 return Err(SdProbeError::Cmd8EchoMismatch(r7));
@@ -105,44 +184,58 @@ impl<'d> SdCardProbe<'d> {
         let mut acmd41_r1 = 0xFFu8;
         let mut acmd41_ok = false;
         for _ in 0..200 {
-            let _ = self.send_command(SD_CMD55, 0, 0x65, &mut [])?;
-            acmd41_r1 = self.send_command(SD_ACMD41, acmd41_arg, 0x77, &mut [])?;
+            let _ = self.send_command(SD_CMD55, 0, 0x65, &mut []).await?;
+            acmd41_r1 = self
+                .send_command(SD_ACMD41, acmd41_arg, 0x77, &mut [])
+                .await?;
             if acmd41_r1 == 0x00 {
                 acmd41_ok = true;
                 break;
             }
-            self.tiny_spin_delay();
+            self.retry_delay().await;
         }
         if !acmd41_ok {
             return Err(SdProbeError::Acmd41Timeout(acmd41_r1));
         }
 
+        if card_version == SdCardVersion::V1 {
+            let cmd16_r1 = self
+                .send_command(SD_CMD16, SD_SECTOR_SIZE as u32, 0xFF, &mut [])
+                .await?;
+            if cmd16_r1 != 0x00 {
+                return Err(SdProbeError::Cmd16Unexpected(cmd16_r1));
+            }
+        }
+
         let mut ocr = [0u8; 4];
-        let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr)?;
+        let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr).await?;
         if cmd58_r1 != 0x00 {
             return Err(SdProbeError::Cmd58Unexpected(cmd58_r1));
         }
 
-        let cmd9_r1 = self.send_command_hold_cs(SD_CMD9, 0, 0xAF, &mut [])?;
+        let cmd9_r1 = self.send_command_hold_cs(SD_CMD9, 0, 0xAF, &mut []).await?;
         if cmd9_r1 != 0x00 {
-            self.end_transaction();
+            self.end_transaction().await;
             return Err(SdProbeError::Cmd9Unexpected(cmd9_r1));
         }
-        let csd = self.read_data_block()?;
-        self.end_transaction();
+        let csd = self.read_data_block().await?;
+        self.end_transaction().await;
         let capacity_bytes =
             decode_capacity_bytes(&csd).ok_or(SdProbeError::CapacityDecodeFailed)?;
-        let filesystem = self.detect_filesystem((ocr[0] & 0x40) != 0)?;
+        let high_capacity = (ocr[0] & 0x40) != 0;
+        let filesystem = self.detect_filesystem(high_capacity).await?;
 
-        Ok(SdProbeStatus {
+        let status = SdProbeStatus {
             version: card_version,
-            high_capacity: (ocr[0] & 0x40) != 0,
+            high_capacity,
             capacity_bytes,
             filesystem,
-        })
+        };
+        self.high_capacity = Some(high_capacity);
+        Ok(status)
     }
 
-    fn send_command(
+    async fn send_command(
         &mut self,
         cmd: u8,
         arg: u32,
@@ -150,9 +243,10 @@ impl<'d> SdCardProbe<'d> {
         extra_response: &mut [u8],
     ) -> Result<u8, SdProbeError> {
         self.send_command_inner(cmd, arg, crc, extra_response, true)
+            .await
     }
 
-    fn send_command_hold_cs(
+    async fn send_command_hold_cs(
         &mut self,
         cmd: u8,
         arg: u32,
@@ -160,9 +254,10 @@ impl<'d> SdCardProbe<'d> {
         extra_response: &mut [u8],
     ) -> Result<u8, SdProbeError> {
         self.send_command_inner(cmd, arg, crc, extra_response, false)
+            .await
     }
 
-    fn send_command_inner(
+    async fn send_command_inner(
         &mut self,
         cmd: u8,
         arg: u32,
@@ -181,13 +276,13 @@ impl<'d> SdCardProbe<'d> {
 
         self.cs.set_low();
         for byte in frame {
-            let _ = self.transfer_byte(byte)?;
+            let _ = self.transfer_byte(byte).await?;
         }
 
         let mut r1 = 0xFFu8;
         let mut got_response = false;
         for _ in 0..16 {
-            r1 = self.transfer_byte(0xFF)?;
+            r1 = self.transfer_byte(0xFF).await?;
             if (r1 & 0x80) == 0 {
                 got_response = true;
                 break;
@@ -195,38 +290,38 @@ impl<'d> SdCardProbe<'d> {
         }
 
         if !got_response {
-            self.end_transaction();
+            self.end_transaction().await;
             return Err(SdProbeError::NoResponse(cmd));
         }
 
         for slot in extra_response.iter_mut() {
-            *slot = self.transfer_byte(0xFF)?;
+            *slot = self.transfer_byte(0xFF).await?;
         }
 
         if release_cs_after {
-            self.end_transaction();
+            self.end_transaction().await;
         }
         Ok(r1)
     }
 
-    fn send_dummy_clocks(&mut self, bytes: usize) -> Result<(), SdProbeError> {
+    async fn send_dummy_clocks(&mut self, bytes: usize) -> Result<(), SdProbeError> {
         for _ in 0..bytes {
-            let _ = self.transfer_byte(0xFF)?;
+            let _ = self.transfer_byte(0xFF).await?;
         }
         Ok(())
     }
 
-    fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
+    async fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
         let mut frame = [byte];
-        self.spi.transfer(&mut frame)?;
+        self.spi.transfer_in_place_async(&mut frame).await?;
         Ok(frame[0])
     }
 
-    fn read_data_block(&mut self) -> Result<[u8; 16], SdProbeError> {
+    async fn read_data_block(&mut self) -> Result<[u8; 16], SdProbeError> {
         let mut token = 0xFFu8;
         let mut got_token = false;
         for _ in 0..50_000 {
-            token = self.transfer_byte(0xFF)?;
+            token = self.transfer_byte(0xFF).await?;
             if token != 0xFF {
                 got_token = true;
                 break;
@@ -241,15 +336,15 @@ impl<'d> SdCardProbe<'d> {
 
         let mut block = [0u8; 16];
         for slot in block.iter_mut() {
-            *slot = self.transfer_byte(0xFF)?;
+            *slot = self.transfer_byte(0xFF).await?;
         }
         // Read and discard CRC16.
-        let _ = self.transfer_byte(0xFF)?;
-        let _ = self.transfer_byte(0xFF)?;
+        let _ = self.transfer_byte(0xFF).await?;
+        let _ = self.transfer_byte(0xFF).await?;
         Ok(block)
     }
 
-    fn read_data_sector_512(
+    async fn read_data_sector_512(
         &mut self,
         lba: u32,
         high_capacity: bool,
@@ -259,54 +354,57 @@ impl<'d> SdCardProbe<'d> {
         } else {
             lba.saturating_mul(512)
         };
-        let cmd17_r1 = self.send_command_hold_cs(SD_CMD17, arg, 0xFF, &mut [])?;
+        let cmd17_r1 = self
+            .send_command_hold_cs(SD_CMD17, arg, 0xFF, &mut [])
+            .await?;
         if cmd17_r1 != 0x00 {
-            self.end_transaction();
+            self.end_transaction().await;
             return Err(SdProbeError::Cmd17Unexpected(cmd17_r1));
         }
 
         let mut token = 0xFFu8;
         let mut got_token = false;
         for _ in 0..50_000 {
-            token = self.transfer_byte(0xFF)?;
+            token = self.transfer_byte(0xFF).await?;
             if token != 0xFF {
                 got_token = true;
                 break;
             }
         }
         if !got_token {
-            self.end_transaction();
+            self.end_transaction().await;
             return Err(SdProbeError::DataTokenTimeout(SD_CMD17));
         }
         if token != 0xFE {
-            self.end_transaction();
+            self.end_transaction().await;
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
         }
 
         let mut block = [0u8; 512];
         for slot in block.iter_mut() {
-            *slot = self.transfer_byte(0xFF)?;
+            *slot = self.transfer_byte(0xFF).await?;
         }
         // Discard data CRC16.
-        let _ = self.transfer_byte(0xFF)?;
-        let _ = self.transfer_byte(0xFF)?;
-        self.end_transaction();
+        let _ = self.transfer_byte(0xFF).await?;
+        let _ = self.transfer_byte(0xFF).await?;
+        self.end_transaction().await;
         Ok(block)
     }
 
-    fn tiny_spin_delay(&self) {
-        for _ in 0..5_000 {
-            core::hint::spin_loop();
-        }
+    async fn retry_delay(&self) {
+        Timer::after_millis(1).await;
     }
 
-    fn end_transaction(&mut self) {
+    async fn end_transaction(&mut self) {
         self.cs.set_high();
-        let _ = self.transfer_byte(0xFF);
+        let _ = self.transfer_byte(0xFF).await;
     }
 
-    fn detect_filesystem(&mut self, high_capacity: bool) -> Result<SdFilesystem, SdProbeError> {
-        let sector0 = self.read_data_sector_512(0, high_capacity)?;
+    async fn detect_filesystem(
+        &mut self,
+        high_capacity: bool,
+    ) -> Result<SdFilesystem, SdProbeError> {
+        let sector0 = self.read_data_sector_512(0, high_capacity).await?;
         if let Some(fs) = detect_vbr_filesystem(&sector0) {
             return Ok(fs);
         }
@@ -335,7 +433,7 @@ impl<'d> SdCardProbe<'d> {
 
         if partition_type == 0xEE {
             // Protective MBR (GPT). Read the first GPT partition entry.
-            let gpt_entry_sector = self.read_data_sector_512(2, high_capacity)?;
+            let gpt_entry_sector = self.read_data_sector_512(2, high_capacity).await?;
             let start = u64::from_le_bytes([
                 gpt_entry_sector[32],
                 gpt_entry_sector[33],
@@ -351,60 +449,9 @@ impl<'d> SdCardProbe<'d> {
             }
         }
 
-        let vbr = self.read_data_sector_512(partition_lba, high_capacity)?;
+        let vbr = self
+            .read_data_sector_512(partition_lba, high_capacity)
+            .await?;
         Ok(detect_vbr_filesystem(&vbr).unwrap_or(SdFilesystem::Unknown))
     }
-}
-
-fn decode_capacity_bytes(csd: &[u8; 16]) -> Option<u64> {
-    let csd_structure = csd_get_bits(csd, 127, 126) as u8;
-    match csd_structure {
-        0 => {
-            // CSD v1.0 (SDSC)
-            let c_size = csd_get_bits(csd, 73, 62) as u64;
-            let c_size_mult = csd_get_bits(csd, 49, 47) as u64;
-            let read_bl_len = csd_get_bits(csd, 83, 80) as u64;
-
-            let block_len = 1u64.checked_shl(read_bl_len as u32)?;
-            let mult = 1u64.checked_shl((c_size_mult + 2) as u32)?;
-            let blocknr = (c_size + 1).checked_mul(mult)?;
-            blocknr.checked_mul(block_len)
-        }
-        1 => {
-            // CSD v2.0 (SDHC/SDXC)
-            let c_size = csd_get_bits(csd, 69, 48) as u64;
-            (c_size + 1).checked_mul(512 * 1024)
-        }
-        _ => None,
-    }
-}
-
-fn csd_get_bits(csd: &[u8; 16], msb: u8, lsb: u8) -> u32 {
-    let mut value = 0u32;
-    for bit in (lsb..=msb).rev() {
-        let byte_idx = (127 - bit) / 8;
-        let bit_in_byte = bit % 8;
-        let b = (csd[byte_idx as usize] >> bit_in_byte) & 1;
-        value = (value << 1) | (b as u32);
-    }
-    value
-}
-
-fn detect_vbr_filesystem(sector: &[u8; 512]) -> Option<SdFilesystem> {
-    if &sector[3..11] == b"EXFAT   " {
-        return Some(SdFilesystem::ExFat);
-    }
-    if &sector[3..11] == b"NTFS    " {
-        return Some(SdFilesystem::Ntfs);
-    }
-    if &sector[82..90] == b"FAT32   " {
-        return Some(SdFilesystem::Fat32);
-    }
-    if &sector[54..62] == b"FAT16   " {
-        return Some(SdFilesystem::Fat16);
-    }
-    if &sector[54..62] == b"FAT12   " {
-        return Some(SdFilesystem::Fat12);
-    }
-    None
 }
