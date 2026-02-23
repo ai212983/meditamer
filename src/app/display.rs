@@ -34,6 +34,8 @@ const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
 const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 30;
 const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 4;
 const WIZARD_RELEASE_DEBOUNCE_MS: u64 = 24;
+const WIZARD_TOUCH_SAMPLE_MS: u64 = 6;
+const WIZARD_TOUCH_MAX_CATCHUP_SAMPLES: u8 = 10;
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
@@ -401,9 +403,14 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
         }
 
+        let touch_max_catchup_samples = if touch_wizard.is_active() {
+            WIZARD_TOUCH_MAX_CATCHUP_SAMPLES
+        } else {
+            TOUCH_MAX_CATCHUP_SAMPLES
+        };
         let mut sampled_touch_count = 0u8;
         while touch_ready
-            && sampled_touch_count < TOUCH_MAX_CATCHUP_SAMPLES
+            && sampled_touch_count < touch_max_catchup_samples
             && Instant::now() >= touch_next_sample_at
         {
             let sample_instant = Instant::now();
@@ -530,7 +537,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         }
 
                         sampled_touch_count = sampled_touch_count.saturating_add(1);
-                        touch_next_sample_at += Duration::from_millis(TOUCH_SAMPLE_MS);
+                        touch_next_sample_at += Duration::from_millis(WIZARD_TOUCH_SAMPLE_MS);
                         continue;
                     }
 
