@@ -31,9 +31,9 @@ use super::{
 
 const TOUCH_FEEDBACK_ENABLED: bool = true;
 const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
-const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 45;
+const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 30;
 const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 4;
-const WIZARD_RELEASE_DEBOUNCE_MS: u64 = 36;
+const WIZARD_RELEASE_DEBOUNCE_MS: u64 = 24;
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
