@@ -98,6 +98,7 @@ pub(crate) fn run() -> ! {
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
+        spawner.must_spawn(display::touch_pipeline_task());
         spawner.must_spawn(display::display_task(display_context));
         spawner.must_spawn(clock_task());
         spawner.must_spawn(battery_task());

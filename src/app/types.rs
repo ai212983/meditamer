@@ -109,6 +109,18 @@ pub(crate) struct TouchEvent {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct TouchSampleFrame {
+    pub(crate) t_ms: u64,
+    pub(crate) sample: TouchSample,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TouchPipelineInput {
+    Sample(TouchSampleFrame),
+    Reset,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct TapTraceSample {
     pub(crate) t_ms: u64,
     pub(crate) tap_src: u8,

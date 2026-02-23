@@ -9,7 +9,7 @@ use meditamer::{
 };
 use u8g2_fonts::{fonts, FontRenderer};
 
-use super::types::{AppEvent, TapTraceSample, TouchEvent, TouchTraceSample};
+use super::types::{AppEvent, TapTraceSample, TouchEvent, TouchPipelineInput, TouchTraceSample};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
 pub(crate) const REFRESH_INTERVAL_SECONDS: u32 = 300;
@@ -90,6 +90,10 @@ pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSa
 pub(crate) static TOUCH_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchTraceSample, 32> =
     Channel::new();
 pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchEvent, 32> =
+    Channel::new();
+pub(crate) static TOUCH_PIPELINE_INPUTS: Channel<CriticalSectionRawMutex, TouchPipelineInput, 32> =
+    Channel::new();
+pub(crate) static TOUCH_PIPELINE_EVENTS: Channel<CriticalSectionRawMutex, TouchEvent, 64> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
 pub(crate) static MAX_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

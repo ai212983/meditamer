@@ -8,8 +8,9 @@ use super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
         TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_CALIBRATION_WIZARD_ENABLED,
-        TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS, TOUCH_SAMPLE_MS,
-        TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES, UI_TICK_MS,
+        TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS,
+        TOUCH_PIPELINE_EVENTS, TOUCH_PIPELINE_INPUTS, TOUCH_SAMPLE_MS, TOUCH_TRACE_ENABLED,
+        TOUCH_TRACE_SAMPLES, UI_TICK_MS,
     },
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
@@ -25,7 +26,8 @@ use super::{
     },
     types::{
         AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState, TouchEvent,
-        TouchEventKind, TouchSwipeDirection, TouchTraceSample,
+        TouchEventKind, TouchPipelineInput, TouchSampleFrame, TouchSwipeDirection,
+        TouchTraceSample,
     },
 };
 
@@ -33,6 +35,34 @@ const TOUCH_FEEDBACK_ENABLED: bool = true;
 const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
 const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 30;
 const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 8;
+
+#[embassy_executor::task]
+pub(crate) async fn touch_pipeline_task() {
+    let mut touch_engine = TouchEngine::default();
+
+    loop {
+        match TOUCH_PIPELINE_INPUTS.receive().await {
+            TouchPipelineInput::Reset => {
+                touch_engine = TouchEngine::default();
+                while TOUCH_PIPELINE_EVENTS.try_receive().is_ok() {}
+            }
+            TouchPipelineInput::Sample(frame) => {
+                if TOUCH_TRACE_ENABLED && frame.sample.touch_count > 0 {
+                    let _ = TOUCH_TRACE_SAMPLES
+                        .try_send(TouchTraceSample::from_sample(frame.t_ms, frame.sample));
+                }
+
+                let output = touch_engine.tick(frame.t_ms, frame.sample);
+                for touch_event in output.events.into_iter().flatten() {
+                    if TOUCH_EVENT_TRACE_ENABLED {
+                        let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
+                    }
+                    push_touch_output_event(touch_event);
+                }
+            }
+        }
+    }
+}
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
@@ -62,7 +92,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_wizard = TouchCalibrationWizard::new(touch_wizard_requested && touch_ready);
     let mut touch_retry_at = Instant::now();
     let mut touch_next_sample_at = Instant::now();
-    let mut touch_engine = TouchEngine::default();
     let mut touch_feedback_dirty = false;
     let mut touch_feedback_next_flush_at = Instant::now();
 
@@ -78,6 +107,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         render_touch_wizard_waiting_screen(&mut context.inkplate);
         screen_initialized = true;
     }
+    request_touch_pipeline_reset();
 
     loop {
         let app_wait_ms = next_loop_wait_ms(
@@ -177,7 +207,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 AppEvent::StartTouchCalibrationWizard => {
                     esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
                     touch_wizard_requested = true;
-                    touch_engine = TouchEngine::default();
+                    request_touch_pipeline_reset();
                     touch_next_sample_at = Instant::now();
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
@@ -380,7 +410,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         if !touch_ready && Instant::now() >= touch_retry_at {
             touch_ready = try_touch_init_with_logs(&mut context.inkplate, "retry");
             if touch_ready {
-                touch_engine = TouchEngine::default();
+                request_touch_pipeline_reset();
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
@@ -407,79 +437,14 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     let t_ms = scheduled_sample_at
                         .saturating_duration_since(trace_epoch)
                         .as_millis();
-
-                    let output = touch_engine.tick(t_ms, sample);
-                    for touch_event in output.events.into_iter().flatten() {
-                        if TOUCH_EVENT_TRACE_ENABLED {
-                            let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
-                        }
-
-                        if touch_wizard.is_active() {
-                            if TOUCH_FEEDBACK_ENABLED
-                                && matches!(
-                                    touch_event.kind,
-                                    TouchEventKind::Down | TouchEventKind::Move
-                                )
-                            {
-                                draw_touch_feedback_dot(
-                                    &mut context.inkplate,
-                                    touch_event.x,
-                                    touch_event.y,
-                                );
-                                touch_feedback_dirty = true;
-                            }
-
-                            match touch_wizard.handle_event(&mut context.inkplate, touch_event) {
-                                WizardDispatch::Inactive => {}
-                                WizardDispatch::Consumed => continue,
-                                WizardDispatch::Finished => {
-                                    touch_wizard_requested = false;
-                                    update_count = 0;
-                                    render_active_mode(
-                                        &mut context.inkplate,
-                                        display_mode,
-                                        last_uptime_seconds,
-                                        time_sync,
-                                        battery_percent,
-                                        &mut pattern_nonce,
-                                        &mut first_visual_seed_pending,
-                                        true,
-                                    )
-                                    .await;
-                                    screen_initialized = true;
-                                    continue;
-                                }
-                            }
-                        }
-
-                        handle_touch_event(
-                            touch_event,
-                            &mut context,
-                            &mut touch_feedback_dirty,
-                            &mut backlight_cycle_start,
-                            &mut backlight_level,
-                            &mut update_count,
-                            &mut display_mode,
-                            last_uptime_seconds,
-                            time_sync,
-                            battery_percent,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
-                            &mut screen_initialized,
-                        )
-                        .await;
-                    }
-
-                    if TOUCH_TRACE_ENABLED && sample.touch_count > 0 {
-                        let _ = TOUCH_TRACE_SAMPLES
-                            .try_send(TouchTraceSample::from_sample(t_ms, sample));
-                    }
+                    push_touch_input_sample(TouchSampleFrame { t_ms, sample });
                 }
                 Err(_) => {
                     touch_ready = false;
                     let _ = context.inkplate.touch_shutdown();
                     touch_retry_at = sample_instant + Duration::from_millis(TOUCH_INIT_RETRY_MS);
                     esp_println::println!("touch: read_error; retrying");
+                    request_touch_pipeline_reset();
                     if touch_wizard_requested {
                         touch_wizard = TouchCalibrationWizard::new(false);
                         render_touch_wizard_waiting_screen(&mut context.inkplate);
@@ -493,11 +458,85 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             touch_next_sample_at = scheduled_sample_at + Duration::from_millis(TOUCH_SAMPLE_MS);
         }
 
+        while let Ok(touch_event) = TOUCH_PIPELINE_EVENTS.try_receive() {
+            if touch_wizard.is_active() {
+                if TOUCH_FEEDBACK_ENABLED
+                    && matches!(
+                        touch_event.kind,
+                        TouchEventKind::Down | TouchEventKind::Move
+                    )
+                {
+                    draw_touch_feedback_dot(&mut context.inkplate, touch_event.x, touch_event.y);
+                    touch_feedback_dirty = true;
+                }
+
+                match touch_wizard.handle_event(&mut context.inkplate, touch_event) {
+                    WizardDispatch::Inactive => {}
+                    WizardDispatch::Consumed => continue,
+                    WizardDispatch::Finished => {
+                        touch_wizard_requested = false;
+                        update_count = 0;
+                        render_active_mode(
+                            &mut context.inkplate,
+                            display_mode,
+                            last_uptime_seconds,
+                            time_sync,
+                            battery_percent,
+                            &mut pattern_nonce,
+                            &mut first_visual_seed_pending,
+                            true,
+                        )
+                        .await;
+                        screen_initialized = true;
+                        continue;
+                    }
+                }
+            }
+
+            handle_touch_event(
+                touch_event,
+                &mut context,
+                &mut touch_feedback_dirty,
+                &mut backlight_cycle_start,
+                &mut backlight_level,
+                &mut update_count,
+                &mut display_mode,
+                last_uptime_seconds,
+                time_sync,
+                battery_percent,
+                &mut pattern_nonce,
+                &mut first_visual_seed_pending,
+                &mut screen_initialized,
+            )
+            .await;
+        }
+
         run_backlight_timeline(
             &mut context.inkplate,
             &mut backlight_cycle_start,
             &mut backlight_level,
         );
+    }
+}
+
+fn push_touch_input_sample(frame: TouchSampleFrame) {
+    let input = TouchPipelineInput::Sample(frame);
+    if TOUCH_PIPELINE_INPUTS.try_send(input).is_err() {
+        let _ = TOUCH_PIPELINE_INPUTS.try_receive();
+        let _ = TOUCH_PIPELINE_INPUTS.try_send(input);
+    }
+}
+
+fn request_touch_pipeline_reset() {
+    while TOUCH_PIPELINE_INPUTS.try_receive().is_ok() {}
+    while TOUCH_PIPELINE_EVENTS.try_receive().is_ok() {}
+    let _ = TOUCH_PIPELINE_INPUTS.try_send(TouchPipelineInput::Reset);
+}
+
+fn push_touch_output_event(event: TouchEvent) {
+    if TOUCH_PIPELINE_EVENTS.try_send(event).is_err() {
+        let _ = TOUCH_PIPELINE_EVENTS.try_receive();
+        let _ = TOUCH_PIPELINE_EVENTS.try_send(event);
     }
 }
 
