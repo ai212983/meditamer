@@ -160,10 +160,8 @@ impl TouchCalibrationWizard {
         let prev_phase = self.phase;
         let mut changed = false;
 
-        if matches!(
-            event.kind,
-            TouchEventKind::Down | TouchEventKind::Tap | TouchEventKind::LongPress
-        ) && self.shows_continue_button()
+        if matches!(event.kind, TouchEventKind::Tap | TouchEventKind::LongPress)
+            && self.shows_continue_button()
             && self.continue_button_hit(event.x as i32, event.y as i32, width, height)
         {
             changed = self.on_continue_button();
