@@ -1,7 +1,7 @@
 use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
-const TOUCH_DEBOUNCE_DOWN_MS: u64 = 18;
-const TOUCH_DEBOUNCE_UP_MS: u64 = 22;
+const TOUCH_DEBOUNCE_DOWN_MS: u64 = 12;
+const TOUCH_DEBOUNCE_UP_MS: u64 = 16;
 const TOUCH_DRAG_START_PX: i32 = 10;
 const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
