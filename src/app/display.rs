@@ -177,6 +177,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 AppEvent::StartTouchCalibrationWizard => {
                     esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
                     touch_wizard_requested = true;
+                    touch_engine = TouchEngine::default();
+                    touch_next_sample_at = Instant::now();
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
                         touch_wizard.render_full(&mut context.inkplate);
@@ -378,6 +380,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         if !touch_ready && Instant::now() >= touch_retry_at {
             touch_ready = try_touch_init_with_logs(&mut context.inkplate, "retry");
             if touch_ready {
+                touch_engine = TouchEngine::default();
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
@@ -394,10 +397,14 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             && sampled_touch_count < TOUCH_MAX_CATCHUP_SAMPLES
             && Instant::now() >= touch_next_sample_at
         {
+            let scheduled_sample_at = touch_next_sample_at;
             let sample_instant = Instant::now();
             match context.inkplate.touch_read_sample(0) {
                 Ok(sample) => {
-                    let t_ms = sample_instant
+                    // Use scheduled sample time for gesture timing. If we are catching up,
+                    // multiple reads can happen back-to-back in real time; using `Instant::now()`
+                    // for each would collapse debounce durations and miss quick taps.
+                    let t_ms = scheduled_sample_at
                         .saturating_duration_since(trace_epoch)
                         .as_millis();
 
@@ -483,7 +490,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
 
             sampled_touch_count = sampled_touch_count.saturating_add(1);
-            touch_next_sample_at += Duration::from_millis(TOUCH_SAMPLE_MS);
+            touch_next_sample_at = scheduled_sample_at + Duration::from_millis(TOUCH_SAMPLE_MS);
         }
 
         run_backlight_timeline(

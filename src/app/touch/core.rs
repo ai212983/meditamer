@@ -2,15 +2,16 @@ use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
 const TOUCH_DEBOUNCE_DOWN_MS: u64 = 12;
 const TOUCH_DEBOUNCE_UP_MS: u64 = 16;
+const TOUCH_DEBOUNCE_UP_DRAG_MS: u64 = 32;
 const TOUCH_DEBOUNCE_DOWN_ABORT_MS: u64 = 40;
 const TOUCH_DRAG_START_PX: i32 = 10;
 const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
 const TOUCH_TAP_MAX_MS: u64 = 280;
 const TOUCH_TAP_MAX_TRAVEL_PX: i32 = 24;
-const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 48;
+const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 40;
 const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 1_000;
-const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 120;
+const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 105;
 const TOUCH_SWIPE_ORIGIN_NOISE_PX: i32 = 40;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -296,6 +297,17 @@ impl TouchHsm {
 
         self.reset_interaction();
     }
+
+    fn release_debounce_ms(&self) -> u64 {
+        // During drag/swipe motion, tolerate slightly longer zero-count flicker so
+        // one physical swipe is not split into two independent interactions.
+        let moved_sq = squared_distance(self.last_point, self.down_point);
+        if self.drag_active || moved_sq >= TOUCH_DRAG_START_PX * TOUCH_DRAG_START_PX {
+            TOUCH_DEBOUNCE_UP_DRAG_MS
+        } else {
+            TOUCH_DEBOUNCE_UP_MS
+        }
+    }
 }
 
 #[state_machine(initial = "State::idle()")]
@@ -452,7 +464,7 @@ impl TouchHsm {
                 let (count, point) = sample_primary(sample);
                 match (count, point) {
                     (0, _) => {
-                        if now_ms.saturating_sub(self.release_ms) >= TOUCH_DEBOUNCE_UP_MS {
+                        if now_ms.saturating_sub(self.release_ms) >= self.release_debounce_ms() {
                             self.finalize_release(context);
                             Transition(State::idle())
                         } else {
@@ -704,5 +716,33 @@ mod tests {
         assert!(events
             .iter()
             .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
+    }
+
+    #[test]
+    fn drag_flicker_does_not_split_swipe_into_two_touches() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        drain_kinds(engine.tick(0, sample1(40, 120)), &mut events);
+        drain_kinds(engine.tick(16, sample1(40, 120)), &mut events);
+        drain_kinds(engine.tick(24, sample1(90, 121)), &mut events);
+        // Brief count=0 drop while finger is still moving.
+        drain_kinds(engine.tick(32, sample0()), &mut events);
+        drain_kinds(engine.tick(40, sample0()), &mut events);
+        // Recover touch before drag debounce window expires.
+        drain_kinds(engine.tick(48, sample1(165, 123)), &mut events);
+        drain_kinds(engine.tick(56, sample0()), &mut events);
+        drain_kinds(engine.tick(96, sample0()), &mut events);
+
+        assert!(events
+            .iter()
+            .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|k| matches!(k, TouchEventKind::Down))
+                .count(),
+            1
+        );
     }
 }

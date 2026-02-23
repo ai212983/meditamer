@@ -230,6 +230,12 @@ where
         for (idx, raw_point) in raw_points.iter_mut().enumerate() {
             *raw_point = Self::touch_decode_xy(&raw, idx);
         }
+        // Some samples report the active contact in slot 1 while slot 0 is empty.
+        // Promote the valid coordinate to slot 0 so higher layers always get a
+        // stable primary point for single-touch gesture tracking.
+        if raw_points[0] == (0, 0) && raw_points[1] != (0, 0) {
+            raw_points.swap(0, 1);
+        }
         // Some idle/no-data reads still report non-zero status bits in raw[7].
         // Prefer decoded coordinate validity to avoid phantom touches.
         let coord_count = raw_points

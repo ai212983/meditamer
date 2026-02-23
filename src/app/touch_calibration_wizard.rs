@@ -40,6 +40,7 @@ pub(crate) struct TouchCalibrationWizard {
     last_tap: Option<TapAttempt>,
     swipe_trace: SwipeTrace,
     last_swipe: Option<SwipeAttempt>,
+    swipe_trace_pending_points: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +90,7 @@ impl TouchCalibrationWizard {
             last_tap: None,
             swipe_trace: SwipeTrace::default(),
             last_swipe: None,
+            swipe_trace_pending_points: 0,
         }
     }
 
@@ -313,6 +315,7 @@ impl TouchCalibrationWizard {
                     },
                     accepted: true,
                 });
+                self.swipe_trace_pending_points = 0;
             }
             _ => {}
         }
@@ -341,6 +344,7 @@ impl TouchCalibrationWizard {
                 },
                 accepted: false,
             });
+            self.swipe_trace_pending_points = 0;
         }
 
         self.phase != prev_phase
@@ -359,13 +363,17 @@ impl TouchCalibrationWizard {
     fn clear_swipe_debug(&mut self) {
         self.swipe_trace = SwipeTrace::default();
         self.last_swipe = None;
+        self.swipe_trace_pending_points = 0;
     }
 
     fn on_swipe_trace_down(&mut self, x: i32, y: i32) -> bool {
         self.swipe_trace = SwipeTrace::default();
         self.swipe_trace.points[0] = SwipePoint { x, y };
         self.swipe_trace.len = 1;
-        true
+        self.swipe_trace_pending_points = 0;
+        // Avoid full wizard redraw on touch down; display task already renders
+        // lightweight touch dots, and blocking redraws here can starve swipe sampling.
+        false
     }
 
     fn on_swipe_trace_move(&mut self, x: i32, y: i32) -> bool {
@@ -388,7 +396,9 @@ impl TouchCalibrationWizard {
             }
             self.swipe_trace.points[SWIPE_TRACE_MAX_POINTS - 1] = SwipePoint { x, y };
         }
-        true
+        self.swipe_trace_pending_points = self.swipe_trace_pending_points.saturating_add(1);
+        // Defer redraw until Up/Swipe event to keep gesture sampling responsive.
+        false
     }
 
     fn shows_swipe_debug(&self) -> bool {
