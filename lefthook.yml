@@ -3,3 +3,8 @@ pre-commit:
   commands:
     markdown-links:
       run: scripts/check_markdown_links.sh
+
+commit-msg:
+  commands:
+    conventional-commitlint:
+      run: scripts/check_commit_message.sh {1}

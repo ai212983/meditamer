@@ -29,6 +29,12 @@ cargo install --locked lefthook
 cargo install --locked lychee
 ```
 
+Install conventional commit linter:
+
+```bash
+go install github.com/conventionalcommit/commitlint@latest
+```
+
 Install hooks:
 
 ```bash
@@ -39,6 +45,10 @@ Current pre-commit hook:
 
 - Validates links in staged Markdown files via `scripts/check_markdown_links.sh`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
+
+Current commit-msg hook:
+
+- Validates commit messages against Conventional Commits via `scripts/check_commit_message.sh` and `commitlint`.
 
 Optional full (online) validation:
 
