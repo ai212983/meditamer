@@ -8,9 +8,10 @@ const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
 const TOUCH_LONG_PRESS_MS: u64 = 700;
 const TOUCH_TAP_MAX_MS: u64 = 280;
 const TOUCH_TAP_MAX_TRAVEL_PX: i32 = 24;
-const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 72;
+const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 48;
 const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 1_000;
 const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 120;
+const TOUCH_SWIPE_ORIGIN_NOISE_PX: i32 = 40;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TouchPoint {
@@ -113,6 +114,7 @@ impl TouchEngine {
 }
 
 struct TouchHsm {
+    origin_point: TouchPoint,
     down_ms: u64,
     down_point: TouchPoint,
     last_point: TouchPoint,
@@ -126,6 +128,7 @@ struct TouchHsm {
 impl TouchHsm {
     fn new() -> Self {
         Self {
+            origin_point: TouchPoint::default(),
             down_ms: 0,
             down_point: TouchPoint::default(),
             last_point: TouchPoint::default(),
@@ -138,6 +141,7 @@ impl TouchHsm {
     }
 
     fn begin_press(&mut self, now_ms: u64, point: TouchPoint) {
+        self.origin_point = point;
         self.down_ms = now_ms;
         self.down_point = point;
         self.last_point = point;
@@ -225,8 +229,18 @@ impl TouchHsm {
             return None;
         }
 
-        let dx = release_point.x as i32 - self.down_point.x as i32;
-        let dy = release_point.y as i32 - self.down_point.y as i32;
+        // Prefer raw press origin for fast-swipe recovery, but if origin and
+        // stabilized down-point diverge too much treat origin as noisy.
+        let use_stable_down_origin = squared_distance(self.origin_point, self.down_point)
+            >= TOUCH_SWIPE_ORIGIN_NOISE_PX * TOUCH_SWIPE_ORIGIN_NOISE_PX;
+        let origin = if use_stable_down_origin {
+            self.down_point
+        } else {
+            self.origin_point
+        };
+
+        let dx = release_point.x as i32 - origin.x as i32;
+        let dy = release_point.y as i32 - origin.y as i32;
         let abs_dx = dx.abs();
         let abs_dy = dy.abs();
         let major = abs_dx.max(abs_dy);
@@ -672,5 +686,23 @@ mod tests {
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
         assert!(events.iter().any(|k| matches!(k, TouchEventKind::Tap)));
+    }
+
+    #[test]
+    fn fast_swipe_during_down_debounce_is_still_detected() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        // Finger moves quickly before debounce-down promotes to Pressed.
+        drain_kinds(engine.tick(0, sample1(50, 100)), &mut events);
+        drain_kinds(engine.tick(8, sample1(120, 102)), &mut events);
+        drain_kinds(engine.tick(16, sample0()), &mut events);
+        drain_kinds(engine.tick(40, sample0()), &mut events);
+
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Down)));
+        assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
+        assert!(events
+            .iter()
+            .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
     }
 }
