@@ -1,8 +1,11 @@
+use core::fmt::Write;
+
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{Circle, Line, PrimitiveStyle, Rectangle},
 };
+use heapless::String;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 
 use super::{
@@ -41,6 +44,7 @@ pub(crate) struct TouchCalibrationWizard {
     swipe_trace: SwipeTrace,
     last_swipe: Option<SwipeAttempt>,
     swipe_trace_pending_points: u8,
+    swipe_debug: SwipeDebugStats,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +82,45 @@ struct SwipeAttempt {
     accepted: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SwipeDebugKind {
+    None,
+    Down,
+    Move,
+    Up,
+    Swipe(TouchSwipeDirection),
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SwipeDebugStats {
+    down_count: u16,
+    move_count: u16,
+    up_count: u16,
+    swipe_count: u16,
+    cancel_count: u16,
+    last_kind: SwipeDebugKind,
+    last_start: SwipePoint,
+    last_end: SwipePoint,
+    last_duration_ms: u16,
+}
+
+impl Default for SwipeDebugStats {
+    fn default() -> Self {
+        Self {
+            down_count: 0,
+            move_count: 0,
+            up_count: 0,
+            swipe_count: 0,
+            cancel_count: 0,
+            last_kind: SwipeDebugKind::None,
+            last_start: SwipePoint::default(),
+            last_end: SwipePoint::default(),
+            last_duration_ms: 0,
+        }
+    }
+}
+
 impl TouchCalibrationWizard {
     pub(crate) fn new(enabled: bool) -> Self {
         Self {
@@ -91,6 +134,7 @@ impl TouchCalibrationWizard {
             swipe_trace: SwipeTrace::default(),
             last_swipe: None,
             swipe_trace_pending_points: 0,
+            swipe_debug: SwipeDebugStats::default(),
         }
     }
 
@@ -128,7 +172,14 @@ impl TouchCalibrationWizard {
             }
         }
         if self.shows_swipe_debug() {
-            draw_swipe_debug(display, self.swipe_trace, self.last_swipe, width, height);
+            draw_swipe_debug(
+                display,
+                self.swipe_trace,
+                self.last_swipe,
+                self.swipe_debug,
+                width,
+                height,
+            );
         }
         if self.shows_continue_button() {
             draw_continue_button(display, width, height);
@@ -159,8 +210,9 @@ impl TouchCalibrationWizard {
 
         let width = display.width() as i32;
         let height = display.height() as i32;
-        let prev_phase = self.phase;
         let mut changed = false;
+
+        self.update_swipe_debug(event);
 
         if matches!(event.kind, TouchEventKind::Tap | TouchEventKind::LongPress)
             && self.shows_continue_button()
@@ -221,11 +273,7 @@ impl TouchCalibrationWizard {
         }
 
         if changed {
-            if matches!(prev_phase, WizardPhase::Intro) {
-                self.render_full(display).await;
-            } else {
-                self.render_partial(display).await;
-            }
+            self.render_partial(display).await;
         }
         WizardDispatch::Consumed
     }
@@ -298,6 +346,7 @@ impl TouchCalibrationWizard {
         let prev_last_swipe = self.last_swipe;
         match self.phase {
             WizardPhase::SwipeRight => {
+                self.append_swipe_trace_point(event.x as i32, event.y as i32);
                 self.hint = match direction {
                     TouchSwipeDirection::Left => "Swipe detected: LEFT.",
                     TouchSwipeDirection::Right => "Swipe detected: RIGHT.",
@@ -332,6 +381,7 @@ impl TouchCalibrationWizard {
         let prev_last_swipe = self.last_swipe;
 
         if matches!(self.phase, WizardPhase::SwipeRight) {
+            self.append_swipe_trace_point(event.x as i32, event.y as i32);
             self.hint = "Release observed (no swipe classified).";
             self.last_swipe = Some(SwipeAttempt {
                 start: SwipePoint {
@@ -364,6 +414,47 @@ impl TouchCalibrationWizard {
         self.swipe_trace = SwipeTrace::default();
         self.last_swipe = None;
         self.swipe_trace_pending_points = 0;
+        self.swipe_debug = SwipeDebugStats::default();
+    }
+
+    fn update_swipe_debug(&mut self, event: TouchEvent) {
+        if !self.shows_swipe_debug() {
+            return;
+        }
+
+        self.swipe_debug.last_start = SwipePoint {
+            x: event.start_x as i32,
+            y: event.start_y as i32,
+        };
+        self.swipe_debug.last_end = SwipePoint {
+            x: event.x as i32,
+            y: event.y as i32,
+        };
+        self.swipe_debug.last_duration_ms = event.duration_ms;
+
+        match event.kind {
+            TouchEventKind::Down => {
+                self.swipe_debug.down_count = self.swipe_debug.down_count.saturating_add(1);
+                self.swipe_debug.last_kind = SwipeDebugKind::Down;
+            }
+            TouchEventKind::Move => {
+                self.swipe_debug.move_count = self.swipe_debug.move_count.saturating_add(1);
+                self.swipe_debug.last_kind = SwipeDebugKind::Move;
+            }
+            TouchEventKind::Up => {
+                self.swipe_debug.up_count = self.swipe_debug.up_count.saturating_add(1);
+                self.swipe_debug.last_kind = SwipeDebugKind::Up;
+            }
+            TouchEventKind::Swipe(direction) => {
+                self.swipe_debug.swipe_count = self.swipe_debug.swipe_count.saturating_add(1);
+                self.swipe_debug.last_kind = SwipeDebugKind::Swipe(direction);
+            }
+            TouchEventKind::Cancel => {
+                self.swipe_debug.cancel_count = self.swipe_debug.cancel_count.saturating_add(1);
+                self.swipe_debug.last_kind = SwipeDebugKind::Cancel;
+            }
+            TouchEventKind::Tap | TouchEventKind::LongPress => {}
+        }
     }
 
     fn on_swipe_trace_down(&mut self, x: i32, y: i32) -> bool {
@@ -380,11 +471,29 @@ impl TouchCalibrationWizard {
         if self.swipe_trace.len == 0 {
             return self.on_swipe_trace_down(x, y);
         }
+        let prev_len = self.swipe_trace.len;
+        self.append_swipe_trace_point(x, y);
+        if self.swipe_trace.len == prev_len {
+            return false;
+        }
+        self.swipe_trace_pending_points = self.swipe_trace_pending_points.saturating_add(1);
+        // Defer redraw until Up/Swipe event to keep gesture sampling responsive.
+        false
+    }
+
+    fn append_swipe_trace_point(&mut self, x: i32, y: i32) {
+        if self.swipe_trace.len == 0 {
+            self.swipe_trace.points[0] = SwipePoint { x, y };
+            self.swipe_trace.len = 1;
+            return;
+        }
+
         let last_idx = self.swipe_trace.len.saturating_sub(1) as usize;
         let last = self.swipe_trace.points[last_idx];
         if squared_distance_i32(x, y, last.x, last.y) < 9 {
-            return false;
+            return;
         }
+
         if (self.swipe_trace.len as usize) < SWIPE_TRACE_MAX_POINTS {
             self.swipe_trace.points[self.swipe_trace.len as usize] = SwipePoint { x, y };
             self.swipe_trace.len = self.swipe_trace.len.saturating_add(1);
@@ -396,9 +505,6 @@ impl TouchCalibrationWizard {
             }
             self.swipe_trace.points[SWIPE_TRACE_MAX_POINTS - 1] = SwipePoint { x, y };
         }
-        self.swipe_trace_pending_points = self.swipe_trace_pending_points.saturating_add(1);
-        // Defer redraw until Up/Swipe event to keep gesture sampling responsive.
-        false
     }
 
     fn shows_swipe_debug(&self) -> bool {
@@ -570,6 +676,23 @@ fn draw_centered_text(
     );
 }
 
+fn draw_left_text(
+    display: &mut InkplateDriver,
+    renderer: &u8g2_fonts::FontRenderer,
+    text: &str,
+    left_x: i32,
+    center_y: i32,
+) {
+    let _ = renderer.render_aligned(
+        text,
+        Point::new(left_x, center_y),
+        VerticalPosition::Center,
+        HorizontalAlignment::Left,
+        FontColor::Transparent(BinaryColor::On),
+        display,
+    );
+}
+
 fn draw_target(display: &mut InkplateDriver, x: i32, y: i32) {
     let style = PrimitiveStyle::with_stroke(BinaryColor::On, 2);
     let _ = Circle::new(
@@ -591,6 +714,7 @@ fn draw_swipe_debug(
     display: &mut InkplateDriver,
     trace: SwipeTrace,
     attempt: Option<SwipeAttempt>,
+    stats: SwipeDebugStats,
     width: i32,
     height: i32,
 ) {
@@ -635,6 +759,13 @@ fn draw_swipe_debug(
     }
 
     if let Some(attempt) = attempt {
+        let _ = Line::new(
+            Point::new(attempt.start.x, attempt.start.y),
+            Point::new(attempt.end.x, attempt.end.y),
+        )
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(display);
+
         let _ = Circle::new(Point::new(attempt.start.x - 4, attempt.start.y - 4), 8)
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(display);
@@ -657,6 +788,35 @@ fn draw_swipe_debug(
             .draw(display);
         }
     }
+
+    let mut counts_line: String<64> = String::new();
+    let _ = write!(
+        &mut counts_line,
+        "D/M/U/S/C: {}/{}/{}/{}/{}",
+        stats.down_count, stats.move_count, stats.up_count, stats.swipe_count, stats.cancel_count
+    );
+    draw_left_text(display, &META_FONT, &counts_line, 32, 196);
+
+    let last_kind = match stats.last_kind {
+        SwipeDebugKind::None => "none",
+        SwipeDebugKind::Down => "down",
+        SwipeDebugKind::Move => "move",
+        SwipeDebugKind::Up => "up",
+        SwipeDebugKind::Swipe(TouchSwipeDirection::Left) => "swipe_left",
+        SwipeDebugKind::Swipe(TouchSwipeDirection::Right) => "swipe_right",
+        SwipeDebugKind::Swipe(TouchSwipeDirection::Up) => "swipe_up",
+        SwipeDebugKind::Swipe(TouchSwipeDirection::Down) => "swipe_down",
+        SwipeDebugKind::Cancel => "cancel",
+    };
+    let dx = stats.last_end.x.saturating_sub(stats.last_start.x);
+    let dy = stats.last_end.y.saturating_sub(stats.last_start.y);
+    let mut vector_line: String<96> = String::new();
+    let _ = write!(
+        &mut vector_line,
+        "last={} dur={}ms dx={} dy={}",
+        last_kind, stats.last_duration_ms, dx, dy
+    );
+    draw_left_text(display, &META_FONT, &vector_line, 32, 224);
 }
 
 fn draw_continue_button(display: &mut InkplateDriver, width: i32, height: i32) {

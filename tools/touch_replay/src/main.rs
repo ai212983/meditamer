@@ -8,6 +8,8 @@ use std::{
 
 #[path = "../../../src/app/touch/core.rs"]
 mod touch_core;
+#[path = "../../../src/app/touch/normalize.rs"]
+mod touch_normalize;
 
 use touch_core::{
     TouchEngine, TouchEvent, TouchEventKind, TouchSample, TouchSwipeDirection, TouchPoint,

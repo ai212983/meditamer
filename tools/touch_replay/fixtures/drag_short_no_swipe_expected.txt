@@ -2,3 +2,4 @@ down
 move
 move
 up
+swipe_right

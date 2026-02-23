@@ -1,9 +1,14 @@
 # IDE
 /.idea
 /.vscode
+.DS_Store
 
 /.embuild
 /target
-/tools/event_config_compiler/target
-/tools/shanshui_preview/out
+/tools/*/target
+/tools/*/out
+/tools/**/__pycache__/
+/tools/**/*.py[cod]
+/tools/scene_maker/assets
+/logs/
 /Cargo.lock

@@ -228,7 +228,14 @@ where
         let bit_count = (raw[7].count_ones() as u8).min(2);
         let mut raw_points = [(0u16, 0u16); 2];
         for (idx, raw_point) in raw_points.iter_mut().enumerate() {
-            *raw_point = Self::touch_decode_xy(&raw, idx);
+            let decoded = Self::touch_decode_xy(&raw, idx);
+            *raw_point =
+                if touch_raw_point_plausible(decoded.0, decoded.1, self.touch_x_res, self.touch_y_res)
+                {
+                decoded
+            } else {
+                (0, 0)
+            };
         }
         // Some samples report the active contact in slot 1 while slot 0 is empty.
         // Promote the valid coordinate to slot 0 so higher layers always get a
@@ -242,16 +249,16 @@ where
             .iter()
             .filter(|(x, y)| *x != 0 || *y != 0)
             .count() as u8;
-        let touch_count = if coord_count == 0 {
-            0
-        } else {
-            bit_count.max(1).min(coord_count)
-        };
+        let touch_count = touch_presence_count(bit_count, coord_count);
 
         let mut points = [TouchPoint::default(); 2];
         for (idx, point) in points.iter_mut().enumerate() {
             let (x_raw, y_raw) = raw_points[idx];
-            *point = self.touch_transform_point(x_raw, y_raw, rotation);
+            *point = if x_raw == 0 && y_raw == 0 {
+                TouchPoint::default()
+            } else {
+                self.touch_transform_point(x_raw, y_raw, rotation)
+            };
         }
 
         Ok(TouchSample {
@@ -420,5 +427,59 @@ where
             pcal_cfg0: self.read_i2c_reg(IO_INT_ADDR, 0x06)?,
             pcal_cfg1: self.read_i2c_reg(IO_INT_ADDR, 0x07)?,
         })
+    }
+}
+
+fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_res: u16) -> bool {
+    if x_raw == 0 || y_raw == 0 {
+        return false;
+    }
+    if x_res == 0 || y_res == 0 {
+        return false;
+    }
+    // Controller occasionally emits out-of-range garbage while idle.
+    // Clamp-to-edge transforms of those samples create phantom touches.
+    x_raw <= x_res && y_raw <= y_res
+}
+
+fn touch_presence_count(bit_count: u8, coord_count: u8) -> u8 {
+    if bit_count == 0 || coord_count == 0 {
+        0
+    } else {
+        bit_count.min(coord_count).min(2)
+    }
+}
+
+#[cfg(test)]
+mod touch_raw_point_plausible_tests {
+    use super::{touch_presence_count, touch_raw_point_plausible};
+
+    #[test]
+    fn rejects_zero_axes() {
+        assert!(!touch_raw_point_plausible(0, 100, 2048, 2048));
+        assert!(!touch_raw_point_plausible(100, 0, 2048, 2048));
+    }
+
+    #[test]
+    fn rejects_out_of_range() {
+        assert!(!touch_raw_point_plausible(2049, 100, 2048, 2048));
+        assert!(!touch_raw_point_plausible(100, 3000, 2048, 2048));
+    }
+
+    #[test]
+    fn accepts_in_range_non_zero_points() {
+        assert!(touch_raw_point_plausible(1, 1, 2048, 2048));
+        assert!(touch_raw_point_plausible(2048, 2048, 2048, 2048));
+    }
+
+    #[test]
+    fn presence_requires_bits_and_coords() {
+        assert_eq!(touch_presence_count(0, 0), 0);
+        assert_eq!(touch_presence_count(0, 1), 0);
+        assert_eq!(touch_presence_count(1, 0), 0);
+        assert_eq!(touch_presence_count(1, 1), 1);
+        assert_eq!(touch_presence_count(2, 1), 1);
+        assert_eq!(touch_presence_count(1, 2), 1);
+        assert_eq!(touch_presence_count(2, 2), 2);
     }
 }

@@ -57,7 +57,7 @@ pub(crate) async fn touch_pipeline_task() {
                     if TOUCH_EVENT_TRACE_ENABLED {
                         let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
                     }
-                    push_touch_output_event(touch_event);
+                    push_touch_output_event(touch_event).await;
                 }
             }
         }
@@ -94,6 +94,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_next_sample_at = Instant::now();
     let mut touch_feedback_dirty = false;
     let mut touch_feedback_next_flush_at = Instant::now();
+    let mut touch_contact_active = false;
 
     if !touch_ready {
         touch_retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
@@ -208,6 +209,9 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 AppEvent::StartTouchCalibrationWizard => {
                     esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
                     touch_wizard_requested = true;
+                    backlight_cycle_start = None;
+                    backlight_level = 0;
+                    let _ = context.inkplate.frontlight_off();
                     request_touch_pipeline_reset();
                     touch_next_sample_at = Instant::now();
                     if touch_ready {
@@ -308,7 +312,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     });
                     last_engine_trace = output.trace;
 
-                    if output.actions.contains_backlight_trigger() {
+                    if output.actions.contains_backlight_trigger() && !touch_wizard_requested {
                         trigger_backlight_cycle(
                             &mut context.inkplate,
                             &mut backlight_cycle_start,
@@ -456,6 +460,18 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         }
 
         while let Ok(touch_event) = TOUCH_PIPELINE_EVENTS.try_receive() {
+            match touch_event.kind {
+                TouchEventKind::Down | TouchEventKind::Move | TouchEventKind::LongPress => {
+                    touch_contact_active = true;
+                }
+                TouchEventKind::Up
+                | TouchEventKind::Tap
+                | TouchEventKind::Swipe(_)
+                | TouchEventKind::Cancel => {
+                    touch_contact_active = false;
+                }
+            }
+
             if touch_wizard.is_active() {
                 if TOUCH_FEEDBACK_ENABLED
                     && matches!(
@@ -513,18 +529,23 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
 
         // Flush feedback after sampling and event handling so rendering never blocks
         // the beginning of the touch-capture window.
-        if touch_feedback_dirty && Instant::now() >= touch_feedback_next_flush_at {
+        if touch_feedback_dirty
+            && !touch_contact_active
+            && Instant::now() >= touch_feedback_next_flush_at
+        {
             let _ = context.inkplate.display_bw_partial_async(false).await;
             touch_feedback_dirty = false;
             touch_feedback_next_flush_at =
                 Instant::now() + Duration::from_millis(TOUCH_FEEDBACK_MIN_REFRESH_MS);
         }
 
-        run_backlight_timeline(
-            &mut context.inkplate,
-            &mut backlight_cycle_start,
-            &mut backlight_level,
-        );
+        if !touch_wizard_requested {
+            run_backlight_timeline(
+                &mut context.inkplate,
+                &mut backlight_cycle_start,
+                &mut backlight_level,
+            );
+        }
     }
 }
 
@@ -540,11 +561,8 @@ fn request_touch_pipeline_reset() {
     let _ = TOUCH_PIPELINE_INPUTS.try_send(TouchPipelineInput::Reset);
 }
 
-fn push_touch_output_event(event: TouchEvent) {
-    if TOUCH_PIPELINE_EVENTS.try_send(event).is_err() {
-        let _ = TOUCH_PIPELINE_EVENTS.try_receive();
-        let _ = TOUCH_PIPELINE_EVENTS.try_send(event);
-    }
+async fn push_touch_output_event(event: TouchEvent) {
+    TOUCH_PIPELINE_EVENTS.send(event).await;
 }
 
 async fn handle_touch_event(
