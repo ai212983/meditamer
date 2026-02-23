@@ -2,7 +2,7 @@ use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
 const TOUCH_DEBOUNCE_DOWN_MS: u64 = 12;
 const TOUCH_DEBOUNCE_UP_MS: u64 = 16;
-const TOUCH_DEBOUNCE_UP_DRAG_MS: u64 = 32;
+const TOUCH_DEBOUNCE_UP_DRAG_MS: u64 = 64;
 const TOUCH_DEBOUNCE_DOWN_ABORT_MS: u64 = 40;
 const TOUCH_DRAG_START_PX: i32 = 10;
 const TOUCH_MOVE_DEADZONE_PX: i32 = 6;
@@ -12,7 +12,7 @@ const TOUCH_TAP_MAX_TRAVEL_PX: i32 = 24;
 const TOUCH_SWIPE_MIN_DISTANCE_PX: i32 = 40;
 const TOUCH_SWIPE_MAX_DURATION_MS: u64 = 1_000;
 const TOUCH_SWIPE_AXIS_DOMINANCE_X100: i32 = 105;
-const TOUCH_SWIPE_ORIGIN_NOISE_PX: i32 = 40;
+const TOUCH_SWIPE_ORIGIN_NOISE_PX: i32 = 120;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TouchPoint {
@@ -120,6 +120,8 @@ struct TouchHsm {
     down_point: TouchPoint,
     last_point: TouchPoint,
     last_move_emit_point: TouchPoint,
+    farthest_point: TouchPoint,
+    farthest_distance_sq: i32,
     release_ms: u64,
     release_point: TouchPoint,
     drag_active: bool,
@@ -134,6 +136,8 @@ impl TouchHsm {
             down_point: TouchPoint::default(),
             last_point: TouchPoint::default(),
             last_move_emit_point: TouchPoint::default(),
+            farthest_point: TouchPoint::default(),
+            farthest_distance_sq: 0,
             release_ms: 0,
             release_point: TouchPoint::default(),
             drag_active: false,
@@ -147,6 +151,8 @@ impl TouchHsm {
         self.down_point = point;
         self.last_point = point;
         self.last_move_emit_point = point;
+        self.farthest_point = point;
+        self.farthest_distance_sq = 0;
         self.release_ms = now_ms;
         self.release_point = point;
         self.drag_active = false;
@@ -220,6 +226,14 @@ impl TouchHsm {
         }
     }
 
+    fn update_swipe_extent(&mut self, point: TouchPoint) {
+        let distance_sq = squared_distance(point, self.down_point);
+        if distance_sq > self.farthest_distance_sq {
+            self.farthest_distance_sq = distance_sq;
+            self.farthest_point = point;
+        }
+    }
+
     fn classify_swipe(
         &self,
         release_ms: u64,
@@ -271,16 +285,23 @@ impl TouchHsm {
     fn finalize_release(&mut self, context: &mut DispatchContext) {
         let release_ms = self.release_ms;
         let release_point = self.release_point;
+        let swipe_point =
+            if self.farthest_distance_sq > squared_distance(release_point, self.down_point) {
+                self.farthest_point
+            } else {
+                release_point
+            };
 
         self.emit_event(context, TouchEventKind::Up, release_ms, release_point, 0);
 
-        // Classify swipe from final release vector even if drag state wasn't latched.
-        if let Some(direction) = self.classify_swipe(release_ms, release_point) {
+        // Classify swipe from the furthest observed interaction point.
+        // This preserves real swipes when release samples jitter near the start.
+        if let Some(direction) = self.classify_swipe(release_ms, swipe_point) {
             self.emit_event(
                 context,
                 TouchEventKind::Swipe(direction),
                 release_ms,
-                release_point,
+                swipe_point,
                 0,
             );
         } else {
@@ -374,6 +395,8 @@ impl TouchHsm {
                             // This avoids swipe/drag bias from a noisy first contact sample.
                             self.down_point = point;
                             self.last_move_emit_point = point;
+                            self.farthest_point = point;
+                            self.farthest_distance_sq = 0;
                             self.emit_event(context, TouchEventKind::Down, *now_ms, point, 1);
                             Transition(State::pressed())
                         } else {
@@ -402,6 +425,7 @@ impl TouchHsm {
                     }
                     (1, Some(point)) => {
                         self.last_point = point;
+                        self.update_swipe_extent(point);
                         if squared_distance(point, self.down_point)
                             >= TOUCH_DRAG_START_PX * TOUCH_DRAG_START_PX
                         {
@@ -441,6 +465,7 @@ impl TouchHsm {
                     }
                     (1, Some(point)) => {
                         self.last_point = point;
+                        self.update_swipe_extent(point);
                         self.maybe_emit_move(context, *now_ms, point, false);
                         Handled
                     }
@@ -462,9 +487,10 @@ impl TouchHsm {
         match event {
             TouchHsmEvent::Sample { now_ms, sample } => {
                 let (count, point) = sample_primary(sample);
+                let debounce_window_ms = self.release_debounce_ms();
                 match (count, point) {
                     (0, _) => {
-                        if now_ms.saturating_sub(self.release_ms) >= self.release_debounce_ms() {
+                        if now_ms.saturating_sub(self.release_ms) > debounce_window_ms {
                             self.finalize_release(context);
                             Transition(State::idle())
                         } else {
@@ -472,8 +498,9 @@ impl TouchHsm {
                         }
                     }
                     (1, Some(point)) => {
-                        if now_ms.saturating_sub(self.release_ms) < TOUCH_DEBOUNCE_UP_MS {
+                        if now_ms.saturating_sub(self.release_ms) <= debounce_window_ms {
                             self.last_point = point;
+                            self.update_swipe_extent(point);
                             if self.drag_active {
                                 Transition(State::dragging())
                             } else {
@@ -744,5 +771,23 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn swipe_detected_even_if_release_returns_near_start() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        drain_kinds(engine.tick(0, sample1(60, 120)), &mut events);
+        drain_kinds(engine.tick(16, sample1(60, 120)), &mut events);
+        drain_kinds(engine.tick(32, sample1(180, 121)), &mut events);
+        // Finger jitters back before lift.
+        drain_kinds(engine.tick(48, sample1(90, 122)), &mut events);
+        drain_kinds(engine.tick(64, sample0()), &mut events);
+        drain_kinds(engine.tick(120, sample0()), &mut events);
+
+        assert!(events
+            .iter()
+            .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
     }
 }

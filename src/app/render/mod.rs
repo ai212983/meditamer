@@ -19,13 +19,16 @@ pub(crate) async fn render_active_mode(
     force_full: bool,
 ) {
     match mode {
-        DisplayMode::Clock => render_clock_update(
-            display,
-            uptime_seconds,
-            time_sync,
-            battery_percent,
-            force_full,
-        ),
+        DisplayMode::Clock => {
+            render_clock_update(
+                display,
+                uptime_seconds,
+                time_sync,
+                battery_percent,
+                force_full,
+            )
+            .await
+        }
         DisplayMode::Suminagashi => {
             let seed = next_visual_seed(
                 uptime_seconds,

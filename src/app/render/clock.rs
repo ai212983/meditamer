@@ -27,7 +27,7 @@ use super::{
     local_seconds_since_epoch,
 };
 
-pub(crate) fn render_clock_update(
+pub(crate) async fn render_clock_update(
     display: &mut InkplateDriver,
     uptime_seconds: u32,
     time_sync: Option<TimeSyncState>,
@@ -38,19 +38,22 @@ pub(crate) fn render_clock_update(
         draw_clock_static(display);
         draw_clock_dynamic(display, uptime_seconds, time_sync);
         draw_battery_status(display, battery_percent);
-        let _ = display.display_bw(false);
+        let _ = display.display_bw_async(false).await;
         return;
     }
 
     erase_clock_dynamic_regions(display);
     draw_clock_dynamic(display, uptime_seconds, time_sync);
-    let _ = display.display_bw(false);
+    let _ = display.display_bw_async(false).await;
 }
 
-pub(crate) fn render_battery_update(display: &mut InkplateDriver, battery_percent: Option<u8>) {
+pub(crate) async fn render_battery_update(
+    display: &mut InkplateDriver,
+    battery_percent: Option<u8>,
+) {
     erase_battery_region(display);
     draw_battery_status(display, battery_percent);
-    let _ = display.display_bw_partial(false);
+    let _ = display.display_bw_partial_async(false).await;
 }
 
 pub(crate) fn sample_battery_percent(display: &mut InkplateDriver) -> Option<u8> {

@@ -1,4 +1,4 @@
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 
 use crate::sd_probe;
@@ -101,10 +101,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
 
     run_sd_probe("boot", &mut context.inkplate, &mut context.sd_probe);
     if touch_wizard.is_active() {
-        touch_wizard.render_full(&mut context.inkplate);
+        touch_wizard.render_full(&mut context.inkplate).await;
         screen_initialized = true;
     } else if touch_wizard_requested {
-        render_touch_wizard_waiting_screen(&mut context.inkplate);
+        render_touch_wizard_waiting_screen(&mut context.inkplate).await;
         screen_initialized = true;
     }
     request_touch_pipeline_reset();
@@ -137,7 +137,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                                 time_sync,
                                 battery_percent,
                                 do_full_refresh,
-                            );
+                            )
+                            .await;
                             update_count = update_count.wrapping_add(1);
                         } else {
                             render_visual_update(
@@ -162,7 +163,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     if !touch_wizard_requested {
                         if screen_initialized {
                             if display_mode == DisplayMode::Clock {
-                                render_battery_update(&mut context.inkplate, battery_percent);
+                                render_battery_update(&mut context.inkplate, battery_percent).await;
                             }
                         } else if display_mode == DisplayMode::Clock {
                             render_active_mode(
@@ -211,11 +212,11 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     touch_next_sample_at = Instant::now();
                     if touch_ready {
                         touch_wizard = TouchCalibrationWizard::new(true);
-                        touch_wizard.render_full(&mut context.inkplate);
+                        touch_wizard.render_full(&mut context.inkplate).await;
                         screen_initialized = true;
                     } else {
                         touch_wizard = TouchCalibrationWizard::new(false);
-                        render_touch_wizard_waiting_screen(&mut context.inkplate);
+                        render_touch_wizard_waiting_screen(&mut context.inkplate).await;
                         screen_initialized = true;
                     }
                 }
@@ -269,13 +270,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
             },
             Err(_) => {}
-        }
-
-        if touch_feedback_dirty && Instant::now() >= touch_feedback_next_flush_at {
-            let _ = context.inkplate.display_bw_partial(false);
-            touch_feedback_dirty = false;
-            touch_feedback_next_flush_at =
-                Instant::now() + Duration::from_millis(TOUCH_FEEDBACK_MIN_REFRESH_MS);
         }
 
         if !imu_double_tap_ready && Instant::now() >= imu_retry_at {
@@ -414,7 +408,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 touch_next_sample_at = Instant::now();
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
-                    touch_wizard.render_full(&mut context.inkplate);
+                    touch_wizard.render_full(&mut context.inkplate).await;
                     screen_initialized = true;
                 }
             } else {
@@ -437,7 +431,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     let t_ms = scheduled_sample_at
                         .saturating_duration_since(trace_epoch)
                         .as_millis();
-                    push_touch_input_sample(TouchSampleFrame { t_ms, sample });
+                    push_touch_input_sample(TouchSampleFrame { t_ms, sample }).await;
+                    // Always yield between capture iterations so touch pipeline task can run
+                    // even when channel has spare capacity.
+                    Timer::after_micros(0).await;
                 }
                 Err(_) => {
                     touch_ready = false;
@@ -447,7 +444,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     request_touch_pipeline_reset();
                     if touch_wizard_requested {
                         touch_wizard = TouchCalibrationWizard::new(false);
-                        render_touch_wizard_waiting_screen(&mut context.inkplate);
+                        render_touch_wizard_waiting_screen(&mut context.inkplate).await;
                         screen_initialized = true;
                     }
                     break;
@@ -470,7 +467,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     touch_feedback_dirty = true;
                 }
 
-                match touch_wizard.handle_event(&mut context.inkplate, touch_event) {
+                match touch_wizard
+                    .handle_event(&mut context.inkplate, touch_event)
+                    .await
+                {
                     WizardDispatch::Inactive => {}
                     WizardDispatch::Consumed => continue,
                     WizardDispatch::Finished => {
@@ -511,6 +511,15 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             .await;
         }
 
+        // Flush feedback after sampling and event handling so rendering never blocks
+        // the beginning of the touch-capture window.
+        if touch_feedback_dirty && Instant::now() >= touch_feedback_next_flush_at {
+            let _ = context.inkplate.display_bw_partial_async(false).await;
+            touch_feedback_dirty = false;
+            touch_feedback_next_flush_at =
+                Instant::now() + Duration::from_millis(TOUCH_FEEDBACK_MIN_REFRESH_MS);
+        }
+
         run_backlight_timeline(
             &mut context.inkplate,
             &mut backlight_cycle_start,
@@ -519,12 +528,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     }
 }
 
-fn push_touch_input_sample(frame: TouchSampleFrame) {
+async fn push_touch_input_sample(frame: TouchSampleFrame) {
     let input = TouchPipelineInput::Sample(frame);
-    if TOUCH_PIPELINE_INPUTS.try_send(input).is_err() {
-        let _ = TOUCH_PIPELINE_INPUTS.try_receive();
-        let _ = TOUCH_PIPELINE_INPUTS.try_send(input);
-    }
+    // Preserve ordered sample stream; dropping old samples collapses swipe vectors.
+    TOUCH_PIPELINE_INPUTS.send(input).await;
 }
 
 fn request_touch_pipeline_reset() {

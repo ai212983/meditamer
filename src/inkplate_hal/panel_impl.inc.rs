@@ -153,4 +153,75 @@ where
         self.panel_on = false;
         Ok(())
     }
+
+    pub async fn eink_on_async(&mut self) -> Result<(), I2C::Error> {
+        if self.panel_on {
+            return Ok(());
+        }
+
+        self.digital_write_internal(IO_INT_ADDR, WAKEUP, true)?;
+        embassy_time::Timer::after_millis(5).await;
+
+        self.i2c_write(TPS65186_ADDR, &[0x01, 0b0010_0000])?;
+        self.i2c_write(TPS65186_ADDR, &[0x09, 0b1110_0100])?;
+        self.i2c_write(TPS65186_ADDR, &[0x0B, 0b0001_1011])?;
+
+        self.prepare_panel_fast_io()?;
+        self.set_le(false);
+        self.set_cl(false);
+        self.set_sph(true);
+        self.digital_write_internal(IO_INT_ADDR, GMOD, true)?;
+        self.digital_write_internal(IO_INT_ADDR, SPV, true)?;
+        self.set_ckv(false);
+        self.digital_write_internal(IO_INT_ADDR, OE, false)?;
+        self.digital_write_internal(IO_INT_ADDR, PWRUP, true)?;
+
+        let mut ok = false;
+        let mut last_pg = 0u8;
+        for _ in 0..250 {
+            embassy_time::Timer::after_millis(1).await;
+            last_pg = self.read_power_good()?;
+            if last_pg == PWR_GOOD_OK {
+                ok = true;
+                break;
+            }
+        }
+        if !ok {
+            let _ = self.eink_off_async().await;
+            return Err(InkplateHalError::PanelPowerTimeout(last_pg));
+        }
+
+        self.digital_write_internal(IO_INT_ADDR, VCOM, true)?;
+        self.digital_write_internal(IO_INT_ADDR, OE, true)?;
+        self.panel_on = true;
+        Ok(())
+    }
+
+    pub async fn eink_off_async(&mut self) -> Result<(), I2C::Error> {
+        if !self.panel_on {
+            return Ok(());
+        }
+
+        self.digital_write_internal(IO_INT_ADDR, VCOM, false)?;
+        self.digital_write_internal(IO_INT_ADDR, OE, false)?;
+        self.digital_write_internal(IO_INT_ADDR, GMOD, false)?;
+
+        self.clear_data_and_cl_le();
+        self.set_ckv(false);
+        self.set_sph(false);
+        self.digital_write_internal(IO_INT_ADDR, SPV, false)?;
+        self.digital_write_internal(IO_INT_ADDR, PWRUP, false)?;
+
+        for _ in 0..250 {
+            embassy_time::Timer::after_millis(1).await;
+            if self.read_power_good()? == 0 {
+                break;
+            }
+        }
+
+        self.digital_write_internal(IO_INT_ADDR, WAKEUP, false)?;
+        self.i2c_write(TPS65186_ADDR, &[0x01, 0x00])?;
+        self.panel_on = false;
+        Ok(())
+    }
 }

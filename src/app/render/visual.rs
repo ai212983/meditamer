@@ -103,7 +103,7 @@ pub(crate) async fn render_suminagashi_update(
         2,
     );
 
-    let _ = display.display_bw(false);
+    let _ = display.display_bw_async(false).await;
     update_marble_metrics(started);
 }
 
@@ -132,7 +132,7 @@ pub(crate) async fn render_shanshui_update(
         2,
     );
 
-    let _ = display.display_bw(false);
+    let _ = display.display_bw_async(false).await;
     update_marble_metrics(started);
 }
 

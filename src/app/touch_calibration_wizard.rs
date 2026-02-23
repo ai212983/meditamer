@@ -98,15 +98,15 @@ impl TouchCalibrationWizard {
         !matches!(self.phase, WizardPhase::Closed)
     }
 
-    pub(crate) fn render_full(&self, display: &mut InkplateDriver) {
-        self.render_with_refresh(display, true);
+    pub(crate) async fn render_full(&self, display: &mut InkplateDriver) {
+        self.render_with_refresh(display, true).await;
     }
 
-    pub(crate) fn render_partial(&self, display: &mut InkplateDriver) {
-        self.render_with_refresh(display, false);
+    pub(crate) async fn render_partial(&self, display: &mut InkplateDriver) {
+        self.render_with_refresh(display, false).await;
     }
 
-    fn render_with_refresh(&self, display: &mut InkplateDriver, full_refresh: bool) {
+    async fn render_with_refresh(&self, display: &mut InkplateDriver, full_refresh: bool) {
         if !self.is_active() {
             return;
         }
@@ -142,13 +142,13 @@ impl TouchCalibrationWizard {
         draw_centered_text(display, &META_FONT, footer, height - 42);
 
         if full_refresh {
-            let _ = display.display_bw(false);
+            let _ = display.display_bw_async(false).await;
         } else {
-            let _ = display.display_bw_partial(false);
+            let _ = display.display_bw_partial_async(false).await;
         }
     }
 
-    pub(crate) fn handle_event(
+    pub(crate) async fn handle_event(
         &mut self,
         display: &mut InkplateDriver,
         event: TouchEvent,
@@ -222,9 +222,9 @@ impl TouchCalibrationWizard {
 
         if changed {
             if matches!(prev_phase, WizardPhase::Intro) {
-                self.render_full(display);
+                self.render_full(display).await;
             } else {
-                self.render_partial(display);
+                self.render_partial(display).await;
             }
         }
         WizardDispatch::Consumed
@@ -514,7 +514,7 @@ impl TouchCalibrationWizard {
     }
 }
 
-pub(crate) fn render_touch_wizard_waiting_screen(display: &mut InkplateDriver) {
+pub(crate) async fn render_touch_wizard_waiting_screen(display: &mut InkplateDriver) {
     let width = display.width() as i32;
     let height = display.height() as i32;
     let _ = display.clear(BinaryColor::Off);
@@ -541,7 +541,7 @@ pub(crate) fn render_touch_wizard_waiting_screen(display: &mut InkplateDriver) {
         height - 42,
     );
 
-    let _ = display.display_bw(false);
+    let _ = display.display_bw_async(false).await;
 }
 
 fn draw_frame(display: &mut InkplateDriver, width: i32, height: i32) {
