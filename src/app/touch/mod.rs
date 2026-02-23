@@ -30,7 +30,8 @@ impl TouchEngine {
 
     pub(crate) fn tick(&mut self, now_ms: u64, sample: HalTouchSample) -> TouchEngineOutput {
         let primary = self.select_primary_point(sample);
-        let normalized_count = if primary.is_some() { 1 } else { 0 };
+        // Keep binary touch presence from controller count; coordinate quality can flicker.
+        let normalized_count = if sample.touch_count == 0 { 0 } else { 1 };
         let core_sample = core::TouchSample {
             touch_count: normalized_count,
             points: [primary.unwrap_or_default(), core::TouchPoint::default()],
@@ -43,6 +44,20 @@ impl TouchEngine {
     }
 
     fn select_primary_point(&mut self, sample: HalTouchSample) -> Option<core::TouchPoint> {
+        if sample.touch_count == 0 {
+            self.last_primary = None;
+            return None;
+        }
+
+        let point0 = core::TouchPoint {
+            x: sample.points[0].x,
+            y: sample.points[0].y,
+        };
+        let point1 = core::TouchPoint {
+            x: sample.points[1].x,
+            y: sample.points[1].y,
+        };
+
         let mut candidates = [core::TouchPoint::default(); 2];
         let mut candidate_count = 0usize;
 
@@ -59,22 +74,41 @@ impl TouchEngine {
             }
         }
 
-        if candidate_count == 0 {
-            self.last_primary = None;
-            return None;
-        }
-
         let selected = if candidate_count == 1 || self.last_primary.is_none() {
-            candidates[0]
+            if candidate_count == 0 {
+                self.last_primary.unwrap_or(point0)
+            } else {
+                candidates[0]
+            }
         } else {
             let prev = self.last_primary.unwrap_or_default();
             let a = candidates[0];
-            let b = candidates[1];
-            if squared_distance(a, prev) <= squared_distance(b, prev) {
+            if candidate_count == 1 {
                 a
             } else {
-                b
+                let b = candidates[1];
+                if squared_distance(a, prev) <= squared_distance(b, prev) {
+                    a
+                } else {
+                    b
+                }
             }
+        };
+
+        // If decoded coordinates are both zero yet controller still reports touch,
+        // prefer continuity; otherwise fall back to slot 0, then slot 1.
+        let selected = if selected.x == 0 && selected.y == 0 {
+            self.last_primary
+                .or(if point0.x != 0 || point0.y != 0 {
+                    Some(point0)
+                } else if point1.x != 0 || point1.y != 0 {
+                    Some(point1)
+                } else {
+                    Some(point0)
+                })
+                .unwrap_or(selected)
+        } else {
+            selected
         };
 
         self.last_primary = Some(selected);
