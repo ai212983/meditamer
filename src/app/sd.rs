@@ -106,12 +106,15 @@ async fn process_request(
 
     let start = Instant::now();
     let mut attempts = 0u8;
-    let mut ok = false;
+    let mut code = SdResultCode::OperationFailed;
 
     while attempts < SD_RETRY_MAX_ATTEMPTS {
         attempts = attempts.saturating_add(1);
-        ok = run_sd_command("request", request.command, sd_probe, power).await;
-        if ok {
+        code = run_sd_command("request", request.command, sd_probe, power).await;
+        if code == SdResultCode::Ok {
+            break;
+        }
+        if !sd_result_should_retry(code) {
             break;
         }
 
@@ -119,11 +122,12 @@ async fn process_request(
             Timer::after_millis(SD_RETRY_DELAY_MS).await;
             if !request_sd_power(SdPowerRequest::Off).await {
                 let duration_ms = duration_ms_since(start);
+                *powered = false;
                 return SdResult {
                     id: request.id,
                     kind,
                     ok: false,
-                    code: SdResultCode::PowerOnFailed,
+                    code: SdResultCode::PowerOffFailed,
                     attempts,
                     duration_ms,
                 };
@@ -148,12 +152,8 @@ async fn process_request(
     SdResult {
         id: request.id,
         kind,
-        ok,
-        code: if ok {
-            SdResultCode::Ok
-        } else {
-            SdResultCode::OperationFailed
-        },
+        ok: code == SdResultCode::Ok,
+        code,
         attempts,
         duration_ms,
     }
@@ -184,7 +184,7 @@ async fn run_sd_command(
     command: SdCommand,
     sd_probe: &mut SdProbeDriver,
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
-) -> bool {
+) -> SdResultCode {
     match command {
         SdCommand::SdProbe => sd_ops::run_sd_probe(reason, sd_probe, power).await,
         SdCommand::SdRwVerify { lba } => {
@@ -248,6 +248,13 @@ async fn run_sd_command(
     }
 }
 
+fn sd_result_should_retry(code: SdResultCode) -> bool {
+    matches!(
+        code,
+        SdResultCode::PowerOnFailed | SdResultCode::InitFailed | SdResultCode::OperationFailed
+    )
+}
+
 fn sd_command_kind(command: SdCommand) -> SdCommandKind {
     match command {
         SdCommand::SdProbe => SdCommandKind::Probe,
@@ -298,7 +305,13 @@ fn sd_result_code_label(code: SdResultCode) -> &'static str {
     match code {
         SdResultCode::Ok => "ok",
         SdResultCode::PowerOnFailed => "power_on_failed",
+        SdResultCode::InitFailed => "init_failed",
+        SdResultCode::InvalidPath => "invalid_path",
+        SdResultCode::NotFound => "not_found",
+        SdResultCode::VerifyMismatch => "verify_mismatch",
+        SdResultCode::PowerOffFailed => "power_off_failed",
         SdResultCode::OperationFailed => "operation_failed",
+        SdResultCode::RefusedLba0 => "refused_lba0",
     }
 }
 
@@ -339,5 +352,17 @@ mod tests {
             }),
             SdCommandKind::FatTruncate
         );
+    }
+
+    #[test]
+    fn retry_policy_matches_result_codes() {
+        assert!(sd_result_should_retry(SdResultCode::PowerOnFailed));
+        assert!(sd_result_should_retry(SdResultCode::InitFailed));
+        assert!(sd_result_should_retry(SdResultCode::OperationFailed));
+        assert!(!sd_result_should_retry(SdResultCode::InvalidPath));
+        assert!(!sd_result_should_retry(SdResultCode::NotFound));
+        assert!(!sd_result_should_retry(SdResultCode::VerifyMismatch));
+        assert!(!sd_result_should_retry(SdResultCode::PowerOffFailed));
+        assert!(!sd_result_should_retry(SdResultCode::RefusedLba0));
     }
 }

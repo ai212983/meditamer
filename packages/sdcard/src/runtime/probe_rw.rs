@@ -12,17 +12,21 @@ pub async fn run_sd_probe<E, P>(
     reason: &str,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
-) -> bool
+) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
     if power_on(power).await.is_err() {
         esp_println::println!("sdprobe[{}]: power_on_error", reason);
-        return false;
+        return SdRuntimeResultCode::PowerOnFailed;
     }
 
     let result = sd_probe.probe().await;
-    let success = result.is_ok();
+    let code = if result.is_ok() {
+        SdRuntimeResultCode::Ok
+    } else {
+        SdRuntimeResultCode::OperationFailed
+    };
 
     match result {
         Ok(status) => {
@@ -141,9 +145,9 @@ where
 
     if power_off_io(power).is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
-        return false;
+        return SdRuntimeResultCode::PowerOffFailed;
     }
-    success
+    code
 }
 
 pub async fn run_sd_rw_verify<E, P>(
@@ -151,24 +155,24 @@ pub async fn run_sd_rw_verify<E, P>(
     lba: u32,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
-) -> bool
+) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
     if lba == 0 {
         esp_println::println!("sdrw[{}]: refused_lba0", reason);
-        return false;
+        return SdRuntimeResultCode::RefusedLba0;
     }
 
     if power_on(power).await.is_err() {
         esp_println::println!("sdrw[{}]: power_on_error", reason);
-        return false;
+        return SdRuntimeResultCode::PowerOnFailed;
     }
 
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdrw[{}]: init_error={:?}", reason, err);
         let _ = power_off_io(power);
-        return false;
+        return SdRuntimeResultCode::InitFailed;
     }
 
     let mut before = [0u8; probe::SD_SECTOR_SIZE];
@@ -180,13 +184,13 @@ where
             err
         );
         let _ = power_off_io(power);
-        return false;
+        return SdRuntimeResultCode::OperationFailed;
     }
 
     if let Err(err) = sd_probe.write_sector(lba, &before).await {
         esp_println::println!("sdrw[{}]: write_error lba={} err={:?}", reason, lba, err);
         let _ = power_off_io(power);
-        return false;
+        return SdRuntimeResultCode::OperationFailed;
     }
 
     let mut after = [0u8; probe::SD_SECTOR_SIZE];
@@ -198,10 +202,10 @@ where
             err
         );
         let _ = power_off_io(power);
-        return false;
+        return SdRuntimeResultCode::OperationFailed;
     }
 
-    let mut success = true;
+    let mut code = SdRuntimeResultCode::Ok;
     if let Some(idx) = before.iter().zip(after.iter()).position(|(a, b)| a != b) {
         esp_println::println!(
             "sdrw[{}]: verify_mismatch lba={} byte={} before=0x{:02x} after=0x{:02x}",
@@ -211,7 +215,7 @@ where
             before[idx],
             after[idx]
         );
-        success = false;
+        code = SdRuntimeResultCode::VerifyMismatch;
     } else {
         esp_println::println!(
             "sdrw[{}]: verify_ok lba={} bytes={}",
@@ -223,7 +227,7 @@ where
 
     if power_off_io(power).is_err() {
         esp_println::println!("sdrw[{}]: power_off_error", reason);
-        return false;
+        return SdRuntimeResultCode::PowerOffFailed;
     }
-    success
+    code
 }
