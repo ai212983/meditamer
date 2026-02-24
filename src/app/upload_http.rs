@@ -35,6 +35,7 @@ const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
 const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
+const WIFI_FORCED_CHANNEL: u8 = 8;
 const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
     AuthMethod::Wpa,
     AuthMethod::Wpa2Personal,
@@ -707,6 +708,7 @@ fn mode_config_from_credentials(
             .with_ssid(ssid.into())
             .with_password(password.into())
             .with_auth_method(auth_method)
+            .with_channel(WIFI_FORCED_CHANNEL)
             .with_scan_method(ScanMethod::AllChannels),
     ))
 }
