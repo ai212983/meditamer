@@ -18,7 +18,7 @@ const SD_CMD24: u8 = 24;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
-const SD_DATA_SPI_RATE_MHZ: u32 = 8;
+const SD_DATA_SPI_RATE_MHZ: u32 = 24;
 pub const SD_SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
