@@ -1,0 +1,168 @@
+# gh-csi configuration
+
+version = 1
+
+[agent]
+name = "gh-csi"
+
+[github]
+# Required. Public-safe allowlist for GitHub I/O.
+# Must match the slug derived from `git remote get-url origin` unless GH_CSI_ALLOW_REPO_MISMATCH=1 is set.
+repo = "ai212983/meditamer"
+remote = "origin"
+# Public-safe default: only claim issues created by trusted actors.
+allowed_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
+
+[labels]
+queue = "agent:run"
+in_progress = "agent:in-progress"
+done = "agent:done"
+failed = "agent:failed"
+blocked = "agent:blocked"
+# Optional: apply to an issue to use the "heavy" executor model chain.
+heavy = "agent:heavy"
+# Optional: keep the original issue open after a successful run.
+keep_open = "agent:keep-open"
+# Optional: planning-only mode (skip checks; comment plan back to the issue).
+plan = "agent:plan"
+
+[paths]
+run_root = ".gh-csi/output/runs"
+worktree_root = ".gh-csi/output/worktrees"
+
+[schedule]
+# Keep existing schedule window behavior by default.
+enforce_window = true
+window = "default" # default | always
+
+[retention]
+# Prune old run artifact directories under [paths].run_root.
+# A run dir is kept if it’s either:
+# - within the most recent `runs_keep_last` runs, OR
+# - newer than `runs_keep_days` days (if set).
+runs_keep_last = 10
+runs_keep_days = 7
+
+[git]
+branch_prefix = "agent/"
+author_name = "gh-csi"
+author_email = "gh-csi@local"
+
+[executor]
+[executor.pi]
+# Optional: persist Pi auth/config in this directory for unattended runs.
+# Example: ".gh-csi/output/pi"
+data_dir = ".gh-csi/output/pi"
+# Tools enabled for Pi runs (default is all tools).
+tools = ["read", "grep", "find", "ls", "bash", "edit", "write"]
+
+[limits]
+max_issue_tasks_per_run = 1
+max_pr_tasks_per_run = 1
+max_maintenance_tasks_per_run = 0
+max_attempts_per_task = 2
+max_subtasks_per_issue = 10
+stale_lock_minutes = 360
+
+[timeouts]
+# Hard time limits for executor runs to prevent an unattended run from hanging forever.
+executor_minutes = 10
+writer_minutes = 10
+
+[[checks]]
+label = "cargo +stable fmt --all -- --check --color always"
+command = "cargo"
+args = ["+stable", "fmt", "--all", "--", "--check", "--color", "always"]
+
+[[checks]]
+label = "scripts/test_event_config_host.sh"
+command = "scripts/test_event_config_host.sh"
+
+[[checks]]
+label = "scripts/test_event_engine_host.sh"
+command = "scripts/test_event_engine_host.sh"
+
+[[checks]]
+label = "scripts/test_touch_core_host.sh"
+command = "scripts/test_touch_core_host.sh"
+
+[[checks]]
+label = "scripts/test_touch_replay_host.sh"
+command = "scripts/test_touch_replay_host.sh"
+
+[[checks]]
+label = "scripts/lint_host_tools.sh"
+command = "scripts/lint_host_tools.sh"
+
+[copilot]
+# Copilot loop controls. Prefer configuring these in TOML (instead of env vars).
+reviewer_candidates = ["copilot-pull-request-reviewer[bot]", "github-copilot[bot]"]
+max_comments_per_run = 5
+max_review_rounds = 50
+
+[copilot.merge]
+max_merges_per_run = 3
+merge_method = "squash" # merge | squash | rebase
+require_green_checks = true
+
+[delegation]
+# Optional: enable profile-based delegation by issue/comment content.
+enabled = false
+default_profile = "generalist-mid"
+
+[[delegation.profiles]]
+id = "generalist-mid"
+seniority = "mid"
+specializations = ["docs", "tests", "refactor", "bugfix"]
+[delegation.profiles.match]
+labels = []
+keywords = []
+paths = []
+[delegation.profiles.routing]
+model_role = "executor"
+# prompt_prefix = "You are a mid-level generalist agent. Prefer pragmatic, low-risk changes."
+
+# Example specialized profile:
+# [[delegation.profiles]]
+# id = "senior-typescript"
+# seniority = "senior"
+# specializations = ["typescript", "schema", "zod", "api", "migration"]
+# [delegation.profiles.match]
+# labels = ["typescript", "backend"]
+# keywords = ["breaking change", "migration", "schema", "zod", "typing"]
+# paths = ["src/core/schema", "src"]
+# [delegation.profiles.routing]
+# model_role = "executor_heavy"
+# prompt_prefix = "You are a senior TypeScript platform engineer. Focus on safe migrations, typing, and backward compatibility."
+
+[[maintenance_tasks]]
+id = "dependency-hygiene"
+title = "Dependency hygiene sweep"
+enabled = true
+run_every_hours = 168
+prompt_path = "tasks/dependency-hygiene.md"
+preferred_outcome = "issue"
+
+[[maintenance_tasks]]
+id = "test-lint-drift"
+title = "Test + lint drift check"
+enabled = true
+run_every_hours = 24
+prompt_path = "tasks/test-lint-drift.md"
+preferred_outcome = "issue"
+
+[[maintenance_tasks]]
+id = "docs-polish"
+title = "Docs polish"
+enabled = true
+run_every_hours = 168
+prompt_path = "tasks/docs-polish.md"
+preferred_outcome = "pr"
+
+[[maintenance_tasks]]
+id = "large-file-refactor"
+title = "Large file refactor suggestions"
+enabled = true
+run_every_hours = 168
+prompt_path = "tasks/large-file-refactor.md"
+preferred_outcome = "issue"
