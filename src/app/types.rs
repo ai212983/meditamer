@@ -15,15 +15,17 @@ pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
-    Refresh {
-        uptime_seconds: u32,
-    },
+    Refresh { uptime_seconds: u32 },
     BatteryTick,
     TimeSync(TimeSyncCommand),
     TouchIrq,
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SdCommand {
     SdProbe,
     SdRwVerify {
         lba: u32,
@@ -71,6 +73,41 @@ pub(crate) enum AppEvent {
         path_len: u8,
         size: u32,
     },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SdCommandKind {
+    Probe,
+    RwVerify,
+    FatList,
+    FatRead,
+    FatWrite,
+    FatStat,
+    FatMkdir,
+    FatRemove,
+    FatRename,
+    FatAppend,
+    FatTruncate,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdRequest {
+    pub(crate) id: u32,
+    pub(crate) command: SdCommand,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdResult {
+    pub(crate) id: u32,
+    pub(crate) kind: SdCommandKind,
+    pub(crate) ok: bool,
+    pub(crate) duration_ms: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SdPowerRequest {
+    On,
+    Off,
 }
 
 #[derive(Clone, Copy)]
@@ -163,7 +200,6 @@ pub(crate) struct TapTraceSample {
 
 pub(crate) struct DisplayContext {
     pub(crate) inkplate: InkplateDriver,
-    pub(crate) sd_probe: SdProbeDriver,
     pub(crate) mode_store: ModeStore<'static>,
     pub(crate) _panel_pins: PanelPinHold<'static>,
 }

@@ -2,6 +2,7 @@ pub(crate) mod config;
 mod display;
 mod render;
 mod runtime;
+mod sd;
 mod serial;
 pub(crate) mod store;
 mod touch;
@@ -94,7 +95,6 @@ pub(crate) fn run() -> ! {
 
     let display_context = DisplayContext {
         inkplate,
-        sd_probe,
         mode_store,
         _panel_pins: panel_pins,
     };
@@ -105,6 +105,7 @@ pub(crate) fn run() -> ! {
         spawner.must_spawn(touch::tasks::touch_pipeline_task());
         spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
         spawner.must_spawn(display::display_task(display_context));
+        spawner.must_spawn(sd::sd_task(sd_probe));
         spawner.must_spawn(clock_task());
         spawner.must_spawn(battery_task());
         spawner.must_spawn(serial::time_sync_task(uart));
