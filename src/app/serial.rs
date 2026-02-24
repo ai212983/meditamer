@@ -1,6 +1,6 @@
 use core::{fmt::Write, sync::atomic::Ordering};
 
-use embassy_time::{with_timeout, Duration};
+use embassy_time::{with_timeout, Duration, Timer};
 
 use super::{
     config::{
@@ -18,7 +18,7 @@ use super::{
             write_touch_wizard_swipe_trace_sample, TouchWizardSessionLog,
         },
     },
-    types::{AppEvent, SerialUart, TapTraceSample, TimeSyncCommand},
+    types::{AppEvent, SerialUart, TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX},
 };
 
 #[derive(Clone, Copy)]
@@ -30,7 +30,57 @@ enum SerialCommand {
     RepaintMarble,
     Metrics,
     SdProbe,
+    SdRwVerify {
+        lba: u32,
+    },
+    SdFatList {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRead {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatWrite {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        data: [u8; SD_WRITE_MAX],
+        data_len: u16,
+    },
+    SdFatStat {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatMkdir {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRemove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRename {
+        src_path: [u8; SD_PATH_MAX],
+        src_path_len: u8,
+        dst_path: [u8; SD_PATH_MAX],
+        dst_path_len: u8,
+    },
+    SdFatAppend {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        data: [u8; SD_WRITE_MAX],
+        data_len: u16,
+    },
+    SdFatTruncate {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        size: u32,
+    },
 }
+
+const APP_EVENT_ENQUEUE_RETRY_MS: u64 = 25;
+// Absorb short SD/FAT bursts without requiring host-side pacing.
+const APP_EVENT_ENQUEUE_MAX_RETRIES: u8 = 240;
 
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {
@@ -114,39 +164,8 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                 }
                 if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
                     match cmd {
-                        SerialCommand::TimeSync(cmd) => {
-                            if APP_EVENTS.try_send(AppEvent::TimeSync(cmd)).is_ok() {
-                                let _ = uart_write_all(&mut uart, b"TIMESET OK\r\n").await;
-                            } else {
-                                let _ = uart_write_all(&mut uart, b"TIMESET BUSY\r\n").await;
-                            }
-                        }
-                        SerialCommand::Repaint => {
-                            if APP_EVENTS.try_send(AppEvent::ForceRepaint).is_ok() {
-                                let _ = uart_write_all(&mut uart, b"REPAINT OK\r\n").await;
-                            } else {
-                                let _ = uart_write_all(&mut uart, b"REPAINT BUSY\r\n").await;
-                            }
-                        }
-                        SerialCommand::TouchWizard => {
-                            if APP_EVENTS
-                                .try_send(AppEvent::StartTouchCalibrationWizard)
-                                .is_ok()
-                            {
-                                let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD OK\r\n").await;
-                            } else {
-                                let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD BUSY\r\n").await;
-                            }
-                        }
                         SerialCommand::TouchWizardDump => {
                             touch_wizard_log.write_dump(&mut uart).await;
-                        }
-                        SerialCommand::RepaintMarble => {
-                            if APP_EVENTS.try_send(AppEvent::ForceMarbleRepaint).is_ok() {
-                                let _ = uart_write_all(&mut uart, b"REPAINT_MARBLE OK\r\n").await;
-                            } else {
-                                let _ = uart_write_all(&mut uart, b"REPAINT_MARBLE BUSY\r\n").await;
-                            }
                         }
                         SerialCommand::Metrics => {
                             let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
@@ -159,11 +178,13 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
                         }
-                        SerialCommand::SdProbe => {
-                            if APP_EVENTS.try_send(AppEvent::SdProbe).is_ok() {
-                                let _ = uart_write_all(&mut uart, b"SDPROBE OK\r\n").await;
+                        _ => {
+                            let (event, ok_response, busy_response) =
+                                serial_command_event_and_responses(cmd);
+                            if enqueue_app_event_with_retry(event).await {
+                                let _ = uart.write_async(ok_response).await;
                             } else {
-                                let _ = uart_write_all(&mut uart, b"SDPROBE BUSY\r\n").await;
+                                let _ = uart.write_async(busy_response).await;
                             }
                         }
                     }
@@ -178,6 +199,139 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                 line_len = 0;
             }
         }
+    }
+}
+
+async fn enqueue_app_event_with_retry(event: AppEvent) -> bool {
+    for attempt in 0..=APP_EVENT_ENQUEUE_MAX_RETRIES {
+        if APP_EVENTS.try_send(event).is_ok() {
+            return true;
+        }
+        if attempt == APP_EVENT_ENQUEUE_MAX_RETRIES {
+            break;
+        }
+        Timer::after_millis(APP_EVENT_ENQUEUE_RETRY_MS).await;
+    }
+    false
+}
+
+fn serial_command_event_and_responses(
+    cmd: SerialCommand,
+) -> (AppEvent, &'static [u8], &'static [u8]) {
+    match cmd {
+        SerialCommand::TimeSync(cmd) => (
+            AppEvent::TimeSync(cmd),
+            b"TIMESET OK\r\n",
+            b"TIMESET BUSY\r\n",
+        ),
+        SerialCommand::TouchWizard => (
+            AppEvent::StartTouchCalibrationWizard,
+            b"TOUCH_WIZARD OK\r\n",
+            b"TOUCH_WIZARD BUSY\r\n",
+        ),
+        SerialCommand::Repaint => (
+            AppEvent::ForceRepaint,
+            b"REPAINT OK\r\n",
+            b"REPAINT BUSY\r\n",
+        ),
+        SerialCommand::RepaintMarble => (
+            AppEvent::ForceMarbleRepaint,
+            b"REPAINT_MARBLE OK\r\n",
+            b"REPAINT_MARBLE BUSY\r\n",
+        ),
+        SerialCommand::SdProbe => (AppEvent::SdProbe, b"SDPROBE OK\r\n", b"SDPROBE BUSY\r\n"),
+        SerialCommand::SdRwVerify { lba } => (
+            AppEvent::SdRwVerify { lba },
+            b"SDRWVERIFY OK\r\n",
+            b"SDRWVERIFY BUSY\r\n",
+        ),
+        SerialCommand::SdFatList { path, path_len } => (
+            AppEvent::SdFatList { path, path_len },
+            b"SDFATLS OK\r\n",
+            b"SDFATLS BUSY\r\n",
+        ),
+        SerialCommand::SdFatRead { path, path_len } => (
+            AppEvent::SdFatRead { path, path_len },
+            b"SDFATREAD OK\r\n",
+            b"SDFATREAD BUSY\r\n",
+        ),
+        SerialCommand::SdFatWrite {
+            path,
+            path_len,
+            data,
+            data_len,
+        } => (
+            AppEvent::SdFatWrite {
+                path,
+                path_len,
+                data,
+                data_len,
+            },
+            b"SDFATWRITE OK\r\n",
+            b"SDFATWRITE BUSY\r\n",
+        ),
+        SerialCommand::SdFatStat { path, path_len } => (
+            AppEvent::SdFatStat { path, path_len },
+            b"SDFATSTAT OK\r\n",
+            b"SDFATSTAT BUSY\r\n",
+        ),
+        SerialCommand::SdFatMkdir { path, path_len } => (
+            AppEvent::SdFatMkdir { path, path_len },
+            b"SDFATMKDIR OK\r\n",
+            b"SDFATMKDIR BUSY\r\n",
+        ),
+        SerialCommand::SdFatRemove { path, path_len } => (
+            AppEvent::SdFatRemove { path, path_len },
+            b"SDFATRM OK\r\n",
+            b"SDFATRM BUSY\r\n",
+        ),
+        SerialCommand::SdFatRename {
+            src_path,
+            src_path_len,
+            dst_path,
+            dst_path_len,
+        } => (
+            AppEvent::SdFatRename {
+                src_path,
+                src_path_len,
+                dst_path,
+                dst_path_len,
+            },
+            b"SDFATREN OK\r\n",
+            b"SDFATREN BUSY\r\n",
+        ),
+        SerialCommand::SdFatAppend {
+            path,
+            path_len,
+            data,
+            data_len,
+        } => (
+            AppEvent::SdFatAppend {
+                path,
+                path_len,
+                data,
+                data_len,
+            },
+            b"SDFATAPPEND OK\r\n",
+            b"SDFATAPPEND BUSY\r\n",
+        ),
+        SerialCommand::SdFatTruncate {
+            path,
+            path_len,
+            size,
+        } => (
+            AppEvent::SdFatTruncate {
+                path,
+                path_len,
+                size,
+            },
+            b"SDFATTRUNC OK\r\n",
+            b"SDFATTRUNC BUSY\r\n",
+        ),
+        SerialCommand::TouchWizardDump => {
+            unreachable!("touch wizard dump command is handled inline")
+        }
+        SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
     }
 }
 
@@ -231,6 +385,55 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     }
     if parse_sdprobe_command(line) {
         return Some(SerialCommand::SdProbe);
+    }
+    if let Some(lba) = parse_sdrwverify_command(line) {
+        return Some(SerialCommand::SdRwVerify { lba });
+    }
+    if let Some((path, path_len)) = parse_sdfatls_command(line) {
+        return Some(SerialCommand::SdFatList { path, path_len });
+    }
+    if let Some((path, path_len)) = parse_sdfatread_command(line) {
+        return Some(SerialCommand::SdFatRead { path, path_len });
+    }
+    if let Some((path, path_len, data, data_len)) = parse_sdfatwrite_command(line) {
+        return Some(SerialCommand::SdFatWrite {
+            path,
+            path_len,
+            data,
+            data_len,
+        });
+    }
+    if let Some((path, path_len)) = parse_sdfatstat_command(line) {
+        return Some(SerialCommand::SdFatStat { path, path_len });
+    }
+    if let Some((path, path_len)) = parse_sdfatmkdir_command(line) {
+        return Some(SerialCommand::SdFatMkdir { path, path_len });
+    }
+    if let Some((path, path_len)) = parse_sdfatrm_command(line) {
+        return Some(SerialCommand::SdFatRemove { path, path_len });
+    }
+    if let Some((src_path, src_path_len, dst_path, dst_path_len)) = parse_sdfatren_command(line) {
+        return Some(SerialCommand::SdFatRename {
+            src_path,
+            src_path_len,
+            dst_path,
+            dst_path_len,
+        });
+    }
+    if let Some((path, path_len, data, data_len)) = parse_sdfatappend_command(line) {
+        return Some(SerialCommand::SdFatAppend {
+            path,
+            path_len,
+            data,
+            data_len,
+        });
+    }
+    if let Some((path, path_len, size)) = parse_sdfattrunc_command(line) {
+        return Some(SerialCommand::SdFatTruncate {
+            path,
+            path_len,
+            size,
+        });
     }
 
     parse_timeset_command(line).map(SerialCommand::TimeSync)
@@ -296,6 +499,252 @@ fn parse_sdprobe_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"SDPROBE"
 }
 
+fn parse_sdrwverify_command(line: &[u8]) -> Option<u32> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDRWVERIFY";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (lba, next_i) = parse_u64_ascii(trimmed, i)?;
+    if lba > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+
+    Some(lba as u32)
+}
+
+fn parse_sdfatls_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATLS";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        let mut path = [0u8; SD_PATH_MAX];
+        path[0] = b'/';
+        return Some((path, 1));
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    let mut j = next_i;
+    while j < trimmed.len() && trimmed[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if j != trimmed.len() {
+        return None;
+    }
+    Some((path, path_len))
+}
+
+fn parse_sdfatread_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATREAD";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    let mut j = next_i;
+    while j < trimmed.len() && trimmed[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if j != trimmed.len() {
+        return None;
+    }
+    Some((path, path_len))
+}
+
+fn parse_sdfatwrite_command(
+    line: &[u8],
+) -> Option<([u8; SD_PATH_MAX], u8, [u8; SD_WRITE_MAX], u16)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATWRITE";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i > trimmed.len() {
+        return None;
+    }
+
+    let payload = &trimmed[i..];
+    if payload.len() > SD_WRITE_MAX {
+        return None;
+    }
+
+    let mut data = [0u8; SD_WRITE_MAX];
+    data[..payload.len()].copy_from_slice(payload);
+    Some((path, path_len, data, payload.len() as u16))
+}
+
+fn parse_sdfatstat_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    parse_single_path_command(line, b"SDFATSTAT")
+}
+
+fn parse_sdfatmkdir_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    parse_single_path_command(line, b"SDFATMKDIR")
+}
+
+fn parse_sdfatrm_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    parse_single_path_command(line, b"SDFATRM")
+}
+
+fn parse_sdfatren_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8, [u8; SD_PATH_MAX], u8)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATREN";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (src_path, src_path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (dst_path, dst_path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+
+    Some((src_path, src_path_len, dst_path, dst_path_len))
+}
+
+fn parse_sdfatappend_command(
+    line: &[u8],
+) -> Option<([u8; SD_PATH_MAX], u8, [u8; SD_WRITE_MAX], u16)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATAPPEND";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i > trimmed.len() {
+        return None;
+    }
+
+    let payload = &trimmed[i..];
+    if payload.len() > SD_WRITE_MAX {
+        return None;
+    }
+
+    let mut data = [0u8; SD_WRITE_MAX];
+    data[..payload.len()].copy_from_slice(payload);
+    Some((path, path_len, data, payload.len() as u16))
+}
+
+fn parse_sdfattrunc_command(line: &[u8]) -> Option<([u8; SD_PATH_MAX], u8, u32)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDFATTRUNC";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (size, next_i) = parse_u64_ascii(trimmed, i)?;
+    if size > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+
+    Some((path, path_len, size as u32))
+}
+
+fn parse_single_path_command(line: &[u8], cmd: &[u8]) -> Option<([u8; SD_PATH_MAX], u8)> {
+    let trimmed = trim_ascii_whitespace(line);
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let (path, path_len, next_i) = parse_path_token(trimmed, i)?;
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+    Some((path, path_len))
+}
+
+fn parse_path_token(line: &[u8], start: usize) -> Option<([u8; SD_PATH_MAX], u8, usize)> {
+    if start >= line.len() {
+        return None;
+    }
+    let mut end = start;
+    while end < line.len() && !line[end].is_ascii_whitespace() {
+        end += 1;
+    }
+    if end == start {
+        return None;
+    }
+    let token = &line[start..end];
+    if token.len() > SD_PATH_MAX {
+        return None;
+    }
+    let mut out = [0u8; SD_PATH_MAX];
+    out[..token.len()].copy_from_slice(token);
+    Some((out, token.len() as u8, end))
+}
+
 fn trim_ascii_whitespace(line: &[u8]) -> &[u8] {
     let mut start = 0usize;
     let mut end = line.len();
@@ -350,4 +799,161 @@ fn parse_i32_ascii(bytes: &[u8], i: usize) -> Option<(i32, usize)> {
         return None;
     }
     Some((signed as i32, next_idx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path_from(buf: &[u8; SD_PATH_MAX], len: u8) -> &str {
+        core::str::from_utf8(&buf[..len as usize]).unwrap()
+    }
+
+    #[test]
+    fn parses_sdfatstat() {
+        let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt");
+        match cmd {
+            Some(SerialCommand::SdFatStat { path, path_len }) => {
+                assert_eq!(path_from(&path, path_len), "/notes/TODO.txt");
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdfatmkdir() {
+        let cmd = parse_serial_command(b"SDFATMKDIR /logs");
+        match cmd {
+            Some(SerialCommand::SdFatMkdir { path, path_len }) => {
+                assert_eq!(path_from(&path, path_len), "/logs");
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdfatrename() {
+        let cmd = parse_serial_command(b"SDFATREN /old/name.txt /new/name.txt");
+        match cmd {
+            Some(SerialCommand::SdFatRename {
+                src_path,
+                src_path_len,
+                dst_path,
+                dst_path_len,
+            }) => {
+                assert_eq!(path_from(&src_path, src_path_len), "/old/name.txt");
+                assert_eq!(path_from(&dst_path, dst_path_len), "/new/name.txt");
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdfatappend() {
+        let cmd = parse_serial_command(b"SDFATAPPEND /notes/log.txt hello");
+        match cmd {
+            Some(SerialCommand::SdFatAppend {
+                path,
+                path_len,
+                data,
+                data_len,
+            }) => {
+                assert_eq!(path_from(&path, path_len), "/notes/log.txt");
+                assert_eq!(&data[..data_len as usize], b"hello");
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdrwverify() {
+        let cmd = parse_serial_command(b"SDRWVERIFY 2048");
+        match cmd {
+            Some(SerialCommand::SdRwVerify { lba }) => assert_eq!(lba, 2048),
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_sdfatwrite_payload() {
+        let mut line = heapless::Vec::<u8, 512>::new();
+        line.extend_from_slice(b"SDFATWRITE /notes/big.txt ")
+            .expect("prefix");
+        for _ in 0..(SD_WRITE_MAX + 1) {
+            line.push(b'x').expect("payload");
+        }
+        let cmd = parse_serial_command(&line);
+        assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn parses_sdfattrunc() {
+        let cmd = parse_serial_command(b"SDFATTRUNC /notes/log.txt 1024");
+        match cmd {
+            Some(SerialCommand::SdFatTruncate {
+                path,
+                path_len,
+                size,
+            }) => {
+                assert_eq!(path_from(&path, path_len), "/notes/log.txt");
+                assert_eq!(size, 1024);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_bad_sdfatrename() {
+        let cmd = parse_serial_command(b"SDFATREN /only_one_arg");
+        assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn maps_timeset_to_event_and_responses() {
+        let cmd = parse_serial_command(b"TIMESET 1762531200 -300").expect("command");
+        let (event, ok, busy) = serial_command_event_and_responses(cmd);
+        match event {
+            AppEvent::TimeSync(sync) => {
+                assert_eq!(sync.unix_epoch_utc_seconds, 1_762_531_200);
+                assert_eq!(sync.tz_offset_minutes, -300);
+            }
+            _ => panic!("expected timesync event"),
+        }
+        assert_eq!(ok, b"TIMESET OK\r\n");
+        assert_eq!(busy, b"TIMESET BUSY\r\n");
+    }
+
+    #[test]
+    fn maps_sdfatstat_to_event_and_responses() {
+        let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt").expect("command");
+        let (event, ok, busy) = serial_command_event_and_responses(cmd);
+        match event {
+            AppEvent::SdFatStat { path, path_len } => {
+                assert_eq!(path_from(&path, path_len), "/notes/TODO.txt");
+            }
+            _ => panic!("expected sdfat stat event"),
+        }
+        assert_eq!(ok, b"SDFATSTAT OK\r\n");
+        assert_eq!(busy, b"SDFATSTAT BUSY\r\n");
+    }
+
+    #[test]
+    fn maps_sdfatren_to_event_and_responses() {
+        let cmd = parse_serial_command(b"SDFATREN /a.txt /b.txt").expect("command");
+        let (event, ok, busy) = serial_command_event_and_responses(cmd);
+        match event {
+            AppEvent::SdFatRename {
+                src_path,
+                src_path_len,
+                dst_path,
+                dst_path_len,
+            } => {
+                assert_eq!(path_from(&src_path, src_path_len), "/a.txt");
+                assert_eq!(path_from(&dst_path, dst_path_len), "/b.txt");
+            }
+            _ => panic!("expected sdfat rename event"),
+        }
+        assert_eq!(ok, b"SDFATREN OK\r\n");
+        assert_eq!(busy, b"SDFATREN BUSY\r\n");
+    }
 }
