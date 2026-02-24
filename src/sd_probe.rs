@@ -130,7 +130,8 @@ impl<'d> SdCardProbe<'d> {
         }
         let csd = self.read_data_block()?;
         self.end_transaction();
-        let capacity_bytes = decode_capacity_bytes(&csd).ok_or(SdProbeError::CapacityDecodeFailed)?;
+        let capacity_bytes =
+            decode_capacity_bytes(&csd).ok_or(SdProbeError::CapacityDecodeFailed)?;
         let filesystem = self.detect_filesystem((ocr[0] & 0x40) != 0)?;
 
         Ok(SdProbeStatus {
@@ -248,7 +249,11 @@ impl<'d> SdCardProbe<'d> {
         Ok(block)
     }
 
-    fn read_data_sector_512(&mut self, lba: u32, high_capacity: bool) -> Result<[u8; 512], SdProbeError> {
+    fn read_data_sector_512(
+        &mut self,
+        lba: u32,
+        high_capacity: bool,
+    ) -> Result<[u8; 512], SdProbeError> {
         let arg = if high_capacity {
             lba
         } else {

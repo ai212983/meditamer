@@ -254,19 +254,20 @@ fn atkinson_add(cell: &mut i16, delta: i16) {
 }
 
 #[inline]
-fn river_override(
-    base_ink: u8,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    seed: u32,
-) -> u8 {
+fn river_override(base_ink: u8, x: i32, y: i32, width: i32, height: i32, seed: u32) -> u8 {
     let river_start = (height * 42) / 100;
     let center = river_center_x(y, width, height, seed);
     // Evaluate terrain depth on the river centerline (stable across x for this y)
     // to avoid vertical cut artifacts where local mountain depth changes abruptly.
-    let far_c = layer_height(center, width, height, seed ^ 0x4A56_CE3D, 7, FX_0_35, FX_0_35);
+    let far_c = layer_height(
+        center,
+        width,
+        height,
+        seed ^ 0x4A56_CE3D,
+        7,
+        FX_0_35,
+        FX_0_35,
+    );
     let mid_c = layer_height(
         center + 67,
         width,
@@ -337,7 +338,15 @@ fn river_override(
 #[inline]
 fn river_tree_exclusion(x: i32, y: i32, width: i32, height: i32, seed: u32) -> bool {
     let center = river_center_x(y, width, height, seed);
-    let far_c = layer_height(center, width, height, seed ^ 0x4A56_CE3D, 7, FX_0_35, FX_0_35);
+    let far_c = layer_height(
+        center,
+        width,
+        height,
+        seed ^ 0x4A56_CE3D,
+        7,
+        FX_0_35,
+        FX_0_35,
+    );
     let mid_c = layer_height(
         center + 67,
         width,
@@ -364,10 +373,11 @@ fn river_tree_exclusion(x: i32, y: i32, width: i32, height: i32, seed: u32) -> b
         return false;
     }
 
-    let half_w = (fx_i32(river_half_width(y, width, height, valley_floor, depth_factor, seed).max(2))
-        * (FX_0_35 + row_strength * FX_0_6))
-        .to_num::<i32>()
-        .max(3);
+    let half_w =
+        (fx_i32(river_half_width(y, width, height, valley_floor, depth_factor, seed).max(2))
+            * (FX_0_35 + row_strength * FX_0_6))
+            .to_num::<i32>()
+            .max(3);
     (x - center).abs() <= half_w + 6
 }
 
@@ -395,15 +405,18 @@ fn river_half_width(
     let span = (height - valley_floor).max(1);
     let y_rel = (y - valley_floor).clamp(0, span);
     let y_t = Fx::from_bits((y_rel << 16) / span).clamp(FX_ZERO, FX_ONE);
-    let t = (depth_factor * Fx::from_bits(39_322) + y_t * Fx::from_bits(26_214)).clamp(FX_ZERO, FX_ONE);
+    let t =
+        (depth_factor * Fx::from_bits(39_322) + y_t * Fx::from_bits(26_214)).clamp(FX_ZERO, FX_ONE);
 
     let top_w = 5;
     let bottom_w = (width / 6).clamp(28, 120);
     let base = fx_i32(top_w) + fx_i32(bottom_w - top_w) * smoothstep01(t);
 
-    let wobble = (value_noise1d(y.saturating_mul(3) + 17, seed ^ 0xC82A_6F51, 5) - FX_HALF)
-        * fx_i32(5);
-    (base + wobble).to_num::<i32>().clamp(4, (width / 3).max(12))
+    let wobble =
+        (value_noise1d(y.saturating_mul(3) + 17, seed ^ 0xC82A_6F51, 5) - FX_HALF) * fx_i32(5);
+    (base + wobble)
+        .to_num::<i32>()
+        .clamp(4, (width / 3).max(12))
 }
 
 #[inline]
@@ -508,7 +521,11 @@ fn layer_height(
     let h = height.max(1);
     let nx = wrap_x(x, w);
     let macro_noise = value_noise1d(nx, seed, cell_shift);
-    let detail_noise = value_noise1d(nx * 2 + 17, seed ^ 0x1B87_359D, cell_shift.saturating_sub(1));
+    let detail_noise = value_noise1d(
+        nx * 2 + 17,
+        seed ^ 0x1B87_359D,
+        cell_shift.saturating_sub(1),
+    );
     let n = (macro_noise * FX_0_6 + detail_noise * FX_0_4) - FX_HALF;
 
     let base = fx_i32(h) * base_ratio;
