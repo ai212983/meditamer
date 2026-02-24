@@ -228,12 +228,12 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
         );
     }
 
-    loop {
-        let mut rx_buffer = [0u8; HTTP_RW_BUF];
-        let mut tx_buffer = [0u8; HTTP_RW_BUF];
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(20)));
+    let mut rx_buffer = [0u8; HTTP_RW_BUF];
+    let mut tx_buffer = [0u8; HTTP_RW_BUF];
+    let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+    socket.set_timeout(Some(Duration::from_secs(20)));
 
+    loop {
         let accepted = socket
             .accept(IpListenEndpoint {
                 addr: None,
@@ -242,6 +242,8 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
             .await;
         if let Err(err) = accepted {
             println!("upload_http: accept err={:?}", err);
+            socket.abort();
+            Timer::after(Duration::from_millis(10)).await;
             continue;
         }
 
