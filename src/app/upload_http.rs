@@ -250,7 +250,6 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
         }
 
         socket.close();
-        socket.abort();
     }
 }
 
