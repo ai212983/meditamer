@@ -249,7 +249,6 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
             println!("upload_http: request err={}", err);
         }
 
-        let _ = socket.flush().await;
         socket.close();
         socket.abort();
     }
