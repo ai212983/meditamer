@@ -24,7 +24,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
     // Keep boot probe behavior, but now report completion through result channel.
     let boot_req = SdRequest {
         id: 0,
-        command: SdCommand::SdProbe,
+        command: SdCommand::Probe,
     };
     let boot_result = process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power).await;
     publish_result(boot_result);
@@ -43,15 +43,12 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         }
 
         let request = if powered {
-            match with_timeout(
+            with_timeout(
                 Duration::from_millis(SD_IDLE_POWER_OFF_MS),
                 SD_REQUESTS.receive(),
             )
             .await
-            {
-                Ok(request) => Some(request),
-                Err(_) => None,
-            }
+            .ok()
         } else {
             Some(SD_REQUESTS.receive().await)
         };
@@ -186,17 +183,15 @@ async fn run_sd_command(
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
 ) -> SdResultCode {
     match command {
-        SdCommand::SdProbe => sd_ops::run_sd_probe(reason, sd_probe, power).await,
-        SdCommand::SdRwVerify { lba } => {
-            sd_ops::run_sd_rw_verify(reason, lba, sd_probe, power).await
-        }
-        SdCommand::SdFatList { path, path_len } => {
+        SdCommand::Probe => sd_ops::run_sd_probe(reason, sd_probe, power).await,
+        SdCommand::RwVerify { lba } => sd_ops::run_sd_rw_verify(reason, lba, sd_probe, power).await,
+        SdCommand::FatList { path, path_len } => {
             sd_ops::run_sd_fat_ls(reason, &path, path_len, sd_probe, power).await
         }
-        SdCommand::SdFatRead { path, path_len } => {
+        SdCommand::FatRead { path, path_len } => {
             sd_ops::run_sd_fat_read(reason, &path, path_len, sd_probe, power).await
         }
-        SdCommand::SdFatWrite {
+        SdCommand::FatWrite {
             path,
             path_len,
             data,
@@ -205,16 +200,16 @@ async fn run_sd_command(
             sd_ops::run_sd_fat_write(reason, &path, path_len, &data, data_len, sd_probe, power)
                 .await
         }
-        SdCommand::SdFatStat { path, path_len } => {
+        SdCommand::FatStat { path, path_len } => {
             sd_ops::run_sd_fat_stat(reason, &path, path_len, sd_probe, power).await
         }
-        SdCommand::SdFatMkdir { path, path_len } => {
+        SdCommand::FatMkdir { path, path_len } => {
             sd_ops::run_sd_fat_mkdir(reason, &path, path_len, sd_probe, power).await
         }
-        SdCommand::SdFatRemove { path, path_len } => {
+        SdCommand::FatRemove { path, path_len } => {
             sd_ops::run_sd_fat_remove(reason, &path, path_len, sd_probe, power).await
         }
-        SdCommand::SdFatRename {
+        SdCommand::FatRename {
             src_path,
             src_path_len,
             dst_path,
@@ -231,7 +226,7 @@ async fn run_sd_command(
             )
             .await
         }
-        SdCommand::SdFatAppend {
+        SdCommand::FatAppend {
             path,
             path_len,
             data,
@@ -240,7 +235,7 @@ async fn run_sd_command(
             sd_ops::run_sd_fat_append(reason, &path, path_len, &data, data_len, sd_probe, power)
                 .await
         }
-        SdCommand::SdFatTruncate {
+        SdCommand::FatTruncate {
             path,
             path_len,
             size,
@@ -257,17 +252,17 @@ fn sd_result_should_retry(code: SdResultCode) -> bool {
 
 fn sd_command_kind(command: SdCommand) -> SdCommandKind {
     match command {
-        SdCommand::SdProbe => SdCommandKind::Probe,
-        SdCommand::SdRwVerify { .. } => SdCommandKind::RwVerify,
-        SdCommand::SdFatList { .. } => SdCommandKind::FatList,
-        SdCommand::SdFatRead { .. } => SdCommandKind::FatRead,
-        SdCommand::SdFatWrite { .. } => SdCommandKind::FatWrite,
-        SdCommand::SdFatStat { .. } => SdCommandKind::FatStat,
-        SdCommand::SdFatMkdir { .. } => SdCommandKind::FatMkdir,
-        SdCommand::SdFatRemove { .. } => SdCommandKind::FatRemove,
-        SdCommand::SdFatRename { .. } => SdCommandKind::FatRename,
-        SdCommand::SdFatAppend { .. } => SdCommandKind::FatAppend,
-        SdCommand::SdFatTruncate { .. } => SdCommandKind::FatTruncate,
+        SdCommand::Probe => SdCommandKind::Probe,
+        SdCommand::RwVerify { .. } => SdCommandKind::RwVerify,
+        SdCommand::FatList { .. } => SdCommandKind::FatList,
+        SdCommand::FatRead { .. } => SdCommandKind::FatRead,
+        SdCommand::FatWrite { .. } => SdCommandKind::FatWrite,
+        SdCommand::FatStat { .. } => SdCommandKind::FatStat,
+        SdCommand::FatMkdir { .. } => SdCommandKind::FatMkdir,
+        SdCommand::FatRemove { .. } => SdCommandKind::FatRemove,
+        SdCommand::FatRename { .. } => SdCommandKind::FatRename,
+        SdCommand::FatAppend { .. } => SdCommandKind::FatAppend,
+        SdCommand::FatTruncate { .. } => SdCommandKind::FatTruncate,
     }
 }
 
@@ -332,20 +327,20 @@ mod tests {
 
     #[test]
     fn command_kind_mapping_is_stable() {
-        assert_eq!(sd_command_kind(SdCommand::SdProbe), SdCommandKind::Probe);
+        assert_eq!(sd_command_kind(SdCommand::Probe), SdCommandKind::Probe);
         assert_eq!(
-            sd_command_kind(SdCommand::SdRwVerify { lba: 1 }),
+            sd_command_kind(SdCommand::RwVerify { lba: 1 }),
             SdCommandKind::RwVerify
         );
         assert_eq!(
-            sd_command_kind(SdCommand::SdFatStat {
+            sd_command_kind(SdCommand::FatStat {
                 path: [0; SD_PATH_MAX],
                 path_len: 0
             }),
             SdCommandKind::FatStat
         );
         assert_eq!(
-            sd_command_kind(SdCommand::SdFatTruncate {
+            sd_command_kind(SdCommand::FatTruncate {
                 path: [0; SD_PATH_MAX],
                 path_len: 0,
                 size: 0
