@@ -228,12 +228,12 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
         );
     }
 
-    let mut rx_buffer = [0u8; HTTP_RW_BUF];
-    let mut tx_buffer = [0u8; HTTP_RW_BUF];
-    let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-    socket.set_timeout(Some(Duration::from_secs(20)));
-
     loop {
+        let mut rx_buffer = [0u8; HTTP_RW_BUF];
+        let mut tx_buffer = [0u8; HTTP_RW_BUF];
+        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        socket.set_timeout(Some(Duration::from_secs(20)));
+
         let accepted = socket
             .accept(IpListenEndpoint {
                 addr: None,
