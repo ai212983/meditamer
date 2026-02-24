@@ -25,7 +25,7 @@ use super::{
             TOUCH_SAMPLE_IDLE_FALLBACK_MS, TOUCH_WIZARD_RAW_TRACE_SAMPLES,
             TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS, TOUCH_ZERO_CONFIRM_WINDOW_MS,
         },
-        integration::handle_touch_event,
+        integration::{handle_touch_event, TouchEventContext},
         tasks::{
             draw_touch_feedback_dot, next_touch_sample_period_ms, push_touch_input_sample,
             request_touch_pipeline_reset, try_touch_init_with_logs,
@@ -88,27 +88,30 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     request_touch_pipeline_reset();
 
     loop {
-        let app_wait_ms = next_loop_wait_ms(
+        let app_wait_ms = next_loop_wait_ms(LoopWaitSchedule {
             touch_ready,
             touch_retry_at,
             touch_next_sample_at,
-            imu_double_tap_ready,
+            imu_ready: imu_double_tap_ready,
             imu_retry_at,
             touch_feedback_dirty,
             touch_feedback_next_flush_at,
-            TAP_TRACE_ENABLED && imu_double_tap_ready,
+            tap_trace_active: TAP_TRACE_ENABLED && imu_double_tap_ready,
             tap_trace_next_sample_at,
             tap_trace_aux_next_sample_at,
-        );
+        });
 
-        match with_timeout(Duration::from_millis(app_wait_ms), APP_EVENTS.receive()).await {
-            Ok(event) => match event {
+        if let Ok(event) =
+            with_timeout(Duration::from_millis(app_wait_ms), APP_EVENTS.receive()).await
+        {
+            match event {
                 AppEvent::Refresh { uptime_seconds } => {
                     last_uptime_seconds = uptime_seconds;
                     if !touch_wizard_requested {
                         if display_mode == DisplayMode::Clock {
                             let do_full_refresh = !screen_initialized
-                                || update_count % super::config::FULL_REFRESH_EVERY_N_UPDATES == 0;
+                                || update_count
+                                    .is_multiple_of(super::config::FULL_REFRESH_EVERY_N_UPDATES);
                             super::render::render_clock_update(
                                 &mut context.inkplate,
                                 uptime_seconds,
@@ -150,8 +153,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                                 last_uptime_seconds,
                                 time_sync,
                                 battery_percent,
-                                &mut pattern_nonce,
-                                &mut first_visual_seed_pending,
+                                (&mut pattern_nonce, &mut first_visual_seed_pending),
                                 true,
                             )
                             .await;
@@ -175,8 +177,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                             last_uptime_seconds,
                             time_sync,
                             battery_percent,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
+                            (&mut pattern_nonce, &mut first_visual_seed_pending),
                             true,
                         )
                         .await;
@@ -226,8 +227,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                             last_uptime_seconds,
                             time_sync,
                             battery_percent,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
+                            (&mut pattern_nonce, &mut first_visual_seed_pending),
                             true,
                         )
                         .await;
@@ -265,12 +265,11 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 AppEvent::SdProbe => {
                     run_sd_probe("manual", &mut context.inkplate, &mut context.sd_probe);
                 }
-            },
-            Err(_) => {}
+            }
         }
 
         let touch_bus_quiet = touch_contact_active
-            || touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+            || touch_last_nonzero_at.is_some_and(|last_nonzero_at| {
                 Instant::now()
                     .saturating_duration_since(last_nonzero_at)
                     .as_millis()
@@ -331,8 +330,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                             last_uptime_seconds,
                             time_sync,
                             battery_percent,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
+                            (&mut pattern_nonce, &mut first_visual_seed_pending),
                             true,
                         )
                         .await;
@@ -366,41 +364,38 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
 
             if now >= tap_trace_next_sample_at {
-                match (
+                if let (Ok(int2), Ok((gx, gy, gz, ax, ay, az))) = (
                     context.inkplate.lsm6ds3_int2_level(),
                     context.inkplate.lsm6ds3_read_motion_raw(),
                 ) {
-                    (Ok(int2), Ok((gx, gy, gz, ax, ay, az))) => {
-                        let battery_percent_i16 = battery_percent.map_or(-1, i16::from);
-                        let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
-                        let sample = TapTraceSample {
-                            t_ms,
-                            tap_src: last_detect_tap_src,
-                            seq_count: last_engine_trace.seq_count,
-                            tap_candidate: last_engine_trace.tap_candidate,
-                            cand_src: last_engine_trace.candidate_source_mask,
-                            state_id: last_engine_trace.state_id.as_u8(),
-                            reject_reason: last_engine_trace.reject_reason.as_u8(),
-                            candidate_score: last_engine_trace.candidate_score.0,
-                            window_ms: last_engine_trace.window_ms,
-                            cooldown_active: last_engine_trace.cooldown_active,
-                            jerk_l1: last_engine_trace.jerk_l1,
-                            motion_veto: last_engine_trace.motion_veto,
-                            gyro_l1: last_engine_trace.gyro_l1,
-                            int1: last_detect_int1,
-                            int2: if int2 { 1 } else { 0 },
-                            power_good: tap_trace_power_good,
-                            battery_percent: battery_percent_i16,
-                            gx,
-                            gy,
-                            gz,
-                            ax,
-                            ay,
-                            az,
-                        };
-                        let _ = TAP_TRACE_SAMPLES.try_send(sample);
-                    }
-                    _ => {}
+                    let battery_percent_i16 = battery_percent.map_or(-1, i16::from);
+                    let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
+                    let sample = TapTraceSample {
+                        t_ms,
+                        tap_src: last_detect_tap_src,
+                        seq_count: last_engine_trace.seq_count,
+                        tap_candidate: last_engine_trace.tap_candidate,
+                        cand_src: last_engine_trace.candidate_source_mask,
+                        state_id: last_engine_trace.state_id.as_u8(),
+                        reject_reason: last_engine_trace.reject_reason.as_u8(),
+                        candidate_score: last_engine_trace.candidate_score.0,
+                        window_ms: last_engine_trace.window_ms,
+                        cooldown_active: last_engine_trace.cooldown_active,
+                        jerk_l1: last_engine_trace.jerk_l1,
+                        motion_veto: last_engine_trace.motion_veto,
+                        gyro_l1: last_engine_trace.gyro_l1,
+                        int1: last_detect_int1,
+                        int2: if int2 { 1 } else { 0 },
+                        power_good: tap_trace_power_good,
+                        battery_percent: battery_percent_i16,
+                        gx,
+                        gy,
+                        gz,
+                        ax,
+                        ay,
+                        az,
+                    };
+                    let _ = TAP_TRACE_SAMPLES.try_send(sample);
                 }
                 tap_trace_next_sample_at = now + Duration::from_millis(TAP_TRACE_SAMPLE_MS);
             }
@@ -433,7 +428,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         {
             let scheduled_sample_at = touch_next_sample_at;
             let sample_instant = Instant::now();
-            let touch_recent_nonzero = touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+            let touch_recent_nonzero = touch_last_nonzero_at.is_some_and(|last_nonzero_at| {
                 sample_instant
                     .saturating_duration_since(last_nonzero_at)
                     .as_millis()
@@ -513,7 +508,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
             }
 
-            let touch_recent_nonzero = touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+            let touch_recent_nonzero = touch_last_nonzero_at.is_some_and(|last_nonzero_at| {
                 sample_instant
                     .saturating_duration_since(last_nonzero_at)
                     .as_millis()
@@ -577,8 +572,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                             last_uptime_seconds,
                             time_sync,
                             battery_percent,
-                            &mut pattern_nonce,
-                            &mut first_visual_seed_pending,
+                            (&mut pattern_nonce, &mut first_visual_seed_pending),
                             true,
                         )
                         .await;
@@ -591,17 +585,18 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             handle_touch_event(
                 touch_event,
                 &mut context,
-                &mut touch_feedback_dirty,
-                &mut backlight_cycle_start,
-                &mut backlight_level,
-                &mut update_count,
-                &mut display_mode,
-                last_uptime_seconds,
-                time_sync,
-                battery_percent,
-                &mut pattern_nonce,
-                &mut first_visual_seed_pending,
-                &mut screen_initialized,
+                TouchEventContext {
+                    touch_feedback_dirty: &mut touch_feedback_dirty,
+                    backlight_cycle_start: &mut backlight_cycle_start,
+                    backlight_level: &mut backlight_level,
+                    update_count: &mut update_count,
+                    display_mode: &mut display_mode,
+                    last_uptime_seconds,
+                    time_sync,
+                    battery_percent,
+                    seed_state: (&mut pattern_nonce, &mut first_visual_seed_pending),
+                    screen_initialized: &mut screen_initialized,
+                },
             )
             .await;
         }
@@ -628,7 +623,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     }
 }
 
-fn next_loop_wait_ms(
+struct LoopWaitSchedule {
     touch_ready: bool,
     touch_retry_at: Instant,
     touch_next_sample_at: Instant,
@@ -639,27 +634,29 @@ fn next_loop_wait_ms(
     tap_trace_active: bool,
     tap_trace_next_sample_at: Instant,
     tap_trace_aux_next_sample_at: Instant,
-) -> u64 {
+}
+
+fn next_loop_wait_ms(schedule: LoopWaitSchedule) -> u64 {
     let now = Instant::now();
     let mut wait_ms = UI_TICK_MS;
 
-    if touch_ready {
-        wait_ms = wait_ms.min(ms_until(now, touch_next_sample_at));
+    if schedule.touch_ready {
+        wait_ms = wait_ms.min(ms_until(now, schedule.touch_next_sample_at));
     } else {
-        wait_ms = wait_ms.min(ms_until(now, touch_retry_at));
+        wait_ms = wait_ms.min(ms_until(now, schedule.touch_retry_at));
     }
 
-    if !imu_ready {
-        wait_ms = wait_ms.min(ms_until(now, imu_retry_at));
+    if !schedule.imu_ready {
+        wait_ms = wait_ms.min(ms_until(now, schedule.imu_retry_at));
     }
 
-    if touch_feedback_dirty {
-        wait_ms = wait_ms.min(ms_until(now, touch_feedback_next_flush_at));
+    if schedule.touch_feedback_dirty {
+        wait_ms = wait_ms.min(ms_until(now, schedule.touch_feedback_next_flush_at));
     }
 
-    if tap_trace_active {
-        wait_ms = wait_ms.min(ms_until(now, tap_trace_next_sample_at));
-        wait_ms = wait_ms.min(ms_until(now, tap_trace_aux_next_sample_at));
+    if schedule.tap_trace_active {
+        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_next_sample_at));
+        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_aux_next_sample_at));
     }
 
     wait_ms

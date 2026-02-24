@@ -182,8 +182,6 @@ fn draw_swipe_debug(
     case_passed: u8,
     case_attempts: u16,
     manual_marks: u16,
-    _width: i32,
-    _height: i32,
 ) {
     if trace.len >= 2 {
         let mut idx = 1usize;

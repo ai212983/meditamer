@@ -68,11 +68,12 @@ pub(crate) async fn render_suminagashi_update(
             suminagashi::render_scene_rows_bw_masked(
                 &scene,
                 width,
-                y,
-                y_end,
-                SUMINAGASHI_RGSS_MODE,
-                SUMINAGASHI_RENDER_MODE,
-                SUMINAGASHI_DITHER_MODE,
+                y..y_end,
+                suminagashi::SceneRenderStyle {
+                    rgss: SUMINAGASHI_RGSS_MODE,
+                    mode: SUMINAGASHI_RENDER_MODE,
+                    dither: SUMINAGASHI_DITHER_MODE,
+                },
                 |x, py| background_alpha_50_mask(x, py, seed),
                 |x, py| display.set_pixel_bw(x as usize, py as usize, true),
             );
@@ -81,8 +82,7 @@ pub(crate) async fn render_suminagashi_update(
             sumi_sun::render_sumi_sun_rows_bw(
                 width,
                 height,
-                y,
-                y_end,
+                y..y_end,
                 sun_params,
                 SUMINAGASHI_RENDER_MODE,
                 SUMINAGASHI_DITHER_MODE,
@@ -209,20 +209,20 @@ fn sun_center_for_time(
 
 fn build_sun_params(seed: u32, center: Point) -> SumiSunParams {
     let mut state = mix32(seed ^ 0xA1C3_4D27);
-    let mut params = SumiSunParams::default();
-    params.center = center;
-    params.radius_px = ((SUN_TARGET_DIAMETER_PX / 2) + rand_i32(&mut state, -3, 3)).max(10);
-    params.edge_softness_px = SunFx::from_bits(rand_i32(&mut state, 45_875, 98_304));
-    params.bleed_px = SunFx::from_bits(rand_i32(&mut state, 19_661, 98_304));
-    params.dry_brush = SunFx::from_bits(rand_i32(&mut state, 9_000, 26_000));
-    params.completeness = SunFx::from_bits(65_536);
-    params.completeness_softness = SunFx::from_bits(rand_i32(&mut state, 600, 1_800));
-    params.completeness_warp = SunFx::from_bits(rand_i32(&mut state, 0, 600));
-    params.completeness_rotation = SunFx::from_bits(rand_i32(&mut state, 0, 65_535));
-    params.stroke_strength = SunFx::from_bits(rand_i32(&mut state, 24_000, 56_000));
-    params.stroke_anisotropy = SunFx::from_bits(rand_i32(&mut state, 65_536, 196_608));
-    params.ink_luma = SunFx::from_bits(rand_i32(&mut state, 0, 30_000));
-    params
+    SumiSunParams {
+        center,
+        radius_px: ((SUN_TARGET_DIAMETER_PX / 2) + rand_i32(&mut state, -3, 3)).max(10),
+        edge_softness_px: SunFx::from_bits(rand_i32(&mut state, 45_875, 98_304)),
+        bleed_px: SunFx::from_bits(rand_i32(&mut state, 19_661, 98_304)),
+        dry_brush: SunFx::from_bits(rand_i32(&mut state, 9_000, 26_000)),
+        completeness: SunFx::from_bits(65_536),
+        completeness_softness: SunFx::from_bits(rand_i32(&mut state, 600, 1_800)),
+        completeness_warp: SunFx::from_bits(rand_i32(&mut state, 0, 600)),
+        completeness_rotation: SunFx::from_bits(rand_i32(&mut state, 0, 65_535)),
+        stroke_strength: SunFx::from_bits(rand_i32(&mut state, 24_000, 56_000)),
+        stroke_anisotropy: SunFx::from_bits(rand_i32(&mut state, 65_536, 196_608)),
+        ink_luma: SunFx::from_bits(rand_i32(&mut state, 0, 30_000)),
+    }
 }
 
 fn rand_i32(state: &mut u32, min: i32, max: i32) -> i32 {

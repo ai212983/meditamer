@@ -1,3 +1,5 @@
+type Lsm6ds3MotionRaw = (i16, i16, i16, i16, i16, i16);
+
 impl<I2C, D> InkplateHal<I2C, D>
 where
     I2C: I2cOps,
@@ -366,7 +368,7 @@ where
 
     pub fn lsm6ds3_read_motion_raw(
         &mut self,
-    ) -> Result<(i16, i16, i16, i16, i16, i16), I2C::Error> {
+    ) -> Result<Lsm6ds3MotionRaw, I2C::Error> {
         let mut raw = [0u8; 12];
         self.i2c_write_read(LSM6DS3_ADDR, &[LSM6DS3_REG_OUTX_L_G], &mut raw)?;
 

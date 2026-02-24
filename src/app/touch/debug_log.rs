@@ -61,32 +61,26 @@ impl TouchWizardSessionLog {
     }
 
     pub(crate) fn on_swipe_sample(&mut self, sample: TouchWizardSwipeTraceSample) {
-        if self.active {
-            if self.samples.push(sample).is_err() {
-                self.overflow = true;
-                let _ = self.samples.remove(0);
-                let _ = self.samples.push(sample);
-            }
+        if self.active && self.samples.push(sample).is_err() {
+            self.overflow = true;
+            let _ = self.samples.remove(0);
+            let _ = self.samples.push(sample);
         }
     }
 
     pub(crate) fn on_touch_event(&mut self, event: TouchEvent) {
-        if self.active {
-            if self.events.push(event).is_err() {
-                self.event_overflow = true;
-                let _ = self.events.remove(0);
-                let _ = self.events.push(event);
-            }
+        if self.active && self.events.push(event).is_err() {
+            self.event_overflow = true;
+            let _ = self.events.remove(0);
+            let _ = self.events.push(event);
         }
     }
 
     pub(crate) fn on_touch_sample(&mut self, sample: TouchTraceSample) {
-        if self.active {
-            if self.touch_samples.push(sample).is_err() {
-                self.touch_sample_overflow = true;
-                let _ = self.touch_samples.remove(0);
-                let _ = self.touch_samples.push(sample);
-            }
+        if self.active && self.touch_samples.push(sample).is_err() {
+            self.touch_sample_overflow = true;
+            let _ = self.touch_samples.remove(0);
+            let _ = self.touch_samples.push(sample);
         }
     }
 

@@ -1123,8 +1123,7 @@ where
     total_w += (n as i32 - 1) * PIRATA_TIME_SPACING;
     let mut x = center.x - total_w / 2;
     let top = center.y - max_h / 2;
-    for i in 0..n {
-        let g = glyphs[i].unwrap();
+    for g in glyphs.iter().take(n).flatten() {
         draw_glyph(
             display,
             g,
@@ -1138,7 +1137,7 @@ fn draw_glyph<T>(display: &mut T, glyph: &BitmapGlyph, top_left: Point)
 where
     T: DrawTarget<Color = BinaryColor>,
 {
-    let bpr = (glyph.width as usize + 7) / 8;
+    let bpr = (glyph.width as usize).div_ceil(8);
     for y in 0..glyph.height as i32 {
         let row = y as usize * bpr;
         for x in 0..glyph.width as i32 {

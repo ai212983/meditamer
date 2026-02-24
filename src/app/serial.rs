@@ -106,83 +106,77 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
             }
         }
 
-        match with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
-            Ok(Ok(1)) => {
-                let byte = rx[0];
-                if byte == b'\r' || byte == b'\n' {
-                    if line_len == 0 {
-                        continue;
-                    }
-                    if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
-                        match cmd {
-                            SerialCommand::TimeSync(cmd) => {
-                                if APP_EVENTS.try_send(AppEvent::TimeSync(cmd)).is_ok() {
-                                    let _ = uart_write_all(&mut uart, b"TIMESET OK\r\n").await;
-                                } else {
-                                    let _ = uart_write_all(&mut uart, b"TIMESET BUSY\r\n").await;
-                                }
-                            }
-                            SerialCommand::Repaint => {
-                                if APP_EVENTS.try_send(AppEvent::ForceRepaint).is_ok() {
-                                    let _ = uart_write_all(&mut uart, b"REPAINT OK\r\n").await;
-                                } else {
-                                    let _ = uart_write_all(&mut uart, b"REPAINT BUSY\r\n").await;
-                                }
-                            }
-                            SerialCommand::TouchWizard => {
-                                if APP_EVENTS
-                                    .try_send(AppEvent::StartTouchCalibrationWizard)
-                                    .is_ok()
-                                {
-                                    let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD OK\r\n").await;
-                                } else {
-                                    let _ =
-                                        uart_write_all(&mut uart, b"TOUCH_WIZARD BUSY\r\n").await;
-                                }
-                            }
-                            SerialCommand::TouchWizardDump => {
-                                touch_wizard_log.write_dump(&mut uart).await;
-                            }
-                            SerialCommand::RepaintMarble => {
-                                if APP_EVENTS.try_send(AppEvent::ForceMarbleRepaint).is_ok() {
-                                    let _ =
-                                        uart_write_all(&mut uart, b"REPAINT_MARBLE OK\r\n").await;
-                                } else {
-                                    let _ =
-                                        uart_write_all(&mut uart, b"REPAINT_MARBLE BUSY\r\n").await;
-                                }
-                            }
-                            SerialCommand::Metrics => {
-                                let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                                let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                                let mut line = heapless::String::<96>::new();
-                                let _ = write!(
-                                    &mut line,
-                                    "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
-                                    last_ms, max_ms
-                                );
-                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
-                            }
-                            SerialCommand::SdProbe => {
-                                if APP_EVENTS.try_send(AppEvent::SdProbe).is_ok() {
-                                    let _ = uart_write_all(&mut uart, b"SDPROBE OK\r\n").await;
-                                } else {
-                                    let _ = uart_write_all(&mut uart, b"SDPROBE BUSY\r\n").await;
-                                }
+        if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
+            let byte = rx[0];
+            if byte == b'\r' || byte == b'\n' {
+                if line_len == 0 {
+                    continue;
+                }
+                if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
+                    match cmd {
+                        SerialCommand::TimeSync(cmd) => {
+                            if APP_EVENTS.try_send(AppEvent::TimeSync(cmd)).is_ok() {
+                                let _ = uart_write_all(&mut uart, b"TIMESET OK\r\n").await;
+                            } else {
+                                let _ = uart_write_all(&mut uart, b"TIMESET BUSY\r\n").await;
                             }
                         }
-                    } else {
-                        let _ = uart_write_all(&mut uart, b"CMD ERR\r\n").await;
+                        SerialCommand::Repaint => {
+                            if APP_EVENTS.try_send(AppEvent::ForceRepaint).is_ok() {
+                                let _ = uart_write_all(&mut uart, b"REPAINT OK\r\n").await;
+                            } else {
+                                let _ = uart_write_all(&mut uart, b"REPAINT BUSY\r\n").await;
+                            }
+                        }
+                        SerialCommand::TouchWizard => {
+                            if APP_EVENTS
+                                .try_send(AppEvent::StartTouchCalibrationWizard)
+                                .is_ok()
+                            {
+                                let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD OK\r\n").await;
+                            } else {
+                                let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD BUSY\r\n").await;
+                            }
+                        }
+                        SerialCommand::TouchWizardDump => {
+                            touch_wizard_log.write_dump(&mut uart).await;
+                        }
+                        SerialCommand::RepaintMarble => {
+                            if APP_EVENTS.try_send(AppEvent::ForceMarbleRepaint).is_ok() {
+                                let _ = uart_write_all(&mut uart, b"REPAINT_MARBLE OK\r\n").await;
+                            } else {
+                                let _ = uart_write_all(&mut uart, b"REPAINT_MARBLE BUSY\r\n").await;
+                            }
+                        }
+                        SerialCommand::Metrics => {
+                            let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                            let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                            let mut line = heapless::String::<96>::new();
+                            let _ = write!(
+                                &mut line,
+                                "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
+                                last_ms, max_ms
+                            );
+                            let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                        }
+                        SerialCommand::SdProbe => {
+                            if APP_EVENTS.try_send(AppEvent::SdProbe).is_ok() {
+                                let _ = uart_write_all(&mut uart, b"SDPROBE OK\r\n").await;
+                            } else {
+                                let _ = uart_write_all(&mut uart, b"SDPROBE BUSY\r\n").await;
+                            }
+                        }
                     }
-                    line_len = 0;
-                } else if line_len < line_buf.len() {
-                    line_buf[line_len] = byte;
-                    line_len += 1;
                 } else {
-                    line_len = 0;
+                    let _ = uart_write_all(&mut uart, b"CMD ERR\r\n").await;
                 }
+                line_len = 0;
+            } else if line_len < line_buf.len() {
+                line_buf[line_len] = byte;
+                line_len += 1;
+            } else {
+                line_len = 0;
             }
-            _ => {}
         }
     }
 }

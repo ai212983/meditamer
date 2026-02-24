@@ -169,113 +169,104 @@ impl TouchCalibrationWizard {
         let prev_case_passed = self.swipe_case_passed;
         let prev_case_failed = self.swipe_case_failed;
         let prev_case_attempts = self.swipe_case_attempts;
-        match self.phase {
-            WizardPhase::SwipeRight => {
-                let case_index = self.swipe_case_index;
-                let case = self.current_swipe_case(SCREEN_WIDTH, SCREEN_HEIGHT);
-                let start = SwipePoint {
-                    x: event.start_x as i32,
-                    y: event.start_y as i32,
-                };
-                let end = SwipePoint {
-                    x: event.x as i32,
-                    y: event.y as i32,
-                };
-                self.append_swipe_trace_point(event.x as i32, event.y as i32);
-                if case.is_some_and(|spec| !swipe_start_matches(spec, start)) {
-                    self.hint = "Start outside FROM circle. Retry this case.";
-                    self.last_swipe = Some(SwipeAttempt {
-                        start,
-                        end,
-                        accepted: false,
-                    });
-                    self.swipe_trace_pending_points = 0;
-                    self.emit_swipe_case_trace(
-                        event.t_ms,
-                        case_index,
-                        case,
-                        TRACE_VERDICT_SKIP,
-                        Some(direction),
-                        start,
-                        end,
-                        event.duration_ms,
-                        event.move_count,
-                        event.max_travel_px,
-                        event.release_debounce_ms,
-                        event.dropout_count,
-                    );
-                    return self.phase != prev_phase
-                        || self.hint != prev_hint
-                        || self.last_tap != prev_last_tap
-                        || self.last_swipe != prev_last_swipe
-                        || self.swipe_case_index != prev_case_index
-                        || self.swipe_case_passed != prev_case_passed
-                        || self.swipe_case_failed != prev_case_failed
-                        || self.swipe_case_attempts != prev_case_attempts;
-                }
-                self.swipe_case_attempts = self.swipe_case_attempts.saturating_add(1);
-                let mut case_pass = false;
-                if let Some(case) = case {
-                    case_pass = swipe_case_matches(
-                        case,
-                        start,
-                        end,
-                        event.duration_ms,
-                        Some(direction),
-                        true,
-                    );
-                }
+        if self.phase == WizardPhase::SwipeRight {
+            let case_index = self.swipe_case_index;
+            let case = self.current_swipe_case(SCREEN_WIDTH, SCREEN_HEIGHT);
+            let start = SwipePoint {
+                x: event.start_x as i32,
+                y: event.start_y as i32,
+            };
+            let end = SwipePoint {
+                x: event.x as i32,
+                y: event.y as i32,
+            };
+            self.append_swipe_trace_point(event.x as i32, event.y as i32);
+            if case.is_some_and(|spec| !swipe_start_matches(spec, start)) {
+                self.hint = "Start outside FROM circle. Retry this case.";
                 self.last_swipe = Some(SwipeAttempt {
                     start,
                     end,
-                    accepted: case_pass,
+                    accepted: false,
                 });
                 self.swipe_trace_pending_points = 0;
-                if case_pass {
-                    self.swipe_case_passed = self.swipe_case_passed.saturating_add(1);
-                    self.emit_swipe_case_trace(
-                        event.t_ms,
-                        case_index,
-                        case,
-                        TRACE_VERDICT_PASS,
-                        Some(direction),
-                        start,
-                        end,
-                        event.duration_ms,
-                        event.move_count,
-                        event.max_travel_px,
-                        event.release_debounce_ms,
-                        event.dropout_count,
-                    );
-                    self.advance_swipe_case_or_complete(
-                        event.t_ms,
-                        "Swipe PASS. Next case.",
-                        "All swipe cases done. Press CONTINUE to exit.",
-                    );
-                } else {
-                    self.swipe_case_failed = self.swipe_case_failed.saturating_add(1);
-                    self.emit_swipe_case_trace(
-                        event.t_ms,
-                        case_index,
-                        case,
-                        TRACE_VERDICT_MISMATCH,
-                        Some(direction),
-                        start,
-                        end,
-                        event.duration_ms,
-                        event.move_count,
-                        event.max_travel_px,
-                        event.release_debounce_ms,
-                        event.dropout_count,
-                    );
-                    self.advance_swipe_case_or_complete(
-                        event.t_ms,
-                        "Swipe recorded (mismatch). Next case.",
-                        "All swipe cases done. Press CONTINUE to exit.",
-                    );
-                }
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
+                    t_ms: event.t_ms,
+                    case_index,
+                    case,
+                    verdict: TRACE_VERDICT_SKIP,
+                    classified_direction: Some(direction),
+                    start,
+                    end,
+                    duration_ms: event.duration_ms,
+                    move_count: event.move_count,
+                    max_travel_px: event.max_travel_px,
+                    release_debounce_ms: event.release_debounce_ms,
+                    dropout_count: event.dropout_count,
+                });
+                return self.phase != prev_phase
+                    || self.hint != prev_hint
+                    || self.last_tap != prev_last_tap
+                    || self.last_swipe != prev_last_swipe
+                    || self.swipe_case_index != prev_case_index
+                    || self.swipe_case_passed != prev_case_passed
+                    || self.swipe_case_failed != prev_case_failed
+                    || self.swipe_case_attempts != prev_case_attempts;
             }
-            _ => {}
+            self.swipe_case_attempts = self.swipe_case_attempts.saturating_add(1);
+            let mut case_pass = false;
+            if let Some(case) = case {
+                case_pass =
+                    swipe_case_matches(case, start, end, event.duration_ms, Some(direction), true);
+            }
+            self.last_swipe = Some(SwipeAttempt {
+                start,
+                end,
+                accepted: case_pass,
+            });
+            self.swipe_trace_pending_points = 0;
+            if case_pass {
+                self.swipe_case_passed = self.swipe_case_passed.saturating_add(1);
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
+                    t_ms: event.t_ms,
+                    case_index,
+                    case,
+                    verdict: TRACE_VERDICT_PASS,
+                    classified_direction: Some(direction),
+                    start,
+                    end,
+                    duration_ms: event.duration_ms,
+                    move_count: event.move_count,
+                    max_travel_px: event.max_travel_px,
+                    release_debounce_ms: event.release_debounce_ms,
+                    dropout_count: event.dropout_count,
+                });
+                self.advance_swipe_case_or_complete(
+                    event.t_ms,
+                    "Swipe PASS. Next case.",
+                    "All swipe cases done. Press CONTINUE to exit.",
+                );
+            } else {
+                self.swipe_case_failed = self.swipe_case_failed.saturating_add(1);
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
+                    t_ms: event.t_ms,
+                    case_index,
+                    case,
+                    verdict: TRACE_VERDICT_MISMATCH,
+                    classified_direction: Some(direction),
+                    start,
+                    end,
+                    duration_ms: event.duration_ms,
+                    move_count: event.move_count,
+                    max_travel_px: event.max_travel_px,
+                    release_debounce_ms: event.release_debounce_ms,
+                    dropout_count: event.dropout_count,
+                });
+                self.advance_swipe_case_or_complete(
+                    event.t_ms,
+                    "Swipe recorded (mismatch). Next case.",
+                    "All swipe cases done. Press CONTINUE to exit.",
+                );
+            }
         }
         self.phase != prev_phase
             || self.hint != prev_hint
@@ -372,38 +363,38 @@ impl TouchCalibrationWizard {
             });
             if case.is_some_and(|spec| !swipe_start_matches(spec, pending.start)) {
                 self.hint = "Release outside FROM circle. Retry this case.";
-                self.emit_swipe_case_trace(
-                    pending.t_ms,
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
+                    t_ms: pending.t_ms,
                     case_index,
                     case,
-                    TRACE_VERDICT_SKIP,
-                    None,
-                    pending.start,
-                    pending.end,
-                    pending.duration_ms,
-                    pending.move_count,
-                    pending.max_travel_px,
-                    pending.release_debounce_ms,
-                    pending.dropout_count,
-                );
+                    verdict: TRACE_VERDICT_SKIP,
+                    classified_direction: None,
+                    start: pending.start,
+                    end: pending.end,
+                    duration_ms: pending.duration_ms,
+                    move_count: pending.move_count,
+                    max_travel_px: pending.max_travel_px,
+                    release_debounce_ms: pending.release_debounce_ms,
+                    dropout_count: pending.dropout_count,
+                });
             } else {
                 self.swipe_case_attempts = self.swipe_case_attempts.saturating_add(1);
                 self.swipe_case_failed = self.swipe_case_failed.saturating_add(1);
                 self.hint = "Release w/o swipe. Retry this case.";
-                self.emit_swipe_case_trace(
-                    pending.t_ms,
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
+                    t_ms: pending.t_ms,
                     case_index,
                     case,
-                    TRACE_VERDICT_RELEASE_NO_SWIPE,
-                    None,
-                    pending.start,
-                    pending.end,
-                    pending.duration_ms,
-                    pending.move_count,
-                    pending.max_travel_px,
-                    pending.release_debounce_ms,
-                    pending.dropout_count,
-                );
+                    verdict: TRACE_VERDICT_RELEASE_NO_SWIPE,
+                    classified_direction: None,
+                    start: pending.start,
+                    end: pending.end,
+                    duration_ms: pending.duration_ms,
+                    move_count: pending.move_count,
+                    max_travel_px: pending.max_travel_px,
+                    release_debounce_ms: pending.release_debounce_ms,
+                    dropout_count: pending.dropout_count,
+                });
             }
         }
 

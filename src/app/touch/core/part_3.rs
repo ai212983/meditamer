@@ -33,8 +33,8 @@ impl TouchHsm {
                 match (count, point) {
                     (0, _) => {
                         let elapsed = now_ms.saturating_sub(self.down_ms);
-                        if elapsed >= TOUCH_DEBOUNCE_DOWN_MS
-                            && elapsed <= TOUCH_DEBOUNCE_DOWN_ABORT_MS
+                        if (TOUCH_DEBOUNCE_DOWN_MS..=TOUCH_DEBOUNCE_DOWN_ABORT_MS)
+                            .contains(&elapsed)
                         {
                             // A short release can happen before we observe another stable `count=1`
                             // sample. Emit Down, then debounce release so quick recovery can
@@ -258,4 +258,3 @@ fn int_sqrt_i32(value: i32) -> i32 {
     }
     lo
 }
-

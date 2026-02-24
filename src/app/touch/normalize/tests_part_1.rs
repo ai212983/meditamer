@@ -326,3 +326,33 @@
         assert_eq!(p1, Some(NormalizedTouchPoint { x: 222, y: 221 }));
     }
 
+    #[test]
+    fn dual_contact_reports_multitouch_count_when_both_slots_are_active() {
+        let mut n = TouchPresenceNormalizer::new();
+
+        let _ = n.normalize(
+            0,
+            NormalizedTouchSample {
+                touch_count: 1,
+                points: [
+                    NormalizedTouchPoint { x: 220, y: 220 },
+                    NormalizedTouchPoint { x: 0, y: 0 },
+                ],
+                raw: [0, 0, 0, 0, 0, 0, 0, 0x01],
+            },
+        );
+
+        let (count, point) = n.normalize(
+            8,
+            NormalizedTouchSample {
+                touch_count: 2,
+                points: [
+                    NormalizedTouchPoint { x: 222, y: 221 },
+                    NormalizedTouchPoint { x: 300, y: 320 },
+                ],
+                raw: [0, 0, 0, 0, 0, 0, 0, 0x03],
+            },
+        );
+        assert_eq!(count, 2);
+        assert_eq!(point, Some(NormalizedTouchPoint { x: 222, y: 221 }));
+    }

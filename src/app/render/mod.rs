@@ -14,10 +14,10 @@ pub(crate) async fn render_active_mode(
     uptime_seconds: u32,
     time_sync: Option<TimeSyncState>,
     battery_percent: Option<u8>,
-    pattern_nonce: &mut u32,
-    first_visual_seed_pending: &mut bool,
+    seed_state: (&mut u32, &mut bool),
     force_full: bool,
 ) {
+    let (pattern_nonce, first_visual_seed_pending) = seed_state;
     match mode {
         DisplayMode::Clock => {
             render_clock_update(

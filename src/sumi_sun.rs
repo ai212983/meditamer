@@ -94,7 +94,7 @@ pub fn render_sumi_sun<T>(
     }
 
     let _ = target.clear(BinaryColor::Off);
-    render_sumi_sun_rows_bw(width, height, 0, height, params, mode, dither, |x, y| {
+    render_sumi_sun_rows_bw(width, height, 0..height, params, mode, dither, |x, y| {
         let _ = target.draw_iter(core::iter::once(Pixel(Point::new(x, y), BinaryColor::On)));
     });
 }
@@ -102,8 +102,7 @@ pub fn render_sumi_sun<T>(
 pub fn render_sumi_sun_rows_bw<F>(
     width: i32,
     height: i32,
-    y_start: i32,
-    y_end: i32,
+    rows: core::ops::Range<i32>,
     params: SumiSunParams,
     mode: RenderMode,
     dither: DitherMode,
@@ -115,8 +114,8 @@ pub fn render_sumi_sun_rows_bw<F>(
         return;
     }
 
-    let y0 = y_start.max(0);
-    let y1 = y_end.min(height).max(y0);
+    let y0 = rows.start.max(0);
+    let y1 = rows.end.min(height).max(y0);
     let outer = params.radius_px.max(1) + 4;
     let x0 = (params.center.x - outer).max(0);
     let x1 = (params.center.x + outer + 1).min(width).max(x0);

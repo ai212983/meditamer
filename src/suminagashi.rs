@@ -351,6 +351,13 @@ pub enum DitherMode {
     BlueNoise600,
 }
 
+#[derive(Clone, Copy)]
+pub struct SceneRenderStyle {
+    pub rgss: RgssMode,
+    pub mode: RenderMode,
+    pub dither: DitherMode,
+}
+
 impl RgssMode {
     #[inline]
     fn offsets(self) -> &'static [Vec2Fx] {
@@ -434,20 +441,19 @@ pub fn render_seeded_inverse_rgss_bw<F>(
 pub fn render_scene_rows_bw<F>(
     scene: &MarblingScene,
     width: i32,
-    y_start: i32,
-    y_end: i32,
-    rgss: RgssMode,
-    mode: RenderMode,
-    dither: DitherMode,
+    rows: core::ops::Range<i32>,
+    style: SceneRenderStyle,
     mut put_black_pixel: F,
 ) where
     F: FnMut(i32, i32),
 {
-    let y0 = y_start.max(0);
-    let y1 = y_end.max(y0);
+    let y0 = rows.start.max(0);
+    let y1 = rows.end.max(y0);
     for y in y0..y1 {
         for x in 0..width {
-            if sample_binary_pixel(scene, x, y, rgss, mode, dither) == BinaryColor::On {
+            if sample_binary_pixel(scene, x, y, style.rgss, style.mode, style.dither)
+                == BinaryColor::On
+            {
                 put_black_pixel(x, y);
             }
         }
@@ -457,25 +463,24 @@ pub fn render_scene_rows_bw<F>(
 pub fn render_scene_rows_bw_masked<M, F>(
     scene: &MarblingScene,
     width: i32,
-    y_start: i32,
-    y_end: i32,
-    rgss: RgssMode,
-    mode: RenderMode,
-    dither: DitherMode,
+    rows: core::ops::Range<i32>,
+    style: SceneRenderStyle,
     mut include_pixel: M,
     mut put_black_pixel: F,
 ) where
     M: FnMut(i32, i32) -> bool,
     F: FnMut(i32, i32),
 {
-    let y0 = y_start.max(0);
-    let y1 = y_end.max(y0);
+    let y0 = rows.start.max(0);
+    let y1 = rows.end.max(y0);
     for y in y0..y1 {
         for x in 0..width {
             if !include_pixel(x, y) {
                 continue;
             }
-            if sample_binary_pixel(scene, x, y, rgss, mode, dither) == BinaryColor::On {
+            if sample_binary_pixel(scene, x, y, style.rgss, style.mode, style.dither)
+                == BinaryColor::On
+            {
                 put_black_pixel(x, y);
             }
         }

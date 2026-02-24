@@ -73,10 +73,10 @@ impl TouchPresenceNormalizer {
         let decoded_present =
             sample.touch_count > 0 && sample_has_decoded_coordinate(sample.points);
         let raw_present = sample.raw[7].count_ones() > 0;
-        let recent_decoded_short = self.last_decoded_present_ms.map_or(false, |t_ms| {
+        let recent_decoded_short = self.last_decoded_present_ms.is_some_and(|t_ms| {
             now_ms.saturating_sub(t_ms) <= TOUCH_DECODED_GRACE_MS
         });
-        let recent_decoded_long = self.last_decoded_present_ms.map_or(false, |t_ms| {
+        let recent_decoded_long = self.last_decoded_present_ms.is_some_and(|t_ms| {
             now_ms.saturating_sub(t_ms) <= TOUCH_RAW_ASSIST_GRACE_MS
         });
         // Raw bits are noisy when idle on some panels. They are only trusted as
@@ -109,10 +109,17 @@ impl TouchPresenceNormalizer {
             self.pending_outlier = None;
         }
 
-        (
-            if normalized_present { 1 } else { 0 },
-            if normalized_present { primary } else { None },
-        )
+        let normalized_count = if normalized_present {
+            if sample.touch_count > 1 && decoded_coordinate_count(sample.points) > 1 {
+                2
+            } else {
+                1
+            }
+        } else {
+            0
+        };
+
+        (normalized_count, if normalized_present { primary } else { None })
     }
 
     fn filter_primary(&mut self, now_ms: u64, point: NormalizedTouchPoint) -> NormalizedTouchPoint {
@@ -219,9 +226,7 @@ impl TouchPresenceNormalizer {
             if !allow_continuity_fallback {
                 return None;
             }
-            let Some(prev) = self.last_primary else {
-                return None;
-            };
+            let prev = self.last_primary?;
             let continuity = self.select_continuity_primary(sample, prev);
             return Some(continuity.unwrap_or(prev));
         }
@@ -342,13 +347,11 @@ impl TouchPresenceNormalizer {
                 continue;
             }
             let dist = squared_distance(point, previous);
-            if best.map_or(true, |(_, best_dist)| dist < best_dist) {
+            if best.is_none_or(|(_, best_dist)| dist < best_dist) {
                 best = Some((point, dist));
             }
         }
-        let Some((candidate, dist)) = best else {
-            return None;
-        };
+        let (candidate, dist) = best?;
         let max_jump_sq = squared_i32(TOUCH_CONTINUITY_MAX_JUMP_PX);
         if dist <= max_jump_sq {
             Some(candidate)
@@ -364,6 +367,13 @@ fn squared_i32(value: i32) -> u32 {
 
 fn sample_has_decoded_coordinate(points: [NormalizedTouchPoint; 2]) -> bool {
     points.iter().any(|point| point.x != 0 || point.y != 0)
+}
+
+fn decoded_coordinate_count(points: [NormalizedTouchPoint; 2]) -> u8 {
+    points
+        .iter()
+        .filter(|point| point.x != 0 || point.y != 0)
+        .count() as u8
 }
 
 fn median3_u16(a: u16, b: u16, c: u16) -> u16 {
@@ -387,4 +397,3 @@ fn is_axis_dominant_step(from: NormalizedTouchPoint, to: NormalizedTouchPoint) -
         && (minor <= TOUCH_SLOT_HOLD_RADIUS_PX
             || major * 100 >= minor * TOUCH_SLOT_AXIS_DOMINANCE_X100)
 }
-

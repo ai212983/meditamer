@@ -126,7 +126,7 @@ fn sample_shanshui_ink_u8(x: i32, y: i32, width: i32, height: i32, seed: u32) ->
         x,
         y,
         seed ^ (layer as u32).wrapping_mul(0x9E37_79B9),
-        4 + layer as u8,
+        4 + layer,
     );
 
     // Unified depth: mountain tone and river geometry both derive from `depth_factor`.
@@ -458,7 +458,7 @@ fn tree_halo(x: i32, y: i32, _width: i32, height: i32, near_h: i32, seed: u32) -
     let dx = x - shape.crown_x;
     let dy = y - shape.crown_y;
     let dist_sq = dx * dx + dy * dy;
-    dist_sq <= 15 * 15 && dist_sq >= 11 * 11
+    (11 * 11..=15 * 15).contains(&dist_sq)
 }
 
 #[inline]

@@ -1,3 +1,2 @@
 down
-move
-up
+cancel

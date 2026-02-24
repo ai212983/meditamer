@@ -78,8 +78,6 @@ impl TouchCalibrationWizard {
                 self.swipe_case_passed,
                 self.swipe_case_attempts,
                 self.manual_swipe_marks,
-                width,
-                height,
             );
         }
         if self.shows_continue_button() {

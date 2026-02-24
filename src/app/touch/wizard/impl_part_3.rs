@@ -1,3 +1,19 @@
+#[derive(Clone, Copy)]
+struct SwipeCaseTraceInput {
+    t_ms: u64,
+    case_index: u8,
+    case: Option<SwipeCaseSpec>,
+    verdict: u8,
+    classified_direction: Option<TouchSwipeDirection>,
+    start: SwipePoint,
+    end: SwipePoint,
+    duration_ms: u16,
+    move_count: u16,
+    max_travel_px: u16,
+    release_debounce_ms: u16,
+    dropout_count: u16,
+}
+
 impl TouchCalibrationWizard {
 
     fn clear_swipe_debug(&mut self) {
@@ -232,20 +248,20 @@ impl TouchCalibrationWizard {
                 end,
                 accepted: false,
             });
-            self.emit_swipe_case_trace(
+            self.emit_swipe_case_trace(SwipeCaseTraceInput {
                 t_ms,
                 case_index,
                 case,
-                TRACE_VERDICT_MANUAL_MARK,
-                None,
+                verdict: TRACE_VERDICT_MANUAL_MARK,
+                classified_direction: None,
                 start,
                 end,
-                self.swipe_debug.last_duration_ms,
-                self.swipe_debug.last_move_count,
-                self.swipe_debug.last_max_travel_px,
-                self.swipe_debug.last_release_debounce_ms,
-                self.swipe_debug.last_dropout_count,
-            );
+                duration_ms: self.swipe_debug.last_duration_ms,
+                move_count: self.swipe_debug.last_move_count,
+                max_travel_px: self.swipe_debug.last_max_travel_px,
+                release_debounce_ms: self.swipe_debug.last_release_debounce_ms,
+                dropout_count: self.swipe_debug.last_dropout_count,
+            });
             self.advance_swipe_case_or_complete(
                 t_ms,
                 "Manual swipe mark recorded. Next case.",
@@ -297,20 +313,20 @@ impl TouchCalibrationWizard {
                         self.swipe_debug.last_duration_ms,
                     )
                 };
-                self.emit_swipe_case_trace(
+                self.emit_swipe_case_trace(SwipeCaseTraceInput {
                     t_ms,
                     case_index,
                     case,
-                    TRACE_VERDICT_SKIP,
-                    None,
+                    verdict: TRACE_VERDICT_SKIP,
+                    classified_direction: None,
                     start,
                     end,
                     duration_ms,
-                    self.swipe_debug.last_move_count,
-                    self.swipe_debug.last_max_travel_px,
-                    self.swipe_debug.last_release_debounce_ms,
-                    self.swipe_debug.last_dropout_count,
-                );
+                    move_count: self.swipe_debug.last_move_count,
+                    max_travel_px: self.swipe_debug.last_max_travel_px,
+                    release_debounce_ms: self.swipe_debug.last_release_debounce_ms,
+                    dropout_count: self.swipe_debug.last_dropout_count,
+                });
                 self.advance_swipe_case_or_complete(
                     t_ms,
                     "Case skipped. Next case.",
@@ -349,22 +365,8 @@ impl TouchCalibrationWizard {
         let _ = TOUCH_WIZARD_SESSION_EVENTS.try_send(event);
     }
 
-    fn emit_swipe_case_trace(
-        &self,
-        t_ms: u64,
-        case_index: u8,
-        case: Option<SwipeCaseSpec>,
-        verdict: u8,
-        classified_direction: Option<TouchSwipeDirection>,
-        start: SwipePoint,
-        end: SwipePoint,
-        duration_ms: u16,
-        move_count: u16,
-        max_travel_px: u16,
-        release_debounce_ms: u16,
-        dropout_count: u16,
-    ) {
-        let (expected_direction, expected_speed) = if let Some(spec) = case {
+    fn emit_swipe_case_trace(&self, trace: SwipeCaseTraceInput) {
+        let (expected_direction, expected_speed) = if let Some(spec) = trace.case {
             (
                 trace_direction_code(spec.direction),
                 trace_speed_code(spec.speed),
@@ -373,24 +375,25 @@ impl TouchCalibrationWizard {
             (TRACE_DIRECTION_UNKNOWN, TRACE_SPEED_UNKNOWN)
         };
         let sample = TouchWizardSwipeTraceSample {
-            t_ms,
-            case_index,
+            t_ms: trace.t_ms,
+            case_index: trace.case_index,
             attempt: self.swipe_case_attempts,
             expected_direction,
             expected_speed,
-            verdict,
-            classified_direction: classified_direction
+            verdict: trace.verdict,
+            classified_direction: trace
+                .classified_direction
                 .map(trace_direction_code)
                 .unwrap_or(TRACE_DIRECTION_UNKNOWN),
-            start_x: clamp_to_u16(start.x),
-            start_y: clamp_to_u16(start.y),
-            end_x: clamp_to_u16(end.x),
-            end_y: clamp_to_u16(end.y),
-            duration_ms,
-            move_count,
-            max_travel_px,
-            release_debounce_ms,
-            dropout_count,
+            start_x: clamp_to_u16(trace.start.x),
+            start_y: clamp_to_u16(trace.start.y),
+            end_x: clamp_to_u16(trace.end.x),
+            end_y: clamp_to_u16(trace.end.y),
+            duration_ms: trace.duration_ms,
+            move_count: trace.move_count,
+            max_travel_px: trace.max_travel_px,
+            release_debounce_ms: trace.release_debounce_ms,
+            dropout_count: trace.dropout_count,
         };
         let _ = TOUCH_WIZARD_SWIPE_TRACE_SAMPLES.try_send(sample);
     }
