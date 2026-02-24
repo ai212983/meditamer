@@ -93,7 +93,7 @@ impl<'d> SdCardProbe<'d> {
         out: &mut [u8; SD_SECTOR_SIZE],
     ) -> Result<(), SdProbeError> {
         let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
-        *out = self.read_data_sector_512(lba, high_capacity).await?;
+        self.read_data_sector_512_into(lba, high_capacity, out).await?;
         Ok(())
     }
 
@@ -344,11 +344,12 @@ impl<'d> SdCardProbe<'d> {
         Ok(block)
     }
 
-    async fn read_data_sector_512(
+    async fn read_data_sector_512_into(
         &mut self,
         lba: u32,
         high_capacity: bool,
-    ) -> Result<[u8; 512], SdProbeError> {
+        out: &mut [u8; SD_SECTOR_SIZE],
+    ) -> Result<(), SdProbeError> {
         let arg = if high_capacity {
             lba
         } else {
@@ -380,15 +381,14 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
         }
 
-        let mut block = [0u8; 512];
-        for slot in block.iter_mut() {
+        for slot in out.iter_mut() {
             *slot = self.transfer_byte(0xFF).await?;
         }
         // Discard data CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
         self.end_transaction().await;
-        Ok(block)
+        Ok(())
     }
 
     async fn retry_delay(&self) {
@@ -404,8 +404,10 @@ impl<'d> SdCardProbe<'d> {
         &mut self,
         high_capacity: bool,
     ) -> Result<SdFilesystem, SdProbeError> {
-        let sector0 = self.read_data_sector_512(0, high_capacity).await?;
-        if let Some(fs) = detect_vbr_filesystem(&sector0) {
+        let mut sector = [0u8; SD_SECTOR_SIZE];
+        self.read_data_sector_512_into(0, high_capacity, &mut sector)
+            .await?;
+        if let Some(fs) = detect_vbr_filesystem(&sector) {
             return Ok(fs);
         }
 
@@ -413,12 +415,12 @@ impl<'d> SdCardProbe<'d> {
         let mut partition_lba = 0u32;
         for idx in 0..4usize {
             let off = 446 + idx * 16;
-            let p_type = sector0[off + 4];
+            let p_type = sector[off + 4];
             let start = u32::from_le_bytes([
-                sector0[off + 8],
-                sector0[off + 9],
-                sector0[off + 10],
-                sector0[off + 11],
+                sector[off + 8],
+                sector[off + 9],
+                sector[off + 10],
+                sector[off + 11],
             ]);
             if p_type != 0 && start != 0 {
                 partition_type = p_type;
@@ -433,25 +435,25 @@ impl<'d> SdCardProbe<'d> {
 
         if partition_type == 0xEE {
             // Protective MBR (GPT). Read the first GPT partition entry.
-            let gpt_entry_sector = self.read_data_sector_512(2, high_capacity).await?;
+            self.read_data_sector_512_into(2, high_capacity, &mut sector)
+                .await?;
             let start = u64::from_le_bytes([
-                gpt_entry_sector[32],
-                gpt_entry_sector[33],
-                gpt_entry_sector[34],
-                gpt_entry_sector[35],
-                gpt_entry_sector[36],
-                gpt_entry_sector[37],
-                gpt_entry_sector[38],
-                gpt_entry_sector[39],
+                sector[32],
+                sector[33],
+                sector[34],
+                sector[35],
+                sector[36],
+                sector[37],
+                sector[38],
+                sector[39],
             ]);
             if start != 0 && start <= u32::MAX as u64 {
                 partition_lba = start as u32;
             }
         }
 
-        let vbr = self
-            .read_data_sector_512(partition_lba, high_capacity)
+        self.read_data_sector_512_into(partition_lba, high_capacity, &mut sector)
             .await?;
-        Ok(detect_vbr_filesystem(&vbr).unwrap_or(SdFilesystem::Unknown))
+        Ok(detect_vbr_filesystem(&sector).unwrap_or(SdFilesystem::Unknown))
     }
 }
