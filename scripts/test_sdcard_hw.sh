@@ -86,7 +86,7 @@ ack_status_from_line() {
     local deadline=$((SECONDS + timeout_s))
     while ((SECONDS < deadline)); do
         local match_line
-        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^${ack_tag} (OK|BUSY)" || true)"
+        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "${ack_tag} (OK|BUSY)" || true)"
         if [[ "$match_line" == *" OK"* ]]; then
             echo "OK"
             return 0
@@ -107,9 +107,9 @@ wait_for_sdreq_id_from_line() {
     local deadline=$((SECONDS + timeout_s))
     while ((SECONDS < deadline)); do
         local match_line
-        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^SDREQ id=[0-9]+ op=" || true)"
+        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "SDREQ id=[0-9]+ op=" || true)"
         if [[ -n "$match_line" ]]; then
-            sed -E 's/^SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
+            sed -E 's/.*SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
             return 0
         fi
         sleep 1
@@ -124,7 +124,7 @@ wait_for_sdreq_count_from_line() {
     local deadline=$((SECONDS + timeout_s))
     while ((SECONDS < deadline)); do
         local count
-        count="$(tail -n +$((start_line + 1)) "$output_path" | rg -c "^SDREQ id=[0-9]+ op=" || true)"
+        count="$(tail -n +$((start_line + 1)) "$output_path" | rg -c "SDREQ id=[0-9]+ op=" || true)"
         if [[ "${count:-0}" -ge "$expected_count" ]]; then
             return 0
         fi
@@ -138,11 +138,11 @@ last_sdreq_id_from_line() {
     local match_line
     match_line="$(
         tail -n +$((start_line + 1)) "$output_path" \
-            | rg "^SDREQ id=[0-9]+ op=" \
+            | rg "SDREQ id=[0-9]+ op=" \
             | tail -n1 || true
     )"
     if [[ -n "$match_line" ]]; then
-        sed -E 's/^SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
+        sed -E 's/.*SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
     fi
 }
 
@@ -152,8 +152,8 @@ sdwait_result_from_line() {
     local deadline=$((SECONDS + timeout_s))
     while ((SECONDS < deadline)); do
         local match_line
-        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^SDWAIT (DONE|TIMEOUT|ERR)" || true)"
-        if [[ "$match_line" == SDWAIT\ DONE* ]]; then
+        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "SDWAIT (DONE|TIMEOUT|ERR)" || true)"
+        if [[ "$match_line" == *"SDWAIT DONE"* ]]; then
             local status
             local code
             status="$(sed -nE 's/.* status=([a-z]+) .*/\1/p' <<<"$match_line")"
@@ -165,11 +165,11 @@ sdwait_result_from_line() {
             echo "err -"
             return 0
         fi
-        if [[ "$match_line" == SDWAIT\ TIMEOUT* ]]; then
+        if [[ "$match_line" == *"SDWAIT TIMEOUT"* ]]; then
             echo "timeout -"
             return 0
         fi
-        if [[ "$match_line" == SDWAIT\ ERR* ]]; then
+        if [[ "$match_line" == *"SDWAIT ERR"* ]]; then
             echo "err -"
             return 0
         fi
@@ -327,7 +327,7 @@ run_burst_sequence() {
     wait_for_pattern_from_line "$start_line" "sdfat\\[manual\\]: stat_ok path=$burst_file kind=file" 120
     wait_for_pattern_from_line "$start_line" "sdfat\\[manual\\]: read_ok path=$burst_file bytes=3 preview_hex=414243" 120
 
-    if tail -n +$((start_line + 1)) "$output_path" | rg -q "^SDFAT(MKDIR|WRITE|APPEND|STAT|READ) BUSY"; then
+    if tail -n +$((start_line + 1)) "$output_path" | rg -q "SDFAT(MKDIR|WRITE|APPEND|STAT|READ) BUSY"; then
         echo "[FAIL] burst_no_busy"
         tail -n 160 "$output_path" >&2
         return 1
