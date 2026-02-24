@@ -3,7 +3,6 @@
 
 mod app;
 mod pirata_clock_font;
-mod sd_probe;
 
 use esp_backtrace as _;
 

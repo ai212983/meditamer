@@ -22,7 +22,45 @@ Pass criteria:
 - No missing required markers in any cycle log
 - `display uptime screen: ok` is optional in reset soak by default; enable strict mode with `SOAK_REQUIRE_UPTIME=1` if needed.
 
-## 2. Cold Boot Cycles (Manual)
+## 2. SD Card I/O Validation (Automated)
+
+Command:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+```
+
+Pass criteria:
+
+- Script exits with `SD-card hardware test passed`
+- Log contains successful operations for:
+  - probe (`sdprobe[manual]: card_detected`)
+  - FAT flow (`mkdir_ok`, `write_ok`, `read_ok`, `append_ok`, `stat_ok`, `trunc_ok`, `ren_ok`, `rm_ok`)
+  - raw sector verify (`sdrw[manual]: verify_ok`)
+  - burst/backpressure flow with no `SDFAT* BUSY` in burst window
+  - failure-path checks (`rm_error ... NotEmpty`, `ren_error ... AlreadyExists`, `CMD ERR` for oversized payload)
+
+Default behavior does not flash firmware before running. To include flash in the run:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_FLASH_FIRST=1 scripts/test_sdcard_hw.sh debug
+```
+
+Burst/backpressure regression only:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+```
+
+Suite selection:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=baseline scripts/test_sdcard_hw.sh
+ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=burst scripts/test_sdcard_hw.sh
+ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=failures scripts/test_sdcard_hw.sh
+```
+
+## 3. Cold Boot Cycles (Manual)
 
 Procedure:
 
@@ -52,7 +90,7 @@ Pass criteria:
 - 20/20 cycles with all required markers
 - No boot hang or reset loop
 
-## 3. Long Refresh Stability
+## 4. Long Refresh Stability
 
 Goal: validate display loop stability over time.
 
@@ -72,7 +110,7 @@ Pass criteria:
 - No panic/reboot
 - Continuous refresh log output for full run
 
-## 4. Frontlight/Buzzer Repetition
+## 5. Frontlight/Buzzer Repetition
 
 Procedure:
 
@@ -85,7 +123,7 @@ Pass criteria:
 - 100 successful buzzer operations
 - No persistent I2C lockup
 
-## 5. I2C Fault Recovery
+## 6. I2C Fault Recovery
 
 Procedure:
 

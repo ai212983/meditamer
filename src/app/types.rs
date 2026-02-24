@@ -4,16 +4,20 @@ use meditamer::{
     inkplate_hal::InkplateHal,
     platform::{BusyDelay, HalI2c},
 };
+use sdcard::probe;
 
-use crate::{app::store::ModeStore, sd_probe};
+use crate::app::store::ModeStore;
 
 pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;
-pub(crate) type SdProbeDriver = sd_probe::SdCardProbe<'static>;
+pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
+pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
-    Refresh { uptime_seconds: u32 },
+    Refresh {
+        uptime_seconds: u32,
+    },
     BatteryTick,
     TimeSync(TimeSyncCommand),
     TouchIrq,
@@ -21,6 +25,52 @@ pub(crate) enum AppEvent {
     ForceRepaint,
     ForceMarbleRepaint,
     SdProbe,
+    SdRwVerify {
+        lba: u32,
+    },
+    SdFatList {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRead {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatWrite {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        data: [u8; SD_WRITE_MAX],
+        data_len: u16,
+    },
+    SdFatStat {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatMkdir {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRemove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    SdFatRename {
+        src_path: [u8; SD_PATH_MAX],
+        src_path_len: u8,
+        dst_path: [u8; SD_PATH_MAX],
+        dst_path_len: u8,
+    },
+    SdFatAppend {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        data: [u8; SD_WRITE_MAX],
+        data_len: u16,
+    },
+    SdFatTruncate {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        size: u32,
+    },
 }
 
 #[derive(Clone, Copy)]

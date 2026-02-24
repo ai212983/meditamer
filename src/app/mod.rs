@@ -26,7 +26,7 @@ use self::{
     store::ModeStore,
     types::{AppEvent, DisplayContext, PanelPinHold},
 };
-use crate::sd_probe;
+use sdcard::probe;
 
 pub(crate) fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -66,9 +66,10 @@ pub(crate) fn run() -> ! {
         .expect("failed to init SPI2 for SD probe")
         .with_sck(peripherals.GPIO14)
         .with_mosi(peripherals.GPIO13)
-        .with_miso(peripherals.GPIO12);
+        .with_miso(peripherals.GPIO12)
+        .into_async();
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
-    let sd_probe = sd_probe::SdCardProbe::new(sd_spi, sd_cs);
+    let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
     let i2c_cfg = I2cConfig::default()
         .with_frequency(Rate::from_khz(100))
