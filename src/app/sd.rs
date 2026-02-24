@@ -301,3 +301,43 @@ fn sd_result_code_label(code: SdResultCode) -> &'static str {
         SdResultCode::OperationFailed => "operation_failed",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::types::SD_PATH_MAX;
+
+    #[test]
+    fn backoff_grows_and_clamps() {
+        assert_eq!(failure_backoff_ms(0), SD_BACKOFF_BASE_MS);
+        assert_eq!(failure_backoff_ms(1), SD_BACKOFF_BASE_MS);
+        assert_eq!(failure_backoff_ms(2), SD_BACKOFF_BASE_MS * 2);
+        assert_eq!(failure_backoff_ms(3), SD_BACKOFF_BASE_MS * 4);
+        assert_eq!(failure_backoff_ms(8), SD_BACKOFF_MAX_MS);
+        assert_eq!(failure_backoff_ms(32), SD_BACKOFF_MAX_MS);
+    }
+
+    #[test]
+    fn command_kind_mapping_is_stable() {
+        assert_eq!(sd_command_kind(SdCommand::SdProbe), SdCommandKind::Probe);
+        assert_eq!(
+            sd_command_kind(SdCommand::SdRwVerify { lba: 1 }),
+            SdCommandKind::RwVerify
+        );
+        assert_eq!(
+            sd_command_kind(SdCommand::SdFatStat {
+                path: [0; SD_PATH_MAX],
+                path_len: 0
+            }),
+            SdCommandKind::FatStat
+        );
+        assert_eq!(
+            sd_command_kind(SdCommand::SdFatTruncate {
+                path: [0; SD_PATH_MAX],
+                path_len: 0,
+                size: 0
+            }),
+            SdCommandKind::FatTruncate
+        );
+    }
+}
