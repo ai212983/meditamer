@@ -43,7 +43,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut last_uptime_seconds = 0u32;
     let mut time_sync: Option<TimeSyncState> = None;
     let mut battery_percent: Option<u8> = None;
-    let mut display_mode = DisplayMode::Shanshui;
+    let mut display_mode = context
+        .mode_store
+        .load_mode()
+        .unwrap_or(DisplayMode::Shanshui);
     let mut screen_initialized = false;
     let mut pattern_nonce = 0u32;
     let mut first_visual_seed_pending = true;
@@ -279,6 +282,20 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         }
                         screen_initialized = true;
                     }
+                }
+                #[cfg(feature = "asset-upload-http")]
+                AppEvent::SwitchRuntimeMode(mode) => {
+                    context.mode_store.save_runtime_mode(mode);
+                    let _ = context.inkplate.frontlight_off();
+                    esp_println::println!(
+                        "runtime_mode: switching_to={}",
+                        match mode {
+                            super::types::RuntimeMode::Normal => "normal",
+                            super::types::RuntimeMode::Upload => "upload",
+                        }
+                    );
+                    Timer::after_millis(100).await;
+                    esp_hal::system::software_reset();
                 }
             }
         }

@@ -26,13 +26,14 @@ use esp_hal::{
 };
 use meditamer::{inkplate_hal::InkplateHal, platform::HalI2c};
 
-use self::config::UART_BAUD;
-#[cfg(not(feature = "asset-upload-http-uploader"))]
-use self::config::{APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS};
-#[cfg(not(feature = "asset-upload-http-uploader"))]
+use self::config::{
+    APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
+    SD_POWER_RESPONSES, UART_BAUD,
+};
 use self::store::ModeStore;
-#[cfg(not(feature = "asset-upload-http-uploader"))]
-use self::types::{AppEvent, DisplayContext, PanelPinHold};
+use self::types::{
+    AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeMode, SdPowerRequest,
+};
 use sdcard::probe;
 
 pub(crate) fn run() -> ! {
@@ -63,27 +64,29 @@ pub(crate) fn run() -> ! {
         .with_rx(peripherals.GPIO3)
         .with_tx(peripherals.GPIO1)
         .into_async();
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let touch_irq = Input::new(
-        peripherals.GPIO36,
-        InputConfig::default().with_pull(Pull::Up),
+
+    let mut mode_store = ModeStore::new(peripherals.FLASH);
+    let mut run_upload_mode = matches!(
+        mode_store
+            .load_runtime_mode()
+            .unwrap_or(RuntimeMode::Normal),
+        RuntimeMode::Upload
     );
 
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let panel_pins = PanelPinHold {
-        _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
-        _le: Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default()),
-        _d0: Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default()),
-        _d1: Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default()),
-        _d2: Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()),
-        _d3: Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default()),
-        _d4: Output::new(peripherals.GPIO23, Level::Low, OutputConfig::default()),
-        _d5: Output::new(peripherals.GPIO25, Level::Low, OutputConfig::default()),
-        _d6: Output::new(peripherals.GPIO26, Level::Low, OutputConfig::default()),
-        _d7: Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default()),
-        _ckv: Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default()),
-        _sph: Output::new(peripherals.GPIO33, Level::Low, OutputConfig::default()),
-    };
+    #[cfg(feature = "asset-upload-http")]
+    if run_upload_mode {
+        // Upload mode is one-shot. On reset or power-cycle the next boot returns to normal mode.
+        mode_store.save_runtime_mode(RuntimeMode::Normal);
+    }
+
+    #[cfg(not(feature = "asset-upload-http"))]
+    if run_upload_mode {
+        run_upload_mode = false;
+        mode_store.save_runtime_mode(RuntimeMode::Normal);
+        esp_println::println!(
+            "runtime_mode: upload requested but asset-upload-http is disabled; starting normal mode"
+        );
+    }
 
     let sd_spi_cfg = SpiConfig::default()
         .with_frequency(Rate::from_khz(400))
@@ -96,50 +99,88 @@ pub(crate) fn run() -> ! {
         .into_async();
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
+
     #[cfg(feature = "asset-upload-http")]
-    let upload_http_runtime = match upload_http::setup(peripherals.WIFI) {
-        Ok(runtime) => Some(runtime),
-        Err(reason) => {
-            esp_println::println!("{}", reason);
-            None
+    let upload_http_runtime = if run_upload_mode {
+        match upload_http::setup(peripherals.WIFI) {
+            Ok(runtime) => Some(runtime),
+            Err(reason) => {
+                esp_println::println!("{}", reason);
+                run_upload_mode = false;
+                None
+            }
         }
+    } else {
+        None
     };
 
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let i2c_cfg = I2cConfig::default()
-        .with_frequency(Rate::from_khz(100))
-        .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
-        .expect("failed to init I2C0")
-        .with_sda(peripherals.GPIO21)
-        .with_scl(peripherals.GPIO22);
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let i2c = HalI2c::new(i2c);
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let mut inkplate = match InkplateHal::new(i2c, meditamer::platform::BusyDelay::new()) {
-        Ok(driver) => driver,
-        Err(_) => halt_forever(),
-    };
+    let mut touch_irq = None;
+    let mut display_context: Option<DisplayContext> = None;
+    let mut sd_power_inkplate: Option<InkplateDriver> = None;
 
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    if inkplate.init_core().is_err() {
-        halt_forever();
+    if run_upload_mode {
+        let i2c_cfg = I2cConfig::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
+        let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
+            .expect("failed to init I2C0")
+            .with_sda(peripherals.GPIO21)
+            .with_scl(peripherals.GPIO22);
+        let i2c = HalI2c::new(i2c);
+        let mut inkplate = match InkplateHal::new(i2c, meditamer::platform::BusyDelay::new()) {
+            Ok(driver) => driver,
+            Err(_) => halt_forever(),
+        };
+        let _ = inkplate.set_wakeup(true);
+        let _ = inkplate.frontlight_off();
+        sd_power_inkplate = Some(inkplate);
+    } else {
+        touch_irq = Some(Input::new(
+            peripherals.GPIO36,
+            InputConfig::default().with_pull(Pull::Up),
+        ));
+
+        let panel_pins = PanelPinHold {
+            _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
+            _le: Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default()),
+            _d0: Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default()),
+            _d1: Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default()),
+            _d2: Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()),
+            _d3: Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default()),
+            _d4: Output::new(peripherals.GPIO23, Level::Low, OutputConfig::default()),
+            _d5: Output::new(peripherals.GPIO25, Level::Low, OutputConfig::default()),
+            _d6: Output::new(peripherals.GPIO26, Level::Low, OutputConfig::default()),
+            _d7: Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default()),
+            _ckv: Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default()),
+            _sph: Output::new(peripherals.GPIO33, Level::Low, OutputConfig::default()),
+        };
+
+        let i2c_cfg = I2cConfig::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
+        let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
+            .expect("failed to init I2C0")
+            .with_sda(peripherals.GPIO21)
+            .with_scl(peripherals.GPIO22);
+        let i2c = HalI2c::new(i2c);
+        let mut inkplate = match InkplateHal::new(i2c, meditamer::platform::BusyDelay::new()) {
+            Ok(driver) => driver,
+            Err(_) => halt_forever(),
+        };
+
+        if inkplate.init_core().is_err() {
+            halt_forever();
+        }
+
+        let _ = inkplate.set_wakeup(true);
+        let _ = inkplate.frontlight_off();
+
+        display_context = Some(DisplayContext {
+            inkplate,
+            mode_store,
+            _panel_pins: panel_pins,
+        });
     }
-
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let _ = inkplate.set_wakeup(true);
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let _ = inkplate.frontlight_off();
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let mode_store = ModeStore::new(peripherals.FLASH);
-
-    #[cfg(not(feature = "asset-upload-http-uploader"))]
-    let display_context = DisplayContext {
-        inkplate,
-        mode_store,
-        _panel_pins: panel_pins,
-    };
 
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
@@ -153,22 +194,28 @@ pub(crate) fn run() -> ! {
             spawner.must_spawn(upload_http::net_task(upload_http_runtime.net_runner));
             spawner.must_spawn(upload_http::http_server_task(upload_http_runtime.stack));
         }
-        #[cfg(not(feature = "asset-upload-http-uploader"))]
-        spawner.must_spawn(touch::tasks::touch_pipeline_task());
-        #[cfg(not(feature = "asset-upload-http-uploader"))]
-        spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
-        #[cfg(not(feature = "asset-upload-http-uploader"))]
-        spawner.must_spawn(display::display_task(display_context));
+
+        if run_upload_mode {
+            if let Some(inkplate) = sd_power_inkplate {
+                spawner.must_spawn(sd_power_task(inkplate));
+            }
+        } else {
+            spawner.must_spawn(touch::tasks::touch_pipeline_task());
+            if let Some(touch_irq) = touch_irq {
+                spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
+            }
+            if let Some(display_context) = display_context {
+                spawner.must_spawn(display::display_task(display_context));
+            }
+            spawner.must_spawn(clock_task());
+            spawner.must_spawn(battery_task());
+        }
+
         spawner.must_spawn(sd::sd_task(sd_probe));
-        #[cfg(not(feature = "asset-upload-http-uploader"))]
-        spawner.must_spawn(clock_task());
-        #[cfg(not(feature = "asset-upload-http-uploader"))]
-        spawner.must_spawn(battery_task());
         spawner.must_spawn(serial::time_sync_task(uart));
     });
 }
 
-#[cfg(not(feature = "asset-upload-http-uploader"))]
 #[embassy_executor::task]
 async fn clock_task() {
     let boot_instant = Instant::now();
@@ -187,7 +234,6 @@ async fn clock_task() {
     }
 }
 
-#[cfg(not(feature = "asset-upload-http-uploader"))]
 #[embassy_executor::task]
 async fn battery_task() {
     APP_EVENTS.send(AppEvent::BatteryTick).await;
@@ -196,6 +242,18 @@ async fn battery_task() {
     loop {
         ticker.next().await;
         APP_EVENTS.send(AppEvent::BatteryTick).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn sd_power_task(mut inkplate: InkplateDriver) {
+    loop {
+        let request = SD_POWER_REQUESTS.receive().await;
+        let ok = match request {
+            SdPowerRequest::On => inkplate.sd_card_power_on().is_ok(),
+            SdPowerRequest::Off => inkplate.sd_card_power_off().is_ok(),
+        };
+        SD_POWER_RESPONSES.send(ok).await;
     }
 }
 

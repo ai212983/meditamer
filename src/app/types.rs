@@ -22,13 +22,17 @@ pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
-    Refresh { uptime_seconds: u32 },
+    Refresh {
+        uptime_seconds: u32,
+    },
     BatteryTick,
     TimeSync(TimeSyncCommand),
     TouchIrq,
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
+    #[cfg(feature = "asset-upload-http")]
+    SwitchRuntimeMode(RuntimeMode),
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +222,29 @@ pub(crate) struct TimeSyncState {
     pub(crate) unix_epoch_utc_seconds: u64,
     pub(crate) tz_offset_minutes: i32,
     pub(crate) sync_instant: Instant,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeMode {
+    Normal,
+    Upload,
+}
+
+impl RuntimeMode {
+    pub(crate) fn as_persisted(self) -> u8 {
+        match self {
+            Self::Normal => 0,
+            Self::Upload => 1,
+        }
+    }
+
+    pub(crate) fn from_persisted(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Normal),
+            1 => Some(Self::Upload),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

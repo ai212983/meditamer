@@ -28,7 +28,8 @@ use super::{
 use super::{
     config::{WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CREDENTIALS_UPDATES},
     types::{
-        WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
+        RuntimeMode, WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX,
+        WIFI_SSID_MAX,
     },
 };
 
@@ -94,6 +95,10 @@ enum SerialCommand {
     SdWait {
         target: SdWaitTarget,
         timeout_ms: u32,
+    },
+    #[cfg(feature = "asset-upload-http")]
+    RunMode {
+        mode: RuntimeMode,
     },
     #[cfg(feature = "asset-upload-http")]
     WifiSet {
@@ -456,6 +461,13 @@ fn serial_command_event_and_responses(
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
         #[cfg(feature = "asset-upload-http")]
+        SerialCommand::RunMode { mode } => (
+            Some(AppEvent::SwitchRuntimeMode(mode)),
+            None,
+            b"RUNMODE OK\r\n",
+            b"RUNMODE BUSY\r\n",
+        ),
+        #[cfg(feature = "asset-upload-http")]
         SerialCommand::WifiSet { .. } => unreachable!("wifiset command is handled inline"),
     }
 }
@@ -807,6 +819,10 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
         return Some(SerialCommand::AllocatorAllocProbe { bytes });
     }
     #[cfg(feature = "asset-upload-http")]
+    if let Some(mode) = parse_runmode_command(line) {
+        return Some(SerialCommand::RunMode { mode });
+    }
+    #[cfg(feature = "asset-upload-http")]
     if let Some(credentials) = parse_wifiset_command(line) {
         return Some(SerialCommand::WifiSet { credentials });
     }
@@ -952,6 +968,32 @@ fn parse_allocator_alloc_probe_command(line: &[u8]) -> Option<u32> {
         return None;
     }
     Some(bytes as u32)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn parse_runmode_command(line: &[u8]) -> Option<RuntimeMode> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"RUNMODE";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+
+    let mode = &trimmed[i..];
+    if mode.eq_ignore_ascii_case(b"UPLOAD") {
+        return Some(RuntimeMode::Upload);
+    }
+    if mode.eq_ignore_ascii_case(b"NORMAL") {
+        return Some(RuntimeMode::Normal);
+    }
+    None
 }
 
 #[cfg(feature = "asset-upload-http")]
@@ -1477,6 +1519,30 @@ mod tests {
     fn rejects_psram_alloc_probe_without_size() {
         let cmd = parse_serial_command(b"PSRAMALLOC");
         assert!(cmd.is_none());
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_runmode_upload() {
+        let cmd = parse_serial_command(b"RUNMODE UPLOAD");
+        match cmd {
+            Some(SerialCommand::RunMode { mode }) => {
+                assert!(matches!(mode, RuntimeMode::Upload));
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_runmode_normal_case_insensitive() {
+        let cmd = parse_serial_command(b"runmode normal");
+        match cmd {
+            Some(SerialCommand::RunMode { mode }) => {
+                assert!(matches!(mode, RuntimeMode::Normal));
+            }
+            _ => panic!("unexpected command"),
+        }
     }
 
     #[cfg(feature = "asset-upload-http")]
