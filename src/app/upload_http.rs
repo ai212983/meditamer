@@ -350,13 +350,18 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             let mut sent = 0usize;
             if body_bytes_in_buffer > 0 {
                 let take = min(body_bytes_in_buffer, content_length);
-                let chunk = &header_buf[body_start..body_start + take];
-                if let Err(err) = sd_upload_chunk(chunk).await {
-                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                    write_roundtrip_error_response(socket, err).await;
-                    return Err(map_roundtrip_error_to_log(err));
+                let mut offset = 0usize;
+                while offset < take {
+                    let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
+                    let chunk = &header_buf[body_start + offset..body_start + end];
+                    if let Err(err) = sd_upload_chunk(chunk).await {
+                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                        write_roundtrip_error_response(socket, err).await;
+                        return Err(map_roundtrip_error_to_log(err));
+                    }
+                    sent += chunk.len();
+                    offset = end;
                 }
-                sent += take;
             }
 
             let mut chunk_buf = [0u8; SD_UPLOAD_CHUNK_MAX];
