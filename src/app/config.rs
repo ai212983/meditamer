@@ -75,7 +75,7 @@ pub(crate) const FACE_BASELINE_RECALIBRATE_MS: u64 = 1_200;
 pub(crate) const FACE_DOWN_HOLD_MS: u64 = 750;
 pub(crate) const FACE_DOWN_REARM_MS: u64 = 450;
 pub(crate) const MODE_STORE_MAGIC: u32 = 0x4544_4F4D;
-pub(crate) const MODE_STORE_VERSION: u8 = 1;
+pub(crate) const MODE_STORE_VERSION: u8 = 2;
 pub(crate) const MODE_STORE_RECORD_LEN: usize = 16;
 pub(crate) const UI_TICK_MS: u64 = 50;
 pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
@@ -105,7 +105,7 @@ pub(crate) static WIFI_CONFIG_RESPONSES: Channel<CriticalSectionRawMutex, WifiCo
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
-pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 32> =
+pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
 pub(crate) static MAX_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
