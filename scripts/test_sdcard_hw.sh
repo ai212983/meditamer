@@ -146,7 +146,7 @@ last_sdreq_id_from_line() {
     fi
 }
 
-sdwait_status_from_line() {
+sdwait_result_from_line() {
     local start_line="$1"
     local timeout_s="$2"
     local deadline=$((SECONDS + timeout_s))
@@ -154,40 +154,48 @@ sdwait_status_from_line() {
         local match_line
         match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^SDWAIT (DONE|TIMEOUT|ERR)" || true)"
         if [[ "$match_line" == SDWAIT\ DONE* ]]; then
-            if [[ "$match_line" =~ status=ok ]]; then
-                echo "ok"
+            local status
+            local code
+            status="$(sed -nE 's/.* status=([a-z]+) .*/\1/p' <<<"$match_line")"
+            code="$(sed -nE 's/.* code=([a-z_]+) .*/\1/p' <<<"$match_line")"
+            if [[ -n "$status" && -n "$code" ]]; then
+                echo "$status $code"
                 return 0
             fi
-            if [[ "$match_line" =~ status=error ]]; then
-                echo "error"
-                return 0
-            fi
-            echo "err"
+            echo "err -"
             return 0
         fi
         if [[ "$match_line" == SDWAIT\ TIMEOUT* ]]; then
-            echo "timeout"
+            echo "timeout -"
             return 0
         fi
         if [[ "$match_line" == SDWAIT\ ERR* ]]; then
-            echo "err"
+            echo "err -"
             return 0
         fi
         sleep 1
     done
-    echo "none"
+    echo "none -"
     return 0
 }
 
 wait_for_sd_result() {
     local request_id="$1"
     local expected_status="$2"
+    local expected_code="${3:-}"
     local sdwait_start_line
     sdwait_start_line="$(wc -l <"$output_path")"
     send_line "SDWAIT $request_id $sdwait_timeout_ms"
-    local status
-    status="$(sdwait_status_from_line "$sdwait_start_line" 40)"
-    [[ "$status" == "$expected_status" ]]
+    local result status code
+    result="$(sdwait_result_from_line "$sdwait_start_line" 40)"
+    read -r status code <<<"$result"
+    if [[ "$status" != "$expected_status" ]]; then
+        return 1
+    fi
+    if [[ -n "$expected_code" && "$code" != "$expected_code" ]]; then
+        return 1
+    fi
+    return 0
 }
 
 run_step() {
@@ -235,7 +243,8 @@ run_step_expect_error() {
     local command="$2"
     local ack_tag="$3"
     local error_pattern="$4"
-    local max_attempts="${5:-12}"
+    local expected_code="${5:-}"
+    local max_attempts="${6:-12}"
 
     local attempt=1
     while ((attempt <= max_attempts)); do
@@ -248,7 +257,7 @@ run_step_expect_error() {
         if [[ "$status" == "OK" ]]; then
             local request_id
             request_id="$(wait_for_sdreq_id_from_line "$start_line" 8 || true)"
-            if [[ -n "$request_id" ]] && wait_for_sd_result "$request_id" "error"; then
+            if [[ -n "$request_id" ]] && wait_for_sd_result "$request_id" "error" "$expected_code"; then
                 if wait_for_pattern_from_line "$start_line" "$error_pattern" 90; then
                     echo "[PASS] $name"
                     return 0
@@ -306,7 +315,7 @@ run_burst_sequence() {
     fi
     local burst_last_id
     burst_last_id="$(last_sdreq_id_from_line "$start_line")"
-    if [[ -z "$burst_last_id" ]] || ! wait_for_sd_result "$burst_last_id" "ok"; then
+    if [[ -z "$burst_last_id" ]] || ! wait_for_sd_result "$burst_last_id" "ok" "ok"; then
         echo "[FAIL] burst_wait_last"
         tail -n 160 "$output_path" >&2
         return 1
@@ -356,7 +365,8 @@ run_failure_sequence() {
     run_step_expect_error "fail_rm_non_empty_dir" \
         "SDFATRM $fail_root" \
         "SDFATRM" \
-        "sdfat\\[manual\\]: rm_error path=$fail_root err=NotEmpty"
+        "sdfat\\[manual\\]: rm_error path=$fail_root err=NotEmpty" \
+        "operation_failed"
 
     run_step "fail_cleanup_child" \
         "SDFATRM $fail_root/child.txt" \
@@ -386,7 +396,8 @@ run_failure_sequence() {
     run_step_expect_error "fail_rename_collision" \
         "SDFATREN $file_a $file_b" \
         "SDFATREN" \
-        "sdfat\\[manual\\]: ren_error src=$file_a dst=$file_b err=AlreadyExists"
+        "sdfat\\[manual\\]: ren_error src=$file_a dst=$file_b err=AlreadyExists" \
+        "operation_failed"
 
     run_step "fail_cleanup_a" \
         "SDFATRM $file_a" \
