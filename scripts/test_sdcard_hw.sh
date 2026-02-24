@@ -399,6 +399,18 @@ run_failure_sequence() {
         "sdfat\\[manual\\]: ren_error src=$file_a dst=$file_b err=AlreadyExists" \
         "operation_failed"
 
+    run_step_expect_error "fail_read_not_found" \
+        "SDFATREAD $rename_root/missing.txt" \
+        "SDFATREAD" \
+        "sdfat\\[manual\\]: read_error path=$rename_root/missing.txt err=NotFound" \
+        "not_found"
+
+    run_step_expect_error "fail_rw_refused_lba0" \
+        "SDRWVERIFY 0" \
+        "SDRWVERIFY" \
+        "sdrw\\[manual\\]: refused_lba0" \
+        "refused_lba0"
+
     run_step "fail_cleanup_a" \
         "SDFATRM $file_a" \
         "SDFATRM" \
