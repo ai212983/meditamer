@@ -156,8 +156,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
             }
         }
 
-        if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await
-        {
+        if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
             let byte = rx[0];
             if byte == b'\r' || byte == b'\n' {
                 if line_len == 0 {

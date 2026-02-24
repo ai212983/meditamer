@@ -1,6 +1,6 @@
 use crate::{
-    power_off, power_on_for_io,
     fat::{self, FatDirEntry},
+    power_off, power_on_for_io,
     probe::{self, SdCardProbe, SdProbeStatus, SD_SECTOR_SIZE},
 };
 

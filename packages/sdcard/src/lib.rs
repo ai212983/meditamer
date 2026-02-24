@@ -1,10 +1,10 @@
 #![no_std]
 
 pub mod api;
-pub mod power;
-pub mod runtime;
 pub mod fat;
+pub mod power;
 pub mod probe;
+pub mod runtime;
 
 pub use power::{power_off, power_on_for_io, SD_POWER_SETTLE_MS};
 
