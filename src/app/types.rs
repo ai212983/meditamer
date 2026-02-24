@@ -75,7 +75,7 @@ pub(crate) enum SdCommand {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SdCommandKind {
     Probe,
     RwVerify,
@@ -106,7 +106,7 @@ pub(crate) struct SdResult {
     pub(crate) duration_ms: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SdResultCode {
     Ok,
     PowerOnFailed,
