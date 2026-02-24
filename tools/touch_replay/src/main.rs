@@ -12,8 +12,17 @@ mod touch_core;
 mod touch_normalize;
 
 use touch_core::{
-    TouchEngine, TouchEvent, TouchEventKind, TouchSample, TouchSwipeDirection, TouchPoint,
+    TouchEngine, TouchEvent, TouchEventKind, TouchPoint, TouchSample, TouchSwipeDirection,
 };
+use touch_normalize::{NormalizedTouchPoint, NormalizedTouchSample, TouchPresenceNormalizer};
+
+#[derive(Clone, Copy)]
+struct ReplaySample {
+    ms: u64,
+    touch_count: u8,
+    points: [TouchPoint; 2],
+    raw: [u8; 8],
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -60,11 +69,66 @@ fn run() -> Result<(), String> {
 
     let trace_path = trace_path.ok_or_else(usage)?;
     let samples = parse_trace(&trace_path)?;
+    let last_sample_ms = samples.last().map(|s| s.ms);
 
+    let mut normalizer = TouchPresenceNormalizer::new();
     let mut engine = TouchEngine::new();
     let mut events: Vec<TouchEvent> = Vec::new();
-    for (ms, sample) in samples {
-        let output = engine.tick(ms, sample);
+    for replay in &samples {
+        let normalized = NormalizedTouchSample {
+            touch_count: replay.touch_count,
+            points: [
+                NormalizedTouchPoint {
+                    x: replay.points[0].x,
+                    y: replay.points[0].y,
+                },
+                NormalizedTouchPoint {
+                    x: replay.points[1].x,
+                    y: replay.points[1].y,
+                },
+            ],
+            raw: replay.raw,
+        };
+        let (count, primary) = normalizer.normalize(replay.ms, normalized);
+        let core_sample = TouchSample {
+            touch_count: count,
+            points: [
+                primary
+                    .map(|p| TouchPoint { x: p.x, y: p.y })
+                    .unwrap_or_default(),
+                TouchPoint::default(),
+            ],
+        };
+
+        let output = engine.tick(replay.ms, core_sample);
+        for event in output.events.into_iter().flatten() {
+            events.push(event);
+        }
+    }
+
+    // Ensure release/debounce states can flush final Up/Tap/Swipe decisions even
+    // when captured traces stop immediately after the last physical sample.
+    if let Some(last_ms) = events.last().map(|e| e.t_ms).or(last_sample_ms) {
+        let tail_ms = last_ms.saturating_add(200);
+        let normalized = NormalizedTouchSample {
+            touch_count: 0,
+            points: [
+                NormalizedTouchPoint::default(),
+                NormalizedTouchPoint::default(),
+            ],
+            raw: [0u8; 8],
+        };
+        let (count, primary) = normalizer.normalize(tail_ms, normalized);
+        let core_sample = TouchSample {
+            touch_count: count,
+            points: [
+                primary
+                    .map(|p| TouchPoint { x: p.x, y: p.y })
+                    .unwrap_or_default(),
+                TouchPoint::default(),
+            ],
+        };
+        let output = engine.tick(tail_ms, core_sample);
         for event in output.events.into_iter().flatten() {
             events.push(event);
         }
@@ -102,20 +166,15 @@ fn usage() -> String {
     "usage: touch_replay <trace.csv> [--expect expected_kinds.txt]".to_string()
 }
 
-fn parse_trace(path: &Path) -> Result<Vec<(u64, TouchSample)>, String> {
+fn parse_trace(path: &Path) -> Result<Vec<ReplaySample>, String> {
     let file = File::open(path).map_err(|e| format!("failed to open {}: {e}", path.display()))?;
     let reader = BufReader::new(file);
 
-    let mut out = Vec::new();
+    let mut out: Vec<ReplaySample> = Vec::new();
     for (line_no, line_result) in reader.lines().enumerate() {
         let line_no = line_no + 1;
-        let line = line_result.map_err(|e| {
-            format!(
-                "failed to read {}:{}: {e}",
-                path.display(),
-                line_no
-            )
-        })?;
+        let line = line_result
+            .map_err(|e| format!("failed to read {}:{}: {e}", path.display(), line_no))?;
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -144,13 +203,19 @@ fn parse_trace(path: &Path) -> Result<Vec<(u64, TouchSample)>, String> {
         let x1 = parse_u16(parts[5], path, line_no, "x1")?;
         let y1 = parse_u16(parts[6], path, line_no, "y1")?;
 
-        out.push((
+        let mut raw = [0u8; 8];
+        if parts.len() >= 15 {
+            for (idx, raw_slot) in raw.iter_mut().enumerate() {
+                *raw_slot = parse_u8(parts[7 + idx], path, line_no, "raw")?;
+            }
+        }
+
+        out.push(ReplaySample {
             ms,
-            TouchSample {
-                touch_count: count,
-                points: [TouchPoint { x: x0, y: y0 }, TouchPoint { x: x1, y: y1 }],
-            },
-        ));
+            touch_count: count,
+            points: [TouchPoint { x: x0, y: y0 }, TouchPoint { x: x1, y: y1 }],
+            raw,
+        });
     }
 
     Ok(out)
@@ -163,13 +228,8 @@ fn parse_expected_kinds(path: &Path) -> Result<Vec<&'static str>, String> {
     let mut kinds = Vec::new();
     for (line_no, line_result) in reader.lines().enumerate() {
         let line_no = line_no + 1;
-        let line = line_result.map_err(|e| {
-            format!(
-                "failed to read {}:{}: {e}",
-                path.display(),
-                line_no
-            )
-        })?;
+        let line = line_result
+            .map_err(|e| format!("failed to read {}:{}: {e}", path.display(), line_no))?;
         let token = line.trim();
         if token.is_empty() || token.starts_with('#') {
             continue;
