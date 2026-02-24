@@ -35,6 +35,8 @@ use super::{
     types::{AppEvent, DisplayContext, DisplayMode, SdPowerRequest, TapTraceSample, TimeSyncState},
 };
 
+const SD_POWER_POLL_SLICE_MS: u64 = 5;
+
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut update_count = 0u32;
@@ -86,8 +88,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     request_touch_pipeline_reset();
 
     loop {
-        process_sd_power_requests(&mut context).await;
-
         let app_wait_ms = next_loop_wait_ms(LoopWaitSchedule {
             touch_ready,
             touch_retry_at,
@@ -101,9 +101,27 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             tap_trace_aux_next_sample_at,
         });
 
-        if let Ok(event) =
-            with_timeout(Duration::from_millis(app_wait_ms), APP_EVENTS.receive()).await
-        {
+        let mut event = None;
+        let mut remaining_wait_ms = app_wait_ms;
+        loop {
+            process_sd_power_requests(&mut context).await;
+
+            if remaining_wait_ms == 0 {
+                break;
+            }
+            let wait_slice_ms = remaining_wait_ms.min(SD_POWER_POLL_SLICE_MS);
+            match with_timeout(Duration::from_millis(wait_slice_ms), APP_EVENTS.receive()).await {
+                Ok(received_event) => {
+                    event = Some(received_event);
+                    break;
+                }
+                Err(_) => {
+                    remaining_wait_ms = remaining_wait_ms.saturating_sub(wait_slice_ms);
+                }
+            }
+        }
+
+        if let Some(event) = event {
             match event {
                 AppEvent::Refresh { uptime_seconds } => {
                     last_uptime_seconds = uptime_seconds;
