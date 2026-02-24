@@ -1,3 +1,16 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SdRuntimeResultCode {
+    Ok,
+    PowerOnFailed,
+    InitFailed,
+    InvalidPath,
+    NotFound,
+    VerifyMismatch,
+    PowerOffFailed,
+    OperationFailed,
+    RefusedLba0,
+}
+
 async fn power_on<E, P>(power: &mut P) -> Result<(), E>
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -26,4 +39,12 @@ fn decode_entry_name(entry: &fat::FatDirEntry) -> &str {
         return "<invalid>";
     }
     core::str::from_utf8(&entry.name[..len]).unwrap_or("<utf8_err>")
+}
+
+fn fat_error_result_code(error: &fat::SdFatError) -> SdRuntimeResultCode {
+    match error {
+        fat::SdFatError::InvalidPath => SdRuntimeResultCode::InvalidPath,
+        fat::SdFatError::NotFound => SdRuntimeResultCode::NotFound,
+        _ => SdRuntimeResultCode::OperationFailed,
+    }
 }

@@ -1,6 +1,6 @@
 use core::{fmt::Write, sync::atomic::Ordering};
 
-use embassy_time::{with_timeout, Duration, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 
 use super::{
     config::{
@@ -79,11 +79,24 @@ enum SerialCommand {
         path_len: u8,
         size: u32,
     },
+    SdWait {
+        target: SdWaitTarget,
+        timeout_ms: u32,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum SdWaitTarget {
+    Next,
+    Last,
+    Id(u32),
 }
 
 const APP_EVENT_ENQUEUE_RETRY_MS: u64 = 25;
 // Absorb short SD/FAT bursts without requiring host-side pacing.
 const APP_EVENT_ENQUEUE_MAX_RETRIES: u8 = 240;
+const SD_RESULT_CACHE_CAP: usize = 16;
+const SDWAIT_DEFAULT_TIMEOUT_MS: u32 = 10_000;
 
 #[derive(Clone, Copy)]
 enum SerialDispatch {
@@ -98,6 +111,8 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     let mut rx = [0u8; 1];
     let mut touch_wizard_log = TouchWizardSessionLog::new();
     let mut next_sd_request_id = 1u32;
+    let mut last_sd_request_id: Option<u32> = None;
+    let mut sd_result_cache = heapless::Vec::<SdResult, SD_RESULT_CACHE_CAP>::new();
 
     if TAP_TRACE_ENABLED {
         let _ = uart_write_all(
@@ -167,6 +182,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
         }
 
         while let Ok(result) = SD_RESULTS.try_receive() {
+            cache_sd_result(&mut sd_result_cache, result);
             write_sd_result(&mut uart, result).await;
         }
 
@@ -191,6 +207,16 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 last_ms, max_ms
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                        }
+                        SerialCommand::SdWait { target, timeout_ms } => {
+                            run_sdwait_command(
+                                &mut uart,
+                                &mut sd_result_cache,
+                                last_sd_request_id,
+                                target,
+                                timeout_ms,
+                            )
+                            .await;
                         }
                         _ => {
                             let (dispatch, ok_response, busy_response) =
@@ -217,6 +243,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             if queued {
                                 let _ = uart.write_async(ok_response).await;
                                 if let Some((request_id, command)) = sd_request_meta {
+                                    last_sd_request_id = Some(request_id);
                                     write_sd_request_queued(&mut uart, request_id, command).await;
                                 }
                             } else {
@@ -385,6 +412,7 @@ fn serial_command_event_and_responses(
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
+        SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
     }
 }
 
@@ -446,6 +474,117 @@ async fn write_sd_result(uart: &mut SerialUart, result: SdResult) {
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
+fn cache_sd_result(cache: &mut heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>, result: SdResult) {
+    if cache.push(result).is_err() {
+        let _ = cache.remove(0);
+        let _ = cache.push(result);
+    }
+}
+
+async fn run_sdwait_command(
+    uart: &mut SerialUart,
+    sd_result_cache: &mut heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>,
+    last_sd_request_id: Option<u32>,
+    target: SdWaitTarget,
+    timeout_ms: u32,
+) {
+    let wait_id = match target {
+        SdWaitTarget::Next => None,
+        SdWaitTarget::Last => {
+            let Some(id) = last_sd_request_id else {
+                let _ = uart_write_all(uart, b"SDWAIT ERR reason=no_last_request\r\n").await;
+                return;
+            };
+            Some(id)
+        }
+        SdWaitTarget::Id(id) => Some(id),
+    };
+
+    if let Some(id) = wait_id {
+        if let Some(result) = sd_result_cache
+            .iter()
+            .rev()
+            .find(|result| result.id == id)
+            .copied()
+        {
+            write_sdwait_done(uart, target, wait_id, result).await;
+            return;
+        }
+    }
+
+    let start = Instant::now();
+    loop {
+        let elapsed_ms = Instant::now().saturating_duration_since(start).as_millis();
+        if elapsed_ms >= timeout_ms as u64 {
+            write_sdwait_timeout(uart, target, wait_id, timeout_ms).await;
+            return;
+        }
+
+        let remaining_ms = (timeout_ms as u64).saturating_sub(elapsed_ms).max(1);
+        match with_timeout(Duration::from_millis(remaining_ms), SD_RESULTS.receive()).await {
+            Ok(result) => {
+                cache_sd_result(sd_result_cache, result);
+                write_sd_result(uart, result).await;
+                if wait_id.map(|id| id == result.id).unwrap_or(true) {
+                    write_sdwait_done(uart, target, wait_id, result).await;
+                    return;
+                }
+            }
+            Err(_) => {
+                write_sdwait_timeout(uart, target, wait_id, timeout_ms).await;
+                return;
+            }
+        }
+    }
+}
+
+async fn write_sdwait_done(
+    uart: &mut SerialUart,
+    target: SdWaitTarget,
+    wait_id: Option<u32>,
+    result: SdResult,
+) {
+    let mut line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut line,
+        "SDWAIT DONE target={} ",
+        sdwait_target_label(target)
+    );
+    if let Some(wait_id) = wait_id {
+        let _ = write!(&mut line, "wait_id={} ", wait_id);
+    }
+    let _ = write!(
+        &mut line,
+        "id={} op={} status={} code={} attempts={} dur_ms={}\r\n",
+        result.id,
+        sd_result_kind_label(result.kind),
+        if result.ok { "ok" } else { "error" },
+        sd_result_code_label(result.code),
+        result.attempts,
+        result.duration_ms
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn write_sdwait_timeout(
+    uart: &mut SerialUart,
+    target: SdWaitTarget,
+    wait_id: Option<u32>,
+    timeout_ms: u32,
+) {
+    let mut line = heapless::String::<112>::new();
+    let _ = write!(
+        &mut line,
+        "SDWAIT TIMEOUT target={} ",
+        sdwait_target_label(target)
+    );
+    if let Some(wait_id) = wait_id {
+        let _ = write!(&mut line, "wait_id={} ", wait_id);
+    }
+    let _ = write!(&mut line, "timeout_ms={}\r\n", timeout_ms);
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
 fn sd_command_label(command: SdCommand) -> &'static str {
     match command {
         SdCommand::SdProbe => "probe",
@@ -478,11 +617,25 @@ fn sd_result_kind_label(kind: SdCommandKind) -> &'static str {
     }
 }
 
+fn sdwait_target_label(target: SdWaitTarget) -> &'static str {
+    match target {
+        SdWaitTarget::Next => "next",
+        SdWaitTarget::Last => "last",
+        SdWaitTarget::Id(_) => "id",
+    }
+}
+
 fn sd_result_code_label(code: SdResultCode) -> &'static str {
     match code {
         SdResultCode::Ok => "ok",
         SdResultCode::PowerOnFailed => "power_on_failed",
+        SdResultCode::InitFailed => "init_failed",
+        SdResultCode::InvalidPath => "invalid_path",
+        SdResultCode::NotFound => "not_found",
+        SdResultCode::VerifyMismatch => "verify_mismatch",
+        SdResultCode::PowerOffFailed => "power_off_failed",
         SdResultCode::OperationFailed => "operation_failed",
+        SdResultCode::RefusedLba0 => "refused_lba0",
     }
 }
 
@@ -504,6 +657,9 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     }
     if parse_sdprobe_command(line) {
         return Some(SerialCommand::SdProbe);
+    }
+    if let Some((target, timeout_ms)) = parse_sdwait_command(line) {
+        return Some(SerialCommand::SdWait { target, timeout_ms });
     }
     if let Some(lba) = parse_sdrwverify_command(line) {
         return Some(SerialCommand::SdRwVerify { lba });
@@ -616,6 +772,59 @@ fn parse_touch_wizard_dump_command(line: &[u8]) -> bool {
 
 fn parse_sdprobe_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"SDPROBE"
+}
+
+fn parse_sdwait_command(line: &[u8]) -> Option<(SdWaitTarget, u32)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDWAIT";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return Some((SdWaitTarget::Next, SDWAIT_DEFAULT_TIMEOUT_MS));
+    }
+
+    let token_start = i;
+    while i < trimmed.len() && !trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let token = &trimmed[token_start..i];
+    let target = if token == b"LAST" {
+        SdWaitTarget::Last
+    } else if token == b"NEXT" {
+        SdWaitTarget::Next
+    } else {
+        let (id, next_i) = parse_u64_ascii(trimmed, token_start)?;
+        if next_i != i || id > u32::MAX as u64 {
+            return None;
+        }
+        SdWaitTarget::Id(id as u32)
+    };
+
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return Some((target, SDWAIT_DEFAULT_TIMEOUT_MS));
+    }
+
+    let (timeout_ms, next_i) = parse_u64_ascii(trimmed, i)?;
+    if timeout_ms > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+    Some((target, timeout_ms as u32))
 }
 
 fn parse_sdrwverify_command(line: &[u8]) -> Option<u32> {
@@ -991,6 +1200,51 @@ mod tests {
             Some(SerialCommand::SdRwVerify { lba }) => assert_eq!(lba, 2048),
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn parses_sdwait_defaults() {
+        let cmd = parse_serial_command(b"SDWAIT");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                assert!(matches!(target, SdWaitTarget::Next));
+                assert_eq!(timeout_ms, SDWAIT_DEFAULT_TIMEOUT_MS);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdwait_last_with_timeout() {
+        let cmd = parse_serial_command(b"SDWAIT LAST 2500");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                assert!(matches!(target, SdWaitTarget::Last));
+                assert_eq!(timeout_ms, 2500);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdwait_by_id() {
+        let cmd = parse_serial_command(b"SDWAIT 42");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                match target {
+                    SdWaitTarget::Id(id) => assert_eq!(id, 42),
+                    _ => panic!("unexpected target"),
+                }
+                assert_eq!(timeout_ms, SDWAIT_DEFAULT_TIMEOUT_MS);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_sdwait_invalid_trailing_tokens() {
+        let cmd = parse_serial_command(b"SDWAIT 42 100 extra");
+        assert!(cmd.is_none());
     }
 
     #[test]

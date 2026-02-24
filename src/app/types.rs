@@ -106,12 +106,7 @@ pub(crate) struct SdResult {
     pub(crate) duration_ms: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SdResultCode {
-    Ok,
-    PowerOnFailed,
-    OperationFailed,
-}
+pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;
 
 #[derive(Clone, Copy)]
 pub(crate) enum SdPowerRequest {
