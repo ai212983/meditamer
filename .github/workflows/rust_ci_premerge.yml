@@ -3,13 +3,15 @@ name: Firmware Heavy CI
 on:
   pull_request:
     paths:
-      - "src/**"
+      - "src/main.rs"
+      - "src/event_engine/**"
+      - "src/inkplate_hal/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
       - "rust-toolchain.toml"
       - ".cargo/**"
-      - "config/**"
+      - "config/events.toml"
       - ".github/workflows/rust_ci_premerge.yml"
   push:
     branches:
