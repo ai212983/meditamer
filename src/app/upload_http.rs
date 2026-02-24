@@ -249,6 +249,7 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
             println!("upload_http: request err={}", err);
         }
 
+        let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
         socket.close();
     }
 }
