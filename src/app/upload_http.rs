@@ -250,9 +250,7 @@ pub(crate) async fn http_server_task(stack: Stack<'static>) {
         }
 
         let _ = socket.flush().await;
-        Timer::after(Duration::from_millis(20)).await;
         socket.close();
-        Timer::after(Duration::from_millis(20)).await;
         socket.abort();
     }
 }
