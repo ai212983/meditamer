@@ -6,6 +6,7 @@ import mimetypes
 import os
 import posixpath
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -56,34 +57,55 @@ def request(
     target: str,
     body=None,
     headers=None,
+    retries: int = 1,
+    retry_delay: float = 0.2,
 ) -> bytes:
     headers = dict(headers or {})
-    conn = http.client.HTTPConnection(host=host, port=port, timeout=timeout)
-    try:
-        conn.request(method=method, url=target, body=body, headers=headers)
-        resp = conn.getresponse()
-        data = resp.read()
-        if resp.status // 100 != 2:
-            raise RuntimeError(
-                f"{method} {target} failed: {resp.status} {resp.reason} {data.decode(errors='ignore')}"
-            )
-        return data
-    finally:
-        conn.close()
+    attempts = max(1, retries)
+    last_exc = None
+    for attempt in range(attempts):
+        conn = http.client.HTTPConnection(host=host, port=port, timeout=timeout)
+        try:
+            if attempt > 0 and hasattr(body, "seek"):
+                body.seek(0)
+            conn.request(method=method, url=target, body=body, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+            if resp.status // 100 != 2:
+                raise RuntimeError(
+                    f"{method} {target} failed: {resp.status} {resp.reason} {data.decode(errors='ignore')}"
+                )
+            return data
+        except (
+            ConnectionRefusedError,
+            ConnectionResetError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+        ) as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(retry_delay * (attempt + 1))
+        finally:
+            conn.close()
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("request failed without an exception")
 
 
 def health_check(host: str, port: int, timeout: float) -> None:
-    request(host, port, timeout, "GET", "/health")
+    request(host, port, timeout, "GET", "/health", retries=8)
 
 
 def mkdir(host: str, port: int, timeout: float, remote_path: str) -> None:
     target = f"/mkdir?path={quote(remote_path, safe='/')}"
-    request(host, port, timeout, "POST", target, body=b"")
+    request(host, port, timeout, "POST", target, body=b"", retries=8)
 
 
 def rm_path(host: str, port: int, timeout: float, remote_path: str) -> None:
     target = f"/rm?path={quote(remote_path, safe='/')}"
-    request(host, port, timeout, "DELETE", target, body=b"")
+    request(host, port, timeout, "DELETE", target, body=b"", retries=8)
 
 
 def upload_file(
@@ -101,7 +123,7 @@ def upload_file(
         "Content-Type": content_type or "application/octet-stream",
     }
     with local_path.open("rb") as f:
-        request(host, port, timeout, "PUT", target, body=f, headers=headers)
+        request(host, port, timeout, "PUT", target, body=f, headers=headers, retries=5)
 
 
 def iter_files(src: Path):
