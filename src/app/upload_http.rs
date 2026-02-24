@@ -622,9 +622,25 @@ fn decode_hex(b: u8) -> Option<u8> {
 }
 
 async fn write_response(socket: &mut TcpSocket<'_>, status: &[u8], body: &[u8]) {
+    let mut content_length = [0u8; 20];
+    let mut idx = content_length.len();
+    let mut remaining = body.len();
+    loop {
+        idx -= 1;
+        content_length[idx] = b'0' + (remaining % 10) as u8;
+        remaining /= 10;
+        if remaining == 0 {
+            break;
+        }
+    }
+
     let _ = socket.write_all(b"HTTP/1.0 ").await;
     let _ = socket.write_all(status).await;
-    let _ = socket.write_all(b"\r\nConnection: close\r\n\r\n").await;
+    let _ = socket
+        .write_all(b"\r\nConnection: close\r\nContent-Length: ")
+        .await;
+    let _ = socket.write_all(&content_length[idx..]).await;
+    let _ = socket.write_all(b"\r\n\r\n").await;
     let _ = socket.write_all(body).await;
 }
 
