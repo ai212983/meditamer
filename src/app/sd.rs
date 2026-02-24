@@ -1,10 +1,15 @@
+use embassy_futures::select::{select, Either};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use sdcard::runtime as sd_ops;
+use sdcard::{fat, runtime as sd_ops};
 
 use super::{
-    config::{SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_REQUESTS, SD_RESULTS},
+    config::{
+        SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_REQUESTS, SD_RESULTS, SD_UPLOAD_REQUESTS,
+        SD_UPLOAD_RESULTS,
+    },
     types::{
         SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult, SdResultCode,
+        SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode,
     },
 };
 
@@ -14,10 +19,23 @@ const SD_RETRY_DELAY_MS: u64 = 120;
 const SD_BACKOFF_BASE_MS: u64 = 300;
 const SD_BACKOFF_MAX_MS: u64 = 2_400;
 const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_000;
+const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
+const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
+
+struct SdUploadSession {
+    final_path: [u8; SD_UPLOAD_PATH_BUF_MAX],
+    final_path_len: u8,
+    temp_path: [u8; SD_UPLOAD_PATH_BUF_MAX],
+    temp_path_len: u8,
+    expected_size: u32,
+    bytes_written: u32,
+}
 
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
     let mut powered = false;
+    let mut upload_mounted = false;
+    let mut upload_session: Option<SdUploadSession> = None;
     let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
     let mut consecutive_failures = 0u8;
     let mut backoff_until: Option<Instant> = None;
@@ -44,14 +62,45 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         }
 
         let request = if powered {
-            with_timeout(
-                Duration::from_millis(SD_IDLE_POWER_OFF_MS),
-                SD_REQUESTS.receive(),
+            match select(
+                SD_UPLOAD_REQUESTS.receive(),
+                with_timeout(
+                    Duration::from_millis(SD_IDLE_POWER_OFF_MS),
+                    SD_REQUESTS.receive(),
+                ),
             )
             .await
-            .ok()
+            {
+                Either::First(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either::Second(result) => result.ok(),
+            }
         } else {
-            Some(SD_REQUESTS.receive().await)
+            match select(SD_UPLOAD_REQUESTS.receive(), SD_REQUESTS.receive()).await {
+                Either::First(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either::Second(request) => Some(request),
+            }
         };
 
         let Some(request) = request else {
@@ -59,6 +108,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 esp_println::println!("sdtask: idle_power_off_failed");
             }
             powered = false;
+            upload_mounted = false;
             continue;
         };
 
@@ -76,6 +126,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 esp_println::println!("sdtask: fail_power_off_failed");
             }
             powered = false;
+            upload_mounted = false;
         }
     }
 }
@@ -154,6 +205,272 @@ async fn process_request(
         code,
         attempts,
         duration_ms,
+    }
+}
+
+async fn process_upload_request(
+    request: SdUploadRequest,
+    session: &mut Option<SdUploadSession>,
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> SdUploadResult {
+    match request.command {
+        SdUploadCommand::Begin {
+            path,
+            path_len,
+            expected_size,
+        } => {
+            if session.is_some() {
+                return upload_result(false, SdUploadResultCode::Busy, 0);
+            }
+
+            let final_path = match parse_upload_path(&path, path_len) {
+                Ok(path) => path,
+                Err(code) => return upload_result(false, code, 0),
+            };
+            let final_path_bytes = final_path.as_bytes();
+
+            if final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len() > SD_UPLOAD_PATH_BUF_MAX {
+                return upload_result(false, SdUploadResultCode::InvalidPath, 0);
+            }
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, 0);
+            }
+
+            let mut temp_path = [0u8; SD_UPLOAD_PATH_BUF_MAX];
+            temp_path[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
+            temp_path[final_path_bytes.len()..final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len()]
+                .copy_from_slice(SD_UPLOAD_TMP_SUFFIX);
+            let temp_len = final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len();
+            let temp_path_str = match core::str::from_utf8(&temp_path[..temp_len]) {
+                Ok(path) => path,
+                Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
+            };
+
+            match fat::remove(sd_probe, temp_path_str).await {
+                Ok(()) => {}
+                Err(fat::SdFatError::NotFound) => {}
+                Err(err) => {
+                    return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+                }
+            }
+
+            if let Err(err) = fat::write_file(sd_probe, temp_path_str, &[]).await {
+                return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+            }
+
+            let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
+            final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
+            *session = Some(SdUploadSession {
+                final_path: final_path_buf,
+                final_path_len: final_path_bytes.len() as u8,
+                temp_path,
+                temp_path_len: temp_len as u8,
+                expected_size,
+                bytes_written: 0,
+            });
+            upload_result(true, SdUploadResultCode::Ok, 0)
+        }
+        SdUploadCommand::Chunk { data, data_len } => {
+            let Some(active) = session.as_mut() else {
+                return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
+            };
+            let data_len = (data_len as usize).min(data.len());
+            if data_len == 0 {
+                return upload_result(true, SdUploadResultCode::Ok, active.bytes_written);
+            }
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, active.bytes_written);
+            }
+
+            let temp_path_str =
+                match core::str::from_utf8(&active.temp_path[..active.temp_path_len as usize]) {
+                    Ok(path) => path,
+                    Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
+                };
+            if let Err(err) = fat::append_file(sd_probe, temp_path_str, &data[..data_len]).await {
+                return upload_result(
+                    false,
+                    map_fat_error_to_upload_code(&err),
+                    active.bytes_written,
+                );
+            }
+            active.bytes_written = active.bytes_written.saturating_add(data_len as u32);
+            upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
+        }
+        SdUploadCommand::Commit => {
+            let Some(active) = session.as_mut() else {
+                return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
+            };
+            if active.bytes_written != active.expected_size {
+                return upload_result(
+                    false,
+                    SdUploadResultCode::SizeMismatch,
+                    active.bytes_written,
+                );
+            }
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, active.bytes_written);
+            }
+
+            let temp_path_str =
+                match core::str::from_utf8(&active.temp_path[..active.temp_path_len as usize]) {
+                    Ok(path) => path,
+                    Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
+                };
+            let final_path_str =
+                match core::str::from_utf8(&active.final_path[..active.final_path_len as usize]) {
+                    Ok(path) => path,
+                    Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
+                };
+
+            match fat::remove(sd_probe, final_path_str).await {
+                Ok(()) => {}
+                Err(fat::SdFatError::NotFound) => {}
+                Err(err) => {
+                    return upload_result(
+                        false,
+                        map_fat_error_to_upload_code(&err),
+                        active.bytes_written,
+                    );
+                }
+            }
+
+            if let Err(err) = fat::rename(sd_probe, temp_path_str, final_path_str).await {
+                return upload_result(
+                    false,
+                    map_fat_error_to_upload_code(&err),
+                    active.bytes_written,
+                );
+            }
+            let bytes_written = active.bytes_written;
+            *session = None;
+            upload_result(true, SdUploadResultCode::Ok, bytes_written)
+        }
+        SdUploadCommand::Abort => {
+            let Some(active) = session.take() else {
+                return upload_result(true, SdUploadResultCode::Ok, 0);
+            };
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, active.bytes_written);
+            }
+
+            let temp_path_str =
+                match core::str::from_utf8(&active.temp_path[..active.temp_path_len as usize]) {
+                    Ok(path) => path,
+                    Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
+                };
+            match fat::remove(sd_probe, temp_path_str).await {
+                Ok(()) | Err(fat::SdFatError::NotFound) => {
+                    upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
+                }
+                Err(err) => upload_result(
+                    false,
+                    map_fat_error_to_upload_code(&err),
+                    active.bytes_written,
+                ),
+            }
+        }
+        SdUploadCommand::Mkdir { path, path_len } => {
+            if session.is_some() {
+                return upload_result(false, SdUploadResultCode::Busy, 0);
+            }
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, 0);
+            }
+
+            let path_str = match parse_upload_path(&path, path_len) {
+                Ok(path) => path,
+                Err(code) => return upload_result(false, code, 0),
+            };
+
+            match fat::mkdir(sd_probe, path_str).await {
+                Ok(()) | Err(fat::SdFatError::AlreadyExists) => {
+                    upload_result(true, SdUploadResultCode::Ok, 0)
+                }
+                Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+            }
+        }
+        SdUploadCommand::Remove { path, path_len } => {
+            if session.is_some() {
+                return upload_result(false, SdUploadResultCode::Busy, 0);
+            }
+
+            if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+                return upload_result(false, code, 0);
+            }
+
+            let path_str = match parse_upload_path(&path, path_len) {
+                Ok(path) => path,
+                Err(code) => return upload_result(false, code, 0),
+            };
+
+            match fat::remove(sd_probe, path_str).await {
+                Ok(()) | Err(fat::SdFatError::NotFound) => {
+                    upload_result(true, SdUploadResultCode::Ok, 0)
+                }
+                Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+            }
+        }
+    }
+}
+
+async fn ensure_upload_ready(
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> Result<(), SdUploadResultCode> {
+    if !*powered {
+        if !request_sd_power(SdPowerRequest::On).await {
+            return Err(SdUploadResultCode::PowerOnFailed);
+        }
+        *powered = true;
+        *upload_mounted = false;
+    }
+
+    if !*upload_mounted {
+        if sd_probe.init().await.is_err() {
+            return Err(SdUploadResultCode::InitFailed);
+        }
+        *upload_mounted = true;
+    }
+
+    Ok(())
+}
+
+fn map_fat_error_to_upload_code(error: &fat::SdFatError) -> SdUploadResultCode {
+    match error {
+        fat::SdFatError::InvalidPath => SdUploadResultCode::InvalidPath,
+        fat::SdFatError::NotFound => SdUploadResultCode::NotFound,
+        fat::SdFatError::NotEmpty => SdUploadResultCode::NotEmpty,
+        _ => SdUploadResultCode::OperationFailed,
+    }
+}
+
+fn parse_upload_path(path: &[u8], path_len: u8) -> Result<&str, SdUploadResultCode> {
+    let path_len = path_len as usize;
+    if path_len == 0 || path_len > path.len() {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+    let path_str =
+        core::str::from_utf8(&path[..path_len]).map_err(|_| SdUploadResultCode::InvalidPath)?;
+    if !path_str.starts_with('/') {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+    Ok(path_str)
+}
+
+fn upload_result(ok: bool, code: SdUploadResultCode, bytes_written: u32) -> SdUploadResult {
+    SdUploadResult {
+        ok,
+        code,
+        bytes_written,
     }
 }
 
@@ -317,6 +634,17 @@ fn publish_result(result: SdResult) {
     }
 }
 
+fn publish_upload_result(result: SdUploadResult) {
+    if SD_UPLOAD_RESULTS.try_send(result).is_err() {
+        esp_println::println!(
+            "sdtask: upload_result_drop ok={} code={} bytes_written={}",
+            result.ok as u8,
+            sd_upload_result_code_label(result.code),
+            result.bytes_written
+        );
+    }
+}
+
 fn sd_kind_label(kind: SdCommandKind) -> &'static str {
     match kind {
         SdCommandKind::Probe => "probe",
@@ -344,6 +672,21 @@ fn sd_result_code_label(code: SdResultCode) -> &'static str {
         SdResultCode::PowerOffFailed => "power_off_failed",
         SdResultCode::OperationFailed => "operation_failed",
         SdResultCode::RefusedLba0 => "refused_lba0",
+    }
+}
+
+fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
+    match code {
+        SdUploadResultCode::Ok => "ok",
+        SdUploadResultCode::Busy => "busy",
+        SdUploadResultCode::SessionNotActive => "session_not_active",
+        SdUploadResultCode::InvalidPath => "invalid_path",
+        SdUploadResultCode::NotFound => "not_found",
+        SdUploadResultCode::NotEmpty => "not_empty",
+        SdUploadResultCode::SizeMismatch => "size_mismatch",
+        SdUploadResultCode::PowerOnFailed => "power_on_failed",
+        SdUploadResultCode::InitFailed => "init_failed",
+        SdUploadResultCode::OperationFailed => "operation_failed",
     }
 }
 

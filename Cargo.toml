@@ -28,12 +28,23 @@ opt-level = "z"
 [profile.dev.package.esp-storage]
 opt-level = 2
 
+[profile.dev.package.esp-radio]
+opt-level = 3
+
 [features]
 default = ["esp-hal-runtime", "graphics"]
 esp-hal-runtime = []
 graphics = ["dep:embedded-graphics", "dep:heapless", "dep:u8g2-fonts"]
 psram-alloc = ["dep:esp-alloc", "esp-hal/psram"]
 ui-hybrid = []
+asset-upload-http = [
+    "dep:embassy-net",
+    "dep:embedded-io-async",
+    "dep:esp-radio",
+    "dep:static_cell",
+    "dep:esp-alloc",
+    "esp-rtos/esp-radio",
+]
 
 [dependencies]
 esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
@@ -45,6 +56,11 @@ esp-backtrace = { version = "0.18.1", default-features = false, features = ["esp
 embassy-executor = "0.9.0"
 embassy-time = "0.5.0"
 embassy-sync = "0.7.0"
+embassy-futures = "0.1.2"
+embassy-net = { version = "0.8.0", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embedded-io-async = { version = "0.7.0", optional = true }
+esp-radio = { version = "0.17.0", optional = true, default-features = false, features = ["esp32", "wifi", "log-04"] }
+static_cell = { version = "2.1.0", optional = true }
 
 embedded-graphics = { version = "0.8.1", optional = true }
 heapless = { version = "0.8.0", optional = true }

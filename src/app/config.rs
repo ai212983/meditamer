@@ -9,7 +9,11 @@ use meditamer::{
 };
 use u8g2_fonts::{fonts, FontRenderer};
 
-use super::types::{AppEvent, SdPowerRequest, SdRequest, SdResult, TapTraceSample};
+#[cfg(feature = "asset-upload-http")]
+use super::types::WifiCredentials;
+use super::types::{
+    AppEvent, SdPowerRequest, SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
+};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
 pub(crate) const SCREEN_HEIGHT: i32 = E_INK_HEIGHT as i32;
@@ -83,6 +87,13 @@ pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
 pub(crate) static SD_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 16> = Channel::new();
+pub(crate) static SD_UPLOAD_REQUESTS: Channel<CriticalSectionRawMutex, SdUploadRequest, 2> =
+    Channel::new();
+pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadResult, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
+    Channel::new();
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
