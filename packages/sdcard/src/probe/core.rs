@@ -4,6 +4,7 @@ use esp_hal::{
     spi::{
         master::{Config as SpiConfig, ConfigError as SpiConfigError, Spi},
         Error as SpiError,
+        Mode as SpiMode,
     },
     time::Rate,
     Async,
@@ -288,13 +289,17 @@ impl<'d> SdCardProbe<'d> {
     }
 
     async fn apply_init_clock(&mut self) -> Result<(), SdProbeError> {
-        let config = SpiConfig::default().with_frequency(Rate::from_khz(SD_INIT_SPI_RATE_KHZ));
+        let config = SpiConfig::default()
+            .with_mode(SpiMode::_0)
+            .with_frequency(Rate::from_khz(SD_INIT_SPI_RATE_KHZ));
         self.spi.apply_config(&config)?;
         Ok(())
     }
 
     async fn apply_data_clock(&mut self) -> Result<(), SdProbeError> {
-        let config = SpiConfig::default().with_frequency(Rate::from_mhz(SD_DATA_SPI_RATE_MHZ));
+        let config = SpiConfig::default()
+            .with_mode(SpiMode::_0)
+            .with_frequency(Rate::from_mhz(SD_DATA_SPI_RATE_MHZ));
         self.spi.apply_config(&config)?;
         Ok(())
     }
