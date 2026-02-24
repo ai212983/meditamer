@@ -12,7 +12,7 @@ pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
-pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
+pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 2048;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_SSID_MAX: usize = 32;
 #[cfg(feature = "asset-upload-http")]

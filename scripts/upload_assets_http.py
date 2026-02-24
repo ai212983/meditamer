@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-UPLOAD_CHUNK_SIZE = 1024
+UPLOAD_CHUNK_SIZE = 2048
 
 
 def parse_args() -> argparse.Namespace:
