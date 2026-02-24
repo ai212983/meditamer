@@ -15,7 +15,6 @@ struct SwipeCaseTraceInput {
 }
 
 impl TouchCalibrationWizard {
-
     fn clear_swipe_debug(&mut self) {
         self.swipe_trace = SwipeTrace::default();
         self.last_swipe = None;
@@ -428,7 +427,9 @@ impl TouchCalibrationWizard {
             WizardPhase::TapCenter => "Aim inside the ring.",
             WizardPhase::TapTopLeft => "Aim inside the ring.",
             WizardPhase::TapBottomRight => "Aim inside the ring.",
-            WizardPhase::SwipeRight => "FROM->TO + speed. Use I JUST SWIPED or SKIP CASE.",
+            WizardPhase::SwipeRight => {
+                "FROM->TO + direction. Speed logged. Use I JUST SWIPED or SKIP CASE."
+            }
             WizardPhase::Complete => "Exit with the EXIT button.",
             WizardPhase::Closed => "",
         }
