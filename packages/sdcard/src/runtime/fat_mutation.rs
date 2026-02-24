@@ -4,6 +4,7 @@ pub async fn run_sd_fat_stat<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -15,13 +16,13 @@ where
             return SdRuntimeResultCode::InvalidPath;
         }
     };
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: stat power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: stat init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -43,7 +44,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: stat power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -56,6 +57,7 @@ pub async fn run_sd_fat_mkdir<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -67,13 +69,13 @@ where
             return SdRuntimeResultCode::InvalidPath;
         }
     };
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: mkdir power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: mkdir init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -84,7 +86,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: mkdir power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -97,6 +99,7 @@ pub async fn run_sd_fat_remove<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -108,13 +111,13 @@ where
             return SdRuntimeResultCode::InvalidPath;
         }
     };
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: rm power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: rm init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -125,7 +128,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: rm power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -140,6 +143,7 @@ pub async fn run_sd_fat_rename<E, P>(
     dst_path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -158,13 +162,13 @@ where
             return SdRuntimeResultCode::InvalidPath;
         }
     };
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: ren power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: ren init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -186,7 +190,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: ren power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -201,6 +205,7 @@ pub async fn run_sd_fat_append<E, P>(
     data_len: u16,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -214,13 +219,13 @@ where
     };
     let data_len = core::cmp::min(data_len as usize, data_buf.len());
     let data = &data_buf[..data_len];
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: append power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: append init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -242,7 +247,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: append power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -256,6 +261,7 @@ pub async fn run_sd_fat_truncate<E, P>(
     size: u32,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -267,13 +273,13 @@ where
             return SdRuntimeResultCode::InvalidPath;
         }
     };
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: trunc power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: trunc init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
     let mut code = SdRuntimeResultCode::Ok;
@@ -290,7 +296,7 @@ where
             code = fat_error_result_code(&err);
         }
     }
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: trunc power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
