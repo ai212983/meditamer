@@ -1,0 +1,52 @@
+name: Firmware Heavy CI
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "config/**"
+      - ".github/workflows/rust_ci_premerge.yml"
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware-xtensa:
+    name: Firmware Xtensa Build and Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Setup Rust
+        uses: esp-rs/xtensa-toolchain@v1.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          default: true
+          buildtargets: esp32
+          ldproxy: true
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+      - name: Firmware clippy
+        run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
+      - name: Firmware build release
+        run: cargo build --locked --release
