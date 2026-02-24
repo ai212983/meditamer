@@ -1,4 +1,3 @@
-
 pub(crate) async fn render_touch_wizard_waiting_screen(display: &mut InkplateDriver) {
     let width = display.width() as i32;
     let height = display.height() as i32;
@@ -374,7 +373,8 @@ fn swipe_case_matches(
     let end_ok = squared_distance_i32(end.x, end.y, case.end.x, case.end.y)
         <= SWIPE_CASE_END_RADIUS_PX * SWIPE_CASE_END_RADIUS_PX;
     let direction_ok = direction == Some(case.direction);
-    let speed_ok = swipe_speed_from_duration(duration_ms) == case.speed;
+    let speed_ok =
+        !SWIPE_CASE_REQUIRE_SPEED_MATCH || swipe_speed_from_duration(duration_ms) == case.speed;
     classified_as_swipe && start_ok && end_ok && direction_ok && speed_ok
 }
 
