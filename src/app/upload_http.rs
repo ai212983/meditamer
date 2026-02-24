@@ -7,7 +7,8 @@ use embedded_io_async::Write;
 use esp_hal::rng::Rng;
 use esp_println::println;
 use esp_radio::wifi::{
-    ClientConfig, Config as WifiRuntimeConfig, ModeConfig, WifiController, WifiDevice, WifiEvent,
+    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, WifiController, WifiDevice,
+    WifiEvent,
 };
 use static_cell::StaticCell;
 
@@ -34,6 +35,11 @@ const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
 const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
+const WIFI_AUTH_METHODS: [AuthMethod; 3] = [
+    AuthMethod::Wpa2Personal,
+    AuthMethod::WpaWpa2Personal,
+    AuthMethod::Wpa2Wpa3Personal,
+];
 
 #[derive(Clone, Copy)]
 enum SdUploadRoundtripError {
@@ -87,10 +93,12 @@ pub(crate) async fn wifi_connection_task(
     mut credentials: Option<WifiCredentials>,
 ) {
     let mut config_applied = false;
+    let mut auth_method_idx = 0usize;
 
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
         config_applied = false;
+        auth_method_idx = 0;
         println!("upload_http: loaded wifi credentials from SD");
     }
 
@@ -102,6 +110,7 @@ pub(crate) async fn wifi_connection_task(
         while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
             credentials = Some(updated);
             config_applied = false;
+            auth_method_idx = 0;
             println!("upload_http: wifi credentials updated");
         }
 
@@ -111,13 +120,15 @@ pub(crate) async fn wifi_connection_task(
                 let first = WIFI_CREDENTIALS_UPDATES.receive().await;
                 credentials = Some(first);
                 config_applied = false;
+                auth_method_idx = 0;
                 println!("upload_http: wifi credentials received");
                 continue;
             }
         };
 
         if !config_applied {
-            let mode = match mode_config_from_credentials(active) {
+            let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
+            let mode = match mode_config_from_credentials(active, auth_method) {
                 Some(mode) => mode,
                 None => {
                     println!("upload_http: wifi credentials invalid utf8 or length");
@@ -135,6 +146,10 @@ pub(crate) async fn wifi_connection_task(
                 Timer::after(Duration::from_secs(2)).await;
                 continue;
             }
+            println!(
+                "upload_http: applying station config auth={:?}",
+                auth_method
+            );
             config_applied = true;
         }
 
@@ -169,15 +184,21 @@ pub(crate) async fn wifi_connection_task(
                     Either::Second(updated) => {
                         credentials = Some(updated);
                         config_applied = false;
+                        auth_method_idx = 0;
                         println!("upload_http: wifi credentials changed, reconnecting");
                         let _ = controller.disconnect_async().await;
                     }
                 }
             }
             Err(err) => {
-                println!("upload_http: wifi connect err={:?}", err);
+                let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
+                println!(
+                    "upload_http: wifi connect err={:?} auth={:?}",
+                    err, auth_method
+                );
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
+                auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
                 config_applied = false;
                 Timer::after(Duration::from_secs(3)).await;
             }
@@ -664,13 +685,22 @@ fn wifi_credentials_from_parts(
     Ok(result)
 }
 
-fn mode_config_from_credentials(credentials: WifiCredentials) -> Option<ModeConfig> {
+fn mode_config_from_credentials(
+    credentials: WifiCredentials,
+    auth_method: AuthMethod,
+) -> Option<ModeConfig> {
     let ssid = core::str::from_utf8(&credentials.ssid[..credentials.ssid_len as usize]).ok()?;
     let password =
         core::str::from_utf8(&credentials.password[..credentials.password_len as usize]).ok()?;
+    let auth_method = if password.is_empty() {
+        AuthMethod::None
+    } else {
+        auth_method
+    };
     Some(ModeConfig::Client(
         ClientConfig::default()
             .with_ssid(ssid.into())
-            .with_password(password.into()),
+            .with_password(password.into())
+            .with_auth_method(auth_method),
     ))
 }
