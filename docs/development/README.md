@@ -271,6 +271,18 @@ Open network (no password):
 WIFISET <ssid>
 ```
 
+Credential persistence:
+
+- `WIFISET` now persists credentials to SD file `/config/wifi.cfg`.
+- On boot, firmware attempts to load `/config/wifi.cfg` before waiting for UART `WIFISET`.
+- This survives reboot and firmware reflashes (as long as SD card content is retained).
+
+Host helper:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/wifiset.sh <ssid> <password>
+```
+
 Health check:
 
 ```bash

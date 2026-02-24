@@ -2,11 +2,6 @@ use core::{fmt::Write, sync::atomic::Ordering};
 
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 
-#[cfg(feature = "asset-upload-http")]
-use super::{
-    config::WIFI_CREDENTIALS_UPDATES,
-    types::{WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX},
-};
 use super::{
     config::{
         APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, SD_REQUESTS, SD_RESULTS,
@@ -27,6 +22,13 @@ use super::{
     types::{
         AppEvent, SdCommand, SdCommandKind, SdRequest, SdResult, SdResultCode, SerialUart,
         TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
+    },
+};
+#[cfg(feature = "asset-upload-http")]
+use super::{
+    config::{WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CREDENTIALS_UPDATES},
+    types::{
+        WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
 };
 
@@ -111,6 +113,8 @@ const APP_EVENT_ENQUEUE_RETRY_MS: u64 = 25;
 const APP_EVENT_ENQUEUE_MAX_RETRIES: u8 = 240;
 const SD_RESULT_CACHE_CAP: usize = 16;
 const SDWAIT_DEFAULT_TIMEOUT_MS: u32 = 10_000;
+#[cfg(feature = "asset-upload-http")]
+const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {
@@ -681,10 +685,51 @@ async fn write_sdwait_timeout(
 #[cfg(feature = "asset-upload-http")]
 async fn run_wifiset_command(uart: &mut SerialUart, credentials: WifiCredentials) {
     while WIFI_CREDENTIALS_UPDATES.try_receive().is_ok() {}
-    if WIFI_CREDENTIALS_UPDATES.try_send(credentials).is_ok() {
-        let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
-    } else {
+    while WIFI_CONFIG_RESPONSES.try_receive().is_ok() {}
+
+    if WIFI_CREDENTIALS_UPDATES.try_send(credentials).is_err() {
         let _ = uart_write_all(uart, b"WIFISET BUSY\r\n").await;
+        return;
+    }
+
+    WIFI_CONFIG_REQUESTS
+        .send(WifiConfigRequest::Store { credentials })
+        .await;
+
+    match with_timeout(
+        Duration::from_millis(WIFI_CONFIG_RESPONSE_TIMEOUT_MS),
+        WIFI_CONFIG_RESPONSES.receive(),
+    )
+    .await
+    {
+        Ok(result) if result.ok => {
+            let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
+        }
+        Ok(result) => {
+            let mut line = heapless::String::<96>::new();
+            let _ = write!(
+                &mut line,
+                "WIFISET ERR reason={}\r\n",
+                wifi_config_result_code_label(result.code)
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
+        Err(_) => {
+            let _ = uart_write_all(uart, b"WIFISET ERR reason=timeout\r\n").await;
+        }
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn wifi_config_result_code_label(code: WifiConfigResultCode) -> &'static str {
+    match code {
+        WifiConfigResultCode::Ok => "ok",
+        WifiConfigResultCode::Busy => "busy",
+        WifiConfigResultCode::NotFound => "not_found",
+        WifiConfigResultCode::InvalidData => "invalid_data",
+        WifiConfigResultCode::PowerOnFailed => "power_on_failed",
+        WifiConfigResultCode::InitFailed => "init_failed",
+        WifiConfigResultCode::OperationFailed => "operation_failed",
     }
 }
 

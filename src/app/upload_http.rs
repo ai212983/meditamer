@@ -10,10 +10,14 @@ use esp_radio::wifi::{ClientConfig, ModeConfig, WifiController, WifiDevice, Wifi
 use static_cell::StaticCell;
 
 use super::{
-    config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS, WIFI_CREDENTIALS_UPDATES},
+    config::{
+        SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS, WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES,
+        WIFI_CREDENTIALS_UPDATES,
+    },
     types::{
-        SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, WifiCredentials,
-        SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
+        SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, WifiConfigRequest,
+        WifiConfigResultCode, WifiCredentials, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, WIFI_PASSWORD_MAX,
+        WIFI_SSID_MAX,
     },
 };
 
@@ -21,6 +25,7 @@ const UPLOAD_HTTP_PORT: u16 = 8080;
 const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 4096;
 const SD_UPLOAD_RESPONSE_TIMEOUT_MS: u64 = 10_000;
+const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Clone, Copy)]
 enum SdUploadRoundtripError {
@@ -73,6 +78,11 @@ pub(crate) async fn wifi_connection_task(
     mut controller: WifiController<'static>,
     mut credentials: Option<WifiCredentials>,
 ) {
+    if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
+        credentials = Some(sd_credentials);
+        println!("upload_http: loaded wifi credentials from SD");
+    }
+
     if credentials.is_none() {
         println!("upload_http: waiting for WIFISET credentials over UART");
     }
@@ -564,6 +574,34 @@ fn wifi_credentials() -> Option<(&'static str, &'static str)> {
         .or(option_env!("PASSWORD"))
         .unwrap_or("");
     Some((ssid, password))
+}
+
+async fn load_wifi_credentials_from_sd() -> Option<WifiCredentials> {
+    drain_wifi_config_responses();
+    WIFI_CONFIG_REQUESTS.send(WifiConfigRequest::Load).await;
+    let response = with_timeout(
+        Duration::from_millis(WIFI_CONFIG_RESPONSE_TIMEOUT_MS),
+        WIFI_CONFIG_RESPONSES.receive(),
+    )
+    .await
+    .ok()?;
+
+    if response.ok {
+        return response.credentials;
+    }
+
+    match response.code {
+        WifiConfigResultCode::NotFound => {}
+        WifiConfigResultCode::InvalidData => {
+            println!("upload_http: SD wifi config invalid; waiting for WIFISET")
+        }
+        code => println!("upload_http: SD wifi config load failed code={:?}", code),
+    }
+    None
+}
+
+fn drain_wifi_config_responses() {
+    while WIFI_CONFIG_RESPONSES.try_receive().is_ok() {}
 }
 
 fn wifi_credentials_from_parts(

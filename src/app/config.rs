@@ -14,6 +14,8 @@ use super::types::WifiCredentials;
 use super::types::{
     AppEvent, SdPowerRequest, SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
 };
+#[cfg(feature = "asset-upload-http")]
+use super::types::{WifiConfigRequest, WifiConfigResponse};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
 pub(crate) const SCREEN_HEIGHT: i32 = E_INK_HEIGHT as i32;
@@ -93,6 +95,12 @@ pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadRe
     Channel::new();
 #[cfg(feature = "asset-upload-http")]
 pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CONFIG_REQUESTS: Channel<CriticalSectionRawMutex, WifiConfigRequest, 1> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CONFIG_RESPONSES: Channel<CriticalSectionRawMutex, WifiConfigResponse, 1> =
     Channel::new();
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
