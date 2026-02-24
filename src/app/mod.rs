@@ -131,6 +131,9 @@ pub(crate) fn run() -> ! {
             Ok(driver) => driver,
             Err(_) => halt_forever(),
         };
+        if inkplate.init_core().is_err() {
+            halt_forever();
+        }
         let _ = inkplate.set_wakeup(true);
         let _ = inkplate.frontlight_off();
         sd_power_inkplate = Some(inkplate);
