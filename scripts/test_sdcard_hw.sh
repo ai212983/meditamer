@@ -17,6 +17,10 @@ base_path="${SDCARD_TEST_BASE_PATH:-/sdt$(date +%H%M%S)}"
 output_path="${2:-$repo_root/logs/sdcard_hw_test_$(date +%Y%m%d_%H%M%S).log}"
 suite="${SDCARD_TEST_SUITE:-all}"
 sdwait_timeout_ms="${SDCARD_TEST_SDWAIT_TIMEOUT_MS:-300000}"
+monitor_mode="${SDCARD_TEST_MONITOR_MODE:-raw}"
+monitor_raw_backend="${SDCARD_TEST_MONITOR_RAW_BACKEND:-cat}"
+monitor_persist_raw="${SDCARD_TEST_MONITOR_PERSIST_RAW:-1}"
+monitor_raw_tio_mute="${SDCARD_TEST_MONITOR_RAW_TIO_MUTE:-0}"
 
 case "$suite" in
 all | baseline | burst | failures) ;;
@@ -38,6 +42,10 @@ port_flag() {
 }
 
 cleanup() {
+    if [[ "${serial_fd_open:-0}" == "1" ]]; then
+        exec 3>&-
+        serial_fd_open=0
+    fi
     if [[ -n "${monitor_pid:-}" ]]; then
         kill "$monitor_pid" >/dev/null 2>&1 || true
         wait "$monitor_pid" >/dev/null 2>&1 || true
@@ -50,19 +58,23 @@ if [[ "$flash_first" == "1" ]]; then
     ESPFLASH_PORT="$ESPFLASH_PORT" FLASH_SET_TIME_AFTER_FLASH=0 "$script_dir/flash.sh" "$build_mode"
 fi
 
-echo "Starting raw monitor capture: $output_path"
+echo "Starting monitor capture: $output_path"
 ESPFLASH_PORT="$ESPFLASH_PORT" \
-ESPFLASH_MONITOR_MODE=raw \
-ESPFLASH_MONITOR_RAW_BACKEND=cat \
+ESPFLASH_MONITOR_MODE="$monitor_mode" \
+ESPFLASH_MONITOR_RAW_BACKEND="$monitor_raw_backend" \
+ESPFLASH_MONITOR_PERSIST_RAW="$monitor_persist_raw" \
+ESPFLASH_MONITOR_RAW_TIO_MUTE="$monitor_raw_tio_mute" \
 ESPFLASH_MONITOR_OUTPUT_FILE="$output_path" \
 "$script_dir/monitor.sh" >/dev/null 2>&1 &
 monitor_pid=$!
 sleep 1
 
-stty "$(port_flag)" "$ESPFLASH_PORT" 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw
+stty "$(port_flag)" "$ESPFLASH_PORT" 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw clocal
+exec 3>"$ESPFLASH_PORT"
+serial_fd_open=1
 
 send_line() {
-    printf '%s\r\n' "$1" >"$ESPFLASH_PORT"
+    printf '%s\r\n' "$1" >&3
 }
 
 wait_for_pattern_from_line() {
