@@ -13,6 +13,7 @@ const SD_RETRY_MAX_ATTEMPTS: u8 = 3;
 const SD_RETRY_DELAY_MS: u64 = 120;
 const SD_BACKOFF_BASE_MS: u64 = 300;
 const SD_BACKOFF_MAX_MS: u64 = 2_400;
+const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_000;
 
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
@@ -172,8 +173,29 @@ fn failure_backoff_ms(consecutive_failures: u8) -> u64 {
 }
 
 async fn request_sd_power(action: SdPowerRequest) -> bool {
-    SD_POWER_REQUESTS.send(action).await;
-    SD_POWER_RESPONSES.receive().await
+    while SD_POWER_RESPONSES.try_receive().is_ok() {}
+
+    if SD_POWER_REQUESTS.try_send(action).is_err() {
+        esp_println::println!("sdtask: power_req_queue_full action={}", sd_power_action_label(action));
+        return false;
+    }
+
+    match with_timeout(
+        Duration::from_millis(SD_POWER_RESPONSE_TIMEOUT_MS),
+        SD_POWER_RESPONSES.receive(),
+    )
+    .await
+    {
+        Ok(ok) => ok,
+        Err(_) => {
+            esp_println::println!(
+                "sdtask: power_resp_timeout action={} timeout_ms={}",
+                sd_power_action_label(action),
+                SD_POWER_RESPONSE_TIMEOUT_MS
+            );
+            false
+        }
+    }
 }
 
 async fn run_sd_command(
@@ -307,6 +329,13 @@ fn sd_result_code_label(code: SdResultCode) -> &'static str {
         SdResultCode::PowerOffFailed => "power_off_failed",
         SdResultCode::OperationFailed => "operation_failed",
         SdResultCode::RefusedLba0 => "refused_lba0",
+    }
+}
+
+fn sd_power_action_label(action: SdPowerRequest) -> &'static str {
+    match action {
+        SdPowerRequest::On => "on",
+        SdPowerRequest::Off => "off",
     }
 }
 
