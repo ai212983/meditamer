@@ -37,10 +37,10 @@ const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
 const WIFI_FORCED_CHANNEL: u8 = 8;
 const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
-    AuthMethod::Wpa,
     AuthMethod::Wpa2Personal,
     AuthMethod::WpaWpa2Personal,
     AuthMethod::Wpa2Wpa3Personal,
+    AuthMethod::Wpa,
 ];
 
 #[derive(Clone, Copy)]
