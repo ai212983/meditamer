@@ -1,5 +1,6 @@
 pub(crate) mod config;
 mod display;
+pub(crate) mod psram;
 mod render;
 mod runtime;
 mod sd;
@@ -7,6 +8,7 @@ mod serial;
 pub(crate) mod store;
 mod touch;
 pub(crate) mod types;
+pub(crate) mod ui;
 
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{

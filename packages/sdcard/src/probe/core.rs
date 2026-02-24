@@ -18,7 +18,7 @@ const SD_CMD24: u8 = 24;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
-const SD_DATA_SPI_RATE_MHZ: u32 = 8;
+const SD_DATA_SPI_RATE_MHZ: u32 = 12;
 pub const SD_SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,8 +255,6 @@ impl<'d> SdCardProbe<'d> {
             }
         }
 
-        self.apply_data_clock().await?;
-
         let mut ocr = [0u8; 4];
         let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr).await?;
         if cmd58_r1 != 0x00 {
@@ -282,6 +280,7 @@ impl<'d> SdCardProbe<'d> {
             filesystem,
         };
         self.high_capacity = Some(high_capacity);
+        self.apply_data_clock().await?;
         Ok(status)
     }
 
