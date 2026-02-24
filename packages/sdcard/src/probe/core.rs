@@ -18,6 +18,7 @@ const SD_CMD24: u8 = 24;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
+const SD_INIT_SPI_RATE_KHZ: u32 = 400;
 const SD_DATA_SPI_RATE_MHZ: u32 = 24;
 pub const SD_SECTOR_SIZE: usize = 512;
 
@@ -195,6 +196,7 @@ impl<'d> SdCardProbe<'d> {
     }
 
     pub async fn probe(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+        self.apply_init_clock().await?;
         self.cs.set_high();
         self.send_dummy_clocks(10).await?;
 
@@ -283,6 +285,12 @@ impl<'d> SdCardProbe<'d> {
         };
         self.high_capacity = Some(high_capacity);
         Ok(status)
+    }
+
+    async fn apply_init_clock(&mut self) -> Result<(), SdProbeError> {
+        let config = SpiConfig::default().with_frequency(Rate::from_khz(SD_INIT_SPI_RATE_KHZ));
+        self.spi.apply_config(&config)?;
+        Ok(())
     }
 
     async fn apply_data_clock(&mut self) -> Result<(), SdProbeError> {
