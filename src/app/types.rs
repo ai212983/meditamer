@@ -25,55 +25,57 @@ pub(crate) enum AppEvent {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum SdCommand {
-    SdProbe,
-    SdRwVerify {
+pub(crate) enum StorageCommand {
+    Probe,
+    RwVerify {
         lba: u32,
     },
-    SdFatList {
+    FatList {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRead {
+    FatRead {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatWrite {
+    FatWrite {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatStat {
+    FatStat {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatMkdir {
+    FatMkdir {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRemove {
+    FatRemove {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRename {
+    FatRename {
         src_path: [u8; SD_PATH_MAX],
         src_path_len: u8,
         dst_path: [u8; SD_PATH_MAX],
         dst_path_len: u8,
     },
-    SdFatAppend {
+    FatAppend {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatTruncate {
+    FatTruncate {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         size: u32,
     },
 }
+
+pub(crate) type SdCommand = StorageCommand;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SdCommandKind {
