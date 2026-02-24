@@ -6,7 +6,9 @@ use embassy_time::{with_timeout, Duration, Timer};
 use embedded_io_async::Write;
 use esp_hal::rng::Rng;
 use esp_println::println;
-use esp_radio::wifi::{ClientConfig, ModeConfig, WifiController, WifiDevice, WifiEvent};
+use esp_radio::wifi::{
+    ClientConfig, Config as WifiRuntimeConfig, ModeConfig, WifiController, WifiDevice, WifiEvent,
+};
 use static_cell::StaticCell;
 
 use super::{
@@ -23,9 +25,15 @@ use super::{
 
 const UPLOAD_HTTP_PORT: u16 = 8080;
 const HTTP_HEADER_MAX: usize = 2048;
-const HTTP_RW_BUF: usize = 4096;
+const HTTP_RW_BUF: usize = 2048;
 const SD_UPLOAD_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
+const WIFI_RX_QUEUE_SIZE: usize = 3;
+const WIFI_TX_QUEUE_SIZE: usize = 2;
+const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
+const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
+const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
+const WIFI_RX_BA_WIN: u8 = 3;
 
 #[derive(Clone, Copy)]
 enum SdUploadRoundtripError {
@@ -48,11 +56,11 @@ pub(crate) fn setup(
     });
 
     static RADIO_CTRL: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
-    static STACK_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
+    static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 
     let radio_ctrl = esp_radio::init().map_err(|_| "asset-upload-http: esp_radio::init failed")?;
     let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
-    let (wifi_controller, ifaces) = esp_radio::wifi::new(radio_ctrl, wifi, Default::default())
+    let (wifi_controller, ifaces) = esp_radio::wifi::new(radio_ctrl, wifi, wifi_runtime_config())
         .map_err(|_| "asset-upload-http: wifi init failed")?;
 
     let rng = Rng::new();
@@ -61,7 +69,7 @@ pub(crate) fn setup(
     let (stack, net_runner) = embassy_net::new(
         ifaces.sta,
         embassy_net::Config::dhcpv4(Default::default()),
-        STACK_RESOURCES.init(StackResources::<4>::new()),
+        STACK_RESOURCES.init(StackResources::<3>::new()),
         seed,
     );
 
@@ -78,8 +86,11 @@ pub(crate) async fn wifi_connection_task(
     mut controller: WifiController<'static>,
     mut credentials: Option<WifiCredentials>,
 ) {
+    let mut config_applied = false;
+
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
+        config_applied = false;
         println!("upload_http: loaded wifi credentials from SD");
     }
 
@@ -90,6 +101,7 @@ pub(crate) async fn wifi_connection_task(
     loop {
         while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
             credentials = Some(updated);
+            config_applied = false;
             println!("upload_http: wifi credentials updated");
         }
 
@@ -98,24 +110,32 @@ pub(crate) async fn wifi_connection_task(
             None => {
                 let first = WIFI_CREDENTIALS_UPDATES.receive().await;
                 credentials = Some(first);
+                config_applied = false;
                 println!("upload_http: wifi credentials received");
                 continue;
             }
         };
 
-        let mode = match mode_config_from_credentials(active) {
-            Some(mode) => mode,
-            None => {
-                println!("upload_http: wifi credentials invalid utf8 or length");
-                credentials = None;
+        if !config_applied {
+            let mode = match mode_config_from_credentials(active) {
+                Some(mode) => mode,
+                None => {
+                    println!("upload_http: wifi credentials invalid utf8 or length");
+                    credentials = None;
+                    continue;
+                }
+            };
+
+            if let Err(err) = controller.set_config(&mode) {
+                println!("upload_http: wifi station config err={:?}", err);
+                if matches!(controller.is_started(), Ok(true)) {
+                    let _ = controller.stop_async().await;
+                }
+                config_applied = false;
+                Timer::after(Duration::from_secs(2)).await;
                 continue;
             }
-        };
-
-        if let Err(err) = controller.set_config(&mode) {
-            println!("upload_http: wifi station config err={:?}", err);
-            Timer::after(Duration::from_secs(2)).await;
-            continue;
+            config_applied = true;
         }
 
         match controller.is_started() {
@@ -148,6 +168,7 @@ pub(crate) async fn wifi_connection_task(
                     }
                     Either::Second(updated) => {
                         credentials = Some(updated);
+                        config_applied = false;
                         println!("upload_http: wifi credentials changed, reconnecting");
                         let _ = controller.disconnect_async().await;
                     }
@@ -155,6 +176,9 @@ pub(crate) async fn wifi_connection_task(
             }
             Err(err) => {
                 println!("upload_http: wifi connect err={:?}", err);
+                let _ = controller.disconnect_async().await;
+                let _ = controller.stop_async().await;
+                config_applied = false;
                 Timer::after(Duration::from_secs(3)).await;
             }
         }
@@ -272,6 +296,12 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             sd_upload_roundtrip_or_http_error(socket, cmd).await?;
             write_response(socket, b"200 OK", b"delete ok").await;
             Ok(())
+        }
+        ("POST", "/reboot") => {
+            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            write_response(socket, b"200 OK", b"rebooting").await;
+            Timer::after(Duration::from_millis(100)).await;
+            esp_hal::system::software_reset();
         }
         ("PUT", "/upload") => {
             let (path, path_len) = match parse_path_query(target, "/upload") {
@@ -574,6 +604,18 @@ fn wifi_credentials() -> Option<(&'static str, &'static str)> {
         .or(option_env!("PASSWORD"))
         .unwrap_or("");
     Some((ssid, password))
+}
+
+fn wifi_runtime_config() -> WifiRuntimeConfig {
+    WifiRuntimeConfig::default()
+        .with_rx_queue_size(WIFI_RX_QUEUE_SIZE)
+        .with_tx_queue_size(WIFI_TX_QUEUE_SIZE)
+        .with_static_rx_buf_num(WIFI_STATIC_RX_BUF_NUM)
+        .with_dynamic_rx_buf_num(WIFI_DYNAMIC_RX_BUF_NUM)
+        .with_dynamic_tx_buf_num(WIFI_DYNAMIC_TX_BUF_NUM)
+        .with_ampdu_rx_enable(false)
+        .with_ampdu_tx_enable(false)
+        .with_rx_ba_win(WIFI_RX_BA_WIN)
 }
 
 async fn load_wifi_credentials_from_sd() -> Option<WifiCredentials> {
