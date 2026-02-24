@@ -31,7 +31,11 @@ fi
 
 case "$mode" in
 "release")
-    cargo build --release "${feature_args[@]}"
+    if (( ${#feature_args[@]} > 0 )); then
+        cargo build --release "${feature_args[@]}"
+    else
+        cargo build --release
+    fi
     if [[ -n "$resolved_port" ]]; then
         espflash flash -p "$resolved_port" -c esp32 target/xtensa-esp32-none-elf/release/meditamer
     else
@@ -39,7 +43,11 @@ case "$mode" in
     fi
     ;;
 "debug")
-    cargo build "${feature_args[@]}"
+    if (( ${#feature_args[@]} > 0 )); then
+        cargo build "${feature_args[@]}"
+    else
+        cargo build
+    fi
     if [[ -n "$resolved_port" ]]; then
         espflash flash -p "$resolved_port" -c esp32 target/xtensa-esp32-none-elf/debug/meditamer
     else
