@@ -7,8 +7,8 @@ use embedded_io_async::Write;
 use esp_hal::rng::Rng;
 use esp_println::println;
 use esp_radio::wifi::{
-    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, WifiController, WifiDevice,
-    WifiEvent,
+    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanMethod, WifiController,
+    WifiDevice, WifiEvent,
 };
 use static_cell::StaticCell;
 
@@ -35,7 +35,8 @@ const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
 const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
-const WIFI_AUTH_METHODS: [AuthMethod; 3] = [
+const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
+    AuthMethod::Wpa,
     AuthMethod::Wpa2Personal,
     AuthMethod::WpaWpa2Personal,
     AuthMethod::Wpa2Wpa3Personal,
@@ -701,6 +702,7 @@ fn mode_config_from_credentials(
         ClientConfig::default()
             .with_ssid(ssid.into())
             .with_password(password.into())
-            .with_auth_method(auth_method),
+            .with_auth_method(auth_method)
+            .with_scan_method(ScanMethod::AllChannels),
     ))
 }
