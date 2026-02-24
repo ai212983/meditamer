@@ -156,37 +156,36 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
             }
         }
 
-        match with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
-            Ok(Ok(1)) => {
-                let byte = rx[0];
-                if byte == b'\r' || byte == b'\n' {
-                    if line_len == 0 {
-                        continue;
-                    }
-                    if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
-                        match cmd {
-                            SerialCommand::TouchWizardDump => {
-                                touch_wizard_log.write_dump(&mut uart).await;
-                            }
-                            SerialCommand::Metrics => {
-                                let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                                let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                                let mut line = heapless::String::<96>::new();
-                                let _ = write!(
-                                    &mut line,
-                                    "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
-                                    last_ms, max_ms
-                                );
-                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
-                            }
-                            _ => {
-                                let (event, ok_response, busy_response) =
-                                    serial_command_event_and_responses(cmd);
-                                if enqueue_app_event_with_retry(event).await {
-                                    let _ = uart.write_async(ok_response).await;
-                                } else {
-                                    let _ = uart.write_async(busy_response).await;
-                                }
+        if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await
+        {
+            let byte = rx[0];
+            if byte == b'\r' || byte == b'\n' {
+                if line_len == 0 {
+                    continue;
+                }
+                if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
+                    match cmd {
+                        SerialCommand::TouchWizardDump => {
+                            touch_wizard_log.write_dump(&mut uart).await;
+                        }
+                        SerialCommand::Metrics => {
+                            let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                            let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                            let mut line = heapless::String::<96>::new();
+                            let _ = write!(
+                                &mut line,
+                                "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
+                                last_ms, max_ms
+                            );
+                            let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                        }
+                        _ => {
+                            let (event, ok_response, busy_response) =
+                                serial_command_event_and_responses(cmd);
+                            if enqueue_app_event_with_retry(event).await {
+                                let _ = uart.write_async(ok_response).await;
+                            } else {
+                                let _ = uart.write_async(busy_response).await;
                             }
                         }
                     }

@@ -11,4 +11,3 @@
 /tools/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
-/Cargo.lock
