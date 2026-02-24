@@ -68,6 +68,13 @@ where
             probe::SdProbeError::Spi(spi_err) => {
                 esp_println::println!("sdprobe[{}]: not_detected spi_error={:?}", reason, spi_err);
             }
+            probe::SdProbeError::SpiConfig(cfg_err) => {
+                esp_println::println!(
+                    "sdprobe[{}]: not_detected spi_config_error={:?}",
+                    reason,
+                    cfg_err
+                );
+            }
             probe::SdProbeError::Cmd0Failed(r1) => {
                 esp_println::println!("sdprobe[{}]: not_detected cmd0_r1=0x{:02x}", reason, r1);
             }
