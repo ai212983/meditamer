@@ -7,6 +7,7 @@ use super::{
         APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, SD_REQUESTS, SD_RESULTS,
         TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
+    psram,
     touch::{
         config::{
             TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED,
@@ -32,6 +33,10 @@ enum SerialCommand {
     Repaint,
     RepaintMarble,
     Metrics,
+    AllocatorStatus,
+    AllocatorAllocProbe {
+        bytes: u32,
+    },
     Probe,
     RwVerify {
         lba: u32,
@@ -201,6 +206,12 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 last_ms, max_ms
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                        }
+                        SerialCommand::AllocatorStatus => {
+                            write_allocator_status_line(&mut uart).await;
+                        }
+                        SerialCommand::AllocatorAllocProbe { bytes } => {
+                            run_allocator_alloc_probe(&mut uart, bytes as usize).await;
                         }
                         SerialCommand::SdWait { target, timeout_ms } => {
                             run_sdwait_command(
@@ -422,6 +433,10 @@ fn serial_command_event_and_responses(
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
+        SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
+        SerialCommand::AllocatorAllocProbe { .. } => {
+            unreachable!("allocator allocation probe command is handled inline")
+        }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
     }
 }
@@ -456,6 +471,59 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
         sample.az
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn write_allocator_status_line(uart: &mut SerialUart) {
+    let status = psram::allocator_status();
+    let used_bytes = status.total_bytes.saturating_sub(status.free_bytes);
+    let mut line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut line,
+        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={}\r\n",
+        status.feature_enabled,
+        status.state,
+        status.total_bytes,
+        used_bytes,
+        status.free_bytes,
+        status.peak_used_bytes
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn run_allocator_alloc_probe(uart: &mut SerialUart, bytes: usize) {
+    match psram::alloc_large_byte_buffer(bytes) {
+        Ok(buffer) => {
+            #[cfg(feature = "psram-alloc")]
+            let mut buffer = buffer;
+            #[cfg(not(feature = "psram-alloc"))]
+            let buffer = buffer;
+
+            #[cfg(feature = "psram-alloc")]
+            if let Some(first) = buffer.as_mut_slice().first_mut() {
+                *first = 0xA5;
+            }
+
+            let mut line = heapless::String::<128>::new();
+            let _ = write!(
+                &mut line,
+                "PSRAMALLOC OK bytes={} placement={:?} len={}\r\n",
+                bytes,
+                buffer.placement(),
+                buffer.len()
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+            psram::log_allocator_high_water("serial_psram_alloc_probe");
+        }
+        Err(err) => {
+            let mut line = heapless::String::<128>::new();
+            let _ = write!(
+                &mut line,
+                "PSRAMALLOC ERR bytes={} reason={:?}\r\n",
+                bytes, err
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
+    }
 }
 
 async fn write_sd_request_queued(uart: &mut SerialUart, request_id: u32, command: SdCommand) {
@@ -665,6 +733,12 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
     }
+    if let Some(bytes) = parse_allocator_alloc_probe_command(line) {
+        return Some(SerialCommand::AllocatorAllocProbe { bytes });
+    }
+    if parse_allocator_status_command(line) {
+        return Some(SerialCommand::AllocatorStatus);
+    }
     if parse_sdprobe_command(line) {
         return Some(SerialCommand::Probe);
     }
@@ -768,6 +842,42 @@ fn parse_repaint_marble_command(line: &[u8]) -> bool {
 fn parse_metrics_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"METRICS" || cmd == b"PERF"
+}
+
+fn parse_allocator_status_command(line: &[u8]) -> bool {
+    let cmd = trim_ascii_whitespace(line);
+    cmd == b"PSRAM" || cmd == b"ALLOCATOR" || cmd == b"HEAP"
+}
+
+fn parse_allocator_alloc_probe_command(line: &[u8]) -> Option<u32> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = if trimmed.starts_with(b"PSRAMALLOC") {
+        b"PSRAMALLOC".as_slice()
+    } else if trimmed.starts_with(b"HEAPALLOC") {
+        b"HEAPALLOC".as_slice()
+    } else {
+        return None;
+    };
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+    let (bytes, next_i) = parse_u64_ascii(trimmed, i)?;
+    if bytes > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+    Some(bytes as u32)
 }
 
 fn parse_touch_wizard_command(line: &[u8]) -> bool {
@@ -1210,6 +1320,33 @@ mod tests {
             Some(SerialCommand::RwVerify { lba }) => assert_eq!(lba, 2048),
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn parses_psram_allocator_status_command() {
+        let cmd = parse_serial_command(b"PSRAM");
+        assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));
+    }
+
+    #[test]
+    fn parses_heap_allocator_status_alias() {
+        let cmd = parse_serial_command(b"HEAP");
+        assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));
+    }
+
+    #[test]
+    fn parses_psram_alloc_probe_command() {
+        let cmd = parse_serial_command(b"PSRAMALLOC 4096");
+        match cmd {
+            Some(SerialCommand::AllocatorAllocProbe { bytes }) => assert_eq!(bytes, 4096),
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_psram_alloc_probe_without_size() {
+        let cmd = parse_serial_command(b"PSRAMALLOC");
+        assert!(cmd.is_none());
     }
 
     #[test]

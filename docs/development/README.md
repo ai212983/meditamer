@@ -178,6 +178,37 @@ stty -f /dev/cu.usbserial-540 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -
 printf 'TIMESET %s %s\r\n' "$(date -u +%s)" "-300" > /dev/cu.usbserial-540
 ```
 
+## Allocator Diagnostics
+
+Firmware accepts allocator status commands on `UART0` (`115200` baud):
+
+```text
+PSRAM
+```
+
+Aliases: `HEAP`, `ALLOCATOR`.
+
+Response format:
+
+```text
+PSRAM feature_enabled=<bool> state=<state> total_bytes=<n> used_bytes=<n> free_bytes=<n> peak_used_bytes=<n>
+```
+
+Allocator probe command:
+
+```text
+PSRAMALLOC <bytes>
+```
+
+Alias: `HEAPALLOC <bytes>`.
+
+Probe responses:
+
+```text
+PSRAMALLOC OK bytes=<n> placement=<placement> len=<n>
+PSRAMALLOC ERR bytes=<n> reason=<reason>
+```
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:

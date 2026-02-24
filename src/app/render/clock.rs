@@ -22,6 +22,7 @@ use super::{
             META_REGION_WIDTH, RENDER_TIME_FONT, SCREEN_WIDTH, SYNC_Y, TITLE_FONT, TITLE_Y,
             UPTIME_Y,
         },
+        psram,
         types::{InkplateDriver, TimeSyncState},
     },
     local_seconds_since_epoch,
@@ -39,12 +40,14 @@ pub(crate) async fn render_clock_update(
         draw_clock_dynamic(display, uptime_seconds, time_sync);
         draw_battery_status(display, battery_percent);
         let _ = display.display_bw_async(false).await;
+        psram::log_allocator_high_water("render_clock_full");
         return;
     }
 
     erase_clock_dynamic_regions(display);
     draw_clock_dynamic(display, uptime_seconds, time_sync);
     let _ = display.display_bw_async(false).await;
+    psram::log_allocator_high_water("render_clock_partial");
 }
 
 pub(crate) async fn render_battery_update(
@@ -54,6 +57,7 @@ pub(crate) async fn render_battery_update(
     erase_battery_region(display);
     draw_battery_status(display, battery_percent);
     let _ = display.display_bw_partial_async(false).await;
+    psram::log_allocator_high_water("render_battery_partial");
 }
 
 pub(crate) fn sample_battery_percent(display: &mut InkplateDriver) -> Option<u8> {
