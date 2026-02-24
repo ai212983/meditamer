@@ -194,6 +194,7 @@ Defaults:
   - baseline flow: `SDPROBE`, FAT mkdir/write/read/append/stat/truncate/rename/remove, and `SDRWVERIFY`
   - burst/backpressure flow: burst command sequence without host pacing
   - failure-path flow: non-empty-dir remove rejection, rename collision rejection, parser `CMD ERR` for oversized payload
+  - command completion via `SDREQ id=...` + `SDWAIT <id>` (instead of timing-dependent host sleeps)
 
 Optional env vars:
 
@@ -201,6 +202,7 @@ Optional env vars:
 - `SDCARD_TEST_VERIFY_LBA` (default `2048`)
 - `SDCARD_TEST_BASE_PATH` to override test directory path on SD card
 - `SDCARD_TEST_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
+- `SDCARD_TEST_SDWAIT_TIMEOUT_MS` (default `30000`)
 
 Burst/backpressure regression only:
 

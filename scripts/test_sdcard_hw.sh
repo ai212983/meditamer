@@ -16,6 +16,7 @@ verify_lba="${SDCARD_TEST_VERIFY_LBA:-2048}"
 base_path="${SDCARD_TEST_BASE_PATH:-/sdt$(date +%H%M%S)}"
 output_path="${2:-$repo_root/logs/sdcard_hw_test_$(date +%Y%m%d_%H%M%S).log}"
 suite="${SDCARD_TEST_SUITE:-all}"
+sdwait_timeout_ms="${SDCARD_TEST_SDWAIT_TIMEOUT_MS:-30000}"
 
 case "$suite" in
 all | baseline | burst | failures) ;;
@@ -100,6 +101,95 @@ ack_status_from_line() {
     return 0
 }
 
+wait_for_sdreq_id_from_line() {
+    local start_line="$1"
+    local timeout_s="$2"
+    local deadline=$((SECONDS + timeout_s))
+    while ((SECONDS < deadline)); do
+        local match_line
+        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^SDREQ id=[0-9]+ op=" || true)"
+        if [[ -n "$match_line" ]]; then
+            sed -E 's/^SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+wait_for_sdreq_count_from_line() {
+    local start_line="$1"
+    local expected_count="$2"
+    local timeout_s="$3"
+    local deadline=$((SECONDS + timeout_s))
+    while ((SECONDS < deadline)); do
+        local count
+        count="$(tail -n +$((start_line + 1)) "$output_path" | rg -c "^SDREQ id=[0-9]+ op=" || true)"
+        if [[ "${count:-0}" -ge "$expected_count" ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+last_sdreq_id_from_line() {
+    local start_line="$1"
+    local match_line
+    match_line="$(
+        tail -n +$((start_line + 1)) "$output_path" \
+            | rg "^SDREQ id=[0-9]+ op=" \
+            | tail -n1 || true
+    )"
+    if [[ -n "$match_line" ]]; then
+        sed -E 's/^SDREQ id=([0-9]+) .*/\1/' <<<"$match_line"
+    fi
+}
+
+sdwait_status_from_line() {
+    local start_line="$1"
+    local timeout_s="$2"
+    local deadline=$((SECONDS + timeout_s))
+    while ((SECONDS < deadline)); do
+        local match_line
+        match_line="$(tail -n +$((start_line + 1)) "$output_path" | rg -m1 "^SDWAIT (DONE|TIMEOUT|ERR)" || true)"
+        if [[ "$match_line" == SDWAIT\ DONE* ]]; then
+            if [[ "$match_line" =~ status=ok ]]; then
+                echo "ok"
+                return 0
+            fi
+            if [[ "$match_line" =~ status=error ]]; then
+                echo "error"
+                return 0
+            fi
+            echo "err"
+            return 0
+        fi
+        if [[ "$match_line" == SDWAIT\ TIMEOUT* ]]; then
+            echo "timeout"
+            return 0
+        fi
+        if [[ "$match_line" == SDWAIT\ ERR* ]]; then
+            echo "err"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "none"
+    return 0
+}
+
+wait_for_sd_result() {
+    local request_id="$1"
+    local expected_status="$2"
+    local sdwait_start_line
+    sdwait_start_line="$(wc -l <"$output_path")"
+    send_line "SDWAIT $request_id $sdwait_timeout_ms"
+    local status
+    status="$(sdwait_status_from_line "$sdwait_start_line" 40)"
+    [[ "$status" == "$expected_status" ]]
+}
+
 run_step() {
     local name="$1"
     local command="$2"
@@ -116,9 +206,13 @@ run_step() {
         status="$(ack_status_from_line "$start_line" "$ack_tag" 8)"
 
         if [[ "$status" == "OK" ]]; then
-            if wait_for_pattern_from_line "$start_line" "$completion_pattern" 90; then
-                echo "[PASS] $name"
-                return 0
+            local request_id
+            request_id="$(wait_for_sdreq_id_from_line "$start_line" 8 || true)"
+            if [[ -n "$request_id" ]] && wait_for_sd_result "$request_id" "ok"; then
+                if wait_for_pattern_from_line "$start_line" "$completion_pattern" 90; then
+                    echo "[PASS] $name"
+                    return 0
+                fi
             fi
         fi
 
@@ -152,9 +246,13 @@ run_step_expect_error() {
         status="$(ack_status_from_line "$start_line" "$ack_tag" 8)"
 
         if [[ "$status" == "OK" ]]; then
-            if wait_for_pattern_from_line "$start_line" "$error_pattern" 90; then
-                echo "[PASS] $name"
-                return 0
+            local request_id
+            request_id="$(wait_for_sdreq_id_from_line "$start_line" 8 || true)"
+            if [[ -n "$request_id" ]] && wait_for_sd_result "$request_id" "error"; then
+                if wait_for_pattern_from_line "$start_line" "$error_pattern" 90; then
+                    echo "[PASS] $name"
+                    return 0
+                fi
             fi
         fi
 
@@ -200,6 +298,19 @@ run_burst_sequence() {
     send_line "SDFATAPPEND $burst_file BC"
     send_line "SDFATSTAT $burst_file"
     send_line "SDFATREAD $burst_file"
+
+    if ! wait_for_sdreq_count_from_line "$start_line" 5 30; then
+        echo "[FAIL] burst_sdreq_count"
+        tail -n 160 "$output_path" >&2
+        return 1
+    fi
+    local burst_last_id
+    burst_last_id="$(last_sdreq_id_from_line "$start_line")"
+    if [[ -z "$burst_last_id" ]] || ! wait_for_sd_result "$burst_last_id" "ok"; then
+        echo "[FAIL] burst_wait_last"
+        tail -n 160 "$output_path" >&2
+        return 1
+    fi
 
     wait_for_pattern_from_line "$start_line" "sdfat\\[manual\\]: mkdir_ok path=$burst_root" 120
     wait_for_pattern_from_line "$start_line" "sdfat\\[manual\\]: write_ok path=$burst_file bytes=1 verify=ok" 120
