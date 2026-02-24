@@ -7,8 +7,8 @@ use embedded_io_async::Write;
 use esp_hal::rng::Rng;
 use esp_println::println;
 use esp_radio::wifi::{
-    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanMethod, WifiController,
-    WifiDevice, WifiEvent,
+    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig, ScanMethod,
+    WifiController, WifiDevice, WifiEvent,
 };
 use static_cell::StaticCell;
 
@@ -168,6 +168,10 @@ pub(crate) async fn wifi_connection_task(
                 Timer::after(Duration::from_secs(3)).await;
                 continue;
             }
+        }
+
+        if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
+            log_scan_for_target(&mut controller, ssid).await;
         }
 
         match controller.connect_async().await {
@@ -705,4 +709,35 @@ fn mode_config_from_credentials(
             .with_auth_method(auth_method)
             .with_scan_method(ScanMethod::AllChannels),
     ))
+}
+
+async fn log_scan_for_target(controller: &mut WifiController<'static>, target_ssid: &str) {
+    let config = ScanConfig::default()
+        .with_ssid(target_ssid)
+        .with_show_hidden(true)
+        .with_max(8);
+    match controller.scan_with_config_async(config).await {
+        Ok(results) if results.is_empty() => {
+            println!("upload_http: scan target_ssid={} found=0", target_ssid);
+        }
+        Ok(results) => {
+            println!(
+                "upload_http: scan target_ssid={} found={}",
+                target_ssid,
+                results.len()
+            );
+            for ap in results.iter() {
+                println!(
+                    "upload_http: scan ap ssid={} channel={} rssi={} auth={:?}",
+                    ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
+                );
+            }
+        }
+        Err(err) => {
+            println!(
+                "upload_http: scan target_ssid={} err={:?}",
+                target_ssid, err
+            );
+        }
+    }
 }
