@@ -9,6 +9,7 @@ mode="${ESPFLASH_MONITOR_MODE:-espflash}"
 persist_raw="${ESPFLASH_MONITOR_PERSIST_RAW:-1}"
 raw_backend="${ESPFLASH_MONITOR_RAW_BACKEND:-auto}"
 raw_output_mode="${ESPFLASH_MONITOR_OUTPUT_MODE:-normal}"
+raw_tio_mute="${ESPFLASH_MONITOR_RAW_TIO_MUTE:-1}"
 output_file="${ESPFLASH_MONITOR_OUTPUT_FILE:-}"
 child_pid=""
 child_pgid=""
@@ -122,8 +123,10 @@ if [[ "$mode" == "raw" ]]; then
                     -s 1
                     -p none
                     --output-mode "$raw_output_mode"
-                    --mute
                 )
+                if [[ "$raw_tio_mute" == "1" ]]; then
+                    tio_args+=(--mute)
+                fi
                 if [[ "$persist_raw" != "1" ]]; then
                     tio_args+=(--no-reconnect)
                 fi
@@ -136,9 +139,6 @@ if [[ "$mode" == "raw" ]]; then
                 fi
 
                 if [[ "$persist_raw" != "1" ]]; then
-                    exit 0
-                fi
-                if [[ -e "$ESPFLASH_PORT" ]]; then
                     exit 0
                 fi
                 echo "raw monitor: serial disconnected, waiting for reconnect..." >&2
@@ -159,7 +159,7 @@ if [[ "$mode" == "raw" ]]; then
         while true; do
             if [[ -e "$ESPFLASH_PORT" ]]; then
                 announced_wait=0
-                stty "$stty_flag" "$ESPFLASH_PORT" "$baud" cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw || true
+                stty "$stty_flag" "$ESPFLASH_PORT" "$baud" cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw clocal || true
                 set +e
                 run_interruptible cat "$ESPFLASH_PORT"
                 rc=$?
@@ -169,9 +169,6 @@ if [[ "$mode" == "raw" ]]; then
                 fi
 
                 if [[ "$persist_raw" != "1" ]]; then
-                    exit 0
-                fi
-                if [[ -e "$ESPFLASH_PORT" ]]; then
                     exit 0
                 fi
                 echo "raw monitor: serial disconnected, waiting for reconnect..." >&2
