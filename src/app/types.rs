@@ -101,7 +101,16 @@ pub(crate) struct SdResult {
     pub(crate) id: u32,
     pub(crate) kind: SdCommandKind,
     pub(crate) ok: bool,
+    pub(crate) code: SdResultCode,
+    pub(crate) attempts: u8,
     pub(crate) duration_ms: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum SdResultCode {
+    Ok,
+    PowerOnFailed,
+    OperationFailed,
 }
 
 #[derive(Clone, Copy)]

@@ -1,26 +1,47 @@
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use sdcard::runtime as sd_ops;
 
 use super::{
     config::{SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_REQUESTS, SD_RESULTS},
-    types::{SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult},
+    types::{
+        SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult, SdResultCode,
+    },
 };
 
 const SD_IDLE_POWER_OFF_MS: u64 = 1_500;
+const SD_RETRY_MAX_ATTEMPTS: u8 = 3;
+const SD_RETRY_DELAY_MS: u64 = 120;
+const SD_BACKOFF_BASE_MS: u64 = 300;
+const SD_BACKOFF_MAX_MS: u64 = 2_400;
 
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
     let mut powered = false;
     let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
+    let mut consecutive_failures = 0u8;
+    let mut backoff_until: Option<Instant> = None;
 
     // Keep boot probe behavior, but now report completion through result channel.
     let boot_req = SdRequest {
         id: 0,
         command: SdCommand::SdProbe,
     };
-    let _ = process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power).await;
+    let boot_result = process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power).await;
+    publish_result(boot_result);
+    if !boot_result.ok {
+        consecutive_failures = 1;
+        backoff_until = Some(Instant::now() + Duration::from_millis(failure_backoff_ms(1)));
+    }
 
     loop {
+        if let Some(until) = backoff_until {
+            let now = Instant::now();
+            if now < until {
+                Timer::after(until.saturating_duration_since(now)).await;
+            }
+            backoff_until = None;
+        }
+
         let request = if powered {
             match with_timeout(
                 Duration::from_millis(SD_IDLE_POWER_OFF_MS),
@@ -36,16 +57,28 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         };
 
         let Some(request) = request else {
-            if powered {
-                if !request_sd_power(SdPowerRequest::Off).await {
-                    esp_println::println!("sdtask: idle_power_off_failed");
-                }
-                powered = false;
+            if powered && !request_sd_power(SdPowerRequest::Off).await {
+                esp_println::println!("sdtask: idle_power_off_failed");
             }
+            powered = false;
             continue;
         };
 
-        let _ = process_request(request, &mut sd_probe, &mut powered, &mut no_power).await;
+        let result = process_request(request, &mut sd_probe, &mut powered, &mut no_power).await;
+        publish_result(result);
+
+        if result.ok {
+            consecutive_failures = 0;
+            backoff_until = None;
+        } else {
+            consecutive_failures = consecutive_failures.saturating_add(1).min(8);
+            let backoff_ms = failure_backoff_ms(consecutive_failures);
+            backoff_until = Some(Instant::now() + Duration::from_millis(backoff_ms));
+            if powered && !request_sd_power(SdPowerRequest::Off).await {
+                esp_println::println!("sdtask: fail_power_off_failed");
+            }
+            powered = false;
+        }
     }
 }
 
@@ -54,28 +87,91 @@ async fn process_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
-) -> bool {
+) -> SdResult {
+    let kind = sd_command_kind(request.command);
+
     if !*powered {
         if !request_sd_power(SdPowerRequest::On).await {
-            publish_result(request.id, sd_command_kind(request.command), false, 0);
-            return false;
+            return SdResult {
+                id: request.id,
+                kind,
+                ok: false,
+                code: SdResultCode::PowerOnFailed,
+                attempts: 0,
+                duration_ms: 0,
+            };
         }
         *powered = true;
     }
 
     let start = Instant::now();
-    let ok = run_sd_command("request", request.command, sd_probe, power).await;
-    let duration_ms = Instant::now()
+    let mut attempts = 0u8;
+    let mut ok = false;
+
+    while attempts < SD_RETRY_MAX_ATTEMPTS {
+        attempts = attempts.saturating_add(1);
+        ok = run_sd_command("request", request.command, sd_probe, power).await;
+        if ok {
+            break;
+        }
+
+        if attempts < SD_RETRY_MAX_ATTEMPTS {
+            Timer::after_millis(SD_RETRY_DELAY_MS).await;
+            if !request_sd_power(SdPowerRequest::Off).await {
+                let duration_ms = duration_ms_since(start);
+                return SdResult {
+                    id: request.id,
+                    kind,
+                    ok: false,
+                    code: SdResultCode::PowerOnFailed,
+                    attempts,
+                    duration_ms,
+                };
+            }
+            *powered = false;
+            if !request_sd_power(SdPowerRequest::On).await {
+                let duration_ms = duration_ms_since(start);
+                return SdResult {
+                    id: request.id,
+                    kind,
+                    ok: false,
+                    code: SdResultCode::PowerOnFailed,
+                    attempts,
+                    duration_ms,
+                };
+            }
+            *powered = true;
+        }
+    }
+
+    let duration_ms = duration_ms_since(start);
+    SdResult {
+        id: request.id,
+        kind,
+        ok,
+        code: if ok {
+            SdResultCode::Ok
+        } else {
+            SdResultCode::OperationFailed
+        },
+        attempts,
+        duration_ms,
+    }
+}
+
+fn duration_ms_since(start: Instant) -> u32 {
+    Instant::now()
         .saturating_duration_since(start)
         .as_millis()
-        .min(u32::MAX as u64) as u32;
-    publish_result(
-        request.id,
-        sd_command_kind(request.command),
-        ok,
-        duration_ms,
-    );
-    ok
+        .min(u32::MAX as u64) as u32
+}
+
+fn failure_backoff_ms(consecutive_failures: u8) -> u64 {
+    let exponent = consecutive_failures.saturating_sub(1).min(6);
+    let factor = 1u64 << exponent;
+    SD_BACKOFF_BASE_MS
+        .saturating_mul(factor)
+        .min(SD_BACKOFF_MAX_MS)
 }
 
 async fn request_sd_power(action: SdPowerRequest) -> bool {
@@ -168,20 +264,16 @@ fn sd_command_kind(command: SdCommand) -> SdCommandKind {
     }
 }
 
-fn publish_result(id: u32, kind: SdCommandKind, ok: bool, duration_ms: u32) {
-    let result = SdResult {
-        id,
-        kind,
-        ok,
-        duration_ms,
-    };
+fn publish_result(result: SdResult) {
     if SD_RESULTS.try_send(result).is_err() {
         esp_println::println!(
-            "sdtask: result_drop id={} kind={} ok={} dur_ms={}",
-            id,
-            sd_kind_label(kind),
-            ok as u8,
-            duration_ms
+            "sdtask: result_drop id={} kind={} ok={} code={} attempts={} dur_ms={}",
+            result.id,
+            sd_kind_label(result.kind),
+            result.ok as u8,
+            sd_result_code_label(result.code),
+            result.attempts,
+            result.duration_ms
         );
     }
 }
@@ -199,5 +291,13 @@ fn sd_kind_label(kind: SdCommandKind) -> &'static str {
         SdCommandKind::FatRename => "fat_ren",
         SdCommandKind::FatAppend => "fat_append",
         SdCommandKind::FatTruncate => "fat_trunc",
+    }
+}
+
+fn sd_result_code_label(code: SdResultCode) -> &'static str {
+    match code {
+        SdResultCode::Ok => "ok",
+        SdResultCode::PowerOnFailed => "power_on_failed",
+        SdResultCode::OperationFailed => "operation_failed",
     }
 }

@@ -19,8 +19,8 @@ use super::{
         },
     },
     types::{
-        AppEvent, SdCommand, SdCommandKind, SdRequest, SdResult, SerialUart, TapTraceSample,
-        TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
+        AppEvent, SdCommand, SdCommandKind, SdRequest, SdResult, SdResultCode, SerialUart,
+        TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
     },
 };
 
@@ -435,10 +435,12 @@ async fn write_sd_result(uart: &mut SerialUart, result: SdResult) {
     let mut line = heapless::String::<128>::new();
     let _ = write!(
         &mut line,
-        "SDDONE id={} op={} status={} dur_ms={}\r\n",
+        "SDDONE id={} op={} status={} code={} attempts={} dur_ms={}\r\n",
         result.id,
         sd_result_kind_label(result.kind),
         if result.ok { "ok" } else { "error" },
+        sd_result_code_label(result.code),
+        result.attempts,
         result.duration_ms
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
@@ -473,6 +475,14 @@ fn sd_result_kind_label(kind: SdCommandKind) -> &'static str {
         SdCommandKind::FatRename => "fat_ren",
         SdCommandKind::FatAppend => "fat_append",
         SdCommandKind::FatTruncate => "fat_trunc",
+    }
+}
+
+fn sd_result_code_label(code: SdResultCode) -> &'static str {
+    match code {
+        SdResultCode::Ok => "ok",
+        SdResultCode::PowerOnFailed => "power_on_failed",
+        SdResultCode::OperationFailed => "operation_failed",
     }
 }
 
