@@ -4,6 +4,7 @@ pub async fn run_sd_fat_ls<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -16,13 +17,13 @@ where
         }
     };
 
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: ls power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: ls init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
 
@@ -49,7 +50,7 @@ where
         }
     }
 
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: ls power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -62,6 +63,7 @@ pub async fn run_sd_fat_read<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -74,13 +76,13 @@ where
         }
     };
 
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: read power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: read init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
 
@@ -116,7 +118,7 @@ where
         }
     }
 
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: read power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -131,6 +133,7 @@ pub async fn run_sd_fat_write<E, P>(
     data_len: u16,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -146,13 +149,13 @@ where
     let data_len = core::cmp::min(data_len as usize, data_buf.len());
     let data = &data_buf[..data_len];
 
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdfat[{}]: write power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: write init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
 
@@ -194,7 +197,7 @@ where
         }
     }
 
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdfat[{}]: write power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }

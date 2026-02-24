@@ -207,14 +207,18 @@ async fn run_sd_command(
     sd_probe: &mut SdProbeDriver,
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
 ) -> SdResultCode {
+    let power_mode = sd_ops::SdPowerMode::AlreadyOn;
+
     match command {
-        SdCommand::Probe => sd_ops::run_sd_probe(reason, sd_probe, power).await,
-        SdCommand::RwVerify { lba } => sd_ops::run_sd_rw_verify(reason, lba, sd_probe, power).await,
+        SdCommand::Probe => sd_ops::run_sd_probe(reason, sd_probe, power, power_mode).await,
+        SdCommand::RwVerify { lba } => {
+            sd_ops::run_sd_rw_verify(reason, lba, sd_probe, power, power_mode).await
+        }
         SdCommand::FatList { path, path_len } => {
-            sd_ops::run_sd_fat_ls(reason, &path, path_len, sd_probe, power).await
+            sd_ops::run_sd_fat_ls(reason, &path, path_len, sd_probe, power, power_mode).await
         }
         SdCommand::FatRead { path, path_len } => {
-            sd_ops::run_sd_fat_read(reason, &path, path_len, sd_probe, power).await
+            sd_ops::run_sd_fat_read(reason, &path, path_len, sd_probe, power, power_mode).await
         }
         SdCommand::FatWrite {
             path,
@@ -222,17 +226,19 @@ async fn run_sd_command(
             data,
             data_len,
         } => {
-            sd_ops::run_sd_fat_write(reason, &path, path_len, &data, data_len, sd_probe, power)
-                .await
+            sd_ops::run_sd_fat_write(
+                reason, &path, path_len, &data, data_len, sd_probe, power, power_mode,
+            )
+            .await
         }
         SdCommand::FatStat { path, path_len } => {
-            sd_ops::run_sd_fat_stat(reason, &path, path_len, sd_probe, power).await
+            sd_ops::run_sd_fat_stat(reason, &path, path_len, sd_probe, power, power_mode).await
         }
         SdCommand::FatMkdir { path, path_len } => {
-            sd_ops::run_sd_fat_mkdir(reason, &path, path_len, sd_probe, power).await
+            sd_ops::run_sd_fat_mkdir(reason, &path, path_len, sd_probe, power, power_mode).await
         }
         SdCommand::FatRemove { path, path_len } => {
-            sd_ops::run_sd_fat_remove(reason, &path, path_len, sd_probe, power).await
+            sd_ops::run_sd_fat_remove(reason, &path, path_len, sd_probe, power, power_mode).await
         }
         SdCommand::FatRename {
             src_path,
@@ -248,6 +254,7 @@ async fn run_sd_command(
                 dst_path_len,
                 sd_probe,
                 power,
+                power_mode,
             )
             .await
         }
@@ -257,14 +264,19 @@ async fn run_sd_command(
             data,
             data_len,
         } => {
-            sd_ops::run_sd_fat_append(reason, &path, path_len, &data, data_len, sd_probe, power)
-                .await
+            sd_ops::run_sd_fat_append(
+                reason, &path, path_len, &data, data_len, sd_probe, power, power_mode,
+            )
+            .await
         }
         SdCommand::FatTruncate {
             path,
             path_len,
             size,
-        } => sd_ops::run_sd_fat_truncate(reason, &path, path_len, size, sd_probe, power).await,
+        } => {
+            sd_ops::run_sd_fat_truncate(reason, &path, path_len, size, sd_probe, power, power_mode)
+                .await
+        }
     }
 }
 

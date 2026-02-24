@@ -12,11 +12,12 @@ pub async fn run_sd_probe<E, P>(
     reason: &str,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdprobe[{}]: power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
@@ -150,7 +151,7 @@ where
         },
     }
 
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
@@ -162,6 +163,7 @@ pub async fn run_sd_rw_verify<E, P>(
     lba: u32,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
+    power_mode: SdPowerMode,
 ) -> SdRuntimeResultCode
 where
     P: FnMut(SdPowerAction) -> Result<(), E>,
@@ -171,14 +173,14 @@ where
         return SdRuntimeResultCode::RefusedLba0;
     }
 
-    if power_on(power).await.is_err() {
+    if power_on(power, power_mode).await.is_err() {
         esp_println::println!("sdrw[{}]: power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
 
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdrw[{}]: init_error={:?}", reason, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;
     }
 
@@ -190,13 +192,13 @@ where
             lba,
             err
         );
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::OperationFailed;
     }
 
     if let Err(err) = sd_probe.write_sector(lba, &before).await {
         esp_println::println!("sdrw[{}]: write_error lba={} err={:?}", reason, lba, err);
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::OperationFailed;
     }
 
@@ -208,7 +210,7 @@ where
             lba,
             err
         );
-        let _ = power_off_io(power);
+        let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::OperationFailed;
     }
 
@@ -232,7 +234,7 @@ where
         );
     }
 
-    if power_off_io(power).is_err() {
+    if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdrw[{}]: power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;
     }
