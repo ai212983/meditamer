@@ -194,7 +194,7 @@ Defaults:
   - baseline flow: `SDPROBE`, FAT mkdir/write/read/append/stat/truncate/rename/remove, and `SDRWVERIFY`
   - burst/backpressure flow: burst command sequence without host pacing
   - failure-path flow: non-empty-dir remove rejection, rename collision rejection, parser `CMD ERR` for oversized payload
-  - command completion via `SDREQ id=...` + `SDWAIT <id>` (instead of timing-dependent host sleeps)
+  - command completion via `SDREQ id=...` + `SDWAIT <id>` with status/code checks
 
 Optional env vars:
 
