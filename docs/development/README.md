@@ -202,7 +202,7 @@ Optional env vars:
 - `SDCARD_TEST_VERIFY_LBA` (default `2048`)
 - `SDCARD_TEST_BASE_PATH` to override test directory path on SD card
 - `SDCARD_TEST_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
-- `SDCARD_TEST_SDWAIT_TIMEOUT_MS` (default `30000`)
+- `SDCARD_TEST_SDWAIT_TIMEOUT_MS` (default `300000`)
 
 Burst/backpressure regression only:
 
