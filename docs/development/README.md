@@ -241,6 +241,72 @@ Burst/backpressure regression only:
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
 ```
 
+## SD Asset Upload Over Wi-Fi (STA, HTTP)
+
+Feature-gated upload server (disabled by default) for pushing assets to SD card without removing it.
+
+Build/flash with feature:
+
+```bash
+export CARGO_FEATURES=asset-upload-http
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh debug
+```
+
+Notes:
+
+- optional compile-time credentials are still supported via `MEDITAMER_WIFI_SSID` / `MEDITAMER_WIFI_PASSWORD`
+  (fallback `SSID` / `PASSWORD`).
+- if credentials are not compiled in, firmware waits for UART `WIFISET` command.
+- server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
+
+Runtime credential provisioning over UART:
+
+```text
+WIFISET <ssid> <password>
+```
+
+Open network (no password):
+
+```text
+WIFISET <ssid>
+```
+
+Health check:
+
+```bash
+curl "http://<device-ip>:8080/health"
+```
+
+Create directory:
+
+```bash
+curl -X POST "http://<device-ip>:8080/mkdir?path=/assets/images"
+```
+
+Delete file or empty directory:
+
+```bash
+curl -X DELETE "http://<device-ip>:8080/rm?path=/assets/old.bin"
+```
+
+Upload an assets directory:
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --src assets --dst /assets
+```
+
+Upload a single file:
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --src ./path/to/file.bin --dst /assets
+```
+
+Delete paths (absolute or relative to `--dst`):
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --dst /assets --rm old.bin --rm unused/
+```
+
 ## Soak Script
 
 Reset-cycle soak validation:

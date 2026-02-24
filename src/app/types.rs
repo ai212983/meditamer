@@ -12,6 +12,11 @@ pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
+pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_SSID_MAX: usize = 32;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_PASSWORD_MAX: usize = 64;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
@@ -109,6 +114,63 @@ pub(crate) struct SdResult {
 }
 
 pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;
+
+#[cfg_attr(not(feature = "asset-upload-http"), allow(dead_code))]
+pub(crate) enum SdUploadCommand {
+    Begin {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        expected_size: u32,
+    },
+    Chunk {
+        data: [u8; SD_UPLOAD_CHUNK_MAX],
+        data_len: u16,
+    },
+    Commit,
+    Abort,
+    Mkdir {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    Remove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+}
+
+pub(crate) struct SdUploadRequest {
+    pub(crate) command: SdUploadCommand,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SdUploadResultCode {
+    Ok,
+    Busy,
+    SessionNotActive,
+    InvalidPath,
+    NotFound,
+    NotEmpty,
+    SizeMismatch,
+    PowerOnFailed,
+    InitFailed,
+    OperationFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SdUploadResult {
+    pub(crate) ok: bool,
+    pub(crate) code: SdUploadResultCode,
+    pub(crate) bytes_written: u32,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WifiCredentials {
+    pub(crate) ssid: [u8; WIFI_SSID_MAX],
+    pub(crate) ssid_len: u8,
+    pub(crate) password: [u8; WIFI_PASSWORD_MAX],
+    pub(crate) password_len: u8,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum SdPowerRequest {

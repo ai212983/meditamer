@@ -9,6 +9,8 @@ pub(crate) mod store;
 mod touch;
 pub(crate) mod types;
 pub(crate) mod ui;
+#[cfg(feature = "asset-upload-http")]
+mod upload_http;
 
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{
@@ -33,6 +35,9 @@ use sdcard::probe;
 
 pub(crate) fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
+    esp_alloc::heap_allocator!(size: 96 * 1024);
+
     #[cfg(feature = "psram-alloc")]
     let allocator_status = psram::init_allocator(&peripherals.PSRAM);
     #[cfg(not(feature = "psram-alloc"))]
@@ -87,6 +92,14 @@ pub(crate) fn run() -> ! {
         .into_async();
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
+    #[cfg(feature = "asset-upload-http")]
+    let upload_http_runtime = match upload_http::setup(peripherals.WIFI) {
+        Ok(runtime) => Some(runtime),
+        Err(reason) => {
+            esp_println::println!("{}", reason);
+            None
+        }
+    };
 
     let i2c_cfg = I2cConfig::default()
         .with_frequency(Rate::from_khz(100))
@@ -118,6 +131,15 @@ pub(crate) fn run() -> ! {
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
+        #[cfg(feature = "asset-upload-http")]
+        if let Some(upload_http_runtime) = upload_http_runtime {
+            spawner.must_spawn(upload_http::wifi_connection_task(
+                upload_http_runtime.wifi_controller,
+                upload_http_runtime.initial_credentials,
+            ));
+            spawner.must_spawn(upload_http::net_task(upload_http_runtime.net_runner));
+            spawner.must_spawn(upload_http::http_server_task(upload_http_runtime.stack));
+        }
         spawner.must_spawn(touch::tasks::touch_pipeline_task());
         spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
         spawner.must_spawn(display::display_task(display_context));
