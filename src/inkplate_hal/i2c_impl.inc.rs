@@ -3,23 +3,43 @@ where
     I2C: I2cOps,
     D: DelayOps,
 {
+    fn cached_regs_mut(&mut self, addr: u8) -> Result<&mut [u8; 23], I2C::Error> {
+        match addr {
+            IO_INT_ADDR => Ok(&mut self.io_regs_int),
+            IO_EXT_ADDR => Ok(&mut self.io_regs_ext),
+            _ => Err(InkplateHalError::UnsupportedAddress(addr)),
+        }
+    }
+
+    fn cached_regs(&self, addr: u8) -> Result<&[u8; 23], I2C::Error> {
+        match addr {
+            IO_INT_ADDR => Ok(&self.io_regs_int),
+            IO_EXT_ADDR => Ok(&self.io_regs_ext),
+            _ => Err(InkplateHalError::UnsupportedAddress(addr)),
+        }
+    }
+
     fn io_begin(&mut self, addr: u8) -> Result<(), I2C::Error> {
         let mut regs = [0u8; 23];
         self.i2c_write_read(addr, &[0x00], &mut regs)?;
-        if addr == IO_INT_ADDR {
-            self.io_regs_int = regs;
-            return Ok(());
+        match addr {
+            IO_INT_ADDR => {
+                self.io_regs_int = regs;
+                Ok(())
+            }
+            IO_EXT_ADDR => {
+                self.io_regs_ext = regs;
+                Ok(())
+            }
+            _ => Err(InkplateHalError::UnsupportedAddress(addr)),
         }
-        Err(InkplateHalError::UnsupportedAddress(addr))
     }
 
     fn pin_mode_internal(&mut self, addr: u8, pin: u8, mode: PinMode) -> Result<(), I2C::Error> {
         if pin > 15 {
             return Err(InkplateHalError::InvalidPin(pin));
         }
-        if addr != IO_INT_ADDR {
-            return Err(InkplateHalError::UnsupportedAddress(addr));
-        }
+        let _ = self.cached_regs(addr)?;
 
         let port = (pin / 8) as usize;
         let bit = pin % 8;
@@ -46,27 +66,27 @@ where
 
         match mode {
             PinMode::Input => {
-                self.modify_cached_reg(cfg_idx, 1u8 << bit, 0);
+                self.modify_cached_reg(addr, cfg_idx, 1u8 << bit, 0)?;
                 self.write_cached_reg(addr, cfg_idx)?;
             }
             PinMode::Output => {
-                self.modify_cached_reg(cfg_idx, 0, 1u8 << bit);
-                self.modify_cached_reg(out_idx, 0, 1u8 << bit);
+                self.modify_cached_reg(addr, cfg_idx, 0, 1u8 << bit)?;
+                self.modify_cached_reg(addr, out_idx, 0, 1u8 << bit)?;
                 self.write_cached_reg(addr, out_idx)?;
                 self.write_cached_reg(addr, cfg_idx)?;
             }
             PinMode::InputPullUp => {
-                self.modify_cached_reg(cfg_idx, 1u8 << bit, 0);
-                self.modify_cached_reg(pupden_idx, 1u8 << bit, 0);
-                self.modify_cached_reg(pupdsel_idx, 1u8 << bit, 0);
+                self.modify_cached_reg(addr, cfg_idx, 1u8 << bit, 0)?;
+                self.modify_cached_reg(addr, pupden_idx, 1u8 << bit, 0)?;
+                self.modify_cached_reg(addr, pupdsel_idx, 1u8 << bit, 0)?;
                 self.write_cached_reg(addr, cfg_idx)?;
                 self.write_cached_reg(addr, pupden_idx)?;
                 self.write_cached_reg(addr, pupdsel_idx)?;
             }
             PinMode::InputPullDown => {
-                self.modify_cached_reg(cfg_idx, 1u8 << bit, 0);
-                self.modify_cached_reg(pupden_idx, 1u8 << bit, 0);
-                self.modify_cached_reg(pupdsel_idx, 0, 1u8 << bit);
+                self.modify_cached_reg(addr, cfg_idx, 1u8 << bit, 0)?;
+                self.modify_cached_reg(addr, pupden_idx, 1u8 << bit, 0)?;
+                self.modify_cached_reg(addr, pupdsel_idx, 0, 1u8 << bit)?;
                 self.write_cached_reg(addr, cfg_idx)?;
                 self.write_cached_reg(addr, pupden_idx)?;
                 self.write_cached_reg(addr, pupdsel_idx)?;
@@ -79,9 +99,7 @@ where
         if pin > 15 {
             return Err(InkplateHalError::InvalidPin(pin));
         }
-        if addr != IO_INT_ADDR {
-            return Err(InkplateHalError::UnsupportedAddress(addr));
-        }
+        let _ = self.cached_regs(addr)?;
 
         let port = (pin / 8) as usize;
         let bit = pin % 8;
@@ -91,9 +109,9 @@ where
             PCAL_OUTPORT1_ARRAY
         };
         if state {
-            self.modify_cached_reg(out_idx, 1u8 << bit, 0);
+            self.modify_cached_reg(addr, out_idx, 1u8 << bit, 0)?;
         } else {
-            self.modify_cached_reg(out_idx, 0, 1u8 << bit);
+            self.modify_cached_reg(addr, out_idx, 0, 1u8 << bit)?;
         }
         self.write_cached_reg(addr, out_idx)?;
         Ok(())
@@ -103,9 +121,7 @@ where
         if pin > 15 {
             return Err(InkplateHalError::InvalidPin(pin));
         }
-        if addr != IO_INT_ADDR {
-            return Err(InkplateHalError::UnsupportedAddress(addr));
-        }
+        let _ = self.cached_regs(addr)?;
 
         let port = (pin / 8) as usize;
         let bit = pin % 8;
@@ -114,13 +130,22 @@ where
         Ok((value & (1u8 << bit)) != 0)
     }
 
-    fn modify_cached_reg(&mut self, idx: usize, set_mask: u8, clear_mask: u8) {
-        self.io_regs_int[idx] |= set_mask;
-        self.io_regs_int[idx] &= !clear_mask;
+    fn modify_cached_reg(
+        &mut self,
+        addr: u8,
+        idx: usize,
+        set_mask: u8,
+        clear_mask: u8,
+    ) -> Result<(), I2C::Error> {
+        let regs = self.cached_regs_mut(addr)?;
+        regs[idx] |= set_mask;
+        regs[idx] &= !clear_mask;
+        Ok(())
     }
 
     fn write_cached_reg(&mut self, addr: u8, idx: usize) -> Result<(), I2C::Error> {
-        self.i2c_write(addr, &[PCAL_REG_ADDRS[idx], self.io_regs_int[idx]])
+        let reg_value = self.cached_regs(addr)?[idx];
+        self.i2c_write(addr, &[PCAL_REG_ADDRS[idx], reg_value])
     }
 
     fn i2c_write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), I2C::Error> {
@@ -148,6 +173,17 @@ where
                 self.i2c
                     .write_read(addr, bytes, buffer)
                     .map_err(InkplateHalError::I2c)
+            }
+        }
+    }
+
+    fn i2c_read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), I2C::Error> {
+        match self.i2c.read(addr, buffer) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                let _ = self.i2c.reset();
+                self.delay.delay_ms(1);
+                self.i2c.read(addr, buffer).map_err(InkplateHalError::I2c)
             }
         }
     }

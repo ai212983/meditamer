@@ -125,9 +125,9 @@ where
         Ok(hello)
     }
 
-    pub fn touch_set_power_state(&mut self, enabled: bool) -> Result<(), I2C::Error> {
+    pub fn touch_set_power_state(&mut self, powered: bool) -> Result<(), I2C::Error> {
         let mut cmd = [0x54, 0x50, 0x00, 0x01];
-        if enabled {
+        if powered {
             cmd[1] |= 1 << 3;
         }
         self.i2c_write(TOUCHSCREEN_ADDR, &cmd)
@@ -185,6 +185,8 @@ where
 
             self.touch_x_res = x_res;
             self.touch_y_res = y_res;
+            // Match ELAN reference behavior (`tsInit(true)`): bit3=1 means the
+            // controller remains powered in run mode for continuous sampling.
             self.touch_set_power_state(true)?;
             return Ok(TouchInitStatus::Ready { x_res, y_res });
         }
@@ -224,7 +226,18 @@ where
             self.touch_y_res = y_res;
         }
 
-        let raw = self.touch_read_raw_data()?;
+        let mut raw = self.touch_read_raw_data()?;
+        // Some ELAN frames are all-zero even while a finger is moving. A short
+        // in-call retry burst reduces one-frame gesture collapse without
+        // changing higher-level gesture thresholds.
+        for _ in 0..TOUCH_RAW_EMPTY_RETRY_COUNT {
+            if touch_raw_frame_has_contact(&raw, self.touch_x_res, self.touch_y_res) {
+                break;
+            }
+            self.delay.delay_ms(TOUCH_RAW_EMPTY_RETRY_DELAY_MS);
+            raw = self.touch_read_raw_data()?;
+        }
+
         let bit_count = (raw[7].count_ones() as u8).min(2);
         let mut raw_points = [(0u16, 0u16); 2];
         for (idx, raw_point) in raw_points.iter_mut().enumerate() {
@@ -430,6 +443,24 @@ where
     }
 }
 
+fn touch_raw_frame_has_contact(raw: &[u8; 8], x_res: u16, y_res: u16) -> bool {
+    if raw[7].count_ones() > 0 {
+        return true;
+    }
+    for idx in 0..2 {
+        let base = 1 + idx * 3;
+        let d0 = raw[base];
+        let d1 = raw[base + 1];
+        let d2 = raw[base + 2];
+        let x_raw = (u16::from(d0 & 0xF0) << 4) | u16::from(d1);
+        let y_raw = (u16::from(d0 & 0x0F) << 8) | u16::from(d2);
+        if touch_raw_point_plausible(x_raw, y_raw, x_res, y_res) {
+            return true;
+        }
+    }
+    false
+}
+
 fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_res: u16) -> bool {
     if x_raw == 0 || y_raw == 0 {
         return false;
@@ -442,17 +473,18 @@ fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_res: u16) -> 
     x_raw <= x_res && y_raw <= y_res
 }
 
+const TOUCH_RAW_EMPTY_RETRY_COUNT: u8 = 2;
+const TOUCH_RAW_EMPTY_RETRY_DELAY_MS: u32 = 1;
+
 fn touch_presence_count(bit_count: u8, coord_count: u8) -> u8 {
-    if bit_count == 0 || coord_count == 0 {
-        0
-    } else {
-        bit_count.min(coord_count).min(2)
-    }
+    // Reference stack keeps contact presence from status bits. Keep that signal
+    // so coordinate dropouts do not truncate an active swipe.
+    bit_count.max(coord_count).min(2)
 }
 
 #[cfg(test)]
 mod touch_raw_point_plausible_tests {
-    use super::{touch_presence_count, touch_raw_point_plausible};
+    use super::{touch_presence_count, touch_raw_frame_has_contact, touch_raw_point_plausible};
 
     #[test]
     fn rejects_zero_axes() {
@@ -475,11 +507,35 @@ mod touch_raw_point_plausible_tests {
     #[test]
     fn presence_requires_bits_and_coords() {
         assert_eq!(touch_presence_count(0, 0), 0);
-        assert_eq!(touch_presence_count(0, 1), 0);
-        assert_eq!(touch_presence_count(1, 0), 0);
+        // Bit-only presence must be preserved; higher layers debounce and gate it.
+        assert_eq!(touch_presence_count(1, 0), 1);
+        // Bit count may flicker low while coordinates are still valid.
+        assert_eq!(touch_presence_count(0, 1), 1);
         assert_eq!(touch_presence_count(1, 1), 1);
         assert_eq!(touch_presence_count(2, 1), 1);
-        assert_eq!(touch_presence_count(1, 2), 1);
+        assert_eq!(touch_presence_count(1, 2), 2);
         assert_eq!(touch_presence_count(2, 2), 2);
+    }
+
+    #[test]
+    fn raw_frame_has_contact_when_status_bits_are_set() {
+        let mut raw = [0u8; 8];
+        raw[7] = 0x01;
+        assert!(touch_raw_frame_has_contact(&raw, 2048, 2048));
+    }
+
+    #[test]
+    fn raw_frame_has_contact_when_decoded_coordinate_is_plausible() {
+        let mut raw = [0u8; 8];
+        raw[1] = 0x14; // x_high=0x1, y_high=0x4
+        raw[2] = 0x23; // x_low
+        raw[3] = 0x56; // y_low
+        assert!(touch_raw_frame_has_contact(&raw, 2048, 2048));
+    }
+
+    #[test]
+    fn raw_frame_without_bits_or_coords_is_empty() {
+        let raw = [0u8; 8];
+        assert!(!touch_raw_frame_has_contact(&raw, 2048, 2048));
     }
 }

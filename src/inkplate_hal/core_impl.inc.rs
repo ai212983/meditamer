@@ -24,7 +24,10 @@ where
             i2c,
             delay,
             io_regs_int: [0; 23],
+            io_regs_ext: [0; 23],
             battery_gate_active_high: None,
+            touch_x_res: 0,
+            touch_y_res: 0,
             pin_lut,
             panel_fast_ready: false,
             panel_on: false,
@@ -44,12 +47,14 @@ where
     pub fn probe_devices(&mut self) -> ProbeStatus {
         ProbeStatus {
             io_internal: self.read_i2c_reg(IO_INT_ADDR, 0x00).is_ok(),
+            io_external: self.read_i2c_reg(IO_EXT_ADDR, 0x00).is_ok(),
             tps65186: self.read_i2c_reg(TPS65186_ADDR, 0x0F).is_ok(),
         }
     }
 
     pub fn init_core(&mut self) -> Result<(), I2C::Error> {
         self.io_begin(IO_INT_ADDR)?;
+        self.io_begin(IO_EXT_ADDR)?;
 
         self.pin_mode_internal(IO_INT_ADDR, VCOM, PinMode::Output)?;
         self.pin_mode_internal(IO_INT_ADDR, PWRUP, PinMode::Output)?;
@@ -75,6 +80,11 @@ where
         self.digital_write_internal(IO_INT_ADDR, SD_PMOS_PIN, true)?;
         self.pin_mode_internal(IO_INT_ADDR, BUZZ_EN, PinMode::Output)?;
         self.digital_write_internal(IO_INT_ADDR, BUZZ_EN, true)?;
+        self.pin_mode_internal(IO_EXT_ADDR, TOUCHSCREEN_EN, PinMode::Output)?;
+        self.pin_mode_internal(IO_EXT_ADDR, TOUCHSCREEN_RST, PinMode::Output)?;
+        // Touchscreen power-enable is active-low; keep it off by default.
+        self.digital_write_internal(IO_EXT_ADDR, TOUCHSCREEN_EN, true)?;
+        self.digital_write_internal(IO_EXT_ADDR, TOUCHSCREEN_RST, true)?;
 
         Ok(())
     }
