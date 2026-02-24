@@ -176,7 +176,10 @@ async fn request_sd_power(action: SdPowerRequest) -> bool {
     while SD_POWER_RESPONSES.try_receive().is_ok() {}
 
     if SD_POWER_REQUESTS.try_send(action).is_err() {
-        esp_println::println!("sdtask: power_req_queue_full action={}", sd_power_action_label(action));
+        esp_println::println!(
+            "sdtask: power_req_queue_full action={}",
+            sd_power_action_label(action)
+        );
         return false;
     }
 
