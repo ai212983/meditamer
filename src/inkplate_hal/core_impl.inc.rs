@@ -19,12 +19,12 @@ where
 
         let framebuffer_bw = unsafe {
             let slot = &mut *core::ptr::addr_of_mut!(FRAMEBUFFER_BW);
-            core::ptr::write_bytes(slot.as_mut_ptr(), 0, FRAMEBUFFER_BYTES);
+            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
             slot.assume_init_mut()
         };
         let previous_bw = unsafe {
             let slot = &mut *core::ptr::addr_of_mut!(PREVIOUS_BW);
-            core::ptr::write_bytes(slot.as_mut_ptr(), 0, FRAMEBUFFER_BYTES);
+            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
             slot.assume_init_mut()
         };
 
