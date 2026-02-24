@@ -221,9 +221,6 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             } else if let Some(command) = sd_command {
                                 let request_id = next_sd_request_id;
                                 next_sd_request_id = next_sd_request_id.wrapping_add(1);
-                                if next_sd_request_id == 0 {
-                                    next_sd_request_id = 1;
-                                }
                                 let request = SdRequest {
                                     id: request_id,
                                     command,
