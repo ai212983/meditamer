@@ -33,6 +33,20 @@ use sdcard::probe;
 
 pub(crate) fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    #[cfg(feature = "psram-alloc")]
+    let allocator_status = psram::init_allocator(&peripherals.PSRAM);
+    #[cfg(not(feature = "psram-alloc"))]
+    psram::init_allocator();
+    psram::log_allocator_status();
+    #[cfg(feature = "psram-alloc")]
+    if !matches!(allocator_status.state, psram::AllocatorState::Initialized) {
+        esp_println::println!(
+            "psram: allocator initialization failed: {:?}",
+            allocator_status
+        );
+        panic!("psram allocator initialization failed");
+    }
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
