@@ -9,7 +9,7 @@ use meditamer::{
 };
 use u8g2_fonts::{fonts, FontRenderer};
 
-use super::types::{AppEvent, TapTraceSample};
+use super::types::{AppEvent, SdPowerRequest, SdRequest, SdResult, TapTraceSample};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
 pub(crate) const SCREEN_HEIGHT: i32 = E_INK_HEIGHT as i32;
@@ -81,6 +81,11 @@ pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
 
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
+pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
+pub(crate) static SD_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 16> = Channel::new();
+pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
+    Channel::new();
+pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 32> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

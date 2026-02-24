@@ -4,27 +4,29 @@ pub async fn run_sd_fat_ls<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
-) where
+) -> bool
+where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
     let path = match decode_path(path_buf, path_len) {
         Some(path) => path,
         None => {
             esp_println::println!("sdfat[{}]: ls invalid_path", reason);
-            return;
+            return false;
         }
     };
 
     if power_on(power).await.is_err() {
         esp_println::println!("sdfat[{}]: ls power_on_error", reason);
-        return;
+        return false;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: ls init_error={:?}", reason, err);
         let _ = power_off_io(power);
-        return;
+        return false;
     }
 
+    let mut success = true;
     let mut entries = [fat::FatDirEntry::EMPTY; 32];
     match fat::list_dir(sd_probe, path, &mut entries).await {
         Ok(count) => {
@@ -43,12 +45,15 @@ pub async fn run_sd_fat_ls<E, P>(
         }
         Err(err) => {
             esp_println::println!("sdfat[{}]: ls_error path={} err={:?}", reason, path, err);
+            success = false;
         }
     }
 
     if power_off_io(power).is_err() {
         esp_println::println!("sdfat[{}]: ls power_off_error", reason);
+        return false;
     }
+    success
 }
 
 pub async fn run_sd_fat_read<E, P>(
@@ -57,27 +62,29 @@ pub async fn run_sd_fat_read<E, P>(
     path_len: u8,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
-) where
+) -> bool
+where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
     let path = match decode_path(path_buf, path_len) {
         Some(path) => path,
         None => {
             esp_println::println!("sdfat[{}]: read invalid_path", reason);
-            return;
+            return false;
         }
     };
 
     if power_on(power).await.is_err() {
         esp_println::println!("sdfat[{}]: read power_on_error", reason);
-        return;
+        return false;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: read init_error={:?}", reason, err);
         let _ = power_off_io(power);
-        return;
+        return false;
     }
 
+    let mut success = true;
     let mut data = [0u8; 256];
     match fat::read_file(sd_probe, path, &mut data).await {
         Ok(size) => {
@@ -101,15 +108,19 @@ pub async fn run_sd_fat_read<E, P>(
                 path,
                 needed
             );
+            success = false;
         }
         Err(err) => {
             esp_println::println!("sdfat[{}]: read_error path={} err={:?}", reason, path, err);
+            success = false;
         }
     }
 
     if power_off_io(power).is_err() {
         esp_println::println!("sdfat[{}]: read power_off_error", reason);
+        return false;
     }
+    success
 }
 
 pub async fn run_sd_fat_write<E, P>(
@@ -120,14 +131,15 @@ pub async fn run_sd_fat_write<E, P>(
     data_len: u16,
     sd_probe: &mut probe::SdCardProbe<'_>,
     power: &mut P,
-) where
+) -> bool
+where
     P: FnMut(SdPowerAction) -> Result<(), E>,
 {
     let path = match decode_path(path_buf, path_len) {
         Some(path) => path,
         None => {
             esp_println::println!("sdfat[{}]: write invalid_path", reason);
-            return;
+            return false;
         }
     };
 
@@ -136,14 +148,15 @@ pub async fn run_sd_fat_write<E, P>(
 
     if power_on(power).await.is_err() {
         esp_println::println!("sdfat[{}]: write power_on_error", reason);
-        return;
+        return false;
     }
     if let Err(err) = sd_probe.init().await {
         esp_println::println!("sdfat[{}]: write init_error={:?}", reason, err);
         let _ = power_off_io(power);
-        return;
+        return false;
     }
 
+    let mut success = true;
     match fat::write_file(sd_probe, path, data).await {
         Ok(()) => {
             let mut verify = [0u8; SD_WRITE_MAX];
@@ -159,6 +172,9 @@ pub async fn run_sd_fat_write<E, P>(
                         data.len(),
                         if ok { "ok" } else { "mismatch" }
                     );
+                    if !ok {
+                        success = false;
+                    }
                 }
                 Err(err) => {
                     esp_println::println!(
@@ -168,16 +184,19 @@ pub async fn run_sd_fat_write<E, P>(
                         data.len(),
                         err
                     );
+                    success = false;
                 }
             }
         }
         Err(err) => {
             esp_println::println!("sdfat[{}]: write_error path={} err={:?}", reason, path, err);
+            success = false;
         }
     }
 
     if power_off_io(power).is_err() {
         esp_println::println!("sdfat[{}]: write power_off_error", reason);
+        return false;
     }
+    success
 }
-
