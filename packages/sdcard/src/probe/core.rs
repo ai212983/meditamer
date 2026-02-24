@@ -1,7 +1,12 @@
 use embassy_time::Timer;
 use esp_hal::{
     gpio::Output,
-    spi::{master::Spi, Error as SpiError},
+    spi::{
+        master::{Config as SpiConfig, ConfigError as SpiConfigError, Spi},
+        Error as SpiError,
+        Mode as SpiMode,
+    },
+    time::Rate,
     Async,
 };
 
@@ -14,6 +19,8 @@ const SD_CMD24: u8 = 24;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
+const SD_INIT_SPI_RATE_KHZ: u32 = 400;
+const SD_DATA_SPI_RATE_MHZ: u32 = 24;
 pub const SD_SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +50,7 @@ pub enum SdFilesystem {
 #[derive(Debug)]
 pub enum SdProbeError {
     Spi(SpiError),
+    SpiConfig(SpiConfigError),
     Cmd0Failed(u8),
     Cmd8Unexpected(u8),
     Cmd8EchoMismatch([u8; 4]),
@@ -67,10 +75,19 @@ impl From<SpiError> for SdProbeError {
     }
 }
 
+impl From<SpiConfigError> for SdProbeError {
+    fn from(value: SpiConfigError) -> Self {
+        Self::SpiConfig(value)
+    }
+}
+
 pub struct SdCardProbe<'d> {
     spi: Spi<'d, Async>,
     cs: Output<'d>,
     high_capacity: Option<bool>,
+    cached_sector_lba: Option<u32>,
+    cached_sector: [u8; SD_SECTOR_SIZE],
+    next_free_cluster_hint: Option<u32>,
 }
 
 impl<'d> SdCardProbe<'d> {
@@ -80,11 +97,35 @@ impl<'d> SdCardProbe<'d> {
             spi,
             cs,
             high_capacity: None,
+            cached_sector_lba: None,
+            cached_sector: [0; SD_SECTOR_SIZE],
+            next_free_cluster_hint: None,
         }
     }
 
     pub async fn init(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+        self.cached_sector_lba = None;
         self.probe().await
+    }
+
+    pub(crate) fn next_free_cluster_hint(&self) -> Option<u32> {
+        self.next_free_cluster_hint
+    }
+
+    pub(crate) fn set_next_free_cluster_hint(&mut self, cluster: u32) {
+        self.next_free_cluster_hint = Some(cluster);
+    }
+
+    pub(crate) fn lower_next_free_cluster_hint(&mut self, cluster: u32) {
+        if cluster < 2 {
+            return;
+        }
+        if let Some(current) = self.next_free_cluster_hint {
+            if current <= cluster {
+                return;
+            }
+        }
+        self.next_free_cluster_hint = Some(cluster);
     }
 
     pub async fn read_sector(
@@ -92,8 +133,15 @@ impl<'d> SdCardProbe<'d> {
         lba: u32,
         out: &mut [u8; SD_SECTOR_SIZE],
     ) -> Result<(), SdProbeError> {
+        if self.cached_sector_lba == Some(lba) {
+            out.copy_from_slice(&self.cached_sector);
+            return Ok(());
+        }
         let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
-        *out = self.read_data_sector_512(lba, high_capacity).await?;
+        self.read_data_sector_512_into(lba, high_capacity, out)
+            .await?;
+        self.cached_sector.copy_from_slice(out);
+        self.cached_sector_lba = Some(lba);
         Ok(())
     }
 
@@ -143,10 +191,13 @@ impl<'d> SdCardProbe<'d> {
         if !released {
             return Err(SdProbeError::WriteBusyTimeout);
         }
+        self.cached_sector.copy_from_slice(data);
+        self.cached_sector_lba = Some(lba);
         Ok(())
     }
 
     pub async fn probe(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+        self.apply_init_clock().await?;
         self.cs.set_high();
         self.send_dummy_clocks(10).await?;
 
@@ -207,6 +258,8 @@ impl<'d> SdCardProbe<'d> {
             }
         }
 
+        self.apply_data_clock().await?;
+
         let mut ocr = [0u8; 4];
         let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr).await?;
         if cmd58_r1 != 0x00 {
@@ -233,6 +286,22 @@ impl<'d> SdCardProbe<'d> {
         };
         self.high_capacity = Some(high_capacity);
         Ok(status)
+    }
+
+    async fn apply_init_clock(&mut self) -> Result<(), SdProbeError> {
+        let config = SpiConfig::default()
+            .with_mode(SpiMode::_0)
+            .with_frequency(Rate::from_khz(SD_INIT_SPI_RATE_KHZ));
+        self.spi.apply_config(&config)?;
+        Ok(())
+    }
+
+    async fn apply_data_clock(&mut self) -> Result<(), SdProbeError> {
+        let config = SpiConfig::default()
+            .with_mode(SpiMode::_0)
+            .with_frequency(Rate::from_mhz(SD_DATA_SPI_RATE_MHZ));
+        self.spi.apply_config(&config)?;
+        Ok(())
     }
 
     async fn send_command(
@@ -344,11 +413,12 @@ impl<'d> SdCardProbe<'d> {
         Ok(block)
     }
 
-    async fn read_data_sector_512(
+    async fn read_data_sector_512_into(
         &mut self,
         lba: u32,
         high_capacity: bool,
-    ) -> Result<[u8; 512], SdProbeError> {
+        out: &mut [u8; SD_SECTOR_SIZE],
+    ) -> Result<(), SdProbeError> {
         let arg = if high_capacity {
             lba
         } else {
@@ -380,15 +450,14 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
         }
 
-        let mut block = [0u8; 512];
-        for slot in block.iter_mut() {
+        for slot in out.iter_mut() {
             *slot = self.transfer_byte(0xFF).await?;
         }
         // Discard data CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
         self.end_transaction().await;
-        Ok(block)
+        Ok(())
     }
 
     async fn retry_delay(&self) {
@@ -404,8 +473,10 @@ impl<'d> SdCardProbe<'d> {
         &mut self,
         high_capacity: bool,
     ) -> Result<SdFilesystem, SdProbeError> {
-        let sector0 = self.read_data_sector_512(0, high_capacity).await?;
-        if let Some(fs) = detect_vbr_filesystem(&sector0) {
+        let mut sector = [0u8; SD_SECTOR_SIZE];
+        self.read_data_sector_512_into(0, high_capacity, &mut sector)
+            .await?;
+        if let Some(fs) = detect_vbr_filesystem(&sector) {
             return Ok(fs);
         }
 
@@ -413,12 +484,12 @@ impl<'d> SdCardProbe<'d> {
         let mut partition_lba = 0u32;
         for idx in 0..4usize {
             let off = 446 + idx * 16;
-            let p_type = sector0[off + 4];
+            let p_type = sector[off + 4];
             let start = u32::from_le_bytes([
-                sector0[off + 8],
-                sector0[off + 9],
-                sector0[off + 10],
-                sector0[off + 11],
+                sector[off + 8],
+                sector[off + 9],
+                sector[off + 10],
+                sector[off + 11],
             ]);
             if p_type != 0 && start != 0 {
                 partition_type = p_type;
@@ -433,25 +504,19 @@ impl<'d> SdCardProbe<'d> {
 
         if partition_type == 0xEE {
             // Protective MBR (GPT). Read the first GPT partition entry.
-            let gpt_entry_sector = self.read_data_sector_512(2, high_capacity).await?;
+            self.read_data_sector_512_into(2, high_capacity, &mut sector)
+                .await?;
             let start = u64::from_le_bytes([
-                gpt_entry_sector[32],
-                gpt_entry_sector[33],
-                gpt_entry_sector[34],
-                gpt_entry_sector[35],
-                gpt_entry_sector[36],
-                gpt_entry_sector[37],
-                gpt_entry_sector[38],
-                gpt_entry_sector[39],
+                sector[32], sector[33], sector[34], sector[35], sector[36], sector[37], sector[38],
+                sector[39],
             ]);
             if start != 0 && start <= u32::MAX as u64 {
                 partition_lba = start as u32;
             }
         }
 
-        let vbr = self
-            .read_data_sector_512(partition_lba, high_capacity)
+        self.read_data_sector_512_into(partition_lba, high_capacity, &mut sector)
             .await?;
-        Ok(detect_vbr_filesystem(&vbr).unwrap_or(SdFilesystem::Unknown))
+        Ok(detect_vbr_filesystem(&sector).unwrap_or(SdFilesystem::Unknown))
     }
 }

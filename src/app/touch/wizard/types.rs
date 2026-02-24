@@ -31,6 +31,7 @@ const SWIPE_MARK_BUTTON_HEIGHT: i32 = 44;
 const SWIPE_CASE_COUNT: u8 = 8;
 const SWIPE_CASE_START_RADIUS_PX: i32 = 60;
 const SWIPE_CASE_END_RADIUS_PX: i32 = 72;
+const SWIPE_CASE_REQUIRE_SPEED_MATCH: bool = false;
 const TRACE_DIRECTION_UNKNOWN: u8 = 0xFF;
 const TRACE_SPEED_UNKNOWN: u8 = 0xFF;
 const TRACE_VERDICT_PASS: u8 = 0;
@@ -182,4 +183,3 @@ impl Default for SwipeDebugStats {
         }
     }
 }
-
