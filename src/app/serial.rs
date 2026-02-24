@@ -5,19 +5,27 @@ use embassy_time::{with_timeout, Duration};
 use super::{
     config::{
         APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN, TOUCH_EVENT_TRACE_ENABLED,
-        TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES,
+        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
-    types::{
-        AppEvent, SerialUart, TapTraceSample, TimeSyncCommand, TouchEvent, TouchEventKind,
-        TouchSwipeDirection, TouchTraceSample,
+    touch::{
+        config::{
+            TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED,
+            TOUCH_TRACE_SAMPLES, TOUCH_WIZARD_RAW_TRACE_SAMPLES, TOUCH_WIZARD_SESSION_EVENTS,
+            TOUCH_WIZARD_SWIPE_TRACE_SAMPLES, TOUCH_WIZARD_TRACE_ENABLED,
+        },
+        debug_log::{
+            uart_write_all, write_touch_event_trace_sample, write_touch_trace_sample,
+            write_touch_wizard_swipe_trace_sample, TouchWizardSessionLog,
+        },
     },
+    types::{AppEvent, SerialUart, TapTraceSample, TimeSyncCommand},
 };
 
 #[derive(Clone, Copy)]
 enum SerialCommand {
     TimeSync(TimeSyncCommand),
     TouchWizard,
+    TouchWizardDump,
     Repaint,
     RepaintMarble,
     Metrics,
@@ -29,32 +37,61 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     let mut line_buf = [0u8; TIMESET_CMD_BUF_LEN];
     let mut line_len = 0usize;
     let mut rx = [0u8; 1];
+    let mut touch_wizard_log = TouchWizardSessionLog::new();
 
     if TAP_TRACE_ENABLED {
-        let _ = uart
-            .write_async(
-                b"tap_trace,ms,tap_src,seq,cand,csrc,state,reject,score,window,cooldown,jerk,veto,gyro,int1,int2,pgood,batt_pct,gx,gy,gz,ax,ay,az\r\n",
-            )
-            .await;
+        let _ = uart_write_all(
+            &mut uart,
+            b"tap_trace,ms,tap_src,seq,cand,csrc,state,reject,score,window,cooldown,jerk,veto,gyro,int1,int2,pgood,batt_pct,gx,gy,gz,ax,ay,az\r\n",
+        )
+        .await;
     }
     if TOUCH_TRACE_ENABLED {
-        let _ = uart
-            .write_async(
-                b"touch_trace,ms,count,x0,y0,x1,y1,raw0,raw1,raw2,raw3,raw4,raw5,raw6,raw7\r\n",
-            )
-            .await;
+        let _ = uart_write_all(
+            &mut uart,
+            b"touch_trace,ms,count,x0,y0,x1,y1,raw0,raw1,raw2,raw3,raw4,raw5,raw6,raw7\r\n",
+        )
+        .await;
     }
     if TOUCH_EVENT_TRACE_ENABLED {
-        let _ = uart
-            .write_async(b"touch_event,ms,kind,x,y,start_x,start_y,duration_ms,count\r\n")
-            .await;
+        let _ = uart_write_all(
+            &mut uart,
+            b"touch_event,ms,kind,x,y,start_x,start_y,duration_ms,count,move_count,max_travel_px,release_debounce_ms,dropout_count\r\n",
+        )
+        .await;
+    }
+    if TOUCH_WIZARD_TRACE_ENABLED {
+        let _ = uart_write_all(
+            &mut uart,
+            b"touch_wizard_swipe,ms,case,attempt,expected_dir,expected_speed,verdict,class_dir,start_x,start_y,end_x,end_y,duration_ms,move_count,max_travel_px,release_debounce_ms,dropout_count\r\n",
+        )
+        .await;
     }
 
     loop {
+        while let Ok(session_event) = TOUCH_WIZARD_SESSION_EVENTS.try_receive() {
+            touch_wizard_log.on_session_event(session_event);
+        }
+
         if TOUCH_EVENT_TRACE_ENABLED {
             while let Ok(event) = TOUCH_EVENT_TRACE_SAMPLES.try_receive() {
+                touch_wizard_log.on_touch_event(event);
                 write_touch_event_trace_sample(&mut uart, event).await;
             }
+        }
+
+        while let Ok(sample) = TOUCH_WIZARD_SWIPE_TRACE_SAMPLES.try_receive() {
+            touch_wizard_log.on_swipe_sample(sample);
+            if TOUCH_WIZARD_TRACE_ENABLED {
+                write_touch_wizard_swipe_trace_sample(&mut uart, sample).await;
+            }
+        }
+        while let Ok(sample) = TOUCH_WIZARD_RAW_TRACE_SAMPLES.try_receive() {
+            touch_wizard_log.on_touch_sample(sample);
+        }
+
+        if touch_wizard_log.settle_pending_end() {
+            touch_wizard_log.write_dump(&mut uart).await;
         }
 
         if TOUCH_TRACE_ENABLED {
@@ -80,16 +117,16 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                         match cmd {
                             SerialCommand::TimeSync(cmd) => {
                                 if APP_EVENTS.try_send(AppEvent::TimeSync(cmd)).is_ok() {
-                                    let _ = uart.write_async(b"TIMESET OK\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"TIMESET OK\r\n").await;
                                 } else {
-                                    let _ = uart.write_async(b"TIMESET BUSY\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"TIMESET BUSY\r\n").await;
                                 }
                             }
                             SerialCommand::Repaint => {
                                 if APP_EVENTS.try_send(AppEvent::ForceRepaint).is_ok() {
-                                    let _ = uart.write_async(b"REPAINT OK\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"REPAINT OK\r\n").await;
                                 } else {
-                                    let _ = uart.write_async(b"REPAINT BUSY\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"REPAINT BUSY\r\n").await;
                                 }
                             }
                             SerialCommand::TouchWizard => {
@@ -97,16 +134,22 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                     .try_send(AppEvent::StartTouchCalibrationWizard)
                                     .is_ok()
                                 {
-                                    let _ = uart.write_async(b"TOUCH_WIZARD OK\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"TOUCH_WIZARD OK\r\n").await;
                                 } else {
-                                    let _ = uart.write_async(b"TOUCH_WIZARD BUSY\r\n").await;
+                                    let _ =
+                                        uart_write_all(&mut uart, b"TOUCH_WIZARD BUSY\r\n").await;
                                 }
+                            }
+                            SerialCommand::TouchWizardDump => {
+                                touch_wizard_log.write_dump(&mut uart).await;
                             }
                             SerialCommand::RepaintMarble => {
                                 if APP_EVENTS.try_send(AppEvent::ForceMarbleRepaint).is_ok() {
-                                    let _ = uart.write_async(b"REPAINT_MARBLE OK\r\n").await;
+                                    let _ =
+                                        uart_write_all(&mut uart, b"REPAINT_MARBLE OK\r\n").await;
                                 } else {
-                                    let _ = uart.write_async(b"REPAINT_MARBLE BUSY\r\n").await;
+                                    let _ =
+                                        uart_write_all(&mut uart, b"REPAINT_MARBLE BUSY\r\n").await;
                                 }
                             }
                             SerialCommand::Metrics => {
@@ -118,18 +161,18 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                     "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
                                     last_ms, max_ms
                                 );
-                                let _ = uart.write_async(line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
                             }
                             SerialCommand::SdProbe => {
                                 if APP_EVENTS.try_send(AppEvent::SdProbe).is_ok() {
-                                    let _ = uart.write_async(b"SDPROBE OK\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"SDPROBE OK\r\n").await;
                                 } else {
-                                    let _ = uart.write_async(b"SDPROBE BUSY\r\n").await;
+                                    let _ = uart_write_all(&mut uart, b"SDPROBE BUSY\r\n").await;
                                 }
                             }
                         }
                     } else {
-                        let _ = uart.write_async(b"CMD ERR\r\n").await;
+                        let _ = uart_write_all(&mut uart, b"CMD ERR\r\n").await;
                     }
                     line_len = 0;
                 } else if line_len < line_buf.len() {
@@ -173,62 +216,7 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
         sample.ay,
         sample.az
     );
-    let _ = uart.write_async(line.as_bytes()).await;
-}
-
-async fn write_touch_trace_sample(uart: &mut SerialUart, sample: TouchTraceSample) {
-    let mut line = heapless::String::<224>::new();
-    let _ = write!(
-        &mut line,
-        "touch_trace,{},{},{},{},{},{},{:#04x},{:#04x},{:#04x},{:#04x},{:#04x},{:#04x},{:#04x},{:#04x}\r\n",
-        sample.t_ms,
-        sample.count,
-        sample.x0,
-        sample.y0,
-        sample.x1,
-        sample.y1,
-        sample.raw[0],
-        sample.raw[1],
-        sample.raw[2],
-        sample.raw[3],
-        sample.raw[4],
-        sample.raw[5],
-        sample.raw[6],
-        sample.raw[7]
-    );
-    let _ = uart.write_async(line.as_bytes()).await;
-}
-
-async fn write_touch_event_trace_sample(uart: &mut SerialUart, event: TouchEvent) {
-    let mut line = heapless::String::<144>::new();
-    let _ = write!(
-        &mut line,
-        "touch_event,{},{},{},{},{},{},{},{}\r\n",
-        event.t_ms,
-        touch_event_kind_label(event.kind),
-        event.x,
-        event.y,
-        event.start_x,
-        event.start_y,
-        event.duration_ms,
-        event.touch_count
-    );
-    let _ = uart.write_async(line.as_bytes()).await;
-}
-
-fn touch_event_kind_label(kind: TouchEventKind) -> &'static str {
-    match kind {
-        TouchEventKind::Down => "down",
-        TouchEventKind::Move => "move",
-        TouchEventKind::Up => "up",
-        TouchEventKind::Tap => "tap",
-        TouchEventKind::LongPress => "long_press",
-        TouchEventKind::Swipe(TouchSwipeDirection::Left) => "swipe_left",
-        TouchEventKind::Swipe(TouchSwipeDirection::Right) => "swipe_right",
-        TouchEventKind::Swipe(TouchSwipeDirection::Up) => "swipe_up",
-        TouchEventKind::Swipe(TouchSwipeDirection::Down) => "swipe_down",
-        TouchEventKind::Cancel => "cancel",
-    }
+    let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
 fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
@@ -237,6 +225,9 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     }
     if parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
+    }
+    if parse_touch_wizard_dump_command(line) {
+        return Some(SerialCommand::TouchWizardDump);
     }
     if parse_touch_wizard_command(line) {
         return Some(SerialCommand::TouchWizard);
@@ -300,6 +291,11 @@ fn parse_metrics_command(line: &[u8]) -> bool {
 fn parse_touch_wizard_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"TOUCH_WIZARD" || cmd == b"TOUCH_CAL" || cmd == b"CAL_TOUCH"
+}
+
+fn parse_touch_wizard_dump_command(line: &[u8]) -> bool {
+    let cmd = trim_ascii_whitespace(line);
+    cmd == b"TOUCH_WIZARD_DUMP" || cmd == b"TOUCH_DUMP" || cmd == b"WIZARD_DUMP"
 }
 
 fn parse_sdprobe_command(line: &[u8]) -> bool {

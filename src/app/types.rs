@@ -1,7 +1,7 @@
 use embassy_time::Instant;
 use esp_hal::{gpio::Output, uart::Uart, Async};
 use meditamer::{
-    inkplate_hal::{InkplateHal, TouchSample},
+    inkplate_hal::InkplateHal,
     platform::{BusyDelay, HalI2c},
 };
 
@@ -16,6 +16,7 @@ pub(crate) enum AppEvent {
     Refresh { uptime_seconds: u32 },
     BatteryTick,
     TimeSync(TimeSyncCommand),
+    TouchIrq,
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
@@ -77,48 +78,11 @@ impl DisplayMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TouchSwipeDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TouchEventKind {
-    Down,
-    Move,
-    Up,
-    Tap,
-    LongPress,
-    Swipe(TouchSwipeDirection),
-    Cancel,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TouchEvent {
-    pub(crate) kind: TouchEventKind,
-    pub(crate) t_ms: u64,
-    pub(crate) x: u16,
-    pub(crate) y: u16,
-    pub(crate) start_x: u16,
-    pub(crate) start_y: u16,
-    pub(crate) duration_ms: u16,
-    pub(crate) touch_count: u8,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct TouchSampleFrame {
-    pub(crate) t_ms: u64,
-    pub(crate) sample: TouchSample,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum TouchPipelineInput {
-    Sample(TouchSampleFrame),
-    Reset,
-}
+#[allow(unused_imports)]
+pub(crate) use super::touch::types::{
+    TouchEvent, TouchEventKind, TouchIrqPin, TouchPipelineInput, TouchSampleFrame,
+    TouchSwipeDirection, TouchTraceSample, TouchWizardSessionEvent, TouchWizardSwipeTraceSample,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct TapTraceSample {
@@ -145,31 +109,6 @@ pub(crate) struct TapTraceSample {
     pub(crate) ax: i16,
     pub(crate) ay: i16,
     pub(crate) az: i16,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct TouchTraceSample {
-    pub(crate) t_ms: u64,
-    pub(crate) count: u8,
-    pub(crate) x0: u16,
-    pub(crate) y0: u16,
-    pub(crate) x1: u16,
-    pub(crate) y1: u16,
-    pub(crate) raw: [u8; 8],
-}
-
-impl TouchTraceSample {
-    pub(crate) fn from_sample(t_ms: u64, sample: TouchSample) -> Self {
-        Self {
-            t_ms,
-            count: sample.touch_count,
-            x0: sample.points[0].x,
-            y0: sample.points[0].y,
-            x1: sample.points[1].x,
-            y1: sample.points[1].y,
-            raw: sample.raw,
-        }
-    }
 }
 
 pub(crate) struct DisplayContext {

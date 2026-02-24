@@ -1,10 +1,16 @@
+pub(crate) mod config;
 mod core;
+pub(crate) mod debug_log;
+pub(crate) mod integration;
 mod normalize;
+pub(crate) mod tasks;
+pub(crate) mod types;
+pub(crate) mod wizard;
 
 use meditamer::inkplate_hal::TouchSample as HalTouchSample;
 use normalize::{NormalizedTouchPoint, NormalizedTouchSample, TouchPresenceNormalizer};
 
-use crate::app::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
+use self::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TouchEngineOutput {
@@ -74,6 +80,10 @@ fn map_event(event: core::TouchEvent) -> TouchEvent {
         start_y: event.start_y,
         duration_ms: event.duration_ms,
         touch_count: event.touch_count,
+        move_count: event.move_count,
+        max_travel_px: event.max_travel_px,
+        release_debounce_ms: event.release_debounce_ms,
+        dropout_count: event.dropout_count,
     }
 }
 

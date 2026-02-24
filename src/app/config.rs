@@ -2,16 +2,17 @@ use core::sync::atomic::AtomicU32;
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use meditamer::{
-    inkplate_hal::E_INK_WIDTH,
+    inkplate_hal::{E_INK_HEIGHT, E_INK_WIDTH},
     suminagashi::{
         DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
     },
 };
 use u8g2_fonts::{fonts, FontRenderer};
 
-use super::types::{AppEvent, TapTraceSample, TouchEvent, TouchPipelineInput, TouchTraceSample};
+use super::types::{AppEvent, TapTraceSample};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
+pub(crate) const SCREEN_HEIGHT: i32 = E_INK_HEIGHT as i32;
 pub(crate) const REFRESH_INTERVAL_SECONDS: u32 = 300;
 pub(crate) const BATTERY_INTERVAL_SECONDS: u32 = 300;
 pub(crate) const FULL_REFRESH_EVERY_N_UPDATES: u32 = 20;
@@ -78,22 +79,9 @@ pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
 pub(crate) const TAP_TRACE_ENABLED: bool = false;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
-pub(crate) const TOUCH_TRACE_ENABLED: bool = true;
-pub(crate) const TOUCH_EVENT_TRACE_ENABLED: bool = true;
-pub(crate) const TOUCH_CALIBRATION_WIZARD_ENABLED: bool = true;
-pub(crate) const TOUCH_SAMPLE_MS: u64 = 8;
-pub(crate) const TOUCH_INIT_RETRY_MS: u64 = 2_000;
 
-pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 4> = Channel::new();
+pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 32> =
-    Channel::new();
-pub(crate) static TOUCH_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchTraceSample, 32> =
-    Channel::new();
-pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchEvent, 32> =
-    Channel::new();
-pub(crate) static TOUCH_PIPELINE_INPUTS: Channel<CriticalSectionRawMutex, TouchPipelineInput, 32> =
-    Channel::new();
-pub(crate) static TOUCH_PIPELINE_EVENTS: Channel<CriticalSectionRawMutex, TouchEvent, 64> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
 pub(crate) static MAX_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

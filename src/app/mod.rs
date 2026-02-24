@@ -5,12 +5,11 @@ mod runtime;
 mod serial;
 pub(crate) mod store;
 mod touch;
-mod touch_calibration_wizard;
 pub(crate) mod types;
 
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{
-    gpio::{Level, Output, OutputConfig},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
     i2c::master::{Config as I2cConfig, I2c, SoftwareTimeout},
     spi::{
         master::{Config as SpiConfig, Spi},
@@ -40,6 +39,10 @@ pub(crate) fn run() -> ! {
         .with_rx(peripherals.GPIO3)
         .with_tx(peripherals.GPIO1)
         .into_async();
+    let touch_irq = Input::new(
+        peripherals.GPIO36,
+        InputConfig::default().with_pull(Pull::Up),
+    );
 
     let panel_pins = PanelPinHold {
         _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
@@ -98,7 +101,8 @@ pub(crate) fn run() -> ! {
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
-        spawner.must_spawn(display::touch_pipeline_task());
+        spawner.must_spawn(touch::tasks::touch_pipeline_task());
+        spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
         spawner.must_spawn(display::display_task(display_context));
         spawner.must_spawn(clock_task());
         spawner.must_spawn(battery_task());

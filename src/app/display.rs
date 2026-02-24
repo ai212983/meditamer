@@ -1,16 +1,13 @@
+use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 
 use crate::sd_probe;
-use meditamer::inkplate_hal::TouchInitStatus;
 
 use super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, TOUCH_CALIBRATION_WIZARD_ENABLED,
-        TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_INIT_RETRY_MS,
-        TOUCH_PIPELINE_EVENTS, TOUCH_PIPELINE_INPUTS, TOUCH_SAMPLE_MS, TOUCH_TRACE_ENABLED,
-        TOUCH_TRACE_SAMPLES, UI_TICK_MS,
+        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS, UI_TICK_MS,
     },
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
@@ -20,49 +17,24 @@ use super::{
         run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle,
         FaceDownToggleState,
     },
-    touch::TouchEngine,
-    touch_calibration_wizard::{
-        render_touch_wizard_waiting_screen, TouchCalibrationWizard, WizardDispatch,
+    touch::{
+        config::{
+            TOUCH_CALIBRATION_WIZARD_ENABLED, TOUCH_FEEDBACK_ENABLED,
+            TOUCH_FEEDBACK_MIN_REFRESH_MS, TOUCH_IMU_QUIET_WINDOW_MS, TOUCH_INIT_RETRY_MS,
+            TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW, TOUCH_MAX_CATCHUP_SAMPLES, TOUCH_PIPELINE_EVENTS,
+            TOUCH_SAMPLE_IDLE_FALLBACK_MS, TOUCH_WIZARD_RAW_TRACE_SAMPLES,
+            TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS, TOUCH_ZERO_CONFIRM_WINDOW_MS,
+        },
+        integration::handle_touch_event,
+        tasks::{
+            draw_touch_feedback_dot, next_touch_sample_period_ms, push_touch_input_sample,
+            request_touch_pipeline_reset, try_touch_init_with_logs,
+        },
+        types::{TouchEventKind, TouchSampleFrame, TouchTraceSample},
+        wizard::{render_touch_wizard_waiting_screen, TouchCalibrationWizard, WizardDispatch},
     },
-    types::{
-        AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState, TouchEvent,
-        TouchEventKind, TouchPipelineInput, TouchSampleFrame, TouchSwipeDirection,
-        TouchTraceSample,
-    },
+    types::{AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState},
 };
-
-const TOUCH_FEEDBACK_ENABLED: bool = true;
-const TOUCH_FEEDBACK_RADIUS_PX: i32 = 3;
-const TOUCH_FEEDBACK_MIN_REFRESH_MS: u64 = 30;
-const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 8;
-
-#[embassy_executor::task]
-pub(crate) async fn touch_pipeline_task() {
-    let mut touch_engine = TouchEngine::default();
-
-    loop {
-        match TOUCH_PIPELINE_INPUTS.receive().await {
-            TouchPipelineInput::Reset => {
-                touch_engine = TouchEngine::default();
-                while TOUCH_PIPELINE_EVENTS.try_receive().is_ok() {}
-            }
-            TouchPipelineInput::Sample(frame) => {
-                if TOUCH_TRACE_ENABLED && frame.sample.touch_count > 0 {
-                    let _ = TOUCH_TRACE_SAMPLES
-                        .try_send(TouchTraceSample::from_sample(frame.t_ms, frame.sample));
-                }
-
-                let output = touch_engine.tick(frame.t_ms, frame.sample);
-                for touch_event in output.events.into_iter().flatten() {
-                    if TOUCH_EVENT_TRACE_ENABLED {
-                        let _ = TOUCH_EVENT_TRACE_SAMPLES.try_send(touch_event);
-                    }
-                    push_touch_output_event(touch_event).await;
-                }
-            }
-        }
-    }
-}
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
@@ -95,6 +67,11 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut touch_feedback_dirty = false;
     let mut touch_feedback_next_flush_at = Instant::now();
     let mut touch_contact_active = false;
+    let mut touch_last_nonzero_at: Option<Instant> = None;
+    let mut touch_irq_pending = 0u8;
+    let mut touch_irq_burst_until = Instant::now();
+    let mut touch_idle_fallback_at = Instant::now();
+    let mut touch_wizard_trace_capture_until_ms = 0u64;
 
     if !touch_ready {
         touch_retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
@@ -206,9 +183,25 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                         screen_initialized = true;
                     }
                 }
+                AppEvent::TouchIrq => {
+                    touch_irq_pending = touch_irq_pending.saturating_add(1);
+                    let now = Instant::now();
+                    touch_irq_burst_until = now + Duration::from_millis(TOUCH_IRQ_BURST_MS);
+                    if touch_next_sample_at > now {
+                        touch_next_sample_at = now;
+                    }
+                    touch_idle_fallback_at =
+                        now + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
+                }
                 AppEvent::StartTouchCalibrationWizard => {
                     esp_println::println!("touch_wizard: start_event touch_ready={}", touch_ready);
                     touch_wizard_requested = true;
+                    touch_last_nonzero_at = None;
+                    touch_irq_pending = 0;
+                    touch_irq_burst_until = Instant::now();
+                    TOUCH_IRQ_LOW.store(false, Ordering::Relaxed);
+                    touch_idle_fallback_at =
+                        Instant::now() + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
                     backlight_cycle_start = None;
                     backlight_level = 0;
                     let _ = context.inkplate.frontlight_off();
@@ -276,7 +269,15 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             Err(_) => {}
         }
 
-        if !imu_double_tap_ready && Instant::now() >= imu_retry_at {
+        let touch_bus_quiet = touch_contact_active
+            || touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+                Instant::now()
+                    .saturating_duration_since(last_nonzero_at)
+                    .as_millis()
+                    <= TOUCH_IMU_QUIET_WINDOW_MS
+            });
+
+        if !touch_bus_quiet && !imu_double_tap_ready && Instant::now() >= imu_retry_at {
             imu_double_tap_ready = context.inkplate.lsm6ds3_init_double_tap().unwrap_or(false);
             if imu_double_tap_ready {
                 let now_ms = Instant::now()
@@ -287,7 +288,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             imu_retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
         }
 
-        if imu_double_tap_ready {
+        if !touch_bus_quiet && imu_double_tap_ready {
             match (
                 context.inkplate.lsm6ds3_read_tap_src(),
                 context.inkplate.lsm6ds3_int1_level(),
@@ -351,7 +352,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             }
         }
 
-        if TAP_TRACE_ENABLED && imu_double_tap_ready {
+        if TAP_TRACE_ENABLED && imu_double_tap_ready && !touch_bus_quiet {
             let now = Instant::now();
 
             if now >= tap_trace_aux_next_sample_at {
@@ -409,7 +410,12 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             touch_ready = try_touch_init_with_logs(&mut context.inkplate, "retry");
             if touch_ready {
                 request_touch_pipeline_reset();
+                touch_irq_pending = 0;
+                touch_irq_burst_until = Instant::now();
+                TOUCH_IRQ_LOW.store(false, Ordering::Relaxed);
                 touch_next_sample_at = Instant::now();
+                touch_idle_fallback_at =
+                    Instant::now() + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
                 if touch_wizard_requested && !touch_wizard.is_active() {
                     touch_wizard = TouchCalibrationWizard::new(true);
                     touch_wizard.render_full(&mut context.inkplate).await;
@@ -427,14 +433,62 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         {
             let scheduled_sample_at = touch_next_sample_at;
             let sample_instant = Instant::now();
+            let touch_recent_nonzero = touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+                sample_instant
+                    .saturating_duration_since(last_nonzero_at)
+                    .as_millis()
+                    <= TOUCH_ZERO_CONFIRM_WINDOW_MS
+            });
+            let touch_irq_low = TOUCH_IRQ_LOW.load(Ordering::Relaxed);
+            let irq_burst_active = sample_instant <= touch_irq_burst_until;
+            let idle_poll_due = sample_instant >= touch_idle_fallback_at;
+            let should_sample = touch_irq_pending > 0
+                || touch_irq_low
+                || irq_burst_active
+                || touch_contact_active
+                || touch_recent_nonzero
+                || idle_poll_due;
+            if !should_sample {
+                touch_next_sample_at = touch_idle_fallback_at;
+                break;
+            }
+            if touch_irq_pending > 0 {
+                touch_irq_pending = touch_irq_pending.saturating_sub(1);
+            }
+
             match context.inkplate.touch_read_sample(0) {
                 Ok(sample) => {
+                    if sample.touch_count > 0 {
+                        touch_last_nonzero_at = Some(sample_instant);
+                        touch_irq_burst_until =
+                            sample_instant + Duration::from_millis(TOUCH_IRQ_BURST_MS);
+                    } else if let Some(last_nonzero_at) = touch_last_nonzero_at {
+                        if sample_instant
+                            .saturating_duration_since(last_nonzero_at)
+                            .as_millis()
+                            > TOUCH_ZERO_CONFIRM_WINDOW_MS
+                        {
+                            touch_last_nonzero_at = None;
+                        }
+                    }
+
                     // Use scheduled sample time for gesture timing. If we are catching up,
                     // multiple reads can happen back-to-back in real time; using `Instant::now()`
                     // for each would collapse debounce durations and miss quick taps.
                     let t_ms = scheduled_sample_at
                         .saturating_duration_since(trace_epoch)
                         .as_millis();
+                    if touch_wizard.is_active() {
+                        let raw_present = sample.raw[7].count_ones() > 0;
+                        if sample.touch_count > 0 || raw_present {
+                            touch_wizard_trace_capture_until_ms =
+                                t_ms.saturating_add(TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS);
+                        }
+                        if t_ms <= touch_wizard_trace_capture_until_ms {
+                            let _ = TOUCH_WIZARD_RAW_TRACE_SAMPLES
+                                .try_send(TouchTraceSample::from_sample(t_ms, sample));
+                        }
+                    }
                     push_touch_input_sample(TouchSampleFrame { t_ms, sample }).await;
                     // Always yield between capture iterations so touch pipeline task can run
                     // even when channel has spare capacity.
@@ -442,6 +496,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
                 Err(_) => {
                     touch_ready = false;
+                    touch_last_nonzero_at = None;
+                    touch_irq_pending = 0;
+                    touch_irq_burst_until = Instant::now();
+                    TOUCH_IRQ_LOW.store(false, Ordering::Relaxed);
                     let _ = context.inkplate.touch_shutdown();
                     touch_retry_at = sample_instant + Duration::from_millis(TOUCH_INIT_RETRY_MS);
                     esp_println::println!("touch: read_error; retrying");
@@ -455,8 +513,25 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 }
             }
 
+            let touch_recent_nonzero = touch_last_nonzero_at.map_or(false, |last_nonzero_at| {
+                sample_instant
+                    .saturating_duration_since(last_nonzero_at)
+                    .as_millis()
+                    <= TOUCH_ZERO_CONFIRM_WINDOW_MS
+            });
+            if !touch_contact_active && !touch_recent_nonzero && touch_irq_pending == 0 {
+                touch_idle_fallback_at =
+                    sample_instant + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
+            }
+            let sample_period_ms = next_touch_sample_period_ms(
+                touch_contact_active
+                    || touch_recent_nonzero
+                    || touch_irq_pending > 0
+                    || touch_irq_low
+                    || sample_instant <= touch_irq_burst_until,
+            );
             sampled_touch_count = sampled_touch_count.saturating_add(1);
-            touch_next_sample_at = scheduled_sample_at + Duration::from_millis(TOUCH_SAMPLE_MS);
+            touch_next_sample_at = scheduled_sample_at + Duration::from_millis(sample_period_ms);
         }
 
         while let Ok(touch_event) = TOUCH_PIPELINE_EVENTS.try_receive() {
@@ -469,6 +544,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 | TouchEventKind::Swipe(_)
                 | TouchEventKind::Cancel => {
                     touch_contact_active = false;
+                    if touch_last_nonzero_at.is_none() {
+                        touch_idle_fallback_at =
+                            Instant::now() + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
+                    }
                 }
             }
 
@@ -549,90 +628,6 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     }
 }
 
-async fn push_touch_input_sample(frame: TouchSampleFrame) {
-    let input = TouchPipelineInput::Sample(frame);
-    // Preserve ordered sample stream; dropping old samples collapses swipe vectors.
-    TOUCH_PIPELINE_INPUTS.send(input).await;
-}
-
-fn request_touch_pipeline_reset() {
-    while TOUCH_PIPELINE_INPUTS.try_receive().is_ok() {}
-    while TOUCH_PIPELINE_EVENTS.try_receive().is_ok() {}
-    let _ = TOUCH_PIPELINE_INPUTS.try_send(TouchPipelineInput::Reset);
-}
-
-async fn push_touch_output_event(event: TouchEvent) {
-    TOUCH_PIPELINE_EVENTS.send(event).await;
-}
-
-async fn handle_touch_event(
-    event: TouchEvent,
-    context: &mut DisplayContext,
-    touch_feedback_dirty: &mut bool,
-    backlight_cycle_start: &mut Option<Instant>,
-    backlight_level: &mut u8,
-    update_count: &mut u32,
-    display_mode: &mut DisplayMode,
-    last_uptime_seconds: u32,
-    time_sync: Option<TimeSyncState>,
-    battery_percent: Option<u8>,
-    pattern_nonce: &mut u32,
-    first_visual_seed_pending: &mut bool,
-    screen_initialized: &mut bool,
-) {
-    match event.kind {
-        TouchEventKind::Down | TouchEventKind::Move if TOUCH_FEEDBACK_ENABLED => {
-            draw_touch_feedback_dot(&mut context.inkplate, event.x, event.y);
-            *touch_feedback_dirty = true;
-        }
-        TouchEventKind::Tap => {
-            trigger_backlight_cycle(
-                &mut context.inkplate,
-                backlight_cycle_start,
-                backlight_level,
-            );
-        }
-        TouchEventKind::LongPress => {
-            *update_count = 0;
-            render_active_mode(
-                &mut context.inkplate,
-                *display_mode,
-                last_uptime_seconds,
-                time_sync,
-                battery_percent,
-                pattern_nonce,
-                first_visual_seed_pending,
-                true,
-            )
-            .await;
-            *screen_initialized = true;
-        }
-        TouchEventKind::Swipe(direction) => {
-            *display_mode = match direction {
-                TouchSwipeDirection::Right | TouchSwipeDirection::Down => display_mode.toggled(),
-                TouchSwipeDirection::Left | TouchSwipeDirection::Up => {
-                    display_mode.toggled_reverse()
-                }
-            };
-            context.mode_store.save_mode(*display_mode);
-            *update_count = 0;
-            render_active_mode(
-                &mut context.inkplate,
-                *display_mode,
-                last_uptime_seconds,
-                time_sync,
-                battery_percent,
-                pattern_nonce,
-                first_visual_seed_pending,
-                true,
-            )
-            .await;
-            *screen_initialized = true;
-        }
-        _ => {}
-    }
-}
-
 fn next_loop_wait_ms(
     touch_ready: bool,
     touch_retry_at: Instant,
@@ -675,59 +670,6 @@ fn ms_until(now: Instant, deadline: Instant) -> u64 {
         0
     } else {
         deadline.saturating_duration_since(now).as_millis()
-    }
-}
-
-fn try_touch_init_with_logs(display: &mut super::types::InkplateDriver, phase: &str) -> bool {
-    match display.touch_init_with_status() {
-        Ok(TouchInitStatus::Ready { x_res, y_res }) => {
-            esp_println::println!(
-                "touch: ready phase={} x_res={} y_res={}",
-                phase,
-                x_res,
-                y_res
-            );
-            true
-        }
-        Ok(TouchInitStatus::HelloMismatch { hello }) => {
-            let probes = display.probe_devices();
-            esp_println::println!(
-                "touch: init_failed phase={} reason=hello_mismatch hello={:02x}{:02x}{:02x}{:02x} probe_int={} probe_ext={} probe_pwr={}",
-                phase,
-                hello[0],
-                hello[1],
-                hello[2],
-                hello[3],
-                probes.io_internal,
-                probes.io_external,
-                probes.tps65186
-            );
-            false
-        }
-        Ok(TouchInitStatus::ZeroResolution { x_res, y_res }) => {
-            let probes = display.probe_devices();
-            esp_println::println!(
-                "touch: init_failed phase={} reason=zero_resolution x_res={} y_res={} probe_int={} probe_ext={} probe_pwr={}",
-                phase,
-                x_res,
-                y_res,
-                probes.io_internal,
-                probes.io_external,
-                probes.tps65186
-            );
-            false
-        }
-        Err(_) => {
-            let probes = display.probe_devices();
-            esp_println::println!(
-                "touch: init_failed phase={} reason=i2c_error probe_int={} probe_ext={} probe_pwr={}",
-                phase,
-                probes.io_internal,
-                probes.io_external,
-                probes.tps65186
-            );
-            false
-        }
     }
 }
 
@@ -841,30 +783,5 @@ fn run_sd_probe(
 
     if inkplate.sd_card_power_off().is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
-    }
-}
-
-fn draw_touch_feedback_dot(display: &mut super::types::InkplateDriver, x: u16, y: u16) {
-    let cx = x as i32;
-    let cy = y as i32;
-    let radius = TOUCH_FEEDBACK_RADIUS_PX.max(1);
-    let radius_sq = radius * radius;
-    let width = display.width() as i32;
-    let height = display.height() as i32;
-
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            if dx * dx + dy * dy > radius_sq {
-                continue;
-            }
-
-            let px = cx + dx;
-            let py = cy + dy;
-            if px < 0 || py < 0 || px >= width || py >= height {
-                continue;
-            }
-
-            display.set_pixel_bw(px as usize, py as usize, true);
-        }
     }
 }
