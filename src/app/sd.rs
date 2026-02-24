@@ -1,4 +1,7 @@
+#[cfg(not(feature = "asset-upload-http"))]
 use embassy_futures::select::{select, Either};
+#[cfg(feature = "asset-upload-http")]
+use embassy_futures::select::{select3, Either3};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use sdcard::{fat, runtime as sd_ops};
 
@@ -12,6 +15,14 @@ use super::{
         SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode,
     },
 };
+#[cfg(feature = "asset-upload-http")]
+use super::{
+    config::{WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES},
+    types::{
+        WifiConfigRequest, WifiConfigResponse, WifiConfigResultCode, WifiCredentials,
+        WIFI_CONFIG_FILE_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
+    },
+};
 
 const SD_IDLE_POWER_OFF_MS: u64 = 1_500;
 const SD_RETRY_MAX_ATTEMPTS: u8 = 3;
@@ -21,6 +32,10 @@ const SD_BACKOFF_MAX_MS: u64 = 2_400;
 const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_000;
 const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
 const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
+#[cfg(feature = "asset-upload-http")]
+const WIFI_CONFIG_DIR: &str = "/config";
+#[cfg(feature = "asset-upload-http")]
+const WIFI_CONFIG_PATH: &str = "/config/wifi.cfg";
 
 struct SdUploadSession {
     final_path: [u8; SD_UPLOAD_PATH_BUF_MAX],
@@ -61,6 +76,81 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             backoff_until = None;
         }
 
+        #[cfg(feature = "asset-upload-http")]
+        let request = if powered {
+            match select3(
+                WIFI_CONFIG_REQUESTS.receive(),
+                SD_UPLOAD_REQUESTS.receive(),
+                with_timeout(
+                    Duration::from_millis(SD_IDLE_POWER_OFF_MS),
+                    SD_REQUESTS.receive(),
+                ),
+            )
+            .await
+            {
+                Either3::First(config_request) => {
+                    let response = process_wifi_config_request(
+                        config_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_wifi_config_response(response);
+                    continue;
+                }
+                Either3::Second(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either3::Third(result) => result.ok(),
+            }
+        } else {
+            match select3(
+                WIFI_CONFIG_REQUESTS.receive(),
+                SD_UPLOAD_REQUESTS.receive(),
+                SD_REQUESTS.receive(),
+            )
+            .await
+            {
+                Either3::First(config_request) => {
+                    let response = process_wifi_config_request(
+                        config_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_wifi_config_response(response);
+                    continue;
+                }
+                Either3::Second(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either3::Third(request) => Some(request),
+            }
+        };
+
+        #[cfg(not(feature = "asset-upload-http"))]
         let request = if powered {
             match select(
                 SD_UPLOAD_REQUESTS.receive(),
@@ -421,6 +511,70 @@ async fn process_upload_request(
     }
 }
 
+#[cfg(feature = "asset-upload-http")]
+async fn process_wifi_config_request(
+    request: WifiConfigRequest,
+    session: &Option<SdUploadSession>,
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> WifiConfigResponse {
+    if session.is_some() {
+        return wifi_config_response(false, WifiConfigResultCode::Busy, None);
+    }
+
+    if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        return wifi_config_response(false, map_upload_ready_error(code), None);
+    }
+
+    match request {
+        WifiConfigRequest::Load => {
+            let mut raw = [0u8; WIFI_CONFIG_FILE_MAX];
+            match fat::read_file(sd_probe, WIFI_CONFIG_PATH, &mut raw).await {
+                Ok(len) => match parse_wifi_config_file(&raw[..len]) {
+                    Ok(credentials) => {
+                        wifi_config_response(true, WifiConfigResultCode::Ok, Some(credentials))
+                    }
+                    Err(_) => wifi_config_response(false, WifiConfigResultCode::InvalidData, None),
+                },
+                Err(fat::SdFatError::NotFound) => {
+                    wifi_config_response(false, WifiConfigResultCode::NotFound, None)
+                }
+                Err(err) => {
+                    wifi_config_response(false, map_fat_error_to_wifi_config_code(&err), None)
+                }
+            }
+        }
+        WifiConfigRequest::Store { credentials } => {
+            match fat::mkdir(sd_probe, WIFI_CONFIG_DIR).await {
+                Ok(()) | Err(fat::SdFatError::AlreadyExists) => {}
+                Err(err) => {
+                    return wifi_config_response(
+                        false,
+                        map_fat_error_to_wifi_config_code(&err),
+                        None,
+                    );
+                }
+            }
+
+            let mut encoded = [0u8; WIFI_CONFIG_FILE_MAX];
+            let encoded_len = match encode_wifi_config_file(credentials, &mut encoded) {
+                Ok(len) => len,
+                Err(_) => {
+                    return wifi_config_response(false, WifiConfigResultCode::InvalidData, None);
+                }
+            };
+
+            match fat::write_file(sd_probe, WIFI_CONFIG_PATH, &encoded[..encoded_len]).await {
+                Ok(()) => wifi_config_response(true, WifiConfigResultCode::Ok, None),
+                Err(err) => {
+                    wifi_config_response(false, map_fat_error_to_wifi_config_code(&err), None)
+                }
+            }
+        }
+    }
+}
+
 async fn ensure_upload_ready(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
@@ -444,12 +598,32 @@ async fn ensure_upload_ready(
     Ok(())
 }
 
+#[cfg(feature = "asset-upload-http")]
+fn map_upload_ready_error(code: SdUploadResultCode) -> WifiConfigResultCode {
+    match code {
+        SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
+        SdUploadResultCode::InitFailed => WifiConfigResultCode::InitFailed,
+        _ => WifiConfigResultCode::OperationFailed,
+    }
+}
+
 fn map_fat_error_to_upload_code(error: &fat::SdFatError) -> SdUploadResultCode {
     match error {
         fat::SdFatError::InvalidPath => SdUploadResultCode::InvalidPath,
         fat::SdFatError::NotFound => SdUploadResultCode::NotFound,
         fat::SdFatError::NotEmpty => SdUploadResultCode::NotEmpty,
         _ => SdUploadResultCode::OperationFailed,
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn map_fat_error_to_wifi_config_code(error: &fat::SdFatError) -> WifiConfigResultCode {
+    match error {
+        fat::SdFatError::NotFound => WifiConfigResultCode::NotFound,
+        fat::SdFatError::InvalidPath | fat::SdFatError::BufferTooSmall { .. } => {
+            WifiConfigResultCode::InvalidData
+        }
+        _ => WifiConfigResultCode::OperationFailed,
     }
 }
 
@@ -472,6 +646,97 @@ fn upload_result(ok: bool, code: SdUploadResultCode, bytes_written: u32) -> SdUp
         code,
         bytes_written,
     }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn wifi_config_response(
+    ok: bool,
+    code: WifiConfigResultCode,
+    credentials: Option<WifiCredentials>,
+) -> WifiConfigResponse {
+    WifiConfigResponse {
+        ok,
+        code,
+        credentials,
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn encode_wifi_config_file(
+    credentials: WifiCredentials,
+    out: &mut [u8; WIFI_CONFIG_FILE_MAX],
+) -> Result<usize, ()> {
+    let ssid_len = credentials.ssid_len as usize;
+    let password_len = credentials.password_len as usize;
+    if ssid_len == 0 || ssid_len > WIFI_SSID_MAX || password_len > WIFI_PASSWORD_MAX {
+        return Err(());
+    }
+
+    let mut cursor = 0usize;
+    cursor = write_ascii(out, cursor, b"ssid=").ok_or(())?;
+    cursor = write_ascii(out, cursor, &credentials.ssid[..ssid_len]).ok_or(())?;
+    cursor = write_ascii(out, cursor, b"\npassword=").ok_or(())?;
+    cursor = write_ascii(out, cursor, &credentials.password[..password_len]).ok_or(())?;
+    cursor = write_ascii(out, cursor, b"\n").ok_or(())?;
+    Ok(cursor)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn parse_wifi_config_file(buf: &[u8]) -> Result<WifiCredentials, ()> {
+    let mut ssid: Option<&[u8]> = None;
+    let mut password: Option<&[u8]> = None;
+
+    for raw_line in buf.split(|b| *b == b'\n') {
+        let line = trim_ascii_line(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(b"ssid=") {
+            ssid = Some(value);
+        } else if let Some(value) = line.strip_prefix(b"password=") {
+            password = Some(value);
+        }
+    }
+
+    let ssid = ssid.ok_or(())?;
+    if ssid.is_empty() || ssid.len() > WIFI_SSID_MAX {
+        return Err(());
+    }
+    let password = password.unwrap_or(&[]);
+    if password.len() > WIFI_PASSWORD_MAX {
+        return Err(());
+    }
+
+    let mut credentials = WifiCredentials {
+        ssid: [0u8; WIFI_SSID_MAX],
+        ssid_len: ssid.len() as u8,
+        password: [0u8; WIFI_PASSWORD_MAX],
+        password_len: password.len() as u8,
+    };
+    credentials.ssid[..ssid.len()].copy_from_slice(ssid);
+    credentials.password[..password.len()].copy_from_slice(password);
+    Ok(credentials)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn write_ascii(dst: &mut [u8], cursor: usize, bytes: &[u8]) -> Option<usize> {
+    let next = cursor.checked_add(bytes.len())?;
+    if next > dst.len() {
+        return None;
+    }
+    dst[cursor..next].copy_from_slice(bytes);
+    Some(next)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn trim_ascii_line(mut line: &[u8]) -> &[u8] {
+    while matches!(line.last(), Some(b'\r' | b' ' | b'\t')) {
+        line = &line[..line.len().saturating_sub(1)];
+    }
+    while matches!(line.first(), Some(b' ' | b'\t')) {
+        line = &line[1..];
+    }
+    line
 }
 
 fn duration_ms_since(start: Instant) -> u32 {
@@ -645,6 +910,18 @@ fn publish_upload_result(result: SdUploadResult) {
     }
 }
 
+#[cfg(feature = "asset-upload-http")]
+fn publish_wifi_config_response(response: WifiConfigResponse) {
+    if WIFI_CONFIG_RESPONSES.try_send(response).is_err() {
+        esp_println::println!(
+            "sdtask: wifi_config_resp_drop ok={} code={} has_credentials={}",
+            response.ok as u8,
+            wifi_config_result_code_label(response.code),
+            response.credentials.is_some() as u8
+        );
+    }
+}
+
 fn sd_kind_label(kind: SdCommandKind) -> &'static str {
     match kind {
         SdCommandKind::Probe => "probe",
@@ -687,6 +964,19 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
         SdUploadResultCode::PowerOnFailed => "power_on_failed",
         SdUploadResultCode::InitFailed => "init_failed",
         SdUploadResultCode::OperationFailed => "operation_failed",
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn wifi_config_result_code_label(code: WifiConfigResultCode) -> &'static str {
+    match code {
+        WifiConfigResultCode::Ok => "ok",
+        WifiConfigResultCode::Busy => "busy",
+        WifiConfigResultCode::NotFound => "not_found",
+        WifiConfigResultCode::InvalidData => "invalid_data",
+        WifiConfigResultCode::PowerOnFailed => "power_on_failed",
+        WifiConfigResultCode::InitFailed => "init_failed",
+        WifiConfigResultCode::OperationFailed => "operation_failed",
     }
 }
 

@@ -17,6 +17,8 @@ pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
 pub(crate) const WIFI_SSID_MAX: usize = 32;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_PASSWORD_MAX: usize = 64;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
@@ -170,6 +172,33 @@ pub(crate) struct WifiCredentials {
     pub(crate) ssid_len: u8,
     pub(crate) password: [u8; WIFI_PASSWORD_MAX],
     pub(crate) password_len: u8,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WifiConfigRequest {
+    Load,
+    Store { credentials: WifiCredentials },
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WifiConfigResultCode {
+    Ok,
+    Busy,
+    NotFound,
+    InvalidData,
+    PowerOnFailed,
+    InitFailed,
+    OperationFailed,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WifiConfigResponse {
+    pub(crate) ok: bool,
+    pub(crate) code: WifiConfigResultCode,
+    pub(crate) credentials: Option<WifiCredentials>,
 }
 
 #[derive(Clone, Copy)]
