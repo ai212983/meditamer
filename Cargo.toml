@@ -32,6 +32,8 @@ opt-level = 2
 default = ["esp-hal-runtime", "graphics"]
 esp-hal-runtime = []
 graphics = ["dep:embedded-graphics", "dep:heapless", "dep:u8g2-fonts"]
+psram-alloc = []
+ui-hybrid = []
 
 [dependencies]
 esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }

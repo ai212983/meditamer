@@ -17,8 +17,16 @@ where
                 | ((((v & 0b1110_0000) >> 5) as u32) << 25);
         }
 
-        let framebuffer_bw = unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER_BW) };
-        let previous_bw = unsafe { &mut *core::ptr::addr_of_mut!(PREVIOUS_BW) };
+        let framebuffer_bw = unsafe {
+            let slot = &mut *core::ptr::addr_of_mut!(FRAMEBUFFER_BW);
+            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
+            slot.assume_init_mut()
+        };
+        let previous_bw = unsafe {
+            let slot = &mut *core::ptr::addr_of_mut!(PREVIOUS_BW);
+            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
+            slot.assume_init_mut()
+        };
 
         Ok(Self {
             i2c,

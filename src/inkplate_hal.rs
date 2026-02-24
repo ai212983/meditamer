@@ -1,5 +1,6 @@
 #[cfg(feature = "graphics")]
 use core::convert::Infallible;
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "graphics")]
@@ -98,8 +99,10 @@ const LUTB: [u8; 16] = [
 ];
 
 static FRAMEBUFFER_TAKEN: AtomicBool = AtomicBool::new(false);
-static mut FRAMEBUFFER_BW: [u8; FRAMEBUFFER_BYTES] = [0; FRAMEBUFFER_BYTES];
-static mut PREVIOUS_BW: [u8; FRAMEBUFFER_BYTES] = [0; FRAMEBUFFER_BYTES];
+#[unsafe(link_section = ".dram2_uninit")]
+static mut FRAMEBUFFER_BW: MaybeUninit<[u8; FRAMEBUFFER_BYTES]> = MaybeUninit::uninit();
+#[unsafe(link_section = ".dram2_uninit")]
+static mut PREVIOUS_BW: MaybeUninit<[u8; FRAMEBUFFER_BYTES]> = MaybeUninit::uninit();
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]

@@ -387,7 +387,15 @@ impl TouchHsm {
             let dy = point.y as i32 - self.down_point.y as i32;
             let dist_sq = squared_distance(point, self.down_point);
             let moved_min = dist_sq >= squared_i32(TOUCH_RELEASE_NO_MOVE_RECOVER_MIN_DISTANCE_PX);
-            let moved_max = dist_sq <= squared_i32(TOUCH_RELEASE_NO_MOVE_RECOVER_MAX_DISTANCE_PX);
+            // When the first stable re-contact after a sparse release appears late,
+            // allow a larger jump envelope so long swipes don't split.
+            let dynamic_max_distance = TOUCH_RELEASE_NO_MOVE_RECOVER_MAX_DISTANCE_PX
+                .saturating_add(
+                    ((TOUCH_RELEASE_NO_MOVE_RECOVER_DISTANCE_PER_MS_X100 as u64 * interaction_age)
+                        / 100) as i32,
+                )
+                .min(TOUCH_RELEASE_NO_MOVE_RECOVER_HARD_MAX_DISTANCE_PX);
+            let moved_max = dist_sq <= squared_i32(dynamic_max_distance);
             let axis_dominant =
                 is_axis_dominant(dx, dy, TOUCH_RELEASE_NO_MOVE_RECOVER_AXIS_DOM_X100);
             if interaction_age <= TOUCH_RELEASE_NO_MOVE_RECOVER_MAX_AGE_MS

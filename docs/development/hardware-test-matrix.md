@@ -38,7 +38,8 @@ Pass criteria:
   - FAT flow (`mkdir_ok`, `write_ok`, `read_ok`, `append_ok`, `stat_ok`, `trunc_ok`, `ren_ok`, `rm_ok`)
   - raw sector verify (`sdrw[manual]: verify_ok`)
   - burst/backpressure flow with no `SDFAT* BUSY` in burst window
-  - failure-path checks (`rm_error ... NotEmpty`, `ren_error ... AlreadyExists`, `CMD ERR` for oversized payload)
+  - failure-path checks (`rm_error ... NotEmpty`, `ren_error ... AlreadyExists`, `read_error ... NotFound`, `sdrw[manual]: refused_lba0`, `CMD ERR` for oversized payload)
+  - `SDWAIT DONE ... code=` values match expected outcomes (`ok`, `operation_failed`, `not_found`, `refused_lba0`)
 
 Default behavior does not flash firmware before running. To include flash in the run:
 

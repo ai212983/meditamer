@@ -323,6 +323,52 @@ mod tests {
     }
 
     #[test]
+    fn no_move_release_large_late_recontact_still_continues_swipe() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        // Stabilize press, then drop to zero before any drag sample is observed.
+        drain_kinds(engine.tick(0, sample1(100, 100)), &mut events);
+        drain_kinds(engine.tick(20, sample1(100, 100)), &mut events);
+        drain_kinds(engine.tick(36, sample0()), &mut events);
+        // Re-contact arrives after debounce window with a long rightward jump.
+        drain_kinds(engine.tick(160, sample1(430, 104)), &mut events);
+        drain_kinds(engine.tick(176, sample1(520, 106)), &mut events);
+        drain_kinds(engine.tick(208, sample0()), &mut events);
+        drain_kinds(engine.tick(320, sample0()), &mut events);
+
+        assert_eq!(
+            events
+                .iter()
+                .filter(|k| matches!(k, TouchEventKind::Down))
+                .count(),
+            1
+        );
+        assert!(events
+            .iter()
+            .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
+    }
+
+    #[test]
+    fn no_move_release_recontact_beyond_hard_max_starts_new_interaction() {
+        let mut engine = TouchEngine::new();
+        let mut events = std::vec::Vec::new();
+
+        drain_kinds(engine.tick(0, sample1(100, 100)), &mut events);
+        drain_kinds(engine.tick(20, sample1(100, 100)), &mut events);
+        drain_kinds(engine.tick(36, sample0()), &mut events);
+        // Too far from original down point to be treated as same interaction.
+        drain_kinds(engine.tick(160, sample1(760, 100)), &mut events);
+        drain_kinds(engine.tick(192, sample1(760, 100)), &mut events);
+
+        let down_count = events
+            .iter()
+            .filter(|k| matches!(k, TouchEventKind::Down))
+            .count();
+        assert!(down_count >= 2);
+    }
+
+    #[test]
     fn tiny_jitter_no_move_release_uses_extended_debounce() {
         let mut engine = TouchEngine::new();
         let mut events = std::vec::Vec::new();

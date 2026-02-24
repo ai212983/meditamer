@@ -5,7 +5,11 @@ async fn allocate_chain(
 ) -> Result<u32, SdFatError> {
     let mut first = 0u32;
     let mut prev = 0u32;
-    let mut search_from = 2u32;
+    let max_cluster = volume.total_clusters.saturating_add(1);
+    let mut search_from = sd.next_free_cluster_hint().unwrap_or(2);
+    if search_from < 2 || search_from > max_cluster {
+        search_from = 2;
+    }
 
     for _ in 0..count {
         let cluster = find_free_cluster(sd, volume, search_from).await?;
@@ -16,7 +20,12 @@ async fn allocate_chain(
             first = cluster;
         }
         prev = cluster;
-        search_from = cluster.saturating_add(1);
+        search_from = if cluster >= max_cluster {
+            2
+        } else {
+            cluster.saturating_add(1)
+        };
+        sd.set_next_free_cluster_hint(search_from);
     }
 
     Ok(first)
@@ -62,6 +71,7 @@ async fn free_chain(
             return Err(SdFatError::ClusterChainTooLong);
         }
         visited = visited.saturating_add(1);
+        sd.lower_next_free_cluster_hint(cluster);
 
         let entry = read_fat_entry(sd, volume, cluster).await?;
         set_fat_entry(sd, volume, cluster, 0).await?;
@@ -189,7 +199,9 @@ async fn parse_fat32_boot(
 
     let sectors_per_cluster = boot[13];
     if sectors_per_cluster == 0 || !sectors_per_cluster.is_power_of_two() {
-        return Err(SdFatError::UnsupportedSectorsPerCluster(sectors_per_cluster));
+        return Err(SdFatError::UnsupportedSectorsPerCluster(
+            sectors_per_cluster,
+        ));
     }
 
     let reserved_sectors = u16::from_le_bytes([boot[14], boot[15]]) as u32;
@@ -268,4 +280,3 @@ fn first_fat_partition_lba(sector0: &[u8; SD_SECTOR_SIZE]) -> Option<u32> {
     }
     None
 }
-

@@ -15,62 +15,105 @@ pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
-    Refresh {
-        uptime_seconds: u32,
-    },
+    Refresh { uptime_seconds: u32 },
     BatteryTick,
     TimeSync(TimeSyncCommand),
     TouchIrq,
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
-    SdProbe,
-    SdRwVerify {
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum StorageCommand {
+    Probe,
+    RwVerify {
         lba: u32,
     },
-    SdFatList {
+    FatList {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRead {
+    FatRead {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatWrite {
+    FatWrite {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatStat {
+    FatStat {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatMkdir {
+    FatMkdir {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRemove {
+    FatRemove {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRename {
+    FatRename {
         src_path: [u8; SD_PATH_MAX],
         src_path_len: u8,
         dst_path: [u8; SD_PATH_MAX],
         dst_path_len: u8,
     },
-    SdFatAppend {
+    FatAppend {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatTruncate {
+    FatTruncate {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         size: u32,
     },
+}
+
+pub(crate) type SdCommand = StorageCommand;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SdCommandKind {
+    Probe,
+    RwVerify,
+    FatList,
+    FatRead,
+    FatWrite,
+    FatStat,
+    FatMkdir,
+    FatRemove,
+    FatRename,
+    FatAppend,
+    FatTruncate,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdRequest {
+    pub(crate) id: u32,
+    pub(crate) command: SdCommand,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdResult {
+    pub(crate) id: u32,
+    pub(crate) kind: SdCommandKind,
+    pub(crate) ok: bool,
+    pub(crate) code: SdResultCode,
+    pub(crate) attempts: u8,
+    pub(crate) duration_ms: u32,
+}
+
+pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;
+
+#[derive(Clone, Copy)]
+pub(crate) enum SdPowerRequest {
+    On,
+    Off,
 }
 
 #[derive(Clone, Copy)]
@@ -163,7 +206,6 @@ pub(crate) struct TapTraceSample {
 
 pub(crate) struct DisplayContext {
     pub(crate) inkplate: InkplateDriver,
-    pub(crate) sd_probe: SdProbeDriver,
     pub(crate) mode_store: ModeStore<'static>,
     pub(crate) _panel_pins: PanelPinHold<'static>,
 }

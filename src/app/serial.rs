@@ -1,11 +1,11 @@
 use core::{fmt::Write, sync::atomic::Ordering};
 
-use embassy_time::{with_timeout, Duration, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 
 use super::{
     config::{
-        APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
+        APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, SD_REQUESTS, SD_RESULTS,
+        TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
     touch::{
         config::{
@@ -18,7 +18,10 @@ use super::{
             write_touch_wizard_swipe_trace_sample, TouchWizardSessionLog,
         },
     },
-    types::{AppEvent, SerialUart, TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX},
+    types::{
+        AppEvent, SdCommand, SdCommandKind, SdRequest, SdResult, SdResultCode, SerialUart,
+        TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -29,58 +32,71 @@ enum SerialCommand {
     Repaint,
     RepaintMarble,
     Metrics,
-    SdProbe,
-    SdRwVerify {
+    Probe,
+    RwVerify {
         lba: u32,
     },
-    SdFatList {
+    FatList {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRead {
+    FatRead {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatWrite {
+    FatWrite {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatStat {
+    FatStat {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatMkdir {
+    FatMkdir {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRemove {
+    FatRemove {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
-    SdFatRename {
+    FatRename {
         src_path: [u8; SD_PATH_MAX],
         src_path_len: u8,
         dst_path: [u8; SD_PATH_MAX],
         dst_path_len: u8,
     },
-    SdFatAppend {
+    FatAppend {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         data: [u8; SD_WRITE_MAX],
         data_len: u16,
     },
-    SdFatTruncate {
+    FatTruncate {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
         size: u32,
     },
+    SdWait {
+        target: SdWaitTarget,
+        timeout_ms: u32,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum SdWaitTarget {
+    Next,
+    Last,
+    Id(u32),
 }
 
 const APP_EVENT_ENQUEUE_RETRY_MS: u64 = 25;
 // Absorb short SD/FAT bursts without requiring host-side pacing.
 const APP_EVENT_ENQUEUE_MAX_RETRIES: u8 = 240;
+const SD_RESULT_CACHE_CAP: usize = 16;
+const SDWAIT_DEFAULT_TIMEOUT_MS: u32 = 10_000;
 
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {
@@ -88,6 +104,9 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     let mut line_len = 0usize;
     let mut rx = [0u8; 1];
     let mut touch_wizard_log = TouchWizardSessionLog::new();
+    let mut next_sd_request_id = 1u32;
+    let mut last_sd_request_id: Option<u32> = None;
+    let mut sd_result_cache = heapless::Vec::<SdResult, SD_RESULT_CACHE_CAP>::new();
 
     if TAP_TRACE_ENABLED {
         let _ = uart_write_all(
@@ -156,6 +175,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
             }
         }
 
+        while let Ok(result) = SD_RESULTS.try_receive() {
+            cache_sd_result(&mut sd_result_cache, result);
+            write_sd_result(&mut uart, result).await;
+        }
+
         if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
             let byte = rx[0];
             if byte == b'\r' || byte == b'\n' {
@@ -178,11 +202,40 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
                         }
+                        SerialCommand::SdWait { target, timeout_ms } => {
+                            run_sdwait_command(
+                                &mut uart,
+                                &mut sd_result_cache,
+                                last_sd_request_id,
+                                target,
+                                timeout_ms,
+                            )
+                            .await;
+                        }
                         _ => {
-                            let (event, ok_response, busy_response) =
+                            let (app_event, sd_command, ok_response, busy_response) =
                                 serial_command_event_and_responses(cmd);
-                            if enqueue_app_event_with_retry(event).await {
+                            let mut sd_request_meta: Option<(u32, SdCommand)> = None;
+                            let queued = if let Some(event) = app_event {
+                                enqueue_app_event_with_retry(event).await
+                            } else if let Some(command) = sd_command {
+                                let request_id = next_sd_request_id;
+                                next_sd_request_id = next_sd_request_id.wrapping_add(1);
+                                let request = SdRequest {
+                                    id: request_id,
+                                    command,
+                                };
+                                sd_request_meta = Some((request_id, command));
+                                enqueue_sd_request_with_retry(request).await
+                            } else {
+                                unreachable!("serial command must map to app or sd dispatch");
+                            };
+                            if queued {
                                 let _ = uart.write_async(ok_response).await;
+                                if let Some((request_id, command)) = sd_request_meta {
+                                    last_sd_request_id = Some(request_id);
+                                    write_sd_request_queued(&mut uart, request_id, command).await;
+                                }
                             } else {
                                 let _ = uart.write_async(busy_response).await;
                             }
@@ -215,116 +268,153 @@ async fn enqueue_app_event_with_retry(event: AppEvent) -> bool {
     false
 }
 
+async fn enqueue_sd_request_with_retry(request: SdRequest) -> bool {
+    for attempt in 0..=APP_EVENT_ENQUEUE_MAX_RETRIES {
+        if SD_REQUESTS.try_send(request).is_ok() {
+            return true;
+        }
+        if attempt == APP_EVENT_ENQUEUE_MAX_RETRIES {
+            break;
+        }
+        Timer::after_millis(APP_EVENT_ENQUEUE_RETRY_MS).await;
+    }
+    false
+}
+
 fn serial_command_event_and_responses(
     cmd: SerialCommand,
-) -> (AppEvent, &'static [u8], &'static [u8]) {
+) -> (
+    Option<AppEvent>,
+    Option<SdCommand>,
+    &'static [u8],
+    &'static [u8],
+) {
     match cmd {
         SerialCommand::TimeSync(cmd) => (
-            AppEvent::TimeSync(cmd),
+            Some(AppEvent::TimeSync(cmd)),
+            None,
             b"TIMESET OK\r\n",
             b"TIMESET BUSY\r\n",
         ),
         SerialCommand::TouchWizard => (
-            AppEvent::StartTouchCalibrationWizard,
+            Some(AppEvent::StartTouchCalibrationWizard),
+            None,
             b"TOUCH_WIZARD OK\r\n",
             b"TOUCH_WIZARD BUSY\r\n",
         ),
         SerialCommand::Repaint => (
-            AppEvent::ForceRepaint,
+            Some(AppEvent::ForceRepaint),
+            None,
             b"REPAINT OK\r\n",
             b"REPAINT BUSY\r\n",
         ),
         SerialCommand::RepaintMarble => (
-            AppEvent::ForceMarbleRepaint,
+            Some(AppEvent::ForceMarbleRepaint),
+            None,
             b"REPAINT_MARBLE OK\r\n",
             b"REPAINT_MARBLE BUSY\r\n",
         ),
-        SerialCommand::SdProbe => (AppEvent::SdProbe, b"SDPROBE OK\r\n", b"SDPROBE BUSY\r\n"),
-        SerialCommand::SdRwVerify { lba } => (
-            AppEvent::SdRwVerify { lba },
+        SerialCommand::Probe => (
+            None,
+            Some(SdCommand::Probe),
+            b"SDPROBE OK\r\n",
+            b"SDPROBE BUSY\r\n",
+        ),
+        SerialCommand::RwVerify { lba } => (
+            None,
+            Some(SdCommand::RwVerify { lba }),
             b"SDRWVERIFY OK\r\n",
             b"SDRWVERIFY BUSY\r\n",
         ),
-        SerialCommand::SdFatList { path, path_len } => (
-            AppEvent::SdFatList { path, path_len },
+        SerialCommand::FatList { path, path_len } => (
+            None,
+            Some(SdCommand::FatList { path, path_len }),
             b"SDFATLS OK\r\n",
             b"SDFATLS BUSY\r\n",
         ),
-        SerialCommand::SdFatRead { path, path_len } => (
-            AppEvent::SdFatRead { path, path_len },
+        SerialCommand::FatRead { path, path_len } => (
+            None,
+            Some(SdCommand::FatRead { path, path_len }),
             b"SDFATREAD OK\r\n",
             b"SDFATREAD BUSY\r\n",
         ),
-        SerialCommand::SdFatWrite {
+        SerialCommand::FatWrite {
             path,
             path_len,
             data,
             data_len,
         } => (
-            AppEvent::SdFatWrite {
+            None,
+            Some(SdCommand::FatWrite {
                 path,
                 path_len,
                 data,
                 data_len,
-            },
+            }),
             b"SDFATWRITE OK\r\n",
             b"SDFATWRITE BUSY\r\n",
         ),
-        SerialCommand::SdFatStat { path, path_len } => (
-            AppEvent::SdFatStat { path, path_len },
+        SerialCommand::FatStat { path, path_len } => (
+            None,
+            Some(SdCommand::FatStat { path, path_len }),
             b"SDFATSTAT OK\r\n",
             b"SDFATSTAT BUSY\r\n",
         ),
-        SerialCommand::SdFatMkdir { path, path_len } => (
-            AppEvent::SdFatMkdir { path, path_len },
+        SerialCommand::FatMkdir { path, path_len } => (
+            None,
+            Some(SdCommand::FatMkdir { path, path_len }),
             b"SDFATMKDIR OK\r\n",
             b"SDFATMKDIR BUSY\r\n",
         ),
-        SerialCommand::SdFatRemove { path, path_len } => (
-            AppEvent::SdFatRemove { path, path_len },
+        SerialCommand::FatRemove { path, path_len } => (
+            None,
+            Some(SdCommand::FatRemove { path, path_len }),
             b"SDFATRM OK\r\n",
             b"SDFATRM BUSY\r\n",
         ),
-        SerialCommand::SdFatRename {
+        SerialCommand::FatRename {
             src_path,
             src_path_len,
             dst_path,
             dst_path_len,
         } => (
-            AppEvent::SdFatRename {
+            None,
+            Some(SdCommand::FatRename {
                 src_path,
                 src_path_len,
                 dst_path,
                 dst_path_len,
-            },
+            }),
             b"SDFATREN OK\r\n",
             b"SDFATREN BUSY\r\n",
         ),
-        SerialCommand::SdFatAppend {
+        SerialCommand::FatAppend {
             path,
             path_len,
             data,
             data_len,
         } => (
-            AppEvent::SdFatAppend {
+            None,
+            Some(SdCommand::FatAppend {
                 path,
                 path_len,
                 data,
                 data_len,
-            },
+            }),
             b"SDFATAPPEND OK\r\n",
             b"SDFATAPPEND BUSY\r\n",
         ),
-        SerialCommand::SdFatTruncate {
+        SerialCommand::FatTruncate {
             path,
             path_len,
             size,
         } => (
-            AppEvent::SdFatTruncate {
+            None,
+            Some(SdCommand::FatTruncate {
                 path,
                 path_len,
                 size,
-            },
+            }),
             b"SDFATTRUNC OK\r\n",
             b"SDFATTRUNC BUSY\r\n",
         ),
@@ -332,6 +422,7 @@ fn serial_command_event_and_responses(
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
+        SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
     }
 }
 
@@ -367,6 +458,197 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
+async fn write_sd_request_queued(uart: &mut SerialUart, request_id: u32, command: SdCommand) {
+    let mut line = heapless::String::<96>::new();
+    let _ = write!(
+        &mut line,
+        "SDREQ id={} op={}\r\n",
+        request_id,
+        sd_command_label(command)
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn write_sd_result(uart: &mut SerialUart, result: SdResult) {
+    let mut line = heapless::String::<128>::new();
+    let _ = write!(
+        &mut line,
+        "SDDONE id={} op={} status={} code={} attempts={} dur_ms={}\r\n",
+        result.id,
+        sd_result_kind_label(result.kind),
+        if result.ok { "ok" } else { "error" },
+        sd_result_code_label(result.code),
+        result.attempts,
+        result.duration_ms
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+fn cache_sd_result(cache: &mut heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>, result: SdResult) {
+    if cache.push(result).is_err() {
+        let _ = cache.remove(0);
+        let _ = cache.push(result);
+    }
+}
+
+async fn run_sdwait_command(
+    uart: &mut SerialUart,
+    sd_result_cache: &mut heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>,
+    last_sd_request_id: Option<u32>,
+    target: SdWaitTarget,
+    timeout_ms: u32,
+) {
+    let wait_id = match target {
+        SdWaitTarget::Next => None,
+        SdWaitTarget::Last => {
+            let Some(id) = last_sd_request_id else {
+                let _ = uart_write_all(uart, b"SDWAIT ERR reason=no_last_request\r\n").await;
+                return;
+            };
+            Some(id)
+        }
+        SdWaitTarget::Id(id) => Some(id),
+    };
+
+    if let Some(id) = wait_id {
+        if let Some(result) = sd_result_cache
+            .iter()
+            .rev()
+            .find(|result| result.id == id)
+            .copied()
+        {
+            write_sdwait_done(uart, target, wait_id, result).await;
+            return;
+        }
+    }
+
+    let start = Instant::now();
+    loop {
+        let elapsed_ms = Instant::now().saturating_duration_since(start).as_millis();
+        if elapsed_ms >= timeout_ms as u64 {
+            write_sdwait_timeout(uart, target, wait_id, timeout_ms).await;
+            return;
+        }
+
+        let remaining_ms = (timeout_ms as u64).saturating_sub(elapsed_ms).max(1);
+        match with_timeout(Duration::from_millis(remaining_ms), SD_RESULTS.receive()).await {
+            Ok(result) => {
+                cache_sd_result(sd_result_cache, result);
+                write_sd_result(uart, result).await;
+                if wait_id.map(|id| id == result.id).unwrap_or(true) {
+                    write_sdwait_done(uart, target, wait_id, result).await;
+                    return;
+                }
+            }
+            Err(_) => {
+                write_sdwait_timeout(uart, target, wait_id, timeout_ms).await;
+                return;
+            }
+        }
+    }
+}
+
+async fn write_sdwait_done(
+    uart: &mut SerialUart,
+    target: SdWaitTarget,
+    wait_id: Option<u32>,
+    result: SdResult,
+) {
+    let mut line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut line,
+        "SDWAIT DONE target={} ",
+        sdwait_target_label(target)
+    );
+    if let Some(wait_id) = wait_id {
+        let _ = write!(&mut line, "wait_id={} ", wait_id);
+    }
+    let _ = write!(
+        &mut line,
+        "id={} op={} status={} code={} attempts={} dur_ms={}\r\n",
+        result.id,
+        sd_result_kind_label(result.kind),
+        if result.ok { "ok" } else { "error" },
+        sd_result_code_label(result.code),
+        result.attempts,
+        result.duration_ms
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn write_sdwait_timeout(
+    uart: &mut SerialUart,
+    target: SdWaitTarget,
+    wait_id: Option<u32>,
+    timeout_ms: u32,
+) {
+    let mut line = heapless::String::<112>::new();
+    let _ = write!(
+        &mut line,
+        "SDWAIT TIMEOUT target={} ",
+        sdwait_target_label(target)
+    );
+    if let Some(wait_id) = wait_id {
+        let _ = write!(&mut line, "wait_id={} ", wait_id);
+    }
+    let _ = write!(&mut line, "timeout_ms={}\r\n", timeout_ms);
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+fn sd_command_label(command: SdCommand) -> &'static str {
+    match command {
+        SdCommand::Probe => "probe",
+        SdCommand::RwVerify { .. } => "rw_verify",
+        SdCommand::FatList { .. } => "fat_ls",
+        SdCommand::FatRead { .. } => "fat_read",
+        SdCommand::FatWrite { .. } => "fat_write",
+        SdCommand::FatStat { .. } => "fat_stat",
+        SdCommand::FatMkdir { .. } => "fat_mkdir",
+        SdCommand::FatRemove { .. } => "fat_rm",
+        SdCommand::FatRename { .. } => "fat_ren",
+        SdCommand::FatAppend { .. } => "fat_append",
+        SdCommand::FatTruncate { .. } => "fat_trunc",
+    }
+}
+
+fn sd_result_kind_label(kind: SdCommandKind) -> &'static str {
+    match kind {
+        SdCommandKind::Probe => "probe",
+        SdCommandKind::RwVerify => "rw_verify",
+        SdCommandKind::FatList => "fat_ls",
+        SdCommandKind::FatRead => "fat_read",
+        SdCommandKind::FatWrite => "fat_write",
+        SdCommandKind::FatStat => "fat_stat",
+        SdCommandKind::FatMkdir => "fat_mkdir",
+        SdCommandKind::FatRemove => "fat_rm",
+        SdCommandKind::FatRename => "fat_ren",
+        SdCommandKind::FatAppend => "fat_append",
+        SdCommandKind::FatTruncate => "fat_trunc",
+    }
+}
+
+fn sdwait_target_label(target: SdWaitTarget) -> &'static str {
+    match target {
+        SdWaitTarget::Next => "next",
+        SdWaitTarget::Last => "last",
+        SdWaitTarget::Id(_) => "id",
+    }
+}
+
+fn sd_result_code_label(code: SdResultCode) -> &'static str {
+    match code {
+        SdResultCode::Ok => "ok",
+        SdResultCode::PowerOnFailed => "power_on_failed",
+        SdResultCode::InitFailed => "init_failed",
+        SdResultCode::InvalidPath => "invalid_path",
+        SdResultCode::NotFound => "not_found",
+        SdResultCode::VerifyMismatch => "verify_mismatch",
+        SdResultCode::PowerOffFailed => "power_off_failed",
+        SdResultCode::OperationFailed => "operation_failed",
+        SdResultCode::RefusedLba0 => "refused_lba0",
+    }
+}
+
 fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if parse_repaint_marble_command(line) {
         return Some(SerialCommand::RepaintMarble);
@@ -384,19 +666,22 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
         return Some(SerialCommand::Metrics);
     }
     if parse_sdprobe_command(line) {
-        return Some(SerialCommand::SdProbe);
+        return Some(SerialCommand::Probe);
+    }
+    if let Some((target, timeout_ms)) = parse_sdwait_command(line) {
+        return Some(SerialCommand::SdWait { target, timeout_ms });
     }
     if let Some(lba) = parse_sdrwverify_command(line) {
-        return Some(SerialCommand::SdRwVerify { lba });
+        return Some(SerialCommand::RwVerify { lba });
     }
     if let Some((path, path_len)) = parse_sdfatls_command(line) {
-        return Some(SerialCommand::SdFatList { path, path_len });
+        return Some(SerialCommand::FatList { path, path_len });
     }
     if let Some((path, path_len)) = parse_sdfatread_command(line) {
-        return Some(SerialCommand::SdFatRead { path, path_len });
+        return Some(SerialCommand::FatRead { path, path_len });
     }
     if let Some((path, path_len, data, data_len)) = parse_sdfatwrite_command(line) {
-        return Some(SerialCommand::SdFatWrite {
+        return Some(SerialCommand::FatWrite {
             path,
             path_len,
             data,
@@ -404,16 +689,16 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
         });
     }
     if let Some((path, path_len)) = parse_sdfatstat_command(line) {
-        return Some(SerialCommand::SdFatStat { path, path_len });
+        return Some(SerialCommand::FatStat { path, path_len });
     }
     if let Some((path, path_len)) = parse_sdfatmkdir_command(line) {
-        return Some(SerialCommand::SdFatMkdir { path, path_len });
+        return Some(SerialCommand::FatMkdir { path, path_len });
     }
     if let Some((path, path_len)) = parse_sdfatrm_command(line) {
-        return Some(SerialCommand::SdFatRemove { path, path_len });
+        return Some(SerialCommand::FatRemove { path, path_len });
     }
     if let Some((src_path, src_path_len, dst_path, dst_path_len)) = parse_sdfatren_command(line) {
-        return Some(SerialCommand::SdFatRename {
+        return Some(SerialCommand::FatRename {
             src_path,
             src_path_len,
             dst_path,
@@ -421,7 +706,7 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
         });
     }
     if let Some((path, path_len, data, data_len)) = parse_sdfatappend_command(line) {
-        return Some(SerialCommand::SdFatAppend {
+        return Some(SerialCommand::FatAppend {
             path,
             path_len,
             data,
@@ -429,7 +714,7 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
         });
     }
     if let Some((path, path_len, size)) = parse_sdfattrunc_command(line) {
-        return Some(SerialCommand::SdFatTruncate {
+        return Some(SerialCommand::FatTruncate {
             path,
             path_len,
             size,
@@ -497,6 +782,59 @@ fn parse_touch_wizard_dump_command(line: &[u8]) -> bool {
 
 fn parse_sdprobe_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"SDPROBE"
+}
+
+fn parse_sdwait_command(line: &[u8]) -> Option<(SdWaitTarget, u32)> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"SDWAIT";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return Some((SdWaitTarget::Next, SDWAIT_DEFAULT_TIMEOUT_MS));
+    }
+
+    let token_start = i;
+    while i < trimmed.len() && !trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let token = &trimmed[token_start..i];
+    let target = if token == b"LAST" {
+        SdWaitTarget::Last
+    } else if token == b"NEXT" {
+        SdWaitTarget::Next
+    } else {
+        let (id, next_i) = parse_u64_ascii(trimmed, token_start)?;
+        if next_i != i || id > u32::MAX as u64 {
+            return None;
+        }
+        SdWaitTarget::Id(id as u32)
+    };
+
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return Some((target, SDWAIT_DEFAULT_TIMEOUT_MS));
+    }
+
+    let (timeout_ms, next_i) = parse_u64_ascii(trimmed, i)?;
+    if timeout_ms > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+    Some((target, timeout_ms as u32))
 }
 
 fn parse_sdrwverify_command(line: &[u8]) -> Option<u32> {
@@ -813,7 +1151,7 @@ mod tests {
     fn parses_sdfatstat() {
         let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt");
         match cmd {
-            Some(SerialCommand::SdFatStat { path, path_len }) => {
+            Some(SerialCommand::FatStat { path, path_len }) => {
                 assert_eq!(path_from(&path, path_len), "/notes/TODO.txt");
             }
             _ => panic!("unexpected command"),
@@ -824,7 +1162,7 @@ mod tests {
     fn parses_sdfatmkdir() {
         let cmd = parse_serial_command(b"SDFATMKDIR /logs");
         match cmd {
-            Some(SerialCommand::SdFatMkdir { path, path_len }) => {
+            Some(SerialCommand::FatMkdir { path, path_len }) => {
                 assert_eq!(path_from(&path, path_len), "/logs");
             }
             _ => panic!("unexpected command"),
@@ -835,7 +1173,7 @@ mod tests {
     fn parses_sdfatrename() {
         let cmd = parse_serial_command(b"SDFATREN /old/name.txt /new/name.txt");
         match cmd {
-            Some(SerialCommand::SdFatRename {
+            Some(SerialCommand::FatRename {
                 src_path,
                 src_path_len,
                 dst_path,
@@ -852,7 +1190,7 @@ mod tests {
     fn parses_sdfatappend() {
         let cmd = parse_serial_command(b"SDFATAPPEND /notes/log.txt hello");
         match cmd {
-            Some(SerialCommand::SdFatAppend {
+            Some(SerialCommand::FatAppend {
                 path,
                 path_len,
                 data,
@@ -869,9 +1207,54 @@ mod tests {
     fn parses_sdrwverify() {
         let cmd = parse_serial_command(b"SDRWVERIFY 2048");
         match cmd {
-            Some(SerialCommand::SdRwVerify { lba }) => assert_eq!(lba, 2048),
+            Some(SerialCommand::RwVerify { lba }) => assert_eq!(lba, 2048),
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn parses_sdwait_defaults() {
+        let cmd = parse_serial_command(b"SDWAIT");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                assert!(matches!(target, SdWaitTarget::Next));
+                assert_eq!(timeout_ms, SDWAIT_DEFAULT_TIMEOUT_MS);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdwait_last_with_timeout() {
+        let cmd = parse_serial_command(b"SDWAIT LAST 2500");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                assert!(matches!(target, SdWaitTarget::Last));
+                assert_eq!(timeout_ms, 2500);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_sdwait_by_id() {
+        let cmd = parse_serial_command(b"SDWAIT 42");
+        match cmd {
+            Some(SerialCommand::SdWait { target, timeout_ms }) => {
+                match target {
+                    SdWaitTarget::Id(id) => assert_eq!(id, 42),
+                    _ => panic!("unexpected target"),
+                }
+                assert_eq!(timeout_ms, SDWAIT_DEFAULT_TIMEOUT_MS);
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_sdwait_invalid_trailing_tokens() {
+        let cmd = parse_serial_command(b"SDWAIT 42 100 extra");
+        assert!(cmd.is_none());
     }
 
     #[test]
@@ -890,7 +1273,7 @@ mod tests {
     fn parses_sdfattrunc() {
         let cmd = parse_serial_command(b"SDFATTRUNC /notes/log.txt 1024");
         match cmd {
-            Some(SerialCommand::SdFatTruncate {
+            Some(SerialCommand::FatTruncate {
                 path,
                 path_len,
                 size,
@@ -911,14 +1294,15 @@ mod tests {
     #[test]
     fn maps_timeset_to_event_and_responses() {
         let cmd = parse_serial_command(b"TIMESET 1762531200 -300").expect("command");
-        let (event, ok, busy) = serial_command_event_and_responses(cmd);
-        match event {
-            AppEvent::TimeSync(sync) => {
+        let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
+        assert!(sd_command.is_none());
+        match app_event {
+            Some(AppEvent::TimeSync(sync)) => {
                 assert_eq!(sync.unix_epoch_utc_seconds, 1_762_531_200);
                 assert_eq!(sync.tz_offset_minutes, -300);
             }
             _ => panic!("expected timesync event"),
-        }
+        };
         assert_eq!(ok, b"TIMESET OK\r\n");
         assert_eq!(busy, b"TIMESET BUSY\r\n");
     }
@@ -926,13 +1310,14 @@ mod tests {
     #[test]
     fn maps_sdfatstat_to_event_and_responses() {
         let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt").expect("command");
-        let (event, ok, busy) = serial_command_event_and_responses(cmd);
-        match event {
-            AppEvent::SdFatStat { path, path_len } => {
+        let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
+        assert!(app_event.is_none());
+        match sd_command {
+            Some(SdCommand::FatStat { path, path_len }) => {
                 assert_eq!(path_from(&path, path_len), "/notes/TODO.txt");
             }
             _ => panic!("expected sdfat stat event"),
-        }
+        };
         assert_eq!(ok, b"SDFATSTAT OK\r\n");
         assert_eq!(busy, b"SDFATSTAT BUSY\r\n");
     }
@@ -940,19 +1325,20 @@ mod tests {
     #[test]
     fn maps_sdfatren_to_event_and_responses() {
         let cmd = parse_serial_command(b"SDFATREN /a.txt /b.txt").expect("command");
-        let (event, ok, busy) = serial_command_event_and_responses(cmd);
-        match event {
-            AppEvent::SdFatRename {
+        let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
+        assert!(app_event.is_none());
+        match sd_command {
+            Some(SdCommand::FatRename {
                 src_path,
                 src_path_len,
                 dst_path,
                 dst_path_len,
-            } => {
+            }) => {
                 assert_eq!(path_from(&src_path, src_path_len), "/a.txt");
                 assert_eq!(path_from(&dst_path, dst_path_len), "/b.txt");
             }
             _ => panic!("expected sdfat rename event"),
-        }
+        };
         assert_eq!(ok, b"SDFATREN OK\r\n");
         assert_eq!(busy, b"SDFATREN BUSY\r\n");
     }
