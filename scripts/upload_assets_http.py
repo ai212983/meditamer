@@ -2,13 +2,14 @@
 
 import argparse
 import http.client
-import mimetypes
 import os
 import posixpath
 import sys
 import time
 from pathlib import Path
 from urllib.parse import quote
+
+UPLOAD_CHUNK_SIZE = 1024
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,14 +117,35 @@ def upload_file(
     remote_path: str,
 ) -> None:
     size = local_path.stat().st_size
-    target = f"/upload?path={quote(remote_path, safe='/')}"
-    content_type, _ = mimetypes.guess_type(str(local_path))
-    headers = {
-        "Content-Length": str(size),
-        "Content-Type": content_type or "application/octet-stream",
-    }
-    with local_path.open("rb") as f:
-        request(host, port, timeout, "PUT", target, body=f, headers=headers, retries=5)
+    begin_target = f"/upload_begin?path={quote(remote_path, safe='/')}&size={size}"
+    request(host, port, timeout, "POST", begin_target, body=b"", retries=8)
+    try:
+        with local_path.open("rb") as f:
+            while True:
+                chunk = f.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                headers = {
+                    "Content-Length": str(len(chunk)),
+                    "Content-Type": "application/octet-stream",
+                }
+                request(
+                    host,
+                    port,
+                    timeout,
+                    "PUT",
+                    "/upload_chunk",
+                    body=chunk,
+                    headers=headers,
+                    retries=5,
+                )
+        request(host, port, timeout, "POST", "/upload_commit", body=b"", retries=8)
+    except Exception:
+        try:
+            request(host, port, timeout, "POST", "/upload_abort", body=b"", retries=3)
+        except Exception:
+            pass
+        raise
 
 
 def iter_files(src: Path):

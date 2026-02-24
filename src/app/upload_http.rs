@@ -321,6 +321,84 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             write_response(socket, b"200 OK", b"delete ok").await;
             Ok(())
         }
+        ("POST", "/upload_begin") => {
+            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            let (path, path_len) = match parse_path_query(target, "/upload_begin") {
+                Ok(path) => path,
+                Err(err) => {
+                    write_response(socket, b"400 Bad Request", b"invalid path query").await;
+                    return Err(err);
+                }
+            };
+            let expected_size = match parse_u32_query(target, "/upload_begin", "size") {
+                Ok(size) => size,
+                Err(err) => {
+                    write_response(socket, b"400 Bad Request", b"invalid size query").await;
+                    return Err(err);
+                }
+            };
+            sd_upload_roundtrip_or_http_error(
+                socket,
+                SdUploadCommand::Begin {
+                    path,
+                    path_len,
+                    expected_size,
+                },
+            )
+            .await?;
+            write_response(socket, b"200 OK", b"begin ok").await;
+            Ok(())
+        }
+        ("PUT", "/upload_chunk") => {
+            let mut sent = 0usize;
+            if body_bytes_in_buffer > 0 {
+                let take = min(body_bytes_in_buffer, content_length);
+                let mut offset = 0usize;
+                while offset < take {
+                    let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
+                    let chunk = &header_buf[body_start + offset..body_start + end];
+                    if let Err(err) = sd_upload_chunk(chunk).await {
+                        write_roundtrip_error_response(socket, err).await;
+                        return Err(map_roundtrip_error_to_log(err));
+                    }
+                    sent += chunk.len();
+                    offset = end;
+                }
+            }
+
+            let mut chunk_buf = [0u8; SD_UPLOAD_CHUNK_MAX];
+            while sent < content_length {
+                let want = min(chunk_buf.len(), content_length - sent);
+                let n = socket
+                    .read(&mut chunk_buf[..want])
+                    .await
+                    .map_err(|_| "read body")?;
+                if n == 0 {
+                    write_response(socket, b"400 Bad Request", b"incomplete body").await;
+                    return Err("incomplete body");
+                }
+                if let Err(err) = sd_upload_chunk(&chunk_buf[..n]).await {
+                    write_roundtrip_error_response(socket, err).await;
+                    return Err(map_roundtrip_error_to_log(err));
+                }
+                sent += n;
+            }
+
+            write_response(socket, b"200 OK", b"chunk ok").await;
+            Ok(())
+        }
+        ("POST", "/upload_commit") => {
+            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            sd_upload_roundtrip_or_http_error(socket, SdUploadCommand::Commit).await?;
+            write_response(socket, b"200 OK", b"commit ok").await;
+            Ok(())
+        }
+        ("POST", "/upload_abort") => {
+            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            sd_upload_roundtrip_or_http_error(socket, SdUploadCommand::Abort).await?;
+            write_response(socket, b"200 OK", b"abort ok").await;
+            Ok(())
+        }
         ("POST", "/reboot") => {
             drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
             write_response(socket, b"200 OK", b"rebooting").await;
@@ -571,6 +649,20 @@ fn parse_path_query(target: &str, route: &str) -> Result<([u8; SD_PATH_MAX], u8)
         }
     }
     Err("missing path query")
+}
+
+fn parse_u32_query(target: &str, route: &str, key: &str) -> Result<u32, &'static str> {
+    let query = target
+        .strip_prefix(route)
+        .and_then(|tail| tail.strip_prefix('?'))
+        .ok_or("missing query")?;
+
+    for pair in query.split('&') {
+        if let Some(value) = pair.strip_prefix(key).and_then(|tail| tail.strip_prefix('=')) {
+            return value.parse::<u32>().map_err(|_| "invalid query value");
+        }
+    }
+    Err("missing query key")
 }
 
 fn percent_decode_to_path_buf(encoded: &str) -> Result<([u8; SD_PATH_MAX], u8), &'static str> {
