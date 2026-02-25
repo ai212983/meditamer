@@ -36,6 +36,7 @@ pub(super) fn publish_upload_result(result: SdUploadResult) {
     }
 }
 
+#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
 pub(super) fn publish_asset_read_response(response: SdAssetReadResponse) {
     if SD_ASSET_READ_RESPONSES.try_send(response).is_err() {
         esp_println::println!(
@@ -111,6 +112,7 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
     }
 }
 
+#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
 fn sd_asset_read_result_code_label(code: SdAssetReadResultCode) -> &'static str {
     match code {
         SdAssetReadResultCode::Ok => "ok",

@@ -12,6 +12,9 @@ pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const SD_ASSET_READ_MAX: usize = 64;
+#[cfg(not(feature = "asset-upload-http"))]
 pub(crate) const SD_ASSET_READ_MAX: usize = 3072;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_SSID_MAX: usize = 32;

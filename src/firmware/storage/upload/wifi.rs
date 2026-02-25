@@ -88,7 +88,6 @@ pub(super) async fn run_wifi_connection_task(
 
         if !config_applied {
             let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
-            println!("upload_http: mode_config auth={:?}", auth_method);
             let mode = match mode_config_from_credentials(active, auth_method) {
                 Some(mode) => mode,
                 None => {
@@ -97,7 +96,6 @@ pub(super) async fn run_wifi_connection_task(
                     continue;
                 }
             };
-            println!("upload_http: station_set_config auth={:?}", auth_method);
 
             if let Err(err) = controller.set_config(&mode) {
                 println!("upload_http: wifi station config err={:?}", err);

@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "asset-upload-http", allow(dead_code))]
+
 use sdcard::fat;
 
 use super::super::super::types::{
