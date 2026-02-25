@@ -6,6 +6,8 @@ include!("../assets/suminagashi_blue_noise.rs");
 
 mod helpers;
 mod render;
+mod types;
+mod vec2;
 
 pub use helpers::build_seeded_scene;
 pub(crate) use helpers::dither_threshold_u8;
@@ -17,6 +19,8 @@ pub use render::{
     render_scene_rows_bw, render_scene_rows_bw_masked, render_seeded_gray4_packed,
     render_seeded_inverse_rgss, render_seeded_inverse_rgss_bw,
 };
+pub use types::{DitherMode, RenderMode, RgssMode, SceneRenderStyle};
+pub use vec2::Vec2Fx;
 
 pub type Fx = I16F16;
 
@@ -82,75 +86,6 @@ const BLUE_NOISE_600_WIDTH: usize = 600;
 const BLUE_NOISE_600_HEIGHT: usize = 600;
 const BLUE_NOISE_600: &[u8; BLUE_NOISE_600_WIDTH * BLUE_NOISE_600_HEIGHT] =
     include_bytes!("../assets/suminagashi_blue_noise_600.bin");
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Vec2Fx {
-    pub x: Fx,
-    pub y: Fx,
-}
-
-impl Vec2Fx {
-    #[inline]
-    pub const fn new(x: Fx, y: Fx) -> Self {
-        Self { x, y }
-    }
-
-    #[inline]
-    pub fn dot(self, other: Self) -> Fx {
-        self.x * other.x + self.y * other.y
-    }
-
-    #[inline]
-    pub fn norm2(self) -> Fx {
-        self.dot(self)
-    }
-
-    #[inline]
-    pub fn norm(self) -> Fx {
-        let n2 = self.norm2();
-        if n2 <= FX_ZERO {
-            FX_ZERO
-        } else {
-            sqrt_fx(n2)
-        }
-    }
-}
-
-impl core::ops::Add for Vec2Fx {
-    type Output = Self;
-
-    #[inline]
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.x + rhs.x, self.y + rhs.y)
-    }
-}
-
-impl core::ops::Sub for Vec2Fx {
-    type Output = Self;
-
-    #[inline]
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
-
-impl core::ops::Mul<Fx> for Vec2Fx {
-    type Output = Self;
-
-    #[inline]
-    fn mul(self, rhs: Fx) -> Self::Output {
-        Self::new(self.x * rhs, self.y * rhs)
-    }
-}
-
-impl core::ops::Div<Fx> for Vec2Fx {
-    type Output = Self;
-
-    #[inline]
-    fn div(self, rhs: Fx) -> Self::Output {
-        Self::new(self.x / rhs, self.y / rhs)
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 struct DropOperator {
@@ -339,31 +274,4 @@ impl MarblingScene {
             self.paper_luma
         }
     }
-}
-
-#[derive(Clone, Copy)]
-pub enum RgssMode {
-    X1,
-    X4,
-    X8,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum RenderMode {
-    Mono1,
-    Gray4,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum DitherMode {
-    Bayer4x4,
-    BlueNoise32,
-    BlueNoise600,
-}
-
-#[derive(Clone, Copy)]
-pub struct SceneRenderStyle {
-    pub rgss: RgssMode,
-    pub mode: RenderMode,
-    pub dither: DitherMode,
 }
