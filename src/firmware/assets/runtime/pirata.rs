@@ -4,7 +4,7 @@ use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 mod pirata_specs;
 
 use super::AssetLoadError;
-use pirata_specs::{PirataGlyphSpec, PIRATA_GLYPH_SPECS};
+use pirata_specs::{GlyphSpec, PIRATA_GLYPH_SPECS};
 
 #[cfg(feature = "psram-alloc")]
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -174,8 +174,8 @@ where
     Ok(())
 }
 
-fn collect_pirata_layout(text: &str) -> ([Option<&'static PirataGlyphSpec>; 5], usize, i32, i32) {
-    let mut specs: [Option<&PirataGlyphSpec>; 5] = [None, None, None, None, None];
+fn collect_pirata_layout(text: &str) -> ([Option<&'static GlyphSpec>; 5], usize, i32, i32) {
+    let mut specs: [Option<&GlyphSpec>; 5] = [None, None, None, None, None];
     let mut count = 0usize;
     let mut total_width = 0i32;
     let mut max_height = 0i32;
@@ -198,7 +198,7 @@ fn collect_pirata_layout(text: &str) -> ([Option<&'static PirataGlyphSpec>; 5], 
     (specs, count, total_width, max_height)
 }
 
-fn pirata_spec_for(ch: char) -> Option<&'static PirataGlyphSpec> {
+fn pirata_spec_for(ch: char) -> Option<&'static GlyphSpec> {
     PIRATA_GLYPH_SPECS.iter().find(|spec| spec.glyph == ch)
 }
 
