@@ -1,5 +1,6 @@
 mod app_events;
 mod imu;
+mod runtime_services;
 mod sd_power;
 mod state;
 mod touch_loop;

@@ -1,7 +1,8 @@
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::types::WifiCredentials;
 use crate::firmware::types::{
-    AppEvent, RuntimeMode, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
+    AppEvent, RuntimeMode, RuntimeServicesUpdate, SdCommand, TimeSyncCommand, SD_PATH_MAX,
+    SD_WRITE_MAX,
 };
 
 #[derive(Clone, Copy)]
@@ -242,18 +243,16 @@ pub(super) fn serial_command_event_and_responses(
         SerialCommand::ModeStatus => unreachable!("mode status command is handled inline"),
         SerialCommand::ModeSet { operation } => match operation {
             ModeSetOperation::Upload(enabled) => (
-                Some(AppEvent::SetRuntimeServices(
-                    crate::firmware::runtime::service_mode::runtime_services()
-                        .with_upload_enabled(enabled),
+                Some(AppEvent::UpdateRuntimeServices(
+                    RuntimeServicesUpdate::Upload(enabled),
                 )),
                 None,
                 b"MODE OK\r\n",
                 b"MODE BUSY\r\n",
             ),
             ModeSetOperation::AssetReads(enabled) => (
-                Some(AppEvent::SetRuntimeServices(
-                    crate::firmware::runtime::service_mode::runtime_services()
-                        .with_asset_reads_enabled(enabled),
+                Some(AppEvent::UpdateRuntimeServices(
+                    RuntimeServicesUpdate::AssetReads(enabled),
                 )),
                 None,
                 b"MODE OK\r\n",
@@ -261,7 +260,9 @@ pub(super) fn serial_command_event_and_responses(
             ),
         },
         SerialCommand::RunMode { mode } => (
-            Some(AppEvent::SetRuntimeServices(mode.as_services())),
+            Some(AppEvent::UpdateRuntimeServices(
+                RuntimeServicesUpdate::Replace(mode.as_services()),
+            )),
             None,
             b"RUNMODE OK\r\n",
             b"RUNMODE BUSY\r\n",

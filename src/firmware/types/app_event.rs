@@ -1,4 +1,4 @@
-use super::RuntimeServices;
+use super::RuntimeServicesUpdate;
 use super::TimeSyncCommand;
 
 #[derive(Clone, Copy)]
@@ -10,5 +10,5 @@ pub(crate) enum AppEvent {
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
-    SetRuntimeServices(RuntimeServices),
+    UpdateRuntimeServices(RuntimeServicesUpdate),
 }

@@ -1,7 +1,7 @@
 use super::{commands::SdWaitTarget, parser::SDWAIT_DEFAULT_TIMEOUT_MS, *};
 
 use super::super::types::RuntimeMode;
-use super::super::types::{AppEvent, SD_PATH_MAX, SD_WRITE_MAX};
+use super::super::types::{AppEvent, RuntimeServicesUpdate, SD_PATH_MAX, SD_WRITE_MAX};
 use super::commands::ModeSetOperation;
 
 fn path_from(buf: &[u8; SD_PATH_MAX], len: u8) -> &str {
@@ -311,4 +311,33 @@ fn maps_sdfatren_to_event_and_responses() {
     };
     assert_eq!(ok, b"SDFATREN OK\r\n");
     assert_eq!(busy, b"SDFATREN BUSY\r\n");
+}
+
+#[test]
+fn maps_modeset_to_delta_update_event() {
+    let cmd = parse_serial_command(b"MODE UPLOAD ON").expect("command");
+    let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
+    assert!(sd_command.is_none());
+    match app_event {
+        Some(AppEvent::UpdateRuntimeServices(RuntimeServicesUpdate::Upload(true))) => {}
+        _ => panic!("expected upload delta update"),
+    }
+    assert_eq!(ok, b"MODE OK\r\n");
+    assert_eq!(busy, b"MODE BUSY\r\n");
+}
+
+#[test]
+fn maps_runmode_to_replace_update_event() {
+    let cmd = parse_serial_command(b"RUNMODE NORMAL").expect("command");
+    let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
+    assert!(sd_command.is_none());
+    match app_event {
+        Some(AppEvent::UpdateRuntimeServices(RuntimeServicesUpdate::Replace(services))) => {
+            assert!(!services.upload_enabled_flag());
+            assert!(services.asset_reads_enabled_flag());
+        }
+        _ => panic!("expected replace update"),
+    }
+    assert_eq!(ok, b"RUNMODE OK\r\n");
+    assert_eq!(busy, b"RUNMODE BUSY\r\n");
 }

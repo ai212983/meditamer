@@ -78,6 +78,23 @@ impl RuntimeServices {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeServicesUpdate {
+    Replace(RuntimeServices),
+    Upload(bool),
+    AssetReads(bool),
+}
+
+impl RuntimeServicesUpdate {
+    pub(crate) fn apply(self, current: RuntimeServices) -> RuntimeServices {
+        match self {
+            Self::Replace(next) => next,
+            Self::Upload(enabled) => current.with_upload_enabled(enabled),
+            Self::AssetReads(enabled) => current.with_asset_reads_enabled(enabled),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DisplayMode {
     Clock,
     Suminagashi,
@@ -116,5 +133,30 @@ impl DisplayMode {
             Self::Suminagashi => Self::Clock,
             Self::Shanshui => Self::Suminagashi,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeServices, RuntimeServicesUpdate};
+
+    #[test]
+    fn runtime_services_delta_update_preserves_other_bits() {
+        let current = RuntimeServices::new(false, true);
+        let updated = RuntimeServicesUpdate::Upload(true).apply(current);
+        assert!(updated.upload_enabled_flag());
+        assert!(updated.asset_reads_enabled_flag());
+
+        let updated = RuntimeServicesUpdate::AssetReads(false).apply(updated);
+        assert!(updated.upload_enabled_flag());
+        assert!(!updated.asset_reads_enabled_flag());
+    }
+
+    #[test]
+    fn runtime_services_replace_update_overrides_all_bits() {
+        let current = RuntimeServices::new(true, false);
+        let updated = RuntimeServicesUpdate::Replace(RuntimeServices::normal()).apply(current);
+        assert!(!updated.upload_enabled_flag());
+        assert!(updated.asset_reads_enabled_flag());
     }
 }
