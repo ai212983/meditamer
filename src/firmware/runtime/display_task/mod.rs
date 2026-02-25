@@ -1,12 +1,16 @@
+mod sd_power;
+mod wait;
+
 use super::super::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
+use sd_power::process_sd_power_requests;
+use wait::{next_loop_wait_ms, LoopWaitSchedule};
 
 use super::super::{
     config::{
-        APP_EVENTS, IMU_INIT_RETRY_MS, SD_POWER_REQUESTS, SD_POWER_RESPONSES,
-        TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS,
-        UI_TICK_MS,
+        APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
+        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS,
     },
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
@@ -28,7 +32,7 @@ use super::super::{
         types::{TouchEventKind, TouchSampleFrame, TouchTraceSample},
         wizard::{render_touch_wizard_waiting_screen, TouchCalibrationWizard, WizardDispatch},
     },
-    types::{AppEvent, DisplayContext, DisplayMode, SdPowerRequest, TapTraceSample, TimeSyncState},
+    types::{AppEvent, DisplayContext, DisplayMode, TapTraceSample, TimeSyncState},
 };
 use super::{
     run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle, FaceDownToggleState,
@@ -652,62 +656,5 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                 &mut backlight_level,
             );
         }
-    }
-}
-
-struct LoopWaitSchedule {
-    touch_ready: bool,
-    touch_retry_at: Instant,
-    touch_next_sample_at: Instant,
-    imu_ready: bool,
-    imu_retry_at: Instant,
-    touch_feedback_dirty: bool,
-    touch_feedback_next_flush_at: Instant,
-    tap_trace_active: bool,
-    tap_trace_next_sample_at: Instant,
-    tap_trace_aux_next_sample_at: Instant,
-}
-
-fn next_loop_wait_ms(schedule: LoopWaitSchedule) -> u64 {
-    let now = Instant::now();
-    let mut wait_ms = UI_TICK_MS;
-
-    if schedule.touch_ready {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_next_sample_at));
-    } else {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_retry_at));
-    }
-
-    if !schedule.imu_ready {
-        wait_ms = wait_ms.min(ms_until(now, schedule.imu_retry_at));
-    }
-
-    if schedule.touch_feedback_dirty {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_feedback_next_flush_at));
-    }
-
-    if schedule.tap_trace_active {
-        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_next_sample_at));
-        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_aux_next_sample_at));
-    }
-
-    wait_ms
-}
-
-fn ms_until(now: Instant, deadline: Instant) -> u64 {
-    if deadline <= now {
-        0
-    } else {
-        deadline.saturating_duration_since(now).as_millis()
-    }
-}
-
-async fn process_sd_power_requests(context: &mut DisplayContext) {
-    while let Ok(request) = SD_POWER_REQUESTS.try_receive() {
-        let ok = match request {
-            SdPowerRequest::On => context.inkplate.sd_card_power_on().is_ok(),
-            SdPowerRequest::Off => context.inkplate.sd_card_power_off().is_ok(),
-        };
-        SD_POWER_RESPONSES.send(ok).await;
     }
 }
