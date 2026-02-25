@@ -251,8 +251,8 @@ Notes:
 - server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
 - when an upload token is configured, all HTTP endpoints except `/health` require an `x-upload-token` header;
   requests without a valid token are rejected.
-- if no upload token is configured at build time, authentication is disabled and non-`/health` endpoints accept
-  requests without an `x-upload-token` header.
+- if neither `MEDITAMER_UPLOAD_HTTP_TOKEN` nor `UPLOAD_HTTP_TOKEN` is set at build time, authentication is
+  disabled and non-`/health` endpoints accept requests without an `x-upload-token` header.
 - configure the token at build time with `MEDITAMER_UPLOAD_HTTP_TOKEN` (fallback: `UPLOAD_HTTP_TOKEN`).
 - mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
 
