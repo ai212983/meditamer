@@ -261,6 +261,12 @@ MODE ASSETS ON
 PSRAM
 ```
 
+Automated smoke run (mode toggles + PSRAM snapshots):
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/runtime_modes_smoke.sh
+```
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:
