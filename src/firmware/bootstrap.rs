@@ -10,7 +10,7 @@ use esp_hal::{
     timer::timg::TimerGroup,
     uart::{Config as UartConfig, Uart},
 };
-use meditamer::{drivers::inkplate::InkplateHal, platform::HalI2c};
+use meditamer::drivers::{inkplate::InkplateHal, platform::HalI2c};
 
 use super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
@@ -114,10 +114,11 @@ pub(crate) fn run() -> ! {
             .with_sda(peripherals.GPIO21)
             .with_scl(peripherals.GPIO22);
         let i2c = HalI2c::new(i2c);
-        let mut inkplate = match InkplateHal::new(i2c, meditamer::platform::BusyDelay::new()) {
-            Ok(driver) => driver,
-            Err(_) => halt_forever(),
-        };
+        let mut inkplate =
+            match InkplateHal::new(i2c, meditamer::drivers::platform::BusyDelay::new()) {
+                Ok(driver) => driver,
+                Err(_) => halt_forever(),
+            };
         if inkplate.init_core().is_err() {
             halt_forever();
         }
@@ -153,10 +154,11 @@ pub(crate) fn run() -> ! {
             .with_sda(peripherals.GPIO21)
             .with_scl(peripherals.GPIO22);
         let i2c = HalI2c::new(i2c);
-        let mut inkplate = match InkplateHal::new(i2c, meditamer::platform::BusyDelay::new()) {
-            Ok(driver) => driver,
-            Err(_) => halt_forever(),
-        };
+        let mut inkplate =
+            match InkplateHal::new(i2c, meditamer::drivers::platform::BusyDelay::new()) {
+                Ok(driver) => driver,
+                Err(_) => halt_forever(),
+            };
 
         if inkplate.init_core().is_err() {
             halt_forever();

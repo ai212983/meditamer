@@ -9,7 +9,7 @@ use embedded_graphics::{
     prelude::{DrawTarget, OriginDimensions, Pixel, Size},
 };
 
-use crate::{
+use super::{
     gpio_fast::{
         GpioFast, CKV_MASK1, CL_MASK, DATA_MASK, LE_MASK, PANEL_OUT1_ENABLE_MASK,
         PANEL_OUT_ENABLE_MASK, SPH_MASK1,
