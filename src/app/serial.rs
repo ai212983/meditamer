@@ -523,11 +523,9 @@ async fn write_allocator_status_line(uart: &mut SerialUart) {
 
 async fn run_allocator_alloc_probe(uart: &mut SerialUart, bytes: usize) {
     match psram::alloc_large_byte_buffer(bytes) {
-        Ok(buffer) => {
-            #[cfg(feature = "psram-alloc")]
-            let mut buffer = buffer;
+        Ok(mut buffer) => {
             #[cfg(not(feature = "psram-alloc"))]
-            let buffer = buffer;
+            let _ = &mut buffer;
 
             #[cfg(feature = "psram-alloc")]
             if let Some(first) = buffer.as_mut_slice().first_mut() {
