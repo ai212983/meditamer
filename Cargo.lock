@@ -182,7 +182,6 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim",
  "syn 2.0.117",
 ]
 
@@ -529,37 +528,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1763775e2323b7d5f0aa6090657f5e21cfa02ede71f5dc40eead06d64dcd15cc"
 dependencies = [
  "embedded-storage",
-]
-
-[[package]]
-name = "embedded-test"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0412372bfbc3b737b1e68ad0c199983455d98e9aa8bf6c9495de83cef08444f9"
-dependencies = [
- "embassy-executor",
- "embedded-test-linker-script",
- "embedded-test-macros",
- "semihosting",
-]
-
-[[package]]
-name = "embedded-test-linker-script"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "892fd6c812db2dc4fde8cac39717b772661bb26b24cd54cb5d6d89b37b5cd8c2"
-
-[[package]]
-name = "embedded-test-macros"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "915da3553882d09e9f8a718b19bc90931a414c0a66f9bbefa23e21f2832dc7c7"
-dependencies = [
- "darling 0.21.3",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -1179,7 +1147,6 @@ dependencies = [
  "embedded-graphics",
  "embedded-io-async 0.7.0",
  "embedded-storage",
- "embedded-test",
  "esp-alloc",
  "esp-backtrace",
  "esp-hal",
