@@ -4,7 +4,7 @@ Last updated: 2026-02-13 (Europe/Berlin context)
 
 ## Goal
 
-Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task.rs` into a reusable `statig`-based engine that:
+Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task/mod.rs` into a reusable `statig`-based engine that:
 
 - supports current triple-tap backlight behavior reliably,
 - is extensible to non-tap events (pickup, placement, stillness, near/far intent),
@@ -27,7 +27,7 @@ Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_t
 
 ## Current Baseline (as of this plan)
 
-- Detection and sequencing logic is embedded in `display_task` in `src/firmware/runtime/display_task.rs`.
+- Detection and sequencing logic is embedded in `display_task` in `src/firmware/runtime/display_task/mod.rs`.
 - Current detector uses fused signals:
   - LSM tap source bits (`TAP_SRC` axis/single/tap-event),
   - accel jerk,

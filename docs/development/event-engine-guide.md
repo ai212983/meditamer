@@ -16,7 +16,7 @@ The runtime path is:
 4. Engine emits `EngineAction`s and `EngineTraceSample`.
 5. Firmware executes actions (currently `BacklightTrigger`) and streams trace lines over UART.
 
-Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/runtime/display_task.rs`.
+Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/runtime/display_task/mod.rs`.
 
 ## File Map
 
@@ -51,7 +51,7 @@ Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside 
 - `src/firmware/event_engine/registry.rs`
   - Event registration table for enabled/disabled event kinds.
 
-- `src/firmware/runtime/display_task.rs`
+- `src/firmware/runtime/display_task/mod.rs`
   - Integrates engine in `display_task`.
   - Converts IMU samples to `SensorFrame`, handles `BacklightTrigger`, and writes trace CSV.
 

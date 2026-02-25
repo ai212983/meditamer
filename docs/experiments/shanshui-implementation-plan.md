@@ -15,7 +15,7 @@ The source design brief is strong on architecture, but not implementation detail
 - Existing procedural renderers are:
   - `src/firmware/graphics/suminagashi.rs` (fixed-point marbling + threshold dithering)
   - `src/firmware/graphics/sumi_sun.rs` (fixed-point sun disk rendering)
-- Current visual mode switch is driven by `display_task` in `src/firmware/runtime/display_task.rs` using `DisplayMode` from `src/firmware/types/modes.rs`.
+- Current visual mode switch is driven by `display_task` in `src/firmware/runtime/display_task/mod.rs` using `DisplayMode` from `src/firmware/types/modes.rs`.
 - Existing timing telemetry records marble redraw duration in `src/firmware/render/visual.rs` via `LAST_MARBLE_REDRAW_MS` / `MAX_MARBLE_REDRAW_MS`.
 
 ## Scope
@@ -50,7 +50,7 @@ The source design brief is strong on architecture, but not implementation detail
   - `render_rows_bw(...)` API with callback signature matching existing row renderers.
 - `src/firmware/mod.rs`:
   - Export graphics modules under `firmware::graphics`.
-- `src/firmware/types/modes.rs` and `src/firmware/runtime/display_task.rs`:
+- `src/firmware/types/modes.rs` and `src/firmware/runtime/display_task/mod.rs`:
   - Extend `DisplayMode` to include `Shanshui`.
   - Add render dispatch integration and mode toggling behavior.
 - `docs/development/hardware-test-matrix.md`:
@@ -83,7 +83,7 @@ Deliverables:
 - Create `shanshui` module skeleton with:
   - `build_params(seed, size)` (if needed)
   - `render_shanshui_rows_bw(width, height, y_start, y_end, seed, put_black_pixel)`
-- Integrate new mode in `src/firmware/runtime/display_task.rs`:
+- Integrate new mode in `src/firmware/runtime/display_task/mod.rs`:
   - add `DisplayMode::Shanshui`
   - wire into `render_active_mode(...)`
   - preserve existing Clock and Suminagashi behavior.
@@ -175,7 +175,7 @@ Exit criteria:
 - [ ] Implement deterministic tree column hashing and implicit branch tests.
 - [ ] Implement fog and water/void masking.
 - [ ] Implement row-stream Atkinson diffusion with rolling buffers.
-- [ ] Integrate `DisplayMode::Shanshui` in `src/firmware/runtime/display_task.rs`.
+- [ ] Integrate `DisplayMode::Shanshui` in `src/firmware/runtime/display_task/mod.rs`.
 - [ ] Add render-time counters/log markers for Shanshui path.
 - [ ] Update `docs/development/hardware-test-matrix.md` with Shanshui checks.
 
