@@ -43,12 +43,23 @@ scripts/setup_hooks.sh
 
 Current pre-commit hook:
 
+- Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
+- Auto-stages formatter edits (`stage_fixed: true`) so commits include rustfmt output.
 - Validates links in staged Markdown files via `scripts/check_markdown_links.sh`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
+- Runs host-tooling clippy via `scripts/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
 
 Current commit-msg hook:
 
 - Validates commit messages against Conventional Commits via `scripts/check_commit_message.sh` and `commitlint`.
+
+Current pre-push hook:
+
+- Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
+
+Formatting enforcement:
+
+- CI enforces Rust formatting via `cargo +stable fmt --all -- --check` in `.github/workflows/rust_ci.yml` (`PR Light CI` -> `Rust Format` job).
 
 Optional full (online) validation:
 
@@ -71,25 +82,11 @@ scripts/build.sh [debug|release]
 
 Default is `release` when no argument is provided.
 
-## Embedded Tests (Xtensa)
-
-The project now includes an `embedded-test` harness target:
-
-- test binary: `embedded_smoke_test`
-- source: `tests/embedded_smoke_test.rs`
-
-`embedded-test` requires `probe-rs` as test runner. Keep the default firmware runner as-is and override runner only for test commands:
+The default Xtensa runner (`scripts/xtensa_runner.sh`) flashes firmware without opening
+an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
 
 ```bash
-CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
-  cargo test --test embedded_smoke_test --no-run
-```
-
-When you are ready to run on hardware:
-
-```bash
-CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
-  cargo test --test embedded_smoke_test
+ESPFLASH_RUN_MONITOR=1 cargo run
 ```
 
 ## Flash
@@ -178,6 +175,37 @@ stty -f /dev/cu.usbserial-540 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -
 printf 'TIMESET %s %s\r\n' "$(date -u +%s)" "-300" > /dev/cu.usbserial-540
 ```
 
+## Allocator Diagnostics
+
+Firmware accepts allocator status commands on `UART0` (`115200` baud):
+
+```text
+PSRAM
+```
+
+Aliases: `HEAP`, `ALLOCATOR`.
+
+Response format:
+
+```text
+PSRAM feature_enabled=<bool> state=<state> total_bytes=<n> used_bytes=<n> free_bytes=<n> peak_used_bytes=<n>
+```
+
+Allocator probe command:
+
+```text
+PSRAMALLOC <bytes>
+```
+
+Alias: `HEAPALLOC <bytes>`.
+
+Probe responses:
+
+```text
+PSRAMALLOC OK bytes=<n> placement=<placement> len=<n>
+PSRAMALLOC ERR bytes=<n> reason=<reason>
+```
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:
@@ -208,6 +236,95 @@ Burst/backpressure regression only:
 
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+```
+
+## SD Asset Upload Over Wi-Fi (STA, HTTP)
+
+Feature-gated upload server (disabled by default) for pushing assets to SD card without removing it.
+
+Build/flash with feature:
+
+```bash
+export CARGO_FEATURES=asset-upload-http
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh debug
+```
+
+Notes:
+
+- optional compile-time credentials are still supported via `MEDITAMER_WIFI_SSID` / `MEDITAMER_WIFI_PASSWORD`
+  (fallback `SSID` / `PASSWORD`).
+- if credentials are not compiled in, firmware waits for UART `WIFISET` command.
+- server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
+- when an upload token is configured, all HTTP endpoints except `/health` require an `x-upload-token` header;
+  requests without a valid token are rejected.
+- if neither `MEDITAMER_UPLOAD_HTTP_TOKEN` nor `UPLOAD_HTTP_TOKEN` is set at build time, authentication is
+  disabled and non-`/health` endpoints accept requests without an `x-upload-token` header.
+- configure the token at build time with `MEDITAMER_UPLOAD_HTTP_TOKEN` (fallback: `UPLOAD_HTTP_TOKEN`).
+- mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
+
+Runtime credential provisioning over UART:
+
+```text
+WIFISET <ssid> <password>
+```
+
+Open network (no password):
+
+```text
+WIFISET <ssid>
+```
+
+Credential persistence:
+
+- `WIFISET` now persists credentials to SD file `/config/wifi.cfg`.
+- On boot, firmware attempts to load `/config/wifi.cfg` before waiting for UART `WIFISET`.
+- This survives reboot and firmware reflashes (as long as SD card content is retained).
+
+Host helper:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/wifiset.sh <ssid> <password>
+```
+
+Health check:
+
+```bash
+curl "http://<device-ip>:8080/health"
+```
+
+Create directory (authenticated endpoint):
+
+```bash
+UPLOAD_TOKEN=<your-upload-token>
+curl -X POST \
+  -H "x-upload-token: ${UPLOAD_TOKEN}" \
+  "http://<device-ip>:8080/mkdir?path=/assets/images"
+```
+
+Delete file or empty directory (authenticated endpoint):
+
+```bash
+curl -X DELETE \
+  -H "x-upload-token: ${UPLOAD_TOKEN}" \
+  "http://<device-ip>:8080/rm?path=/assets/old.bin"
+```
+
+Upload an assets directory:
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --src assets --dst /assets
+```
+
+Upload a single file:
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --src ./path/to/file.bin --dst /assets
+```
+
+Delete paths (relative to `--dst`, or absolute under `/assets`):
+
+```bash
+scripts/upload_assets_http.py --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
 
 ## Soak Script

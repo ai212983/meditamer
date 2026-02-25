@@ -9,7 +9,13 @@ use meditamer::{
 };
 use u8g2_fonts::{fonts, FontRenderer};
 
-use super::types::{AppEvent, SdPowerRequest, SdRequest, SdResult, TapTraceSample};
+#[cfg(feature = "asset-upload-http")]
+use super::types::WifiCredentials;
+use super::types::{
+    AppEvent, SdPowerRequest, SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
+};
+#[cfg(feature = "asset-upload-http")]
+use super::types::{WifiConfigRequest, WifiConfigResponse};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;
 pub(crate) const SCREEN_HEIGHT: i32 = E_INK_HEIGHT as i32;
@@ -69,7 +75,7 @@ pub(crate) const FACE_BASELINE_RECALIBRATE_MS: u64 = 1_200;
 pub(crate) const FACE_DOWN_HOLD_MS: u64 = 750;
 pub(crate) const FACE_DOWN_REARM_MS: u64 = 450;
 pub(crate) const MODE_STORE_MAGIC: u32 = 0x4544_4F4D;
-pub(crate) const MODE_STORE_VERSION: u8 = 1;
+pub(crate) const MODE_STORE_VERSION: u8 = 2;
 pub(crate) const MODE_STORE_RECORD_LEN: usize = 16;
 pub(crate) const UI_TICK_MS: u64 = 50;
 pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
@@ -79,14 +85,29 @@ pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
 pub(crate) const TAP_TRACE_ENABLED: bool = false;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
 pub(crate) static SD_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 16> = Channel::new();
+pub(crate) static SD_UPLOAD_REQUESTS: Channel<CriticalSectionRawMutex, SdUploadRequest, 2> =
+    Channel::new();
+pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadResult, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CONFIG_REQUESTS: Channel<CriticalSectionRawMutex, WifiConfigRequest, 1> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_CONFIG_RESPONSES: Channel<CriticalSectionRawMutex, WifiConfigResponse, 1> =
+    Channel::new();
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
-pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 32> =
+pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
 pub(crate) static MAX_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

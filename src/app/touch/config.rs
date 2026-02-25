@@ -27,24 +27,24 @@ pub(crate) const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 8;
 pub(crate) const TOUCH_IMU_QUIET_WINDOW_MS: u64 = 120;
 pub(crate) const TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS: u64 = 240;
 
-pub(crate) static TOUCH_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchTraceSample, 32> =
+pub(crate) static TOUCH_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchTraceSample, 8> =
     Channel::new();
-pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchEvent, 32> =
+pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchEvent, 16> =
     Channel::new();
 pub(crate) static TOUCH_WIZARD_SWIPE_TRACE_SAMPLES: Channel<
     CriticalSectionRawMutex,
     TouchWizardSwipeTraceSample,
-    64,
+    16,
 > = Channel::new();
 pub(crate) static TOUCH_WIZARD_RAW_TRACE_SAMPLES: Channel<
     CriticalSectionRawMutex,
     TouchTraceSample,
-    256,
+    64,
 > = Channel::new();
 pub(crate) static TOUCH_WIZARD_SESSION_EVENTS: Channel<
     CriticalSectionRawMutex,
     TouchWizardSessionEvent,
-    8,
+    4,
 > = Channel::new();
 pub(crate) static TOUCH_PIPELINE_INPUTS: Channel<CriticalSectionRawMutex, TouchPipelineInput, 32> =
     Channel::new();

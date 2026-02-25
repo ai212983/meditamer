@@ -1,0 +1,129 @@
+{
+  "blue_noise": {
+    "entries": [
+      {
+        "format": "u8-threshold",
+        "height": 32,
+        "path": "assets/raw/blue_noise/blue_noise_32x32_u8.raw",
+        "sha256": "7bf7562a404dc5a1c1926d213fafd062f83139ff818cfb9bef2a710cf1940ea1",
+        "size": 1024,
+        "width": 32
+      },
+      {
+        "format": "u8-threshold",
+        "height": 600,
+        "path": "assets/raw/blue_noise/blue_noise_600x600_u8.raw",
+        "sha256": "84b0c3bba73894f7f47bb2f0795759d10846846ed02a2032fa186bb50fcda69c",
+        "size": 360000,
+        "width": 600
+      }
+    ]
+  },
+  "fonts": {
+    "pirata_clock": {
+      "entries": [
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "0",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_0_mono1.raw",
+          "sha256": "d0dab1c917cae583380c14435cd32cb6afe4babfc4085f230f45c49d312edda7",
+          "size": 2112,
+          "width": 84
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "1",
+          "height": 193,
+          "path": "assets/raw/fonts/pirata_clock/digit_1_mono1.raw",
+          "sha256": "d3a61ba386a70caf5d51990c00039242dd840a2b572f8faf102b8772e8b48b13",
+          "size": 1544,
+          "width": 60
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "2",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_2_mono1.raw",
+          "sha256": "832a0592309c36a13be0ed071fb9750eb81be02e0b353ef2929dd51c430ddac5",
+          "size": 2496,
+          "width": 98
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "3",
+          "height": 194,
+          "path": "assets/raw/fonts/pirata_clock/digit_3_mono1.raw",
+          "sha256": "ef9ed3caa86924fc033e89b41c28cb2f6c872ddcac477ba55974bae49216c7be",
+          "size": 2328,
+          "width": 91
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "4",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_4_mono1.raw",
+          "sha256": "90fc6c5df53dc2acbb0bacda915b658453c2684152b9ce2e63ac85aa04a34540",
+          "size": 2496,
+          "width": 99
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "5",
+          "height": 200,
+          "path": "assets/raw/fonts/pirata_clock/digit_5_mono1.raw",
+          "sha256": "15dd5e5d8c3f416926fa6bc4f28a22a61b3a561d664da29022e52e8e91a571b4",
+          "size": 2200,
+          "width": 87
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "6",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_6_mono1.raw",
+          "sha256": "eacc418bf490e6beba045972c891acc60081162e7f91f16110bf91a8d52969fb",
+          "size": 2112,
+          "width": 84
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "7",
+          "height": 198,
+          "path": "assets/raw/fonts/pirata_clock/digit_7_mono1.raw",
+          "sha256": "8c0903e71766fc085f2b6f2241cceacdd50c523ab2add0af012f13aa6812d4de",
+          "size": 2376,
+          "width": 90
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "8",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_8_mono1.raw",
+          "sha256": "edf3f4169a9d629d03cc0f5d4c345a81cf642d059ea2ee41cd8368d9efceda7d",
+          "size": 2112,
+          "width": 84
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": "9",
+          "height": 192,
+          "path": "assets/raw/fonts/pirata_clock/digit_9_mono1.raw",
+          "sha256": "63ecde6b768a073fd80b4f10f33b0f6973af0d4cd8c6da71ba6d632ffcfd59a2",
+          "size": 2112,
+          "width": 84
+        },
+        {
+          "format": "mono1-row-major-lsb",
+          "glyph": ":",
+          "height": 109,
+          "path": "assets/raw/fonts/pirata_clock/colon_mono1.raw",
+          "sha256": "c9bbf8cc2231860b66f5fb4c8c736125b71b0afe2f15adb54f7af6645cca7de7",
+          "size": 436,
+          "width": 32
+        }
+      ],
+      "spacing_px": 3
+    }
+  },
+  "source": "embedded"
+}

@@ -3,9 +3,6 @@ use std::{env, fs, path::PathBuf};
 use event_config_compiler::generate_from_path;
 
 fn main() {
-    // embedded-test injects its own no_std test harness via this linker script.
-    println!("cargo:rustc-link-arg-tests=-Tembedded-test.x");
-
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"));
     let config_path = manifest_dir.join("config/events.toml");

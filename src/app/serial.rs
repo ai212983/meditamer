@@ -7,6 +7,7 @@ use super::{
         APP_EVENTS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, SD_REQUESTS, SD_RESULTS,
         TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
+    psram,
     touch::{
         config::{
             TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED,
@@ -23,6 +24,17 @@ use super::{
         TapTraceSample, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
     },
 };
+#[cfg(feature = "asset-upload-http")]
+use super::{
+    config::{
+        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
+        WIFI_CREDENTIALS_UPDATES,
+    },
+    types::{
+        RuntimeMode, WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX,
+        WIFI_SSID_MAX,
+    },
+};
 
 #[derive(Clone, Copy)]
 enum SerialCommand {
@@ -32,6 +44,10 @@ enum SerialCommand {
     Repaint,
     RepaintMarble,
     Metrics,
+    AllocatorStatus,
+    AllocatorAllocProbe {
+        bytes: u32,
+    },
     Probe,
     RwVerify {
         lba: u32,
@@ -82,6 +98,14 @@ enum SerialCommand {
     SdWait {
         target: SdWaitTarget,
         timeout_ms: u32,
+    },
+    #[cfg(feature = "asset-upload-http")]
+    RunMode {
+        mode: RuntimeMode,
+    },
+    #[cfg(feature = "asset-upload-http")]
+    WifiSet {
+        credentials: WifiCredentials,
     },
 }
 
@@ -202,6 +226,12 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
                         }
+                        SerialCommand::AllocatorStatus => {
+                            write_allocator_status_line(&mut uart).await;
+                        }
+                        SerialCommand::AllocatorAllocProbe { bytes } => {
+                            run_allocator_alloc_probe(&mut uart, bytes as usize).await;
+                        }
                         SerialCommand::SdWait { target, timeout_ms } => {
                             run_sdwait_command(
                                 &mut uart,
@@ -211,6 +241,10 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 timeout_ms,
                             )
                             .await;
+                        }
+                        #[cfg(feature = "asset-upload-http")]
+                        SerialCommand::WifiSet { credentials } => {
+                            run_wifiset_command(&mut uart, credentials).await;
                         }
                         _ => {
                             let (app_event, sd_command, ok_response, busy_response) =
@@ -422,7 +456,20 @@ fn serial_command_event_and_responses(
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
+        SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
+        SerialCommand::AllocatorAllocProbe { .. } => {
+            unreachable!("allocator allocation probe command is handled inline")
+        }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::RunMode { mode } => (
+            Some(AppEvent::SwitchRuntimeMode(mode)),
+            None,
+            b"RUNMODE OK\r\n",
+            b"RUNMODE BUSY\r\n",
+        ),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::WifiSet { .. } => unreachable!("wifiset command is handled inline"),
     }
 }
 
@@ -456,6 +503,57 @@ async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
         sample.az
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn write_allocator_status_line(uart: &mut SerialUart) {
+    let status = psram::allocator_status();
+    let used_bytes = status.total_bytes.saturating_sub(status.free_bytes);
+    let mut line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut line,
+        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={}\r\n",
+        status.feature_enabled,
+        status.state,
+        status.total_bytes,
+        used_bytes,
+        status.free_bytes,
+        status.peak_used_bytes
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+async fn run_allocator_alloc_probe(uart: &mut SerialUart, bytes: usize) {
+    match psram::alloc_large_byte_buffer(bytes) {
+        Ok(mut buffer) => {
+            #[cfg(not(feature = "psram-alloc"))]
+            let _ = &mut buffer;
+
+            #[cfg(feature = "psram-alloc")]
+            if let Some(first) = buffer.as_mut_slice().first_mut() {
+                *first = 0xA5;
+            }
+
+            let mut line = heapless::String::<128>::new();
+            let _ = write!(
+                &mut line,
+                "PSRAMALLOC OK bytes={} placement={:?} len={}\r\n",
+                bytes,
+                buffer.placement(),
+                buffer.len()
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+            psram::log_allocator_high_water("serial_psram_alloc_probe");
+        }
+        Err(err) => {
+            let mut line = heapless::String::<128>::new();
+            let _ = write!(
+                &mut line,
+                "PSRAMALLOC ERR bytes={} reason={:?}\r\n",
+                bytes, err
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
+    }
 }
 
 async fn write_sd_request_queued(uart: &mut SerialUart, request_id: u32, command: SdCommand) {
@@ -595,6 +693,57 @@ async fn write_sdwait_timeout(
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
+#[cfg(feature = "asset-upload-http")]
+async fn run_wifiset_command(uart: &mut SerialUart, credentials: WifiCredentials) {
+    while WIFI_CREDENTIALS_UPDATES.try_receive().is_ok() {}
+    while WIFI_CONFIG_RESPONSES.try_receive().is_ok() {}
+
+    if WIFI_CREDENTIALS_UPDATES.try_send(credentials).is_err() {
+        let _ = uart_write_all(uart, b"WIFISET BUSY\r\n").await;
+        return;
+    }
+
+    WIFI_CONFIG_REQUESTS
+        .send(WifiConfigRequest::Store { credentials })
+        .await;
+
+    match with_timeout(
+        Duration::from_millis(WIFI_CONFIG_RESPONSE_TIMEOUT_MS),
+        WIFI_CONFIG_RESPONSES.receive(),
+    )
+    .await
+    {
+        Ok(result) if result.ok => {
+            let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
+        }
+        Ok(result) => {
+            let mut line = heapless::String::<96>::new();
+            let _ = write!(
+                &mut line,
+                "WIFISET ERR reason={}\r\n",
+                wifi_config_result_code_label(result.code)
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
+        Err(_) => {
+            let _ = uart_write_all(uart, b"WIFISET ERR reason=timeout\r\n").await;
+        }
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn wifi_config_result_code_label(code: WifiConfigResultCode) -> &'static str {
+    match code {
+        WifiConfigResultCode::Ok => "ok",
+        WifiConfigResultCode::Busy => "busy",
+        WifiConfigResultCode::NotFound => "not_found",
+        WifiConfigResultCode::InvalidData => "invalid_data",
+        WifiConfigResultCode::PowerOnFailed => "power_on_failed",
+        WifiConfigResultCode::InitFailed => "init_failed",
+        WifiConfigResultCode::OperationFailed => "operation_failed",
+    }
+}
+
 fn sd_command_label(command: SdCommand) -> &'static str {
     match command {
         SdCommand::Probe => "probe",
@@ -664,6 +813,20 @@ fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     }
     if parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
+    }
+    if let Some(bytes) = parse_allocator_alloc_probe_command(line) {
+        return Some(SerialCommand::AllocatorAllocProbe { bytes });
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if let Some(mode) = parse_runmode_command(line) {
+        return Some(SerialCommand::RunMode { mode });
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if let Some(credentials) = parse_wifiset_command(line) {
+        return Some(SerialCommand::WifiSet { credentials });
+    }
+    if parse_allocator_status_command(line) {
+        return Some(SerialCommand::AllocatorStatus);
     }
     if parse_sdprobe_command(line) {
         return Some(SerialCommand::Probe);
@@ -768,6 +931,124 @@ fn parse_repaint_marble_command(line: &[u8]) -> bool {
 fn parse_metrics_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"METRICS" || cmd == b"PERF"
+}
+
+fn parse_allocator_status_command(line: &[u8]) -> bool {
+    let cmd = trim_ascii_whitespace(line);
+    cmd == b"PSRAM" || cmd == b"ALLOCATOR" || cmd == b"HEAP"
+}
+
+fn parse_allocator_alloc_probe_command(line: &[u8]) -> Option<u32> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = if trimmed.starts_with(b"PSRAMALLOC") {
+        b"PSRAMALLOC".as_slice()
+    } else if trimmed.starts_with(b"HEAPALLOC") {
+        b"HEAPALLOC".as_slice()
+    } else {
+        return None;
+    };
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+    let (bytes, next_i) = parse_u64_ascii(trimmed, i)?;
+    if bytes > u32::MAX as u64 {
+        return None;
+    }
+    i = next_i;
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != trimmed.len() {
+        return None;
+    }
+    Some(bytes as u32)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn parse_runmode_command(line: &[u8]) -> Option<RuntimeMode> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"RUNMODE";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+
+    let mode = &trimmed[i..];
+    if mode.eq_ignore_ascii_case(b"UPLOAD") {
+        return Some(RuntimeMode::Upload);
+    }
+    if mode.eq_ignore_ascii_case(b"NORMAL") {
+        return Some(RuntimeMode::Normal);
+    }
+    None
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn parse_wifiset_command(line: &[u8]) -> Option<WifiCredentials> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"WIFISET";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+
+    let ssid_start = i;
+    while i < trimmed.len() && !trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let ssid = &trimmed[ssid_start..i];
+    if ssid.is_empty() || ssid.len() > WIFI_SSID_MAX {
+        return None;
+    }
+
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let password = if i == trimmed.len() {
+        &[][..]
+    } else {
+        let password_start = i;
+        while i < trimmed.len() && !trimmed[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let password = &trimmed[password_start..i];
+        while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i != trimmed.len() || password.len() > WIFI_PASSWORD_MAX {
+            return None;
+        }
+        password
+    };
+
+    let mut credentials = WifiCredentials {
+        ssid: [0u8; WIFI_SSID_MAX],
+        ssid_len: ssid.len() as u8,
+        password: [0u8; WIFI_PASSWORD_MAX],
+        password_len: password.len() as u8,
+    };
+    credentials.ssid[..ssid.len()].copy_from_slice(ssid);
+    credentials.password[..password.len()].copy_from_slice(password);
+    Some(credentials)
 }
 
 fn parse_touch_wizard_command(line: &[u8]) -> bool {
@@ -1208,6 +1489,89 @@ mod tests {
         let cmd = parse_serial_command(b"SDRWVERIFY 2048");
         match cmd {
             Some(SerialCommand::RwVerify { lba }) => assert_eq!(lba, 2048),
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parses_psram_allocator_status_command() {
+        let cmd = parse_serial_command(b"PSRAM");
+        assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));
+    }
+
+    #[test]
+    fn parses_heap_allocator_status_alias() {
+        let cmd = parse_serial_command(b"HEAP");
+        assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));
+    }
+
+    #[test]
+    fn parses_psram_alloc_probe_command() {
+        let cmd = parse_serial_command(b"PSRAMALLOC 4096");
+        match cmd {
+            Some(SerialCommand::AllocatorAllocProbe { bytes }) => assert_eq!(bytes, 4096),
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn rejects_psram_alloc_probe_without_size() {
+        let cmd = parse_serial_command(b"PSRAMALLOC");
+        assert!(cmd.is_none());
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_runmode_upload() {
+        let cmd = parse_serial_command(b"RUNMODE UPLOAD");
+        match cmd {
+            Some(SerialCommand::RunMode { mode }) => {
+                assert!(matches!(mode, RuntimeMode::Upload));
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_runmode_normal_case_insensitive() {
+        let cmd = parse_serial_command(b"runmode normal");
+        match cmd {
+            Some(SerialCommand::RunMode { mode }) => {
+                assert!(matches!(mode, RuntimeMode::Normal));
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_wifiset_with_password() {
+        let cmd = parse_serial_command(b"WIFISET MyNet pass1234");
+        match cmd {
+            Some(SerialCommand::WifiSet { credentials }) => {
+                assert_eq!(&credentials.ssid[..credentials.ssid_len as usize], b"MyNet");
+                assert_eq!(
+                    &credentials.password[..credentials.password_len as usize],
+                    b"pass1234"
+                );
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_wifiset_open_network() {
+        let cmd = parse_serial_command(b"WIFISET CafeWiFi");
+        match cmd {
+            Some(SerialCommand::WifiSet { credentials }) => {
+                assert_eq!(
+                    &credentials.ssid[..credentials.ssid_len as usize],
+                    b"CafeWiFi"
+                );
+                assert_eq!(credentials.password_len, 0);
+            }
             _ => panic!("unexpected command"),
         }
     }

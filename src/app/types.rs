@@ -12,16 +12,27 @@ pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
+pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_SSID_MAX: usize = 32;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_PASSWORD_MAX: usize = 64;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
-    Refresh { uptime_seconds: u32 },
+    Refresh {
+        uptime_seconds: u32,
+    },
     BatteryTick,
     TimeSync(TimeSyncCommand),
     TouchIrq,
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
+    #[cfg(feature = "asset-upload-http")]
+    SwitchRuntimeMode(RuntimeMode),
 }
 
 #[derive(Clone, Copy)]
@@ -110,6 +121,90 @@ pub(crate) struct SdResult {
 
 pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;
 
+#[cfg_attr(not(feature = "asset-upload-http"), allow(dead_code))]
+pub(crate) enum SdUploadCommand {
+    Begin {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+        expected_size: u32,
+    },
+    Chunk {
+        data_len: u16,
+    },
+    Commit,
+    Abort,
+    Mkdir {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    Remove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+}
+
+pub(crate) struct SdUploadRequest {
+    pub(crate) command: SdUploadCommand,
+    pub(crate) chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SdUploadResultCode {
+    Ok,
+    Busy,
+    SessionNotActive,
+    InvalidPath,
+    NotFound,
+    NotEmpty,
+    SizeMismatch,
+    PowerOnFailed,
+    InitFailed,
+    OperationFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SdUploadResult {
+    pub(crate) ok: bool,
+    pub(crate) code: SdUploadResultCode,
+    pub(crate) bytes_written: u32,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WifiCredentials {
+    pub(crate) ssid: [u8; WIFI_SSID_MAX],
+    pub(crate) ssid_len: u8,
+    pub(crate) password: [u8; WIFI_PASSWORD_MAX],
+    pub(crate) password_len: u8,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WifiConfigRequest {
+    Load,
+    Store { credentials: WifiCredentials },
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WifiConfigResultCode {
+    Ok,
+    Busy,
+    NotFound,
+    InvalidData,
+    PowerOnFailed,
+    InitFailed,
+    OperationFailed,
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WifiConfigResponse {
+    pub(crate) ok: bool,
+    pub(crate) code: WifiConfigResultCode,
+    pub(crate) credentials: Option<WifiCredentials>,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum SdPowerRequest {
     On,
@@ -127,6 +222,29 @@ pub(crate) struct TimeSyncState {
     pub(crate) unix_epoch_utc_seconds: u64,
     pub(crate) tz_offset_minutes: i32,
     pub(crate) sync_instant: Instant,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeMode {
+    Normal,
+    Upload,
+}
+
+impl RuntimeMode {
+    pub(crate) fn as_persisted(self) -> u8 {
+        match self {
+            Self::Normal => 0,
+            Self::Upload => 1,
+        }
+    }
+
+    pub(crate) fn from_persisted(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Normal),
+            1 => Some(Self::Upload),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
