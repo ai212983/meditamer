@@ -1,8 +1,9 @@
 use embassy_time::{with_timeout, Duration, Instant};
 
+use super::super::super::config::{SD_POWER_REQUESTS, SD_POWER_RESPONSES};
 use super::{
     sd_power_action_label, SdPowerRequest, SD_BACKOFF_BASE_MS, SD_BACKOFF_MAX_MS,
-    SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_POWER_RESPONSE_TIMEOUT_MS,
+    SD_POWER_RESPONSE_TIMEOUT_MS,
 };
 
 pub(crate) fn duration_ms_since(start: Instant) -> u32 {
