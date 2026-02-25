@@ -384,6 +384,21 @@ async fn process_upload_request(
                 return upload_result(true, SdUploadResultCode::Ok, active.bytes_written);
             }
 
+            let Some(next_bytes_written) = active.bytes_written.checked_add(data_len as u32) else {
+                return upload_result(
+                    false,
+                    SdUploadResultCode::SizeMismatch,
+                    active.bytes_written,
+                );
+            };
+            if next_bytes_written > active.expected_size {
+                return upload_result(
+                    false,
+                    SdUploadResultCode::SizeMismatch,
+                    active.bytes_written,
+                );
+            }
+
             if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
                 return upload_result(false, code, active.bytes_written);
             }
@@ -400,7 +415,7 @@ async fn process_upload_request(
                     active.bytes_written,
                 );
             }
-            active.bytes_written = active.bytes_written.saturating_add(data_len as u32);
+            active.bytes_written = next_bytes_written;
             upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
         }
         SdUploadCommand::Commit => {
