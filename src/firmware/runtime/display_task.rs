@@ -2,7 +2,7 @@ use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 
-use super::{
+use super::super::{
     config::{
         APP_EVENTS, IMU_INIT_RETRY_MS, SD_POWER_REQUESTS, SD_POWER_RESPONSES,
         TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS,
@@ -11,10 +11,6 @@ use super::{
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_shanshui_update,
         render_suminagashi_update, render_visual_update, sample_battery_percent,
-    },
-    runtime::{
-        run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle,
-        FaceDownToggleState,
     },
     touch::{
         config::{
@@ -33,6 +29,9 @@ use super::{
         wizard::{render_touch_wizard_waiting_screen, TouchCalibrationWizard, WizardDispatch},
     },
     types::{AppEvent, DisplayContext, DisplayMode, SdPowerRequest, TapTraceSample, TimeSyncState},
+};
+use super::{
+    run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle, FaceDownToggleState,
 };
 
 const SD_POWER_POLL_SLICE_MS: u64 = 5;
@@ -131,9 +130,10 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     if !touch_wizard_requested {
                         if display_mode == DisplayMode::Clock {
                             let do_full_refresh = !screen_initialized
-                                || update_count
-                                    .is_multiple_of(super::config::FULL_REFRESH_EVERY_N_UPDATES);
-                            super::render::render_clock_update(
+                                || update_count.is_multiple_of(
+                                    super::super::config::FULL_REFRESH_EVERY_N_UPDATES,
+                                );
+                            super::super::render::render_clock_update(
                                 &mut context.inkplate,
                                 uptime_seconds,
                                 time_sync,
@@ -290,8 +290,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
                     esp_println::println!(
                         "runtime_mode: switching_to={}",
                         match mode {
-                            super::types::RuntimeMode::Normal => "normal",
-                            super::types::RuntimeMode::Upload => "upload",
+                            super::super::types::RuntimeMode::Normal => "normal",
+                            super::super::types::RuntimeMode::Upload => "upload",
                         }
                     );
                     Timer::after_millis(100).await;

@@ -1,3 +1,5 @@
+pub(crate) mod display_task;
+
 use embassy_time::Instant;
 
 use super::{

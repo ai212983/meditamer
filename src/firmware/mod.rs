@@ -1,6 +1,5 @@
 mod comms;
 pub(crate) mod config;
-mod display;
 pub(crate) mod psram;
 mod render;
 mod runtime;
@@ -206,7 +205,7 @@ pub(crate) fn run() -> ! {
                 spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
             }
             if let Some(display_context) = display_context {
-                spawner.must_spawn(display::display_task(display_context));
+                spawner.must_spawn(runtime::display_task::display_task(display_context));
             }
             spawner.must_spawn(clock_task());
             spawner.must_spawn(battery_task());
