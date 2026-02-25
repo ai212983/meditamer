@@ -85,6 +85,8 @@ pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
 pub(crate) const TAP_TRACE_ENABLED: bool = false;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
