@@ -10,7 +10,7 @@ mod touch;
 pub(crate) mod types;
 pub(crate) mod ui;
 #[cfg(feature = "asset-upload-http")]
-mod upload_http;
+mod upload;
 
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{
@@ -102,7 +102,7 @@ pub(crate) fn run() -> ! {
 
     #[cfg(feature = "asset-upload-http")]
     let upload_http_runtime = if run_upload_mode {
-        match upload_http::setup(peripherals.WIFI) {
+        match upload::setup(peripherals.WIFI) {
             Ok(runtime) => Some(runtime),
             Err(reason) => {
                 esp_println::println!("{}", reason);
@@ -190,12 +190,12 @@ pub(crate) fn run() -> ! {
     executor.run(move |spawner| {
         #[cfg(feature = "asset-upload-http")]
         if let Some(upload_http_runtime) = upload_http_runtime {
-            spawner.must_spawn(upload_http::wifi_connection_task(
+            spawner.must_spawn(upload::wifi_connection_task(
                 upload_http_runtime.wifi_controller,
                 upload_http_runtime.initial_credentials,
             ));
-            spawner.must_spawn(upload_http::net_task(upload_http_runtime.net_runner));
-            spawner.must_spawn(upload_http::http_server_task(upload_http_runtime.stack));
+            spawner.must_spawn(upload::net_task(upload_http_runtime.net_runner));
+            spawner.must_spawn(upload::http_server_task(upload_http_runtime.stack));
         }
 
         if run_upload_mode {
