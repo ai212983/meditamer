@@ -26,7 +26,10 @@ use super::{
 };
 #[cfg(feature = "asset-upload-http")]
 use super::{
-    config::{WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CREDENTIALS_UPDATES},
+    config::{
+        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSE_TIMEOUT_MS, WIFI_CONFIG_RESPONSES,
+        WIFI_CREDENTIALS_UPDATES,
+    },
     types::{
         RuntimeMode, WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX,
         WIFI_SSID_MAX,
@@ -118,8 +121,6 @@ const APP_EVENT_ENQUEUE_RETRY_MS: u64 = 25;
 const APP_EVENT_ENQUEUE_MAX_RETRIES: u8 = 240;
 const SD_RESULT_CACHE_CAP: usize = 16;
 const SDWAIT_DEFAULT_TIMEOUT_MS: u32 = 10_000;
-#[cfg(feature = "asset-upload-http")]
-const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {

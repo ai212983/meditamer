@@ -7,13 +7,15 @@ use esp_radio::wifi::{
 };
 
 use super::super::{
-    config::{WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CREDENTIALS_UPDATES},
+    config::{
+        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSE_TIMEOUT_MS, WIFI_CONFIG_RESPONSES,
+        WIFI_CREDENTIALS_UPDATES,
+    },
     types::{
         WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
 };
 
-const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 const WIFI_RX_QUEUE_SIZE: usize = 3;
 const WIFI_TX_QUEUE_SIZE: usize = 2;
 const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
