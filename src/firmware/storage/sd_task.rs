@@ -18,6 +18,7 @@ use super::super::{
 mod asset_read;
 mod dispatch;
 mod logging;
+mod power;
 #[cfg(test)]
 mod tests;
 mod upload;
@@ -31,6 +32,7 @@ use logging::publish_wifi_config_response;
 use logging::{
     publish_asset_read_response, publish_result, publish_upload_result, sd_power_action_label,
 };
+pub(super) use power::{duration_ms_since, failure_backoff_ms, request_sd_power};
 use upload::{process_upload_request, SdUploadSession};
 #[cfg(feature = "asset-upload-http")]
 use wifi_config::process_wifi_config_request;
@@ -277,50 +279,6 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             }
             powered = false;
             upload_mounted = false;
-        }
-    }
-}
-
-fn duration_ms_since(start: Instant) -> u32 {
-    Instant::now()
-        .saturating_duration_since(start)
-        .as_millis()
-        .min(u32::MAX as u64) as u32
-}
-
-fn failure_backoff_ms(consecutive_failures: u8) -> u64 {
-    let exponent = consecutive_failures.saturating_sub(1).min(6);
-    let factor = 1u64 << exponent;
-    SD_BACKOFF_BASE_MS
-        .saturating_mul(factor)
-        .min(SD_BACKOFF_MAX_MS)
-}
-
-async fn request_sd_power(action: SdPowerRequest) -> bool {
-    while SD_POWER_RESPONSES.try_receive().is_ok() {}
-
-    if SD_POWER_REQUESTS.try_send(action).is_err() {
-        esp_println::println!(
-            "sdtask: power_req_queue_full action={}",
-            sd_power_action_label(action)
-        );
-        return false;
-    }
-
-    match with_timeout(
-        Duration::from_millis(SD_POWER_RESPONSE_TIMEOUT_MS),
-        SD_POWER_RESPONSES.receive(),
-    )
-    .await
-    {
-        Ok(ok) => ok,
-        Err(_) => {
-            esp_println::println!(
-                "sdtask: power_resp_timeout action={} timeout_ms={}",
-                sd_power_action_label(action),
-                SD_POWER_RESPONSE_TIMEOUT_MS
-            );
-            false
         }
     }
 }
