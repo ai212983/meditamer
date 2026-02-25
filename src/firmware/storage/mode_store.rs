@@ -23,11 +23,6 @@ impl<'d> ModeStore<'d> {
         self.load_modes().map(|(display_mode, _)| display_mode)
     }
 
-    pub(crate) fn load_runtime_mode(&mut self) -> Option<RuntimeMode> {
-        self.load_modes()
-            .map(|(_, services)| services.as_runtime_mode())
-    }
-
     pub(crate) fn load_runtime_services(&mut self) -> Option<RuntimeServices> {
         self.load_modes().map(|(_, services)| services)
     }
@@ -40,10 +35,6 @@ impl<'d> ModeStore<'d> {
             return;
         }
         self.save_modes(mode, runtime_services);
-    }
-
-    pub(crate) fn save_runtime_mode(&mut self, mode: RuntimeMode) {
-        self.save_runtime_services(mode.as_services());
     }
 
     pub(crate) fn save_runtime_services(&mut self, services: RuntimeServices) {

@@ -26,7 +26,12 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if let Some(bytes) = basic::parse_allocator_alloc_probe_command(line) {
         return Some(SerialCommand::AllocatorAllocProbe { bytes });
     }
-    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_mode_status_command(line) {
+        return Some(SerialCommand::ModeStatus);
+    }
+    if let Some(operation) = basic::parse_modeset_command(line) {
+        return Some(SerialCommand::ModeSet { operation });
+    }
     if let Some(mode) = basic::parse_runmode_command(line) {
         return Some(SerialCommand::RunMode { mode });
     }

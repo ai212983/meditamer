@@ -5,6 +5,7 @@ use embassy_time::{with_timeout, Duration, Instant};
 use crate::firmware::{
     config::SD_RESULTS,
     psram,
+    runtime::service_mode,
     touch::debug_log::uart_write_all,
     types::{SdCommand, SdResult, SerialUart, TapTraceSample},
 };
@@ -71,6 +72,26 @@ pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
         used_bytes,
         status.free_bytes,
         status.peak_used_bytes
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+pub(super) async fn write_mode_status_line(uart: &mut SerialUart) {
+    let services = service_mode::runtime_services();
+    let mut line = heapless::String::<128>::new();
+    let _ = write!(
+        &mut line,
+        "MODE upload={} assets={}\r\n",
+        if services.upload_enabled_flag() {
+            "on"
+        } else {
+            "off"
+        },
+        if services.asset_reads_enabled_flag() {
+            "on"
+        } else {
+            "off"
+        }
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }

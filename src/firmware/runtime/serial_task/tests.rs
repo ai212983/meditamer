@@ -1,8 +1,8 @@
 use super::{commands::SdWaitTarget, parser::SDWAIT_DEFAULT_TIMEOUT_MS, *};
 
-#[cfg(feature = "asset-upload-http")]
 use super::super::types::RuntimeMode;
 use super::super::types::{AppEvent, SD_PATH_MAX, SD_WRITE_MAX};
+use super::commands::ModeSetOperation;
 
 fn path_from(buf: &[u8; SD_PATH_MAX], len: u8) -> &str {
     core::str::from_utf8(&buf[..len as usize]).unwrap()
@@ -100,7 +100,6 @@ fn rejects_psram_alloc_probe_without_size() {
     assert!(cmd.is_none());
 }
 
-#[cfg(feature = "asset-upload-http")]
 #[test]
 fn parses_runmode_upload() {
     let cmd = parse_serial_command(b"RUNMODE UPLOAD");
@@ -112,13 +111,40 @@ fn parses_runmode_upload() {
     }
 }
 
-#[cfg(feature = "asset-upload-http")]
 #[test]
 fn parses_runmode_normal_case_insensitive() {
     let cmd = parse_serial_command(b"runmode normal");
     match cmd {
         Some(SerialCommand::RunMode { mode }) => {
             assert!(matches!(mode, RuntimeMode::Normal));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_mode_status() {
+    let cmd = parse_serial_command(b"MODE STATUS");
+    assert!(matches!(cmd, Some(SerialCommand::ModeStatus)));
+}
+
+#[test]
+fn parses_mode_set_upload_on() {
+    let cmd = parse_serial_command(b"MODE UPLOAD ON");
+    match cmd {
+        Some(SerialCommand::ModeSet { operation }) => {
+            assert!(matches!(operation, ModeSetOperation::Upload(true)));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_mode_set_assets_off() {
+    let cmd = parse_serial_command(b"MODE ASSETS OFF");
+    match cmd {
+        Some(SerialCommand::ModeSet { operation }) => {
+            assert!(matches!(operation, ModeSetOperation::AssetReads(false)));
         }
         _ => panic!("unexpected command"),
     }

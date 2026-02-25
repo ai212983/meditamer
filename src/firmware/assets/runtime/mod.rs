@@ -2,6 +2,7 @@ use embassy_time::{with_timeout, Duration};
 
 use super::super::{
     config::{SD_ASSET_READ_REQUESTS, SD_ASSET_READ_RESPONSES},
+    runtime::service_mode,
     types::{SdAssetReadRequest, SdAssetReadResultCode, SD_ASSET_READ_MAX, SD_PATH_MAX},
 };
 
@@ -14,6 +15,7 @@ const SD_ASSET_RESPONSE_TIMEOUT_MS: u64 = 6_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AssetLoadError {
     InvalidPath,
+    Disabled,
     Timeout,
     Device(SdAssetReadResultCode),
     SizeMismatch,
@@ -22,6 +24,10 @@ pub(crate) enum AssetLoadError {
 async fn sd_asset_read_roundtrip(
     path: &str,
 ) -> Result<([u8; SD_ASSET_READ_MAX], usize), AssetLoadError> {
+    if !service_mode::asset_reads_enabled() {
+        return Err(AssetLoadError::Disabled);
+    }
+
     while SD_ASSET_READ_RESPONSES.try_receive().is_ok() {}
 
     let bytes = path.as_bytes();

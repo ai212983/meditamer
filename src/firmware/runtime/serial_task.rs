@@ -32,7 +32,8 @@ use commands::{serial_command_event_and_responses, SerialCommand};
 use io::run_wifiset_command;
 use io::{
     cache_sd_result, run_allocator_alloc_probe, run_sdwait_command, write_allocator_status_line,
-    write_sd_request_queued, write_sd_result, write_tap_trace_sample, SD_RESULT_CACHE_CAP,
+    write_mode_status_line, write_sd_request_queued, write_sd_result, write_tap_trace_sample,
+    SD_RESULT_CACHE_CAP,
 };
 use parser::parse_serial_command;
 use queue::{enqueue_app_event_with_retry, enqueue_sd_request_with_retry};
@@ -143,6 +144,9 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                         }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;
+                        }
+                        SerialCommand::ModeStatus => {
+                            write_mode_status_line(&mut uart).await;
                         }
                         SerialCommand::AllocatorAllocProbe { bytes } => {
                             run_allocator_alloc_probe(&mut uart, bytes as usize).await;

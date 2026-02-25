@@ -9,7 +9,13 @@ use sdcard::runtime as sd_ops;
 use super::super::config::WIFI_CONFIG_REQUESTS;
 #[cfg(feature = "asset-upload-http")]
 use super::super::config::{SD_REQUESTS, SD_UPLOAD_REQUESTS};
+#[cfg(feature = "asset-upload-http")]
+use super::super::runtime::service_mode;
 use super::super::types::{SdCommand, SdPowerRequest, SdProbeDriver, SdRequest};
+#[cfg(feature = "asset-upload-http")]
+use super::super::types::{
+    SdUploadResult, SdUploadResultCode, WifiConfigResponse, WifiConfigResultCode,
+};
 
 mod asset_read;
 mod dispatch;
@@ -95,6 +101,10 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             .await
             {
                 Either3::First(config_request) => {
+                    if !service_mode::upload_enabled() {
+                        publish_wifi_config_response(disabled_wifi_config_response());
+                        continue;
+                    }
                     let response = process_wifi_config_request(
                         config_request,
                         &upload_session,
@@ -107,6 +117,10 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     continue;
                 }
                 Either3::Second(upload_request) => {
+                    if !service_mode::upload_enabled() {
+                        publish_upload_result(disabled_upload_result());
+                        continue;
+                    }
                     let result = process_upload_request(
                         upload_request,
                         &mut upload_session,
@@ -129,6 +143,10 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             .await
             {
                 Either3::First(config_request) => {
+                    if !service_mode::upload_enabled() {
+                        publish_wifi_config_response(disabled_wifi_config_response());
+                        continue;
+                    }
                     let response = process_wifi_config_request(
                         config_request,
                         &upload_session,
@@ -141,6 +159,10 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     continue;
                 }
                 Either3::Second(upload_request) => {
+                    if !service_mode::upload_enabled() {
+                        publish_upload_result(disabled_upload_result());
+                        continue;
+                    }
                     let result = process_upload_request(
                         upload_request,
                         &mut upload_session,
@@ -190,5 +212,23 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             powered = false;
             upload_mounted = false;
         }
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn disabled_upload_result() -> SdUploadResult {
+    SdUploadResult {
+        ok: false,
+        code: SdUploadResultCode::Busy,
+        bytes_written: 0,
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn disabled_wifi_config_response() -> WifiConfigResponse {
+    WifiConfigResponse {
+        ok: false,
+        code: WifiConfigResultCode::Busy,
+        credentials: None,
     }
 }

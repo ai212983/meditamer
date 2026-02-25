@@ -1,6 +1,7 @@
+use crate::firmware::types::RuntimeMode;
 use crate::firmware::types::TimeSyncCommand;
 #[cfg(feature = "asset-upload-http")]
-use crate::firmware::types::{RuntimeMode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX};
+use crate::firmware::types::{WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX};
 
 use super::util::{find_subslice, parse_i32_ascii, parse_u64_ascii, trim_ascii_whitespace};
 
@@ -86,7 +87,6 @@ pub(super) fn parse_allocator_alloc_probe_command(line: &[u8]) -> Option<u32> {
     Some(bytes as u32)
 }
 
-#[cfg(feature = "asset-upload-http")]
 pub(super) fn parse_runmode_command(line: &[u8]) -> Option<RuntimeMode> {
     let trimmed = trim_ascii_whitespace(line);
     let cmd = b"RUNMODE";
@@ -109,6 +109,81 @@ pub(super) fn parse_runmode_command(line: &[u8]) -> Option<RuntimeMode> {
     if mode.eq_ignore_ascii_case(b"NORMAL") {
         return Some(RuntimeMode::Normal);
     }
+    None
+}
+
+pub(super) fn parse_mode_status_command(line: &[u8]) -> bool {
+    let trimmed = trim_ascii_whitespace(line);
+    if trimmed.eq_ignore_ascii_case(b"MODE") {
+        return true;
+    }
+
+    let cmd = b"MODE";
+    if !trimmed.starts_with(cmd) {
+        return false;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return true;
+    }
+
+    trimmed[i..].eq_ignore_ascii_case(b"STATUS")
+}
+
+pub(super) fn parse_modeset_command(
+    line: &[u8],
+) -> Option<super::super::commands::ModeSetOperation> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"MODE";
+    if !trimmed.starts_with(cmd) {
+        return None;
+    }
+
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+
+    let service_start = i;
+    while i < trimmed.len() && !trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let service = &trimmed[service_start..i];
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+
+    let state = &trimmed[i..];
+    let enabled = if state.eq_ignore_ascii_case(b"ON") {
+        true
+    } else if state.eq_ignore_ascii_case(b"OFF") {
+        false
+    } else {
+        return None;
+    };
+
+    if service.eq_ignore_ascii_case(b"UPLOAD") {
+        return Some(super::super::commands::ModeSetOperation::Upload(enabled));
+    }
+
+    if service.eq_ignore_ascii_case(b"ASSETS")
+        || service.eq_ignore_ascii_case(b"ASSET_READ")
+        || service.eq_ignore_ascii_case(b"ASSET_READS")
+    {
+        return Some(super::super::commands::ModeSetOperation::AssetReads(
+            enabled,
+        ));
+    }
+
     None
 }
 

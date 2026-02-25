@@ -1,11 +1,7 @@
 use core::sync::atomic::Ordering;
 
-#[cfg(feature = "asset-upload-http")]
-use embassy_time::Timer;
 use embassy_time::{Duration, Instant};
 
-#[cfg(feature = "asset-upload-http")]
-use super::super::super::types::RuntimeMode;
 use super::super::super::{
     config::FULL_REFRESH_EVERY_N_UPDATES,
     render::{
@@ -13,6 +9,7 @@ use super::super::super::{
         render_shanshui_update, render_suminagashi_update, render_visual_update,
         sample_battery_percent,
     },
+    runtime::service_mode,
     touch::{
         config::{TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW, TOUCH_SAMPLE_IDLE_FALLBACK_MS},
         tasks::request_touch_pipeline_reset,
@@ -28,9 +25,13 @@ pub(super) async fn handle_app_event(
     context: &mut DisplayContext,
     state: &mut DisplayLoopState,
 ) {
+    let upload_enabled = service_mode::upload_enabled();
     match event {
         AppEvent::Refresh { uptime_seconds } => {
             state.last_uptime_seconds = uptime_seconds;
+            if upload_enabled {
+                return;
+            }
             if !state.touch_wizard_requested {
                 if state.display_mode == DisplayMode::Clock {
                     let do_full_refresh = !state.screen_initialized
@@ -64,6 +65,9 @@ pub(super) async fn handle_app_event(
             }
         }
         AppEvent::BatteryTick => {
+            if upload_enabled {
+                return;
+            }
             if let Some(sampled_percent) = sample_battery_percent(&mut context.inkplate) {
                 state.battery_percent = Some(sampled_percent);
             }
@@ -104,6 +108,9 @@ pub(super) async fn handle_app_event(
                 sync_instant: Instant::now(),
             });
             state.update_count = 0;
+            if upload_enabled {
+                return;
+            }
             if !state.touch_wizard_requested {
                 let display_mode = state.display_mode;
                 let last_uptime_seconds = state.last_uptime_seconds;
@@ -126,6 +133,9 @@ pub(super) async fn handle_app_event(
             }
         }
         AppEvent::TouchIrq => {
+            if upload_enabled {
+                return;
+            }
             state.touch_irq_pending = state.touch_irq_pending.saturating_add(1);
             let now = Instant::now();
             state.touch_irq_burst_until = now + Duration::from_millis(TOUCH_IRQ_BURST_MS);
@@ -136,6 +146,9 @@ pub(super) async fn handle_app_event(
                 now + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
         }
         AppEvent::StartTouchCalibrationWizard => {
+            if upload_enabled {
+                return;
+            }
             esp_println::println!(
                 "touch_wizard: start_event touch_ready={}",
                 state.touch_ready
@@ -163,6 +176,9 @@ pub(super) async fn handle_app_event(
             }
         }
         AppEvent::ForceRepaint => {
+            if upload_enabled {
+                return;
+            }
             if !state.touch_wizard_requested {
                 state.update_count = 0;
                 let display_mode = state.display_mode;
@@ -186,6 +202,9 @@ pub(super) async fn handle_app_event(
             }
         }
         AppEvent::ForceMarbleRepaint => {
+            if upload_enabled {
+                return;
+            }
             if !state.touch_wizard_requested {
                 let last_uptime_seconds = state.last_uptime_seconds;
                 let time_sync = state.time_sync;
@@ -215,19 +234,25 @@ pub(super) async fn handle_app_event(
                 state.screen_initialized = true;
             }
         }
-        #[cfg(feature = "asset-upload-http")]
-        AppEvent::SwitchRuntimeMode(mode) => {
-            context.mode_store.save_runtime_mode(mode);
-            let _ = context.inkplate.frontlight_off();
+        AppEvent::SetRuntimeServices(services) => {
+            service_mode::set_runtime_services(services);
+            context.mode_store.save_runtime_services(services);
+            if services.upload_enabled_flag() {
+                let _ = context.inkplate.frontlight_off();
+            }
             esp_println::println!(
-                "runtime_mode: switching_to={}",
-                match mode {
-                    RuntimeMode::Normal => "normal",
-                    RuntimeMode::Upload => "upload",
+                "runtime_mode: upload={} assets={}",
+                if services.upload_enabled_flag() {
+                    "on"
+                } else {
+                    "off"
+                },
+                if services.asset_reads_enabled_flag() {
+                    "on"
+                } else {
+                    "off"
                 }
             );
-            Timer::after_millis(100).await;
-            esp_hal::system::software_reset();
         }
     }
 }

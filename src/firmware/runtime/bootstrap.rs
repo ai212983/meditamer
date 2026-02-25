@@ -13,13 +13,10 @@ use esp_hal::{
 };
 
 use super::super::config::{
-    APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
-    SD_POWER_RESPONSES, UART_BAUD,
+    APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, UART_BAUD,
 };
 use super::super::storage::ModeStore;
-use super::super::types::{
-    AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeServices, SdPowerRequest,
-};
+use super::super::types::{AppEvent, DisplayContext, PanelPinHold, RuntimeServices};
 use super::super::{psram, storage, touch};
 use super::service_mode;
 use sdcard::probe;
@@ -57,12 +54,10 @@ pub fn run() -> ! {
     let mut runtime_services = mode_store
         .load_runtime_services()
         .unwrap_or(RuntimeServices::normal());
-    let mut run_upload_mode = runtime_services.upload_enabled_flag();
     service_mode::set_runtime_services(runtime_services);
 
     #[cfg(not(feature = "asset-upload-http"))]
-    if run_upload_mode {
-        run_upload_mode = false;
+    if runtime_services.upload_enabled_flag() {
         runtime_services = runtime_services.with_upload_enabled(false);
         mode_store.save_runtime_services(runtime_services);
         service_mode::set_runtime_services(runtime_services);
@@ -84,89 +79,63 @@ pub fn run() -> ! {
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
     #[cfg(feature = "asset-upload-http")]
-    let upload_http_runtime = if run_upload_mode {
-        match storage::upload::setup(peripherals.WIFI) {
-            Ok(runtime) => Some(runtime),
-            Err(reason) => {
-                esp_println::println!("{}", reason);
-                run_upload_mode = false;
-                None
+    let upload_http_runtime = match storage::upload::setup(peripherals.WIFI) {
+        Ok(runtime) => Some(runtime),
+        Err(reason) => {
+            esp_println::println!("{}", reason);
+            if runtime_services.upload_enabled_flag() {
+                runtime_services = runtime_services.with_upload_enabled(false);
+                mode_store.save_runtime_services(runtime_services);
+                service_mode::set_runtime_services(runtime_services);
             }
+            None
         }
-    } else {
-        None
     };
 
-    let mut touch_irq = None;
-    let mut display_context: Option<DisplayContext> = None;
-    let mut sd_power_inkplate: Option<InkplateDriver> = None;
+    let touch_irq = Input::new(
+        peripherals.GPIO36,
+        InputConfig::default().with_pull(Pull::Up),
+    );
 
-    if run_upload_mode {
-        let i2c_cfg = I2cConfig::default()
-            .with_frequency(Rate::from_khz(100))
-            .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
-        let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
-            .expect("failed to init I2C0")
-            .with_sda(peripherals.GPIO21)
-            .with_scl(peripherals.GPIO22);
-        let i2c = HalI2c::new(i2c);
-        let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
-            Ok(driver) => driver,
-            Err(_) => halt_forever(),
-        };
-        if inkplate.init_core().is_err() {
-            halt_forever();
-        }
-        let _ = inkplate.set_wakeup(true);
-        let _ = inkplate.frontlight_off();
-        sd_power_inkplate = Some(inkplate);
-    } else {
-        touch_irq = Some(Input::new(
-            peripherals.GPIO36,
-            InputConfig::default().with_pull(Pull::Up),
-        ));
+    let panel_pins = PanelPinHold {
+        _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
+        _le: Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default()),
+        _d0: Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default()),
+        _d1: Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default()),
+        _d2: Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()),
+        _d3: Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default()),
+        _d4: Output::new(peripherals.GPIO23, Level::Low, OutputConfig::default()),
+        _d5: Output::new(peripherals.GPIO25, Level::Low, OutputConfig::default()),
+        _d6: Output::new(peripherals.GPIO26, Level::Low, OutputConfig::default()),
+        _d7: Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default()),
+        _ckv: Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default()),
+        _sph: Output::new(peripherals.GPIO33, Level::Low, OutputConfig::default()),
+    };
 
-        let panel_pins = PanelPinHold {
-            _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
-            _le: Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default()),
-            _d0: Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default()),
-            _d1: Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default()),
-            _d2: Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()),
-            _d3: Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default()),
-            _d4: Output::new(peripherals.GPIO23, Level::Low, OutputConfig::default()),
-            _d5: Output::new(peripherals.GPIO25, Level::Low, OutputConfig::default()),
-            _d6: Output::new(peripherals.GPIO26, Level::Low, OutputConfig::default()),
-            _d7: Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default()),
-            _ckv: Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default()),
-            _sph: Output::new(peripherals.GPIO33, Level::Low, OutputConfig::default()),
-        };
+    let i2c_cfg = I2cConfig::default()
+        .with_frequency(Rate::from_khz(100))
+        .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
+    let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
+        .expect("failed to init I2C0")
+        .with_sda(peripherals.GPIO21)
+        .with_scl(peripherals.GPIO22);
+    let i2c = HalI2c::new(i2c);
+    let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
+        Ok(driver) => driver,
+        Err(_) => halt_forever(),
+    };
 
-        let i2c_cfg = I2cConfig::default()
-            .with_frequency(Rate::from_khz(100))
-            .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40)));
-        let i2c = I2c::new(peripherals.I2C0, i2c_cfg)
-            .expect("failed to init I2C0")
-            .with_sda(peripherals.GPIO21)
-            .with_scl(peripherals.GPIO22);
-        let i2c = HalI2c::new(i2c);
-        let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
-            Ok(driver) => driver,
-            Err(_) => halt_forever(),
-        };
-
-        if inkplate.init_core().is_err() {
-            halt_forever();
-        }
-
-        let _ = inkplate.set_wakeup(true);
-        let _ = inkplate.frontlight_off();
-
-        display_context = Some(DisplayContext {
-            inkplate,
-            mode_store,
-            _panel_pins: panel_pins,
-        });
+    if inkplate.init_core().is_err() {
+        halt_forever();
     }
+    let _ = inkplate.set_wakeup(true);
+    let _ = inkplate.frontlight_off();
+
+    let display_context = DisplayContext {
+        inkplate,
+        mode_store,
+        _panel_pins: panel_pins,
+    };
 
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
@@ -181,21 +150,11 @@ pub fn run() -> ! {
             spawner.must_spawn(storage::upload::http_server_task(upload_http_runtime.stack));
         }
 
-        if run_upload_mode {
-            if let Some(inkplate) = sd_power_inkplate {
-                spawner.must_spawn(sd_power_task(inkplate));
-            }
-        } else {
-            spawner.must_spawn(touch::tasks::touch_pipeline_task());
-            if let Some(touch_irq) = touch_irq {
-                spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
-            }
-            if let Some(display_context) = display_context {
-                spawner.must_spawn(super::display_task::display_task(display_context));
-            }
-            spawner.must_spawn(clock_task());
-            spawner.must_spawn(battery_task());
-        }
+        spawner.must_spawn(touch::tasks::touch_pipeline_task());
+        spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
+        spawner.must_spawn(super::display_task::display_task(display_context));
+        spawner.must_spawn(clock_task());
+        spawner.must_spawn(battery_task());
 
         spawner.must_spawn(storage::sd_task(sd_probe));
         spawner.must_spawn(super::serial_task::time_sync_task(uart));
@@ -228,18 +187,6 @@ async fn battery_task() {
     loop {
         ticker.next().await;
         APP_EVENTS.send(AppEvent::BatteryTick).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn sd_power_task(mut inkplate: InkplateDriver) {
-    loop {
-        let request = SD_POWER_REQUESTS.receive().await;
-        let ok = match request {
-            SdPowerRequest::On => inkplate.sd_card_power_on().is_ok(),
-            SdPowerRequest::Off => inkplate.sd_card_power_off().is_ok(),
-        };
-        SD_POWER_RESPONSES.send(ok).await;
     }
 }
 

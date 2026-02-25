@@ -11,6 +11,7 @@ use super::super::super::{
         WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
         WIFI_CREDENTIALS_UPDATES,
     },
+    runtime::service_mode,
     types::{
         WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
@@ -54,6 +55,7 @@ pub(super) async fn run_wifi_connection_task(
 ) {
     let mut config_applied = false;
     let mut auth_method_idx = 0usize;
+    let mut paused = false;
 
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
@@ -67,6 +69,24 @@ pub(super) async fn run_wifi_connection_task(
     }
 
     loop {
+        if !service_mode::upload_enabled() {
+            if !paused {
+                let _ = controller.disconnect_async().await;
+                let _ = controller.stop_async().await;
+                paused = true;
+                config_applied = false;
+                auth_method_idx = 0;
+                println!("upload_http: upload mode off; wifi paused");
+            }
+            Timer::after(Duration::from_millis(500)).await;
+            continue;
+        }
+
+        if paused {
+            paused = false;
+            println!("upload_http: upload mode on; wifi resuming");
+        }
+
         while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
             credentials = Some(updated);
             config_applied = false;

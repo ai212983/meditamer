@@ -5,13 +5,6 @@ pub(crate) enum RuntimeMode {
 }
 
 impl RuntimeMode {
-    pub(crate) fn as_persisted(self) -> u8 {
-        match self {
-            Self::Normal => 0,
-            Self::Upload => 1,
-        }
-    }
-
     pub(crate) fn from_persisted(value: u8) -> Option<Self> {
         match value {
             0 => Some(Self::Normal),
@@ -71,14 +64,6 @@ impl RuntimeServices {
 
     pub(crate) fn with_asset_reads_enabled(self, enabled: bool) -> Self {
         Self::new(self.upload_enabled_flag(), enabled)
-    }
-
-    pub(crate) fn as_runtime_mode(self) -> RuntimeMode {
-        if self.upload_enabled_flag() {
-            RuntimeMode::Upload
-        } else {
-            RuntimeMode::Normal
-        }
     }
 
     pub(crate) const fn as_persisted(self) -> u8 {

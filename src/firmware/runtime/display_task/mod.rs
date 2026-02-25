@@ -15,6 +15,7 @@ use wait::next_loop_wait_ms;
 
 use super::super::{
     config::APP_EVENTS,
+    runtime::service_mode,
     touch::{tasks::request_touch_pipeline_reset, wizard::render_touch_wizard_waiting_screen},
     types::DisplayContext,
 };
@@ -62,15 +63,17 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             handle_app_event(event, &mut context, &mut state).await;
         }
 
-        process_imu_cycle(&mut context, &mut state).await;
-        process_touch_cycle(&mut context, &mut state).await;
+        if !service_mode::upload_enabled() {
+            process_imu_cycle(&mut context, &mut state).await;
+            process_touch_cycle(&mut context, &mut state).await;
 
-        if !state.touch_wizard_requested {
-            run_backlight_timeline(
-                &mut context.inkplate,
-                &mut state.backlight_cycle_start,
-                &mut state.backlight_level,
-            );
+            if !state.touch_wizard_requested {
+                run_backlight_timeline(
+                    &mut context.inkplate,
+                    &mut state.backlight_cycle_start,
+                    &mut state.backlight_level,
+                );
+            }
         }
     }
 }

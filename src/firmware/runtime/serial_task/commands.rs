@@ -1,6 +1,8 @@
-use crate::firmware::types::{AppEvent, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX};
 #[cfg(feature = "asset-upload-http")]
-use crate::firmware::types::{RuntimeMode, WifiCredentials};
+use crate::firmware::types::WifiCredentials;
+use crate::firmware::types::{
+    AppEvent, RuntimeMode, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum SerialCommand {
@@ -65,7 +67,10 @@ pub(super) enum SerialCommand {
         target: SdWaitTarget,
         timeout_ms: u32,
     },
-    #[cfg(feature = "asset-upload-http")]
+    ModeStatus,
+    ModeSet {
+        operation: ModeSetOperation,
+    },
     RunMode {
         mode: RuntimeMode,
     },
@@ -73,6 +78,12 @@ pub(super) enum SerialCommand {
     WifiSet {
         credentials: WifiCredentials,
     },
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ModeSetOperation {
+    Upload(bool),
+    AssetReads(bool),
 }
 
 #[derive(Clone, Copy)]
@@ -228,9 +239,29 @@ pub(super) fn serial_command_event_and_responses(
             unreachable!("allocator allocation probe command is handled inline")
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
-        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::ModeStatus => unreachable!("mode status command is handled inline"),
+        SerialCommand::ModeSet { operation } => match operation {
+            ModeSetOperation::Upload(enabled) => (
+                Some(AppEvent::SetRuntimeServices(
+                    crate::firmware::runtime::service_mode::runtime_services()
+                        .with_upload_enabled(enabled),
+                )),
+                None,
+                b"MODE OK\r\n",
+                b"MODE BUSY\r\n",
+            ),
+            ModeSetOperation::AssetReads(enabled) => (
+                Some(AppEvent::SetRuntimeServices(
+                    crate::firmware::runtime::service_mode::runtime_services()
+                        .with_asset_reads_enabled(enabled),
+                )),
+                None,
+                b"MODE OK\r\n",
+                b"MODE BUSY\r\n",
+            ),
+        },
         SerialCommand::RunMode { mode } => (
-            Some(AppEvent::SwitchRuntimeMode(mode)),
+            Some(AppEvent::SetRuntimeServices(mode.as_services())),
             None,
             b"RUNMODE OK\r\n",
             b"RUNMODE BUSY\r\n",
