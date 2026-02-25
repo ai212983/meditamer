@@ -81,18 +81,25 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
 
     let header = core::str::from_utf8(&header_buf[..header_end]).map_err(|_| "header utf8")?;
     let (method, target) = parse_request_line(header).ok_or("bad request line")?;
-    let content_length = parse_content_length(header).unwrap_or(0);
+    let content_length = match parse_content_length(header) {
+        Ok(value) => value,
+        Err(err) => {
+            write_response(socket, b"400 Bad Request", b"invalid Content-Length").await;
+            return Err(err);
+        }
+    };
+    let content_length_or_zero = content_length.unwrap_or(0);
     let body_start = header_end + 4;
     let body_bytes_in_buffer = filled.saturating_sub(body_start);
 
     match (method, target_path(target)) {
         ("GET", "/health") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             write_response(socket, b"200 OK", b"ok").await;
             Ok(())
         }
         ("POST", "/mkdir") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             let (path, path_len) = match parse_path_query(target, "/mkdir") {
                 Ok(path) => path,
                 Err(err) => {
@@ -105,7 +112,7 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             Ok(())
         }
         ("DELETE", "/rm") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             let (path, path_len) = match parse_path_query(target, "/rm") {
                 Ok(path) => path,
                 Err(err) => {
@@ -118,7 +125,7 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             Ok(())
         }
         ("POST", "/upload_begin") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             let (path, path_len) = match parse_path_query(target, "/upload_begin") {
                 Ok(path) => path,
                 Err(err) => {
@@ -146,6 +153,14 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             Ok(())
         }
         ("PUT", "/upload_chunk") => {
+            let content_length = match content_length {
+                Some(value) => value,
+                None => {
+                    write_response(socket, b"411 Length Required", b"Content-Length required")
+                        .await;
+                    return Err("missing content-length");
+                }
+            };
             let mut sent = 0usize;
             if body_bytes_in_buffer > 0 {
                 let take = min(body_bytes_in_buffer, content_length);
@@ -184,18 +199,26 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             Ok(())
         }
         ("POST", "/upload_commit") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             sd_upload_or_http_error(socket, SdUploadCommand::Commit).await?;
             write_response(socket, b"200 OK", b"commit ok").await;
             Ok(())
         }
         ("POST", "/upload_abort") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             sd_upload_or_http_error(socket, SdUploadCommand::Abort).await?;
             write_response(socket, b"200 OK", b"abort ok").await;
             Ok(())
         }
         ("PUT", "/upload") => {
+            let content_length = match content_length {
+                Some(value) => value,
+                None => {
+                    write_response(socket, b"411 Length Required", b"Content-Length required")
+                        .await;
+                    return Err("missing content-length");
+                }
+            };
             let (path, path_len) = match parse_path_query(target, "/upload") {
                 Ok(path) => path,
                 Err(err) => {
@@ -264,7 +287,7 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             Ok(())
         }
         _ => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
+            drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             write_response(socket, b"404 Not Found", b"not found").await;
             Ok(())
         }
@@ -327,14 +350,31 @@ fn parse_request_line(header: &str) -> Option<(&str, &str)> {
     Some((method, target))
 }
 
-fn parse_content_length(header: &str) -> Option<usize> {
+fn parse_content_length(header: &str) -> Result<Option<usize>, &'static str> {
+    let mut content_length = None;
+
     for line in header.lines().skip(1) {
-        let (name, value) = line.split_once(':')?;
-        if name.eq_ignore_ascii_case("content-length") {
-            return value.trim().parse::<usize>().ok();
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+
+        if !name.eq_ignore_ascii_case("content-length") {
+            continue;
         }
+
+        let parsed = value
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| "invalid content-length")?;
+
+        if content_length.is_some() {
+            return Err("duplicate content-length");
+        }
+
+        content_length = Some(parsed);
     }
-    None
+
+    Ok(content_length)
 }
 
 fn target_path(target: &str) -> &str {
