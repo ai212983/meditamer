@@ -5,6 +5,7 @@ mod events;
 mod flow;
 mod render;
 mod swipe;
+mod swipe_event;
 #[cfg(test)]
 mod tests;
 
