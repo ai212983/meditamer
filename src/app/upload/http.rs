@@ -115,8 +115,12 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             }
             Err(UploadAuthError::MissingOrInvalidToken) => {
                 drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
-                write_response(socket, b"401 Unauthorized", b"missing or invalid upload token")
-                    .await;
+                write_response(
+                    socket,
+                    b"401 Unauthorized",
+                    b"missing or invalid upload token",
+                )
+                .await;
                 return Err("missing or invalid upload token");
             }
         }
