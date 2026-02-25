@@ -78,7 +78,10 @@ The project now includes an `embedded-test` harness target:
 - test binary: `embedded_smoke_test`
 - source: `tests/embedded_smoke_test.rs`
 
-`embedded-test` requires `probe-rs` as test runner. Keep the default firmware runner as-is and override runner only for test commands:
+`embedded-test` requires `probe-rs` as test runner.
+The default Xtensa runner (`scripts/xtensa_runner.sh`) is for firmware flashing and
+intentionally rejects `embedded_smoke_test` to avoid false positives/misconfigured runs.
+Override runner for test commands:
 
 ```bash
 CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
@@ -90,6 +93,13 @@ When you are ready to run on hardware:
 ```bash
 CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' \
   cargo test --test embedded_smoke_test
+```
+
+For `cargo run`/`cargo test` firmware binaries, the default runner flashes without opening
+an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
+
+```bash
+ESPFLASH_RUN_MONITOR=1 cargo run
 ```
 
 ## Flash
