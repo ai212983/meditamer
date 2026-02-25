@@ -45,10 +45,15 @@ Current pre-commit hook:
 
 - Validates links in staged Markdown files via `scripts/check_markdown_links.sh`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
+- Runs host-tooling clippy via `scripts/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
 
 Current commit-msg hook:
 
 - Validates commit messages against Conventional Commits via `scripts/check_commit_message.sh` and `commitlint`.
+
+Current pre-push hook:
+
+- Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
 
 Optional full (online) validation:
 
