@@ -3,7 +3,7 @@ use esp_storage::FlashStorage;
 
 use super::super::{
     config::{MODE_STORE_MAGIC, MODE_STORE_RECORD_LEN, MODE_STORE_VERSION},
-    types::{DisplayMode, RuntimeMode},
+    types::{DisplayMode, RuntimeMode, RuntimeServices},
 };
 
 pub(crate) struct ModeStore<'d> {
@@ -24,46 +24,62 @@ impl<'d> ModeStore<'d> {
     }
 
     pub(crate) fn load_runtime_mode(&mut self) -> Option<RuntimeMode> {
-        self.load_modes().map(|(_, runtime_mode)| runtime_mode)
+        self.load_modes()
+            .map(|(_, services)| services.as_runtime_mode())
+    }
+
+    pub(crate) fn load_runtime_services(&mut self) -> Option<RuntimeServices> {
+        self.load_modes().map(|(_, services)| services)
     }
 
     pub(crate) fn save_mode(&mut self, mode: DisplayMode) {
-        let runtime_mode = self.load_runtime_mode().unwrap_or(RuntimeMode::Normal);
+        let runtime_services = self
+            .load_runtime_services()
+            .unwrap_or(RuntimeServices::normal());
         if self.load_mode() == Some(mode) {
             return;
         }
-        self.save_modes(mode, runtime_mode);
+        self.save_modes(mode, runtime_services);
     }
 
     pub(crate) fn save_runtime_mode(&mut self, mode: RuntimeMode) {
-        let display_mode = self.load_mode().unwrap_or(DisplayMode::Shanshui);
-        if self.load_runtime_mode() == Some(mode) {
-            return;
-        }
-        self.save_modes(display_mode, mode);
+        self.save_runtime_services(mode.as_services());
     }
 
-    fn save_modes(&mut self, display_mode: DisplayMode, runtime_mode: RuntimeMode) {
+    pub(crate) fn save_runtime_services(&mut self, services: RuntimeServices) {
+        let display_mode = self.load_mode().unwrap_or(DisplayMode::Shanshui);
+        if self.load_runtime_services() == Some(services) {
+            return;
+        }
+        self.save_modes(display_mode, services);
+    }
+
+    fn save_modes(&mut self, display_mode: DisplayMode, runtime_services: RuntimeServices) {
         let mut record = [0xFFu8; MODE_STORE_RECORD_LEN];
         record[0..4].copy_from_slice(&MODE_STORE_MAGIC.to_le_bytes());
         record[4] = MODE_STORE_VERSION;
         record[5] = display_mode.as_persisted();
-        record[6] = runtime_mode.as_persisted();
+        record[6] = runtime_services.as_persisted();
         record[MODE_STORE_RECORD_LEN - 1] = checksum8(&record[..MODE_STORE_RECORD_LEN - 1]);
         let _ = self.flash.write(self.offset, &record);
     }
 
-    fn load_modes(&mut self) -> Option<(DisplayMode, RuntimeMode)> {
+    fn load_modes(&mut self) -> Option<(DisplayMode, RuntimeServices)> {
         let record = self.load_record()?;
         match record[4] {
             1 => {
                 let display_mode = DisplayMode::from_persisted(record[5])?;
-                Some((display_mode, RuntimeMode::Normal))
+                Some((display_mode, RuntimeServices::normal()))
+            }
+            2 => {
+                let display_mode = DisplayMode::from_persisted(record[5])?;
+                let runtime_mode = RuntimeMode::from_persisted(record[6])?;
+                Some((display_mode, runtime_mode.as_services()))
             }
             MODE_STORE_VERSION => {
                 let display_mode = DisplayMode::from_persisted(record[5])?;
-                let runtime_mode = RuntimeMode::from_persisted(record[6])?;
-                Some((display_mode, runtime_mode))
+                let runtime_services = RuntimeServices::from_persisted(record[6]);
+                Some((display_mode, runtime_services))
             }
             _ => None,
         }

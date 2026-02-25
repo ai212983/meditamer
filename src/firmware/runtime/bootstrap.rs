@@ -18,9 +18,10 @@ use super::super::config::{
 };
 use super::super::storage::ModeStore;
 use super::super::types::{
-    AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeMode, SdPowerRequest,
+    AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeServices, SdPowerRequest,
 };
 use super::super::{psram, storage, touch};
+use super::service_mode;
 use sdcard::probe;
 
 pub fn run() -> ! {
@@ -53,23 +54,18 @@ pub fn run() -> ! {
         .into_async();
 
     let mut mode_store = ModeStore::new(peripherals.FLASH);
-    let mut run_upload_mode = matches!(
-        mode_store
-            .load_runtime_mode()
-            .unwrap_or(RuntimeMode::Normal),
-        RuntimeMode::Upload
-    );
-
-    #[cfg(feature = "asset-upload-http")]
-    if run_upload_mode {
-        // Upload mode is one-shot. On reset or power-cycle the next boot returns to normal mode.
-        mode_store.save_runtime_mode(RuntimeMode::Normal);
-    }
+    let mut runtime_services = mode_store
+        .load_runtime_services()
+        .unwrap_or(RuntimeServices::normal());
+    let mut run_upload_mode = runtime_services.upload_enabled_flag();
+    service_mode::set_runtime_services(runtime_services);
 
     #[cfg(not(feature = "asset-upload-http"))]
     if run_upload_mode {
         run_upload_mode = false;
-        mode_store.save_runtime_mode(RuntimeMode::Normal);
+        runtime_services = runtime_services.with_upload_enabled(false);
+        mode_store.save_runtime_services(runtime_services);
+        service_mode::set_runtime_services(runtime_services);
         esp_println::println!(
             "runtime_mode: upload requested but asset-upload-http is disabled; starting normal mode"
         );
