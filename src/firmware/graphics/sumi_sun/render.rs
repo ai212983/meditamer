@@ -3,6 +3,7 @@ use embedded_graphics::{
     prelude::{DrawTarget, OriginDimensions, Pixel, Point, Size},
 };
 
+use super::sampling::{sample_sumi_sun_binary_pixel, sample_sumi_sun_gray4_level};
 use super::*;
 
 pub fn render_sumi_sun<T>(
