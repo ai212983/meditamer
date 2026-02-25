@@ -1,41 +1,30 @@
 use embassy_time::Instant;
 
-use crate::firmware::config::UI_TICK_MS;
+use crate::firmware::config::{TAP_TRACE_ENABLED, UI_TICK_MS};
 
-pub(super) struct LoopWaitSchedule {
-    pub(super) touch_ready: bool,
-    pub(super) touch_retry_at: Instant,
-    pub(super) touch_next_sample_at: Instant,
-    pub(super) imu_ready: bool,
-    pub(super) imu_retry_at: Instant,
-    pub(super) touch_feedback_dirty: bool,
-    pub(super) touch_feedback_next_flush_at: Instant,
-    pub(super) tap_trace_active: bool,
-    pub(super) tap_trace_next_sample_at: Instant,
-    pub(super) tap_trace_aux_next_sample_at: Instant,
-}
+use super::state::DisplayLoopState;
 
-pub(super) fn next_loop_wait_ms(schedule: LoopWaitSchedule) -> u64 {
+pub(super) fn next_loop_wait_ms(state: &DisplayLoopState) -> u64 {
     let now = Instant::now();
     let mut wait_ms = UI_TICK_MS;
 
-    if schedule.touch_ready {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_next_sample_at));
+    if state.touch_ready {
+        wait_ms = wait_ms.min(ms_until(now, state.touch_next_sample_at));
     } else {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_retry_at));
+        wait_ms = wait_ms.min(ms_until(now, state.touch_retry_at));
     }
 
-    if !schedule.imu_ready {
-        wait_ms = wait_ms.min(ms_until(now, schedule.imu_retry_at));
+    if !state.imu_double_tap_ready {
+        wait_ms = wait_ms.min(ms_until(now, state.imu_retry_at));
     }
 
-    if schedule.touch_feedback_dirty {
-        wait_ms = wait_ms.min(ms_until(now, schedule.touch_feedback_next_flush_at));
+    if state.touch_feedback_dirty {
+        wait_ms = wait_ms.min(ms_until(now, state.touch_feedback_next_flush_at));
     }
 
-    if schedule.tap_trace_active {
-        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_next_sample_at));
-        wait_ms = wait_ms.min(ms_until(now, schedule.tap_trace_aux_next_sample_at));
+    if TAP_TRACE_ENABLED && state.imu_double_tap_ready {
+        wait_ms = wait_ms.min(ms_until(now, state.tap_trace_next_sample_at));
+        wait_ms = wait_ms.min(ms_until(now, state.tap_trace_aux_next_sample_at));
     }
 
     wait_ms
