@@ -1,27 +1,26 @@
 mod app_events;
+mod imu;
 mod sd_power;
 mod wait;
 
-use super::super::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
+use super::super::event_engine::{EngineTraceSample, EventEngine};
 use app_events::handle_app_event;
 use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
+use imu::process_imu_cycle;
 use sd_power::process_sd_power_requests;
 use wait::{next_loop_wait_ms, LoopWaitSchedule};
 
 use super::super::{
-    config::{
-        APP_EVENTS, IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TAP_TRACE_SAMPLE_MS,
-    },
+    config::{APP_EVENTS, TAP_TRACE_ENABLED},
     render::render_active_mode,
     touch::{
         config::{
             TOUCH_CALIBRATION_WIZARD_ENABLED, TOUCH_FEEDBACK_ENABLED,
-            TOUCH_FEEDBACK_MIN_REFRESH_MS, TOUCH_IMU_QUIET_WINDOW_MS, TOUCH_INIT_RETRY_MS,
-            TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW, TOUCH_MAX_CATCHUP_SAMPLES, TOUCH_PIPELINE_EVENTS,
-            TOUCH_SAMPLE_IDLE_FALLBACK_MS, TOUCH_WIZARD_RAW_TRACE_SAMPLES,
-            TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS, TOUCH_ZERO_CONFIRM_WINDOW_MS,
+            TOUCH_FEEDBACK_MIN_REFRESH_MS, TOUCH_INIT_RETRY_MS, TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW,
+            TOUCH_MAX_CATCHUP_SAMPLES, TOUCH_PIPELINE_EVENTS, TOUCH_SAMPLE_IDLE_FALLBACK_MS,
+            TOUCH_WIZARD_RAW_TRACE_SAMPLES, TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS,
+            TOUCH_ZERO_CONFIRM_WINDOW_MS,
         },
         integration::{handle_touch_event, TouchEventContext},
         tasks::{
@@ -31,11 +30,9 @@ use super::super::{
         types::{TouchEventKind, TouchSampleFrame, TouchTraceSample},
         wizard::{render_touch_wizard_waiting_screen, TouchCalibrationWizard, WizardDispatch},
     },
-    types::{DisplayContext, DisplayMode, TapTraceSample, TimeSyncState},
+    types::{DisplayContext, DisplayMode, TimeSyncState},
 };
-use super::{
-    run_backlight_timeline, trigger_backlight_cycle, update_face_down_toggle, FaceDownToggleState,
-};
+use super::{run_backlight_timeline, FaceDownToggleState};
 
 const SD_POWER_POLL_SLICE_MS: u64 = 5;
 
@@ -152,138 +149,34 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             .await;
         }
 
-        let touch_bus_quiet = touch_contact_active
-            || touch_last_nonzero_at.is_some_and(|last_nonzero_at| {
-                Instant::now()
-                    .saturating_duration_since(last_nonzero_at)
-                    .as_millis()
-                    <= TOUCH_IMU_QUIET_WINDOW_MS
-            });
-
-        if !touch_bus_quiet && !imu_double_tap_ready && Instant::now() >= imu_retry_at {
-            imu_double_tap_ready = context.inkplate.lsm6ds3_init_double_tap().unwrap_or(false);
-            if imu_double_tap_ready {
-                let now_ms = Instant::now()
-                    .saturating_duration_since(trace_epoch)
-                    .as_millis();
-                last_engine_trace = event_engine.imu_recovered(now_ms).trace;
-            }
-            imu_retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
-        }
-
-        if !touch_bus_quiet && imu_double_tap_ready {
-            match (
-                context.inkplate.lsm6ds3_read_tap_src(),
-                context.inkplate.lsm6ds3_int1_level(),
-                context.inkplate.lsm6ds3_read_motion_raw(),
-            ) {
-                (Ok(tap_src), Ok(int1), Ok((gx, gy, gz, ax, ay, az))) => {
-                    let now = Instant::now();
-                    let now_ms = now.saturating_duration_since(trace_epoch).as_millis();
-                    last_detect_tap_src = tap_src;
-                    last_detect_int1 = if int1 { 1 } else { 0 };
-
-                    let output = event_engine.tick(SensorFrame {
-                        now_ms,
-                        tap_src,
-                        int1,
-                        gx,
-                        gy,
-                        gz,
-                        ax,
-                        ay,
-                        az,
-                    });
-                    last_engine_trace = output.trace;
-
-                    if output.actions.contains_backlight_trigger() && !touch_wizard_requested {
-                        trigger_backlight_cycle(
-                            &mut context.inkplate,
-                            &mut backlight_cycle_start,
-                            &mut backlight_level,
-                        );
-                    }
-
-                    if update_face_down_toggle(&mut face_down_toggle, now, ax, ay, az) {
-                        display_mode = display_mode.toggled();
-                        context.mode_store.save_mode(display_mode);
-                        update_count = 0;
-                        render_active_mode(
-                            &mut context.inkplate,
-                            display_mode,
-                            last_uptime_seconds,
-                            time_sync,
-                            battery_percent,
-                            (&mut pattern_nonce, &mut first_visual_seed_pending),
-                            true,
-                        )
-                        .await;
-                        screen_initialized = true;
-                    }
-                }
-                _ => {
-                    imu_double_tap_ready = false;
-                    let now_ms = Instant::now()
-                        .saturating_duration_since(trace_epoch)
-                        .as_millis();
-                    last_engine_trace = event_engine.imu_fault(now_ms).trace;
-                    last_detect_tap_src = 0;
-                    last_detect_int1 = 0;
-                    imu_retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
-                }
-            }
-        }
-
-        if TAP_TRACE_ENABLED && imu_double_tap_ready && !touch_bus_quiet {
-            let now = Instant::now();
-
-            if now >= tap_trace_aux_next_sample_at {
-                tap_trace_power_good = context
-                    .inkplate
-                    .read_power_good()
-                    .ok()
-                    .map(|v| v as i16)
-                    .unwrap_or(-1);
-                tap_trace_aux_next_sample_at = now + Duration::from_millis(TAP_TRACE_AUX_SAMPLE_MS);
-            }
-
-            if now >= tap_trace_next_sample_at {
-                if let (Ok(int2), Ok((gx, gy, gz, ax, ay, az))) = (
-                    context.inkplate.lsm6ds3_int2_level(),
-                    context.inkplate.lsm6ds3_read_motion_raw(),
-                ) {
-                    let battery_percent_i16 = battery_percent.map_or(-1, i16::from);
-                    let t_ms = now.saturating_duration_since(trace_epoch).as_millis();
-                    let sample = TapTraceSample {
-                        t_ms,
-                        tap_src: last_detect_tap_src,
-                        seq_count: last_engine_trace.seq_count,
-                        tap_candidate: last_engine_trace.tap_candidate,
-                        cand_src: last_engine_trace.candidate_source_mask,
-                        state_id: last_engine_trace.state_id.as_u8(),
-                        reject_reason: last_engine_trace.reject_reason.as_u8(),
-                        candidate_score: last_engine_trace.candidate_score.0,
-                        window_ms: last_engine_trace.window_ms,
-                        cooldown_active: last_engine_trace.cooldown_active,
-                        jerk_l1: last_engine_trace.jerk_l1,
-                        motion_veto: last_engine_trace.motion_veto,
-                        gyro_l1: last_engine_trace.gyro_l1,
-                        int1: last_detect_int1,
-                        int2: if int2 { 1 } else { 0 },
-                        power_good: tap_trace_power_good,
-                        battery_percent: battery_percent_i16,
-                        gx,
-                        gy,
-                        gz,
-                        ax,
-                        ay,
-                        az,
-                    };
-                    let _ = TAP_TRACE_SAMPLES.try_send(sample);
-                }
-                tap_trace_next_sample_at = now + Duration::from_millis(TAP_TRACE_SAMPLE_MS);
-            }
-        }
+        process_imu_cycle(
+            &mut context,
+            touch_contact_active,
+            touch_last_nonzero_at,
+            &mut imu_double_tap_ready,
+            &mut imu_retry_at,
+            &mut event_engine,
+            &mut last_engine_trace,
+            &mut last_detect_tap_src,
+            &mut last_detect_int1,
+            trace_epoch,
+            touch_wizard_requested,
+            &mut backlight_cycle_start,
+            &mut backlight_level,
+            &mut face_down_toggle,
+            &mut display_mode,
+            &mut update_count,
+            last_uptime_seconds,
+            time_sync,
+            battery_percent,
+            &mut pattern_nonce,
+            &mut first_visual_seed_pending,
+            &mut screen_initialized,
+            &mut tap_trace_next_sample_at,
+            &mut tap_trace_aux_next_sample_at,
+            &mut tap_trace_power_good,
+        )
+        .await;
 
         if !touch_ready && Instant::now() >= touch_retry_at {
             touch_ready = try_touch_init_with_logs(&mut context.inkplate, "retry");
