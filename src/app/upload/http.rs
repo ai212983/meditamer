@@ -25,9 +25,11 @@ enum UploadAuthError {
 pub(super) async fn run_http_server(stack: Stack<'static>) {
     static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
     static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
+    static CHUNK_BUFFER: StaticCell<[u8; SD_UPLOAD_CHUNK_MAX]> = StaticCell::new();
 
     let rx_buffer = RX_BUFFER.init([0u8; HTTP_RW_BUF]);
     let tx_buffer = TX_BUFFER.init([0u8; HTTP_RW_BUF]);
+    let chunk_buffer = CHUNK_BUFFER.init([0u8; SD_UPLOAD_CHUNK_MAX]);
 
     stack.wait_config_up().await;
     if let Some(cfg) = stack.config_v4() {
@@ -53,7 +55,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             continue;
         }
 
-        if let Err(err) = handle_connection(&mut socket).await {
+        if let Err(err) = handle_connection(&mut socket, chunk_buffer).await {
             esp_println::println!("upload_http: request err={}", err);
         }
 
@@ -62,7 +64,10 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     }
 }
 
-async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static str> {
+async fn handle_connection(
+    socket: &mut TcpSocket<'_>,
+    chunk_buf: &mut [u8; SD_UPLOAD_CHUNK_MAX],
+) -> Result<(), &'static str> {
     let mut header_buf = [0u8; HTTP_HEADER_MAX];
     let mut filled = 0usize;
     let header_end = loop {
@@ -200,7 +205,6 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
                 }
             }
 
-            let mut chunk_buf = [0u8; SD_UPLOAD_CHUNK_MAX];
             while sent < content_length {
                 let want = min(chunk_buf.len(), content_length - sent);
                 let n = socket
@@ -281,7 +285,6 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
                 }
             }
 
-            let mut chunk_buf = [0u8; SD_UPLOAD_CHUNK_MAX];
             while sent < content_length {
                 let want = min(chunk_buf.len(), content_length - sent);
                 let n = socket
