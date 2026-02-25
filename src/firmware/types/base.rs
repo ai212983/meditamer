@@ -1,6 +1,6 @@
 use esp_hal::{gpio::Output, uart::Uart, Async};
 use meditamer::{
-    inkplate_hal::InkplateHal,
+    drivers::inkplate::InkplateHal,
     platform::{BusyDelay, HalI2c},
 };
 use sdcard::probe;

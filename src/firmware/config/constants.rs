@@ -1,5 +1,5 @@
 use meditamer::{
-    inkplate_hal::{E_INK_HEIGHT, E_INK_WIDTH},
+    drivers::inkplate::{E_INK_HEIGHT, E_INK_WIDTH},
     suminagashi::{
         DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
     },

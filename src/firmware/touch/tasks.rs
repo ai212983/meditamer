@@ -1,6 +1,6 @@
 use core::sync::atomic::Ordering;
 
-use meditamer::inkplate_hal::TouchInitStatus;
+use meditamer::drivers::inkplate::TouchInitStatus;
 
 use super::{
     config::{

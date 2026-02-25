@@ -10,7 +10,7 @@ use esp_hal::{
     timer::timg::TimerGroup,
     uart::{Config as UartConfig, Uart},
 };
-use meditamer::{inkplate_hal::InkplateHal, platform::HalI2c};
+use meditamer::{drivers::inkplate::InkplateHal, platform::HalI2c};
 
 use super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
