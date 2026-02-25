@@ -92,22 +92,40 @@ pub(crate) fn roundtrip_error_body(error: SdUploadRoundtripError) -> &'static [u
     }
 }
 
+fn drain_stale_sd_upload_results() {
+    while SD_UPLOAD_RESULTS.try_receive().is_ok() {}
+}
+
 async fn sd_upload_roundtrip_raw(
     command: SdUploadCommand,
     chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
+    // A previous request may have timed out locally while the SD task still produced
+    // a late result. Drain any queued stale responses before issuing a new request.
+    drain_stale_sd_upload_results();
+
     SD_UPLOAD_REQUESTS
         .send(SdUploadRequest {
             command,
             chunk_data,
         })
         .await;
-    let result = with_timeout(
+
+    let result = match with_timeout(
         Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS),
         SD_UPLOAD_RESULTS.receive(),
     )
     .await
-    .map_err(|_| SdUploadRoundtripError::Timeout)?;
+    {
+        Ok(result) => result,
+        Err(_) => {
+            // If a response raced with timeout handling, clear it so the next
+            // roundtrip cannot consume a stale result.
+            drain_stale_sd_upload_results();
+            return Err(SdUploadRoundtripError::Timeout);
+        }
+    };
+
     if result.ok {
         Ok(result)
     } else {
