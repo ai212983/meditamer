@@ -249,6 +249,8 @@ Notes:
   (fallback `SSID` / `PASSWORD`).
 - if credentials are not compiled in, firmware waits for UART `WIFISET` command.
 - server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
+- HTTP endpoints are currently unauthenticated: only enable this feature on an isolated, trusted network.
+- mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
 
 Runtime credential provisioning over UART:
 
@@ -304,7 +306,7 @@ Upload a single file:
 scripts/upload_assets_http.py --host <device-ip> --src ./path/to/file.bin --dst /assets
 ```
 
-Delete paths (absolute or relative to `--dst`):
+Delete paths (relative to `--dst`, or absolute under `/assets`):
 
 ```bash
 scripts/upload_assets_http.py --host <device-ip> --dst /assets --rm old.bin --rm unused/
