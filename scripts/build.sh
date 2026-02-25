@@ -15,10 +15,18 @@ fi
 
 case "$1" in
 "" | "release")
-    cargo build --release "${feature_args[@]}"
+    if [[ ${#feature_args[@]} -gt 0 ]]; then
+        cargo build --release "${feature_args[@]}"
+    else
+        cargo build --release
+    fi
     ;;
 "debug")
-    cargo build "${feature_args[@]}"
+    if [[ ${#feature_args[@]} -gt 0 ]]; then
+        cargo build "${feature_args[@]}"
+    else
+        cargo build
+    fi
     ;;
 *)
     echo "Wrong argument. Only \"debug\"/\"release\" arguments are supported"
