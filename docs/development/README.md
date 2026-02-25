@@ -249,7 +249,9 @@ Notes:
   (fallback `SSID` / `PASSWORD`).
 - if credentials are not compiled in, firmware waits for UART `WIFISET` command.
 - server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
-- HTTP endpoints are currently unauthenticated: only enable this feature on an isolated, trusted network.
+- all HTTP endpoints except `/health` require an `x-upload-token` header; requests without a valid token are rejected.
+- if no upload token is configured at build time, all non-`/health` endpoints return HTTP 503 (service unavailable).
+- configure the token at build time with `MEDITAMER_UPLOAD_HTTP_TOKEN` (fallback: `UPLOAD_HTTP_TOKEN`).
 - mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
 
 Runtime credential provisioning over UART:
@@ -282,16 +284,21 @@ Health check:
 curl "http://<device-ip>:8080/health"
 ```
 
-Create directory:
+Create directory (authenticated endpoint):
 
 ```bash
-curl -X POST "http://<device-ip>:8080/mkdir?path=/assets/images"
+UPLOAD_TOKEN=<your-upload-token>
+curl -X POST \
+  -H "x-upload-token: ${UPLOAD_TOKEN}" \
+  "http://<device-ip>:8080/mkdir?path=/assets/images"
 ```
 
-Delete file or empty directory:
+Delete file or empty directory (authenticated endpoint):
 
 ```bash
-curl -X DELETE "http://<device-ip>:8080/rm?path=/assets/old.bin"
+curl -X DELETE \
+  -H "x-upload-token: ${UPLOAD_TOKEN}" \
+  "http://<device-ip>:8080/rm?path=/assets/old.bin"
 ```
 
 Upload an assets directory:
