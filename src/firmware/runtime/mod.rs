@@ -1,5 +1,6 @@
 mod bootstrap;
 pub(crate) mod display_task;
+mod serial_task;
 pub use bootstrap::run;
 
 use embassy_time::Instant;

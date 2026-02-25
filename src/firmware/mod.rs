@@ -1,5 +1,4 @@
 pub mod assets;
-mod comms;
 pub(crate) mod config;
 pub(crate) mod event_engine;
 #[cfg(feature = "graphics")]

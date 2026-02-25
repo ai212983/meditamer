@@ -20,7 +20,7 @@ use super::super::storage::ModeStore;
 use super::super::types::{
     AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeMode, SdPowerRequest,
 };
-use super::super::{comms, psram, storage, touch};
+use super::super::{psram, storage, touch};
 use sdcard::probe;
 
 pub fn run() -> ! {
@@ -202,7 +202,7 @@ pub fn run() -> ! {
         }
 
         spawner.must_spawn(storage::sd_task(sd_probe));
-        spawner.must_spawn(comms::time_sync_task(uart));
+        spawner.must_spawn(super::serial_task::time_sync_task(uart));
     });
 }
 
