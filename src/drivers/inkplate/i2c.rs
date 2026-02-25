@@ -5,7 +5,7 @@ where
     I2C: I2cOps,
     D: DelayOps,
 {
-    pub(super) fn cached_regs_mut(&mut self, addr: u8) -> Result<&mut [u8; 23], I2C::Error> {
+    fn cached_regs_mut(&mut self, addr: u8) -> Result<&mut [u8; 23], I2C::Error> {
         match addr {
             IO_INT_ADDR => Ok(&mut self.io_regs_int),
             IO_EXT_ADDR => Ok(&mut self.io_regs_ext),
@@ -13,7 +13,7 @@ where
         }
     }
 
-    pub(super) fn cached_regs(&self, addr: u8) -> Result<&[u8; 23], I2C::Error> {
+    fn cached_regs(&self, addr: u8) -> Result<&[u8; 23], I2C::Error> {
         match addr {
             IO_INT_ADDR => Ok(&self.io_regs_int),
             IO_EXT_ADDR => Ok(&self.io_regs_ext),
@@ -142,7 +142,7 @@ where
         Ok((value & (1u8 << bit)) != 0)
     }
 
-    pub(super) fn modify_cached_reg(
+    fn modify_cached_reg(
         &mut self,
         addr: u8,
         idx: usize,
@@ -155,7 +155,7 @@ where
         Ok(())
     }
 
-    pub(super) fn write_cached_reg(&mut self, addr: u8, idx: usize) -> Result<(), I2C::Error> {
+    fn write_cached_reg(&mut self, addr: u8, idx: usize) -> Result<(), I2C::Error> {
         let reg_value = self.cached_regs(addr)?[idx];
         self.i2c_write(addr, &[PCAL_REG_ADDRS[idx], reg_value])
     }

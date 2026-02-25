@@ -288,7 +288,7 @@ where
         })
     }
 
-    pub(super) fn touch_decode_xy(raw: &[u8; 8], index: usize) -> (u16, u16) {
+    fn touch_decode_xy(raw: &[u8; 8], index: usize) -> (u16, u16) {
         let base = 1 + index * 3;
         let d0 = raw[base];
         let d1 = raw[base + 1];
@@ -299,11 +299,7 @@ where
         (x, y)
     }
 
-    pub(super) fn touch_scale_axis(
-        raw_value: u16,
-        panel_extent: usize,
-        controller_extent: u16,
-    ) -> u16 {
+    fn touch_scale_axis(raw_value: u16, panel_extent: usize, controller_extent: u16) -> u16 {
         if panel_extent == 0 || controller_extent == 0 {
             return 0;
         }
@@ -317,7 +313,7 @@ where
         scaled.min(max_value) as u16
     }
 
-    pub(super) fn touch_transform_point(&self, x_raw: u16, y_raw: u16, rotation: u8) -> TouchPoint {
+    fn touch_transform_point(&self, x_raw: u16, y_raw: u16, rotation: u8) -> TouchPoint {
         // Inkplate 4 TEMPERA mapping mirrors both axes at rotation 0.
         let sx = Self::touch_scale_axis(x_raw, E_INK_HEIGHT, self.touch_x_res);
         let sy = Self::touch_scale_axis(y_raw, E_INK_WIDTH, self.touch_y_res);
@@ -425,7 +421,7 @@ where
         self.digital_write_internal(IO_INT_ADDR, BATTERY_MEAS_EN, !gate_active_high)
     }
 
-    pub(super) fn detect_battery_gate_polarity(&mut self) -> Result<bool, I2C::Error> {
+    fn detect_battery_gate_polarity(&mut self) -> Result<bool, I2C::Error> {
         if let Some(gate_active_high) = self.battery_gate_active_high {
             return Ok(gate_active_high);
         }
@@ -452,7 +448,7 @@ where
     }
 }
 
-pub(super) fn touch_raw_frame_has_contact(raw: &[u8; 8], x_res: u16, y_res: u16) -> bool {
+fn touch_raw_frame_has_contact(raw: &[u8; 8], x_res: u16, y_res: u16) -> bool {
     if raw[7].count_ones() > 0 {
         return true;
     }
@@ -470,7 +466,7 @@ pub(super) fn touch_raw_frame_has_contact(raw: &[u8; 8], x_res: u16, y_res: u16)
     false
 }
 
-pub(super) fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_res: u16) -> bool {
+fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_res: u16) -> bool {
     if x_raw == 0 || y_raw == 0 {
         return false;
     }
@@ -485,7 +481,7 @@ pub(super) fn touch_raw_point_plausible(x_raw: u16, y_raw: u16, x_res: u16, y_re
 const TOUCH_RAW_EMPTY_RETRY_COUNT: u8 = 2;
 const TOUCH_RAW_EMPTY_RETRY_DELAY_MS: u32 = 1;
 
-pub(super) fn touch_presence_count(bit_count: u8, coord_count: u8) -> u8 {
+fn touch_presence_count(bit_count: u8, coord_count: u8) -> u8 {
     // Reference stack keeps contact presence from status bits. Keep that signal
     // so coordinate dropouts do not truncate an active swipe.
     bit_count.max(coord_count).min(2)
@@ -496,25 +492,25 @@ mod touch_raw_point_plausible_tests {
     use super::{touch_presence_count, touch_raw_frame_has_contact, touch_raw_point_plausible};
 
     #[test]
-    pub(super) fn rejects_zero_axes() {
+    fn rejects_zero_axes() {
         assert!(!touch_raw_point_plausible(0, 100, 2048, 2048));
         assert!(!touch_raw_point_plausible(100, 0, 2048, 2048));
     }
 
     #[test]
-    pub(super) fn rejects_out_of_range() {
+    fn rejects_out_of_range() {
         assert!(!touch_raw_point_plausible(2049, 100, 2048, 2048));
         assert!(!touch_raw_point_plausible(100, 3000, 2048, 2048));
     }
 
     #[test]
-    pub(super) fn accepts_in_range_non_zero_points() {
+    fn accepts_in_range_non_zero_points() {
         assert!(touch_raw_point_plausible(1, 1, 2048, 2048));
         assert!(touch_raw_point_plausible(2048, 2048, 2048, 2048));
     }
 
     #[test]
-    pub(super) fn presence_requires_bits_and_coords() {
+    fn presence_requires_bits_and_coords() {
         assert_eq!(touch_presence_count(0, 0), 0);
         // Bit-only presence must be preserved; higher layers debounce and gate it.
         assert_eq!(touch_presence_count(1, 0), 1);
@@ -527,14 +523,14 @@ mod touch_raw_point_plausible_tests {
     }
 
     #[test]
-    pub(super) fn raw_frame_has_contact_when_status_bits_are_set() {
+    fn raw_frame_has_contact_when_status_bits_are_set() {
         let mut raw = [0u8; 8];
         raw[7] = 0x01;
         assert!(touch_raw_frame_has_contact(&raw, 2048, 2048));
     }
 
     #[test]
-    pub(super) fn raw_frame_has_contact_when_decoded_coordinate_is_plausible() {
+    fn raw_frame_has_contact_when_decoded_coordinate_is_plausible() {
         let mut raw = [0u8; 8];
         raw[1] = 0x14; // x_high=0x1, y_high=0x4
         raw[2] = 0x23; // x_low
@@ -543,7 +539,7 @@ mod touch_raw_point_plausible_tests {
     }
 
     #[test]
-    pub(super) fn raw_frame_without_bits_or_coords_is_empty() {
+    fn raw_frame_without_bits_or_coords_is_empty() {
         let raw = [0u8; 8];
         assert!(!touch_raw_frame_has_contact(&raw, 2048, 2048));
     }
