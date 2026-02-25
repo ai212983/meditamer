@@ -27,7 +27,7 @@
 ## Phase 2: Allocator Integration
 - Add `esp-alloc` dependency and feature-gate it (for example `psram-alloc`).
 - Register global allocator in one place and initialize at boot.
-- Wire initialization from `app::run()` before tasks start.
+- Wire initialization from `firmware::run()` before tasks start.
 - Add clear panic/log path if allocator init fails.
 
 ## Phase 3: Memory Policy

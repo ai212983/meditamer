@@ -4,7 +4,7 @@ Last updated: 2026-02-13 (Europe/Berlin context)
 
 ## Goal
 
-Move sensor-event detection from ad hoc logic in `src/main.rs` into a reusable `statig`-based engine that:
+Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task.rs` into a reusable `statig`-based engine that:
 
 - supports current triple-tap backlight behavior reliably,
 - is extensible to non-tap events (pickup, placement, stillness, near/far intent),
@@ -27,7 +27,7 @@ Move sensor-event detection from ad hoc logic in `src/main.rs` into a reusable `
 
 ## Current Baseline (as of this plan)
 
-- Detection and sequencing logic is embedded in `display_task` in `src/main.rs`.
+- Detection and sequencing logic is embedded in `display_task` in `src/firmware/runtime/display_task.rs`.
 - Current detector uses fused signals:
   - LSM tap source bits (`TAP_SRC` axis/single/tap-event),
   - accel jerk,
@@ -52,13 +52,13 @@ Move sensor-event detection from ad hoc logic in `src/main.rs` into a reusable `
 
 ### Proposed modules
 
-- `src/event_engine/mod.rs`
-- `src/event_engine/types.rs`
-- `src/event_engine/features.rs`
-- `src/event_engine/tap_hsm.rs`
-- `src/event_engine/config.rs`
-- `src/event_engine/trace.rs`
-- `src/event_engine/registry.rs`
+- `src/firmware/event_engine/mod.rs`
+- `src/firmware/event_engine/types.rs`
+- `src/firmware/event_engine/features.rs`
+- `src/firmware/event_engine/tap_hsm.rs`
+- `src/firmware/event_engine/config.rs`
+- `src/firmware/event_engine/trace.rs`
+- `src/firmware/event_engine/registry.rs`
 - `build.rs` (or `xtask`) for config compilation
 - `config/events.toml` (authoritative declarative event definitions)
 - `src/generated/event_config.rs` (generated; checked in or generated during build)
@@ -259,7 +259,7 @@ Exit criteria:
 
 ## Next Session Checklist
 
-1. Add `statig` crate and create `src/event_engine/` skeleton.
+1. Add `statig` crate and create `src/firmware/event_engine/` skeleton.
 2. Move current pure calculations (jerk, axis, veto timing helpers) into `features.rs`.
 3. Add `config/events.toml` and generator pipeline (`build.rs` or `xtask`) with validation.
 4. Introduce `TapHsmConfig` loaded from generated config (not hardcoded constants).

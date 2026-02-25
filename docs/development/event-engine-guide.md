@@ -16,7 +16,7 @@ The runtime path is:
 4. Engine emits `EngineAction`s and `EngineTraceSample`.
 5. Firmware executes actions (currently `BacklightTrigger`) and streams trace lines over UART.
 
-Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/main.rs`.
+Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/runtime/display_task.rs`.
 
 ## File Map
 
@@ -29,29 +29,29 @@ Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside 
   - Generates `EVENT_ENGINE_CONFIG` at build time.
   - Fails build on invalid config values.
 
-- `src/event_engine/config.rs`
+- `src/firmware/event_engine/config.rs`
   - Engine config structs.
   - Includes generated config from `OUT_DIR/event_config.rs`.
   - Do not hand-edit generated config output.
 
-- `src/event_engine/types.rs`
+- `src/firmware/event_engine/types.rs`
   - Public engine types (`SensorFrame`, `MotionFeatures`, `EngineAction`, `RejectReason`, etc.).
 
-- `src/event_engine/features.rs`
+- `src/firmware/event_engine/features.rs`
   - Pure feature/candidate computation (`no HAL access`).
   - Contains source-mask and scoring logic.
 
-- `src/event_engine/tap_hsm.rs`
+- `src/firmware/event_engine/tap_hsm.rs`
   - `statig` HSM (`Idle`, `TapSeq1`, `TapSeq2`, `TriggeredCooldown`, `SensorFaultBackoff`).
   - Transition logic and action emission.
 
-- `src/event_engine/trace.rs`
+- `src/firmware/event_engine/trace.rs`
   - Internal trace payload shape (`state_id`, `reject_reason`, `candidate_score`, etc.).
 
-- `src/event_engine/registry.rs`
+- `src/firmware/event_engine/registry.rs`
   - Event registration table for enabled/disabled event kinds.
 
-- `src/main.rs`
+- `src/firmware/runtime/display_task.rs`
   - Integrates engine in `display_task`.
   - Converts IMU samples to `SensorFrame`, handles `BacklightTrigger`, and writes trace CSV.
 
@@ -77,7 +77,7 @@ If validation fails, Cargo prints an actionable panic message from `build.rs`.
 
 When changing behavior:
 
-1. Update guards/transitions in `src/event_engine/tap_hsm.rs`.
+1. Update guards/transitions in `src/firmware/event_engine/tap_hsm.rs`.
 2. Keep action semantics stable unless intentional:
    - `BacklightTrigger` means "start light cycle now".
    - `EventDetected` is the generic event bus output.
@@ -159,7 +159,7 @@ rg '^tap_trace' logs/tap_trace_test.log
 
 ## Guardrails
 
-- Keep feature extraction pure (`src/event_engine/features.rs` should not call HAL).
+- Keep feature extraction pure (`src/firmware/event_engine/features.rs` should not call HAL).
 - Keep runtime orchestration in `display_task`; avoid hardware side-effects inside engine code.
 - Keep config-driven thresholds/timing in `config/events.toml`; avoid hardcoding detector constants in the main path.
 - Preserve deterministic, traceable reject behavior when adding new logic.

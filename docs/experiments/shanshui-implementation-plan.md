@@ -11,12 +11,12 @@ The source design brief is strong on architecture, but not implementation detail
 ## Current Baseline (Repository-Specific)
 
 - Runtime target is `esp-hal` on `esp32` (`xtensa-esp32-none-elf`).
-- Display pipeline today is framebuffer-based 1-bit (`src/drivers/inkplate/mod.rs` + `src/drivers/inkplate/display_impl.inc.rs`).
+- Display pipeline today is framebuffer-based 1-bit (`src/drivers/inkplate/mod.rs` + `src/drivers/inkplate/display.rs`).
 - Existing procedural renderers are:
-  - `src/graphics/suminagashi.rs` (fixed-point marbling + threshold dithering)
-  - `src/graphics/sumi_sun.rs` (fixed-point sun disk rendering)
-- Current visual mode switch is `DisplayMode::{Clock, Suminagashi}` in `src/main.rs`.
-- Existing timing telemetry already records marble redraw duration in `src/main.rs` via `LAST_MARBLE_REDRAW_MS` / `MAX_MARBLE_REDRAW_MS`.
+  - `src/firmware/graphics/suminagashi.rs` (fixed-point marbling + threshold dithering)
+  - `src/firmware/graphics/sumi_sun.rs` (fixed-point sun disk rendering)
+- Current visual mode switch is driven by `display_task` in `src/firmware/runtime/display_task.rs` using `DisplayMode` from `src/firmware/types/modes.rs`.
+- Existing timing telemetry records marble redraw duration in `src/firmware/render/visual.rs` via `LAST_MARBLE_REDRAW_MS` / `MAX_MARBLE_REDRAW_MS`.
 
 ## Scope
 
@@ -38,7 +38,7 @@ The source design brief is strong on architecture, but not implementation detail
 
 ## Module Layout
 
-- `src/graphics/shanshui.rs` (or `src/graphics/shanshui.rs` if split):
+- `src/firmware/graphics/shanshui.rs` (or `src/firmware/graphics/shanshui.rs` if split):
   - Fixed-point aliases/constants (reuse `fixed::types::I16F16` initially).
   - Coordinate mapping and deterministic seed mixing.
   - Terrain SDF evaluator (background/mid/foreground layers).
@@ -48,12 +48,11 @@ The source design brief is strong on architecture, but not implementation detail
   - Fog/water/void blending.
   - Stateless tree placement via hashed columns and implicit branch tests.
   - `render_rows_bw(...)` API with callback signature matching existing row renderers.
-- `src/lib.rs`:
-  - Export `pub mod shanshui;` under `graphics` feature.
-- `src/main.rs`:
+- `src/firmware/mod.rs`:
+  - Export graphics modules under `firmware::graphics`.
+- `src/firmware/types/modes.rs` and `src/firmware/runtime/display_task.rs`:
   - Extend `DisplayMode` to include `Shanshui`.
-  - Add render dispatch function following existing chunked row loop.
-  - Add seed policy and mode toggling behavior.
+  - Add render dispatch integration and mode toggling behavior.
 - `docs/development/hardware-test-matrix.md`:
   - Add Shanshui-specific soak and visual checks.
 
@@ -84,7 +83,7 @@ Deliverables:
 - Create `shanshui` module skeleton with:
   - `build_params(seed, size)` (if needed)
   - `render_shanshui_rows_bw(width, height, y_start, y_end, seed, put_black_pixel)`
-- Integrate new mode in `src/main.rs`:
+- Integrate new mode in `src/firmware/runtime/display_task.rs`:
   - add `DisplayMode::Shanshui`
   - wire into `render_active_mode(...)`
   - preserve existing Clock and Suminagashi behavior.
@@ -142,7 +141,7 @@ Exit criteria:
 
 ## Phase 5: Performance Tuning and Telemetry (1-2 days)
 
-- Add timing metrics around Shanshui render loop in `src/main.rs`.
+- Add timing metrics around Shanshui render loop in `src/firmware/render/visual.rs`.
 - Tune constants for acceptable latency on device.
 - Avoid expensive operations in hot path:
   - remove divisions where possible
@@ -169,14 +168,14 @@ Exit criteria:
 
 ## Detailed Work Items
 
-- [ ] Add `src/graphics/shanshui.rs` with deterministic seed mixer and fixed-point utilities.
+- [ ] Add `src/firmware/graphics/shanshui.rs` with deterministic seed mixer and fixed-point utilities.
 - [ ] Implement base SDF landscape function and 3-layer composition.
 - [ ] Implement ridge and warp texture evaluators.
 - [ ] Implement local gradient estimator and ink-density modulation.
 - [ ] Implement deterministic tree column hashing and implicit branch tests.
 - [ ] Implement fog and water/void masking.
 - [ ] Implement row-stream Atkinson diffusion with rolling buffers.
-- [ ] Integrate `DisplayMode::Shanshui` in `src/main.rs`.
+- [ ] Integrate `DisplayMode::Shanshui` in `src/firmware/runtime/display_task.rs`.
 - [ ] Add render-time counters/log markers for Shanshui path.
 - [ ] Update `docs/development/hardware-test-matrix.md` with Shanshui checks.
 
