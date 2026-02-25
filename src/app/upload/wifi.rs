@@ -20,6 +20,7 @@ const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
 const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
+const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
 const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
     AuthMethod::Wpa2Personal,
     AuthMethod::WpaWpa2Personal,
@@ -126,8 +127,10 @@ pub(super) async fn run_wifi_connection_task(
             }
         }
 
-        if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
-            log_scan_for_target(&mut controller, ssid).await;
+        if WIFI_LOG_SCAN_ON_CONNECT {
+            if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
+                log_scan_for_target(&mut controller, ssid).await;
+            }
         }
 
         match controller.connect_async().await {
