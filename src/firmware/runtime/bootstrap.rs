@@ -26,7 +26,7 @@ use sdcard::probe;
 pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
-    esp_alloc::heap_allocator!(size: 48 * 1024);
+    esp_alloc::heap_allocator!(size: 40 * 1024);
 
     #[cfg(feature = "psram-alloc")]
     let allocator_status = psram::init_allocator(&peripherals.PSRAM);

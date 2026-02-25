@@ -16,12 +16,12 @@ use super::super::super::{
     },
 };
 
-const WIFI_RX_QUEUE_SIZE: usize = 3;
-const WIFI_TX_QUEUE_SIZE: usize = 2;
-const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
-const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
-const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
-const WIFI_RX_BA_WIN: u8 = 3;
+const WIFI_RX_QUEUE_SIZE: usize = 2;
+const WIFI_TX_QUEUE_SIZE: usize = 1;
+const WIFI_STATIC_RX_BUF_NUM: u8 = 2;
+const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 4;
+const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 4;
+const WIFI_RX_BA_WIN: u8 = 2;
 const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
 const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
     AuthMethod::Wpa2Personal,
