@@ -37,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         metavar="REMOTE_PATH",
         help="Remote path to delete (absolute or relative to --dst); can be repeated",
     )
+    parser.add_argument(
+        "--token",
+        default=os.getenv("UPLOAD_TOKEN"),
+        help="Upload auth token for x-upload-token header (default: UPLOAD_TOKEN env var)",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +53,13 @@ def remote_join(root: str, rel: Path) -> str:
     for part in parts:
         path = posixpath.join(path, part)
     return path if path else "/"
+
+
+def auth_headers(token: str | None, headers=None) -> dict[str, str]:
+    merged = dict(headers or {})
+    if token:
+        merged["x-upload-token"] = token
+    return merged
 
 
 def request(
@@ -99,14 +111,32 @@ def health_check(host: str, port: int, timeout: float) -> None:
     request(host, port, timeout, "GET", "/health", retries=8)
 
 
-def mkdir(host: str, port: int, timeout: float, remote_path: str) -> None:
+def mkdir(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
     target = f"/mkdir?path={quote(remote_path, safe='/')}"
-    request(host, port, timeout, "POST", target, body=b"", retries=8)
+    request(
+        host,
+        port,
+        timeout,
+        "POST",
+        target,
+        body=b"",
+        headers=auth_headers(token),
+        retries=8,
+    )
 
 
-def rm_path(host: str, port: int, timeout: float, remote_path: str) -> None:
+def rm_path(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
     target = f"/rm?path={quote(remote_path, safe='/')}"
-    request(host, port, timeout, "DELETE", target, body=b"", retries=8)
+    request(
+        host,
+        port,
+        timeout,
+        "DELETE",
+        target,
+        body=b"",
+        headers=auth_headers(token),
+        retries=8,
+    )
 
 
 def upload_file(
@@ -115,20 +145,33 @@ def upload_file(
     timeout: float,
     local_path: Path,
     remote_path: str,
+    token: str | None,
 ) -> None:
     size = local_path.stat().st_size
     begin_target = f"/upload_begin?path={quote(remote_path, safe='/')}&size={size}"
-    request(host, port, timeout, "POST", begin_target, body=b"", retries=8)
+    request(
+        host,
+        port,
+        timeout,
+        "POST",
+        begin_target,
+        body=b"",
+        headers=auth_headers(token),
+        retries=8,
+    )
     try:
         with local_path.open("rb") as f:
             while True:
                 chunk = f.read(UPLOAD_CHUNK_SIZE)
                 if not chunk:
                     break
-                headers = {
-                    "Content-Length": str(len(chunk)),
-                    "Content-Type": "application/octet-stream",
-                }
+                headers = auth_headers(
+                    token,
+                    {
+                        "Content-Length": str(len(chunk)),
+                        "Content-Type": "application/octet-stream",
+                    },
+                )
                 request(
                     host,
                     port,
@@ -139,10 +182,28 @@ def upload_file(
                     headers=headers,
                     retries=5,
                 )
-        request(host, port, timeout, "POST", "/upload_commit", body=b"", retries=8)
+        request(
+            host,
+            port,
+            timeout,
+            "POST",
+            "/upload_commit",
+            body=b"",
+            headers=auth_headers(token),
+            retries=8,
+        )
     except Exception:
         try:
-            request(host, port, timeout, "POST", "/upload_abort", body=b"", retries=3)
+            request(
+                host,
+                port,
+                timeout,
+                "POST",
+                "/upload_abort",
+                body=b"",
+                headers=auth_headers(token),
+                retries=3,
+            )
         except Exception:
             pass
         raise
@@ -175,6 +236,7 @@ def iter_dirs(src: Path):
 
 def main() -> int:
     args = parse_args()
+    token = args.token
     src = Path(args.src).resolve() if args.src else None
     if src is None and not args.rm:
         print("Nothing to do: provide --src and/or --rm", file=sys.stderr)
@@ -192,7 +254,7 @@ def main() -> int:
     for raw_rm in args.rm:
         remote_rm = raw_rm if raw_rm.startswith("/") else remote_join(args.dst, Path(raw_rm))
         print(f"[delete] {remote_rm}")
-        rm_path(args.host, args.port, args.timeout, remote_rm)
+        rm_path(args.host, args.port, args.timeout, remote_rm, token)
 
     if src is None:
         print("Delete complete.")
@@ -202,21 +264,21 @@ def main() -> int:
         remote_file = remote_join(args.dst, Path(src.name))
         remote_dir = posixpath.dirname(remote_file) or "/"
         print(f"[mkdir] {remote_dir}")
-        mkdir(args.host, args.port, args.timeout, remote_dir)
+        mkdir(args.host, args.port, args.timeout, remote_dir, token)
         print(f"[upload] {src} -> {remote_file}")
-        upload_file(args.host, args.port, args.timeout, src, remote_file)
+        upload_file(args.host, args.port, args.timeout, src, remote_file, token)
         print("Upload complete.")
         return 0
 
     for rel_dir in iter_dirs(src):
         remote_dir = remote_join(args.dst, rel_dir)
         print(f"[mkdir] {remote_dir}")
-        mkdir(args.host, args.port, args.timeout, remote_dir)
+        mkdir(args.host, args.port, args.timeout, remote_dir, token)
 
     for rel_file, local_file in iter_files(src):
         remote_file = remote_join(args.dst, rel_file)
         print(f"[upload] {local_file} -> {remote_file}")
-        upload_file(args.host, args.port, args.timeout, local_file, remote_file)
+        upload_file(args.host, args.port, args.timeout, local_file, remote_file, token)
 
     print("Upload complete.")
     return 0
