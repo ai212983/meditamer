@@ -2,7 +2,7 @@ use core::sync::atomic::Ordering;
 
 use embassy_time::{Instant, Timer};
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
-use meditamer::{
+use meditamer::graphics::{
     shanshui,
     sumi_sun::{self, Fx as SunFx, SumiSunParams},
     suminagashi,

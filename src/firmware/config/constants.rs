@@ -1,6 +1,6 @@
 use meditamer::{
     drivers::inkplate::{E_INK_HEIGHT, E_INK_WIDTH},
-    suminagashi::{
+    graphics::suminagashi::{
         DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
     },
 };
