@@ -405,8 +405,8 @@ fn target_path(target: &str) -> &str {
 }
 
 fn validate_upload_auth(header: &str) -> Result<(), UploadAuthError> {
-    let Some(expected_token) = option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN")
-        .or(option_env!("UPLOAD_HTTP_TOKEN"))
+    let Some(expected_token) =
+        option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN").or(option_env!("UPLOAD_HTTP_TOKEN"))
     else {
         return Ok(());
     };
