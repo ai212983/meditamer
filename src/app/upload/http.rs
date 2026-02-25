@@ -411,7 +411,8 @@ fn validate_upload_auth(header: &str) -> Result<(), UploadAuthError> {
     let Some(expected_token) =
         option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN").or(option_env!("UPLOAD_HTTP_TOKEN"))
     else {
-        return Err(UploadAuthError::MissingOrInvalidToken);
+        // If no compile-time token is configured, treat auth as disabled.
+        return Ok(());
     };
 
     let provided_token = parse_header_value(header, UPLOAD_HTTP_TOKEN_HEADER)
