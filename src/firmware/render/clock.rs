@@ -10,7 +10,7 @@ use u8g2_fonts::{
     FontRenderer,
 };
 
-use super::super::assets::pirata_clock_font;
+use super::super::assets::runtime as asset_runtime;
 
 use super::{
     super::{
@@ -37,7 +37,7 @@ pub(crate) async fn render_clock_update(
 ) {
     if full_refresh {
         draw_clock_static(display);
-        draw_clock_dynamic(display, uptime_seconds, time_sync);
+        draw_clock_dynamic(display, uptime_seconds, time_sync).await;
         draw_battery_status(display, battery_percent);
         let _ = display.display_bw_async(false).await;
         psram::log_allocator_high_water("render_clock_full");
@@ -45,7 +45,7 @@ pub(crate) async fn render_clock_update(
     }
 
     erase_clock_dynamic_regions(display);
-    draw_clock_dynamic(display, uptime_seconds, time_sync);
+    draw_clock_dynamic(display, uptime_seconds, time_sync).await;
     let _ = display.display_bw_async(false).await;
     psram::log_allocator_high_water("render_clock_partial");
 }
@@ -167,19 +167,31 @@ where
     );
 }
 
-fn draw_clock_dynamic<T>(display: &mut T, uptime_seconds: u32, time_sync: Option<TimeSyncState>)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
+async fn draw_clock_dynamic(
+    display: &mut InkplateDriver,
+    uptime_seconds: u32,
+    time_sync: Option<TimeSyncState>,
+) {
     let clock_text = format_clock_text(uptime_seconds, time_sync);
     let uptime_text = format_uptime_text(uptime_seconds);
     let sync_text = format_sync_text(time_sync);
 
-    pirata_clock_font::draw_time_centered(
+    if let Err(err) = asset_runtime::draw_pirata_time_centered(
         display,
         clock_text.as_str(),
         Point::new(SCREEN_WIDTH / 2, CLOCK_Y),
-    );
+    )
+    .await
+    {
+        esp_println::println!("clock: sd_font_fallback error={:?}", err);
+        draw_centered_bitmap_text_with_white_rim(
+            display,
+            &RENDER_TIME_FONT,
+            clock_text.as_str(),
+            CLOCK_Y,
+            1,
+        );
+    }
     draw_centered_bitmap_text(display, &META_FONT, sync_text.as_str(), SYNC_Y);
     draw_centered_bitmap_text(display, &META_FONT, uptime_text.as_str(), UPTIME_Y);
 }

@@ -1,2 +1,2 @@
 #[cfg(feature = "graphics")]
-pub mod pirata_clock_font;
+pub(crate) mod runtime;

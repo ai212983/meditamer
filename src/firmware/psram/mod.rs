@@ -53,6 +53,11 @@ pub(crate) struct LargeByteBuffer {
     layout: Layout,
 }
 
+#[cfg(feature = "psram-alloc")]
+unsafe impl Send for LargeByteBuffer {}
+#[cfg(feature = "psram-alloc")]
+unsafe impl Sync for LargeByteBuffer {}
+
 const fn initial_allocator_state() -> u8 {
     if cfg!(feature = "psram-alloc") {
         AllocatorState::NotInitialized as u8
