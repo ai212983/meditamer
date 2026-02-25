@@ -97,7 +97,7 @@ command = "scripts/lint_host_tools.sh"
 [copilot]
 # Copilot loop controls. Prefer configuring these in TOML (instead of env vars).
 reviewer_candidates = ["copilot-pull-request-reviewer[bot]", "github-copilot[bot]"]
-max_comments_per_run = 5
+max_comments_per_run = 10
 max_review_rounds = 50
 
 [copilot.merge]
