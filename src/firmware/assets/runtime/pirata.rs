@@ -68,19 +68,21 @@ where
     let top = center.y - max_height / 2;
 
     for spec in specs.iter().take(count).flatten() {
-        let (payload, payload_len) = super::sd_asset_read_roundtrip(spec.path).await?;
-        if payload_len != spec.bytes_len {
-            return Err(AssetLoadError::SizeMismatch);
-        }
-
         let glyph_top = top + (max_height - spec.height as i32) / 2;
-        draw_glyph_data(
-            display,
-            spec.width,
-            spec.height,
-            &payload[..payload_len],
-            Point::new(x, glyph_top),
-        );
+        super::with_sd_asset_read_data(spec.path, |payload| {
+            if payload.len() != spec.bytes_len {
+                return Err(AssetLoadError::SizeMismatch);
+            }
+            draw_glyph_data(
+                display,
+                spec.width,
+                spec.height,
+                payload,
+                Point::new(x, glyph_top),
+            );
+            Ok(())
+        })
+        .await?;
         x += spec.width as i32 + PIRATA_TIME_SPACING;
     }
 
@@ -101,21 +103,24 @@ async fn ensure_pirata_cache_loaded() -> Result<(), AssetLoadError> {
     };
 
     for (index, spec) in PIRATA_GLYPH_SPECS.iter().enumerate() {
-        let (payload, payload_len) = super::sd_asset_read_roundtrip(spec.path).await?;
-        if payload_len != spec.bytes_len {
-            return Err(AssetLoadError::SizeMismatch);
-        }
+        super::with_sd_asset_read_data(spec.path, |payload| {
+            if payload.len() != spec.bytes_len {
+                return Err(AssetLoadError::SizeMismatch);
+            }
 
-        let mut buffer = psram::alloc_large_byte_buffer(payload_len)
-            .map_err(|_| AssetLoadError::Device(SdAssetReadResultCode::OperationFailed))?;
-        buffer.as_mut_slice()[..payload_len].copy_from_slice(&payload[..payload_len]);
+            let mut buffer = psram::alloc_large_byte_buffer(payload.len())
+                .map_err(|_| AssetLoadError::Device(SdAssetReadResultCode::OperationFailed))?;
+            buffer.as_mut_slice()[..payload.len()].copy_from_slice(payload);
 
-        cache.glyphs[index] = Some(PirataCachedGlyph {
-            width: spec.width,
-            height: spec.height,
-            data_len: payload_len,
-            data: buffer,
-        });
+            cache.glyphs[index] = Some(PirataCachedGlyph {
+                width: spec.width,
+                height: spec.height,
+                data_len: payload.len(),
+                data: buffer,
+            });
+            Ok(())
+        })
+        .await?;
     }
 
     let mut guard = PIRATA_CLOCK_CACHE.lock().await;

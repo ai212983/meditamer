@@ -1,12 +1,12 @@
 use core::sync::atomic::AtomicU32;
 
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::WifiCredentials;
 use super::super::types::{
     AppEvent, SdAssetReadRequest, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
-    SdUploadRequest, SdUploadResult, TapTraceSample,
+    SdUploadRequest, SdUploadResult, TapTraceSample, SD_ASSET_READ_MAX, SD_UPLOAD_CHUNK_MAX,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{WifiConfigRequest, WifiConfigResponse};
@@ -23,8 +23,14 @@ pub(crate) static SD_ASSET_READ_REQUESTS: Channel<CriticalSectionRawMutex, SdAss
 pub(crate) static SD_ASSET_READ_RESPONSES: Channel<
     CriticalSectionRawMutex,
     SdAssetReadResponse,
-    2,
+    1,
 > = Channel::new();
+pub(crate) static SD_ASSET_READ_BUFFER: Mutex<CriticalSectionRawMutex, [u8; SD_ASSET_READ_MAX]> =
+    Mutex::new([0; SD_ASSET_READ_MAX]);
+pub(crate) static SD_UPLOAD_CHUNK_BUFFER: Mutex<
+    CriticalSectionRawMutex,
+    [u8; SD_UPLOAD_CHUNK_MAX],
+> = Mutex::new([0; SD_UPLOAD_CHUNK_MAX]);
 #[cfg(feature = "asset-upload-http")]
 pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
     Channel::new();

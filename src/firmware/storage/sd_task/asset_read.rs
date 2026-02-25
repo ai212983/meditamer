@@ -2,9 +2,9 @@
 
 use sdcard::fat;
 
+use super::super::super::config::SD_ASSET_READ_BUFFER;
 use super::super::super::types::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdProbeDriver,
-    SD_ASSET_READ_MAX,
 };
 use super::upload::{ensure_upload_ready, SdUploadSession};
 
@@ -18,47 +18,31 @@ pub(super) async fn process_asset_read_request(
     upload_mounted: &mut bool,
 ) -> SdAssetReadResponse {
     if upload_session.is_some() {
-        return asset_read_response(
-            false,
-            SdAssetReadResultCode::Busy,
-            [0; SD_ASSET_READ_MAX],
-            0,
-        );
+        return asset_read_response(false, SdAssetReadResultCode::Busy, 0);
     }
 
     let path = match parse_asset_path(&request.path, request.path_len) {
         Ok(path) => path,
-        Err(code) => return asset_read_response(false, code, [0; SD_ASSET_READ_MAX], 0),
+        Err(code) => return asset_read_response(false, code, 0),
     };
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
-        return asset_read_response(
-            false,
-            map_upload_ready_error(code),
-            [0; SD_ASSET_READ_MAX],
-            0,
-        );
+        return asset_read_response(false, map_upload_ready_error(code), 0);
     }
 
-    let mut data = [0u8; SD_ASSET_READ_MAX];
-    match fat::read_file(sd_probe, path, &mut data).await {
-        Ok(data_len) => asset_read_response(true, SdAssetReadResultCode::Ok, data, data_len as u16),
-        Err(err) => asset_read_response(false, map_fat_error_to_asset_code(&err), data, 0),
+    let mut data = SD_ASSET_READ_BUFFER.lock().await;
+    match fat::read_file(sd_probe, path, &mut data[..]).await {
+        Ok(data_len) => asset_read_response(true, SdAssetReadResultCode::Ok, data_len as u16),
+        Err(err) => asset_read_response(false, map_fat_error_to_asset_code(&err), 0),
     }
 }
 
 fn asset_read_response(
     ok: bool,
     code: SdAssetReadResultCode,
-    data: [u8; SD_ASSET_READ_MAX],
     data_len: u16,
 ) -> SdAssetReadResponse {
-    SdAssetReadResponse {
-        ok,
-        code,
-        data,
-        data_len,
-    }
+    SdAssetReadResponse { ok, code, data_len }
 }
 
 fn map_upload_ready_error(

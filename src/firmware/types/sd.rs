@@ -1,4 +1,4 @@
-use super::{SD_ASSET_READ_MAX, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX};
+use super::{SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(crate) enum StorageCommand {
@@ -110,7 +110,6 @@ pub(crate) enum SdUploadCommand {
 
 pub(crate) struct SdUploadRequest {
     pub(crate) command: SdUploadCommand,
-    pub(crate) chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,7 +157,6 @@ pub(crate) enum SdAssetReadResultCode {
 pub(crate) struct SdAssetReadResponse {
     pub(crate) ok: bool,
     pub(crate) code: SdAssetReadResultCode,
-    pub(crate) data: [u8; SD_ASSET_READ_MAX],
     pub(crate) data_len: u16,
 }
 

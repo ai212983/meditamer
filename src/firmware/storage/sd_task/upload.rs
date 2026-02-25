@@ -1,7 +1,9 @@
+use super::super::super::config::SD_UPLOAD_CHUNK_BUFFER;
 use sdcard::fat;
 
 use super::super::super::types::{
     SdProbeDriver, SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode,
+    SD_UPLOAD_CHUNK_MAX,
 };
 use super::{SD_UPLOAD_PATH_BUF_MAX, SD_UPLOAD_TMP_SUFFIX};
 
@@ -25,10 +27,7 @@ pub(super) async fn process_upload_request(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> SdUploadResult {
-    let SdUploadRequest {
-        command,
-        chunk_data,
-    } = request;
+    let command = request.command;
     match command {
         SdUploadCommand::Begin {
             path,
@@ -91,14 +90,7 @@ pub(super) async fn process_upload_request(
             let Some(active) = session.as_mut() else {
                 return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
             };
-            let Some(data) = chunk_data.as_ref() else {
-                return upload_result(
-                    false,
-                    SdUploadResultCode::OperationFailed,
-                    active.bytes_written,
-                );
-            };
-            let data_len = (data_len as usize).min(data.len());
+            let data_len = (data_len as usize).min(SD_UPLOAD_CHUNK_MAX);
             if data_len == 0 {
                 return upload_result(true, SdUploadResultCode::Ok, active.bytes_written);
             }
@@ -127,7 +119,10 @@ pub(super) async fn process_upload_request(
                     Ok(path) => path,
                     Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
                 };
-            if let Err(err) = fat::append_file(sd_probe, temp_path_str, &data[..data_len]).await {
+            let chunk_data = SD_UPLOAD_CHUNK_BUFFER.lock().await;
+            if let Err(err) =
+                fat::append_file(sd_probe, temp_path_str, &chunk_data[..data_len]).await
+            {
                 return upload_result(
                     false,
                     map_fat_error_to_upload_code(&err),

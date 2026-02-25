@@ -1,13 +1,15 @@
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{with_timeout, Duration};
 
 use super::super::super::{
-    config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
+    config::{SD_UPLOAD_CHUNK_BUFFER, SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
     types::{
         SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, SD_UPLOAD_CHUNK_MAX,
     },
 };
 
 const SD_UPLOAD_RESPONSE_TIMEOUT_MS: u64 = 10_000;
+static SD_UPLOAD_ROUNDTRIP_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
 #[derive(Clone, Copy)]
 pub(crate) enum SdUploadRoundtripError {
@@ -21,21 +23,22 @@ pub(crate) async fn sd_upload_chunk(data: &[u8]) -> Result<SdUploadResult, SdUpl
             SdUploadResultCode::OperationFailed,
         ));
     }
-    let mut payload = [0u8; SD_UPLOAD_CHUNK_MAX];
-    payload[..data.len()].copy_from_slice(data);
-    sd_upload_roundtrip_raw(
-        SdUploadCommand::Chunk {
-            data_len: data.len() as u16,
-        },
-        Some(payload),
-    )
+    let _lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    {
+        let mut payload = SD_UPLOAD_CHUNK_BUFFER.lock().await;
+        payload[..data.len()].copy_from_slice(data);
+    }
+    sd_upload_roundtrip_raw_locked(SdUploadCommand::Chunk {
+        data_len: data.len() as u16,
+    })
     .await
 }
 
 pub(crate) async fn sd_upload_roundtrip(
     command: SdUploadCommand,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
-    sd_upload_roundtrip_raw(command, None).await
+    let _lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    sd_upload_roundtrip_raw_locked(command).await
 }
 
 pub(crate) fn roundtrip_error_log(error: SdUploadRoundtripError) -> &'static str {
@@ -96,20 +99,14 @@ fn drain_stale_sd_upload_results() {
     while SD_UPLOAD_RESULTS.try_receive().is_ok() {}
 }
 
-async fn sd_upload_roundtrip_raw(
+async fn sd_upload_roundtrip_raw_locked(
     command: SdUploadCommand,
-    chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
     // A previous request may have timed out locally while the SD task still produced
     // a late result. Drain any queued stale responses before issuing a new request.
     drain_stale_sd_upload_results();
 
-    SD_UPLOAD_REQUESTS
-        .send(SdUploadRequest {
-            command,
-            chunk_data,
-        })
-        .await;
+    SD_UPLOAD_REQUESTS.send(SdUploadRequest { command }).await;
 
     let result = match with_timeout(
         Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS),
