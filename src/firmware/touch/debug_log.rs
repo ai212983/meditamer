@@ -1,6 +1,6 @@
 use core::fmt::Write;
 
-use crate::firmware::types::SerialUart;
+use super::super::types::SerialUart;
 
 use super::types::{
     TouchEvent, TouchEventKind, TouchSwipeDirection, TouchTraceSample, TouchWizardSessionEvent,

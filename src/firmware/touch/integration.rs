@@ -1,12 +1,14 @@
 use embassy_time::Instant;
 
-use crate::firmware::{
+use super::super::{
     render::render_active_mode,
     runtime::trigger_backlight_cycle,
-    touch::config::TOUCH_FEEDBACK_ENABLED,
-    touch::tasks::draw_touch_feedback_dot,
-    touch::types::{TouchEvent, TouchEventKind, TouchSwipeDirection},
     types::{DisplayContext, DisplayMode, TimeSyncState},
+};
+use super::{
+    config::TOUCH_FEEDBACK_ENABLED,
+    tasks::draw_touch_feedback_dot,
+    types::{TouchEvent, TouchEventKind, TouchSwipeDirection},
 };
 
 pub(crate) struct TouchEventContext<'a> {

@@ -8,7 +8,7 @@ use embedded_graphics::{
 use heapless::String;
 use u8g2_fonts::types::{FontColor, HorizontalAlignment, VerticalPosition};
 
-use crate::firmware::{
+use super::super::super::{
     config::{META_FONT, SCREEN_HEIGHT, SCREEN_WIDTH, TITLE_FONT},
     types::InkplateDriver,
 };

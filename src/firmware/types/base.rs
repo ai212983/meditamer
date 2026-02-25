@@ -5,7 +5,7 @@ use crate::{
 use esp_hal::{gpio::Output, uart::Uart, Async};
 use sdcard::probe;
 
-use crate::firmware::store::ModeStore;
+use super::super::store::ModeStore;
 
 pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;

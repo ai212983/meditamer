@@ -2,6 +2,10 @@ use core::sync::atomic::Ordering;
 
 use crate::drivers::inkplate::TouchInitStatus;
 
+use super::super::{
+    config::APP_EVENTS,
+    types::{AppEvent, InkplateDriver},
+};
 use super::{
     config::{
         TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_FEEDBACK_RADIUS_PX,
@@ -10,10 +14,6 @@ use super::{
     },
     types::{TouchEvent, TouchIrqPin, TouchPipelineInput, TouchSampleFrame, TouchTraceSample},
     TouchEngine,
-};
-use crate::firmware::{
-    config::APP_EVENTS,
-    types::{AppEvent, InkplateDriver},
 };
 
 #[embassy_executor::task]

@@ -1041,8 +1041,8 @@ fn sd_power_action_label(action: SdPowerRequest) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::SD_PATH_MAX;
     use super::*;
-    use crate::firmware::types::SD_PATH_MAX;
 
     #[test]
     fn backoff_grows_and_clamps() {
