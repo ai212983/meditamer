@@ -1,6 +1,6 @@
 use core::sync::atomic::Ordering;
 
-use crate::graphics::{
+use super::super::graphics::{
     shanshui,
     sumi_sun::{self, Fx as SunFx, SumiSunParams},
     suminagashi,

@@ -1,9 +1,7 @@
-use crate::{
-    drivers::inkplate::{E_INK_HEIGHT, E_INK_WIDTH},
-    graphics::suminagashi::{
-        DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
-    },
+use super::super::graphics::suminagashi::{
+    DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
 };
+use crate::drivers::inkplate::{E_INK_HEIGHT, E_INK_WIDTH};
 use u8g2_fonts::{fonts, FontRenderer};
 
 pub(crate) const SCREEN_WIDTH: i32 = E_INK_WIDTH as i32;

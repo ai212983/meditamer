@@ -1,4 +1,4 @@
-use crate::graphics::suminagashi::{dither_threshold_u8, DitherMode, RenderMode};
+use super::suminagashi::{dither_threshold_u8, DitherMode, RenderMode};
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::{DrawTarget, OriginDimensions, Pixel, Point, Size},

@@ -1,7 +1,10 @@
+pub mod assets;
 mod bootstrap;
 mod comms;
 pub(crate) mod config;
 pub(crate) mod event_engine;
+#[cfg(feature = "graphics")]
+pub mod graphics;
 pub(crate) mod psram;
 mod render;
 mod runtime;
