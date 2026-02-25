@@ -1,7 +1,7 @@
 use super::super::super::super::config::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use super::super::super::config::{TOUCH_WIZARD_SESSION_EVENTS, TOUCH_WIZARD_SWIPE_TRACE_SAMPLES};
 use super::super::super::types::{TouchWizardSessionEvent, TouchWizardSwipeTraceSample};
-use super::render::{continue_button_bounds, swipe_mark_button_bounds};
+use super::draw::{continue_button_bounds, swipe_mark_button_bounds};
 use super::swipe::{
     clamp_to_u16, squared_distance_i32, trace_direction_code, trace_speed_code, SwipeCaseTraceInput,
 };
