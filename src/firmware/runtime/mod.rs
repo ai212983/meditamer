@@ -1,4 +1,6 @@
+mod bootstrap;
 pub(crate) mod display_task;
+pub use bootstrap::run;
 
 use embassy_time::Instant;
 

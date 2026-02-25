@@ -1,5 +1,4 @@
 pub mod assets;
-mod bootstrap;
 mod comms;
 pub(crate) mod config;
 pub(crate) mod event_engine;
@@ -13,4 +12,4 @@ mod touch;
 pub(crate) mod types;
 pub(crate) mod ui;
 
-pub use bootstrap::run;
+pub use runtime::run;

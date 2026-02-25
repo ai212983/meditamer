@@ -12,15 +12,15 @@ use esp_hal::{
     uart::{Config as UartConfig, Uart},
 };
 
-use super::config::{
+use super::super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
     SD_POWER_RESPONSES, UART_BAUD,
 };
-use super::storage::ModeStore;
-use super::types::{
+use super::super::storage::ModeStore;
+use super::super::types::{
     AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeMode, SdPowerRequest,
 };
-use super::{comms, psram, runtime, storage, touch};
+use super::super::{comms, psram, storage, touch};
 use sdcard::probe;
 
 pub fn run() -> ! {
@@ -195,7 +195,7 @@ pub fn run() -> ! {
                 spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
             }
             if let Some(display_context) = display_context {
-                spawner.must_spawn(runtime::display_task::display_task(display_context));
+                spawner.must_spawn(super::display_task::display_task(display_context));
             }
             spawner.must_spawn(clock_task());
             spawner.must_spawn(battery_task());
