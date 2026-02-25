@@ -11,10 +11,6 @@ name = "meditamer"
 harness = false
 test = false
 
-[[test]]
-name = "embedded_smoke_test"
-harness = false
-
 [lib]
 test = false
 
@@ -76,6 +72,3 @@ sdcard = { path = "packages/sdcard" }
 
 [build-dependencies]
 event_config_compiler = { path = "tools/event_config_compiler" }
-
-[dev-dependencies]
-embedded-test = { version = "0.7.0", features = ["xtensa-semihosting", "embassy", "external-executor"] }

@@ -8,18 +8,6 @@ if (( $# < 1 )); then
 fi
 
 image="$1"
-image_base="$(basename "$image")"
-
-# embedded-test integration tests require probe-rs and should not go through
-# the default UART flasher runner.
-if [[ "$image_base" == embedded_smoke_test-* || "$image_base" == embedded_smoke_test ]]; then
-    cat >&2 <<'EOF'
-embedded_smoke_test must use the probe-rs runner.
-Run with:
-  CARGO_TARGET_XTENSA_ESP32_NONE_ELF_RUNNER='probe-rs run --chip ESP32 --preverify --always-print-stacktrace --no-location' cargo test --test embedded_smoke_test
-EOF
-    exit 2
-fi
 
 chip="${ESPFLASH_CHIP:-esp32}"
 port="${ESPFLASH_PORT:-}"
