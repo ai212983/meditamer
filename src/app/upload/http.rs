@@ -13,8 +13,15 @@ use super::sd_bridge::{
 
 const UPLOAD_HTTP_PORT: u16 = 8080;
 const UPLOAD_HTTP_ROOT: &str = "/assets";
+const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
 const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 2048;
+
+#[derive(Copy, Clone)]
+enum UploadAuthError {
+    TokenNotConfigured,
+    MissingOrInvalidToken,
+}
 
 pub(super) async fn run_http_server(stack: Stack<'static>) {
     static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
@@ -91,8 +98,31 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
     let content_length_or_zero = content_length.unwrap_or(0);
     let body_start = header_end + 4;
     let body_bytes_in_buffer = filled.saturating_sub(body_start);
+    let request_path = target_path(target);
 
-    match (method, target_path(target)) {
+    if request_path != "/health" {
+        match validate_upload_auth(header) {
+            Ok(()) => {}
+            Err(UploadAuthError::TokenNotConfigured) => {
+                drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
+                write_response(
+                    socket,
+                    b"503 Service Unavailable",
+                    b"upload token not configured",
+                )
+                .await;
+                return Err("upload token not configured");
+            }
+            Err(UploadAuthError::MissingOrInvalidToken) => {
+                drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
+                write_response(socket, b"401 Unauthorized", b"missing or invalid upload token")
+                    .await;
+                return Err("missing or invalid upload token");
+            }
+        }
+    }
+
+    match (method, request_path) {
         ("GET", "/health") => {
             drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             write_response(socket, b"200 OK", b"ok").await;
@@ -379,6 +409,35 @@ fn parse_content_length(header: &str) -> Result<Option<usize>, &'static str> {
 
 fn target_path(target: &str) -> &str {
     target.split('?').next().unwrap_or(target)
+}
+
+fn validate_upload_auth(header: &str) -> Result<(), UploadAuthError> {
+    let expected_token = option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN")
+        .or(option_env!("UPLOAD_HTTP_TOKEN"))
+        .ok_or(UploadAuthError::TokenNotConfigured)?;
+
+    let provided_token = parse_header_value(header, UPLOAD_HTTP_TOKEN_HEADER)
+        .ok_or(UploadAuthError::MissingOrInvalidToken)?;
+
+    if provided_token == expected_token {
+        Ok(())
+    } else {
+        Err(UploadAuthError::MissingOrInvalidToken)
+    }
+}
+
+fn parse_header_value<'a>(header: &'a str, wanted_name: &str) -> Option<&'a str> {
+    for line in header.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+
+        if name.eq_ignore_ascii_case(wanted_name) {
+            return Some(value.trim());
+        }
+    }
+
+    None
 }
 
 fn parse_path_query(target: &str, route: &str) -> Result<([u8; SD_PATH_MAX], u8), &'static str> {
