@@ -15,12 +15,12 @@ Build a reliable panel-touch and gesture engine for Inkplate using `Embassy` tas
 ### Phase 1: Source-Aligned Filter Pipeline (Current)
 
 Deliverables:
-- Document external sources and borrowed patterns in `src/app/touch/README.md`.
+- Document external sources and borrowed patterns in `src/firmware/touch/README.md`.
 - Refactor normalization into explicit staged filtering.
 - Add unit tests for dropout continuity, slot instability, and outlier handling.
 
 Validation:
-- Host tests in `src/app/touch/normalize.rs` and `src/app/touch/core.rs` pass.
+- Host tests in `src/firmware/touch/normalize.rs` and `src/firmware/touch/core.rs` pass.
 - Wizard step 1 touch tracking stable across repeated taps and drags.
 
 ### Phase 2: Classifier Hardening
@@ -58,6 +58,6 @@ Validation:
 
 ## Immediate Next Steps
 
-1. Implement first filter-stage improvements in `src/app/touch/normalize.rs`.
+1. Implement first filter-stage improvements in `src/firmware/touch/normalize.rs`.
 2. Add tests that exercise outlier rejection vs valid fast motion.
 3. Re-run wizard and inspect trace logs before changing classifier thresholds.

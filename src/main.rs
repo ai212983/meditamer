@@ -1,12 +1,11 @@
 #![no_std]
 #![no_main]
 
-mod app;
-mod pirata_clock_font;
+mod firmware;
 
 use esp_backtrace as _;
 
 #[esp_hal::main]
 fn main() -> ! {
-    app::run()
+    firmware::run()
 }

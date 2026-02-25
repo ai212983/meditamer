@@ -1,12 +1,18 @@
 #![no_std]
 
+pub mod assets;
+pub mod drivers;
 pub mod event_engine;
 pub mod gpio_fast;
-pub mod inkplate_hal;
 pub mod platform;
 #[cfg(feature = "graphics")]
-pub mod shanshui;
+pub mod graphics;
+
+pub use drivers::inkplate as inkplate_hal;
+
 #[cfg(feature = "graphics")]
-pub mod sumi_sun;
+pub use graphics::shanshui;
 #[cfg(feature = "graphics")]
-pub mod suminagashi;
+pub use graphics::sumi_sun;
+#[cfg(feature = "graphics")]
+pub use graphics::suminagashi;

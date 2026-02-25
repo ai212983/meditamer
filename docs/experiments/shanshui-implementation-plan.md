@@ -11,10 +11,10 @@ The source design brief is strong on architecture, but not implementation detail
 ## Current Baseline (Repository-Specific)
 
 - Runtime target is `esp-hal` on `esp32` (`xtensa-esp32-none-elf`).
-- Display pipeline today is framebuffer-based 1-bit (`src/inkplate_hal.rs` + `src/inkplate_hal/display_impl.inc.rs`).
+- Display pipeline today is framebuffer-based 1-bit (`src/drivers/inkplate/mod.rs` + `src/drivers/inkplate/display_impl.inc.rs`).
 - Existing procedural renderers are:
-  - `src/suminagashi.rs` (fixed-point marbling + threshold dithering)
-  - `src/sumi_sun.rs` (fixed-point sun disk rendering)
+  - `src/graphics/suminagashi.rs` (fixed-point marbling + threshold dithering)
+  - `src/graphics/sumi_sun.rs` (fixed-point sun disk rendering)
 - Current visual mode switch is `DisplayMode::{Clock, Suminagashi}` in `src/main.rs`.
 - Existing timing telemetry already records marble redraw duration in `src/main.rs` via `LAST_MARBLE_REDRAW_MS` / `MAX_MARBLE_REDRAW_MS`.
 
@@ -38,7 +38,7 @@ The source design brief is strong on architecture, but not implementation detail
 
 ## Module Layout
 
-- `src/shanshui.rs` (or `src/shanshui/mod.rs` if split):
+- `src/graphics/shanshui.rs` (or `src/graphics/shanshui.rs` if split):
   - Fixed-point aliases/constants (reuse `fixed::types::I16F16` initially).
   - Coordinate mapping and deterministic seed mixing.
   - Terrain SDF evaluator (background/mid/foreground layers).
@@ -169,7 +169,7 @@ Exit criteria:
 
 ## Detailed Work Items
 
-- [ ] Add `src/shanshui.rs` with deterministic seed mixer and fixed-point utilities.
+- [ ] Add `src/graphics/shanshui.rs` with deterministic seed mixer and fixed-point utilities.
 - [ ] Implement base SDF landscape function and 3-layer composition.
 - [ ] Implement ridge and warp texture evaluators.
 - [ ] Implement local gradient estimator and ink-density modulation.
