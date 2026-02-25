@@ -652,8 +652,7 @@ fn parse_upload_path(path: &[u8], path_len: u8) -> Result<&str, SdUploadResultCo
 
     let root = SD_UPLOAD_ROOT;
     if path_str != root
-        && (!path_str.starts_with(root)
-            || path_str.as_bytes().get(root.len()) != Some(&b'/'))
+        && (!path_str.starts_with(root) || path_str.as_bytes().get(root.len()) != Some(&b'/'))
     {
         return Err(SdUploadResultCode::InvalidPath);
     }
@@ -1068,7 +1067,10 @@ mod tests {
     #[test]
     fn upload_path_validation_allows_assets_root_and_children() {
         assert_eq!(parse_upload_path_bytes("/assets"), Ok("/assets"));
-        assert_eq!(parse_upload_path_bytes("/assets/file.bin"), Ok("/assets/file.bin"));
+        assert_eq!(
+            parse_upload_path_bytes("/assets/file.bin"),
+            Ok("/assets/file.bin")
+        );
     }
 
     #[test]
