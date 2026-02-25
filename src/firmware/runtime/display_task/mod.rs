@@ -14,7 +14,7 @@ use touch_loop::process_touch_cycle;
 use wait::next_loop_wait_ms;
 
 use super::super::{
-    config::APP_EVENTS,
+    config::{APP_EVENTS, UI_TICK_MS},
     runtime::service_mode,
     touch::{tasks::request_touch_pipeline_reset, wizard::render_touch_wizard_waiting_screen},
     types::DisplayContext,
@@ -37,7 +37,13 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     request_touch_pipeline_reset();
 
     loop {
-        let app_wait_ms = next_loop_wait_ms(&state);
+        let app_wait_ms = if service_mode::upload_enabled() {
+            // In upload mode touch/IMU loops are skipped, so their deadlines can go stale.
+            // Clamp to a fixed UI tick to avoid a zero-wait busy loop that starves other tasks.
+            UI_TICK_MS
+        } else {
+            next_loop_wait_ms(&state)
+        };
 
         let mut event = None;
         let mut remaining_wait_ms = app_wait_ms;
