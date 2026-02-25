@@ -237,12 +237,21 @@ async fn battery_task() {
 
 #[embassy_executor::task]
 async fn sd_power_task(mut inkplate: InkplateDriver) {
+    esp_println::println!("sdpower: task_started");
     loop {
         let request = SD_POWER_REQUESTS.receive().await;
+        esp_println::println!(
+            "sdpower: request action={}",
+            match request {
+                SdPowerRequest::On => "on",
+                SdPowerRequest::Off => "off",
+            }
+        );
         let ok = match request {
             SdPowerRequest::On => inkplate.sd_card_power_on().is_ok(),
             SdPowerRequest::Off => inkplate.sd_card_power_off().is_ok(),
         };
+        esp_println::println!("sdpower: response ok={}", ok);
         SD_POWER_RESPONSES.send(ok).await;
     }
 }

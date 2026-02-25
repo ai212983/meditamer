@@ -1,7 +1,9 @@
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use sdcard::runtime as sd_ops;
 
-use super::super::types::{SdCommand, SdPowerRequest, SdProbeDriver, SdRequest};
+use super::super::types::{
+    SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult, SdResultCode,
+};
 
 mod asset_read;
 mod dispatch;
@@ -26,6 +28,7 @@ const SD_RETRY_DELAY_MS: u64 = 120;
 const SD_BACKOFF_BASE_MS: u64 = 300;
 const SD_BACKOFF_MAX_MS: u64 = 2_400;
 const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_000;
+const SD_BOOT_PROBE_TIMEOUT_MS: u64 = 5_000;
 const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
 const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
 const SD_UPLOAD_ROOT: &str = "/assets";
@@ -36,6 +39,7 @@ const WIFI_CONFIG_PATH: &str = "/config/wifi.cfg";
 
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
+    esp_println::println!("sdtask: started");
     let mut powered = false;
     let mut upload_mounted = false;
     let mut upload_session: Option<SdUploadSession> = None;
@@ -48,7 +52,29 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         id: 0,
         command: SdCommand::Probe,
     };
-    let boot_result = process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power).await;
+    let boot_start = Instant::now();
+    let boot_result = match with_timeout(
+        Duration::from_millis(SD_BOOT_PROBE_TIMEOUT_MS),
+        process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            esp_println::println!(
+                "sdtask: boot_probe_timeout timeout_ms={}",
+                SD_BOOT_PROBE_TIMEOUT_MS
+            );
+            SdResult {
+                id: 0,
+                kind: SdCommandKind::Probe,
+                ok: false,
+                code: SdResultCode::OperationFailed,
+                attempts: 0,
+                duration_ms: duration_ms_since(boot_start),
+            }
+        }
+    };
     publish_result(boot_result);
     if !boot_result.ok {
         consecutive_failures = 1;

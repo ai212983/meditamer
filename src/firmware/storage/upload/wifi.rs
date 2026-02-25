@@ -2,8 +2,8 @@ use embassy_futures::select::{select, Either};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_println::println;
 use esp_radio::wifi::{
-    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig, ScanMethod,
-    WifiController, WifiEvent,
+    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig, WifiController,
+    WifiEvent,
 };
 
 use super::super::super::{
@@ -88,6 +88,7 @@ pub(super) async fn run_wifi_connection_task(
 
         if !config_applied {
             let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
+            println!("upload_http: mode_config auth={:?}", auth_method);
             let mode = match mode_config_from_credentials(active, auth_method) {
                 Some(mode) => mode,
                 None => {
@@ -96,6 +97,7 @@ pub(super) async fn run_wifi_connection_task(
                     continue;
                 }
             };
+            println!("upload_http: station_set_config auth={:?}", auth_method);
 
             if let Err(err) = controller.set_config(&mode) {
                 println!("upload_http: wifi station config err={:?}", err);
@@ -242,8 +244,7 @@ fn mode_config_from_credentials(
         ClientConfig::default()
             .with_ssid(ssid.into())
             .with_password(password.into())
-            .with_auth_method(auth_method)
-            .with_scan_method(ScanMethod::AllChannels),
+            .with_auth_method(auth_method),
     ))
 }
 
