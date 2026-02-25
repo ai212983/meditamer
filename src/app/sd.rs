@@ -32,6 +32,7 @@ const SD_BACKOFF_MAX_MS: u64 = 2_400;
 const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_000;
 const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
 const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
+const SD_UPLOAD_ROOT: &str = "/assets";
 #[cfg(feature = "asset-upload-http")]
 const WIFI_CONFIG_DIR: &str = "/config";
 #[cfg(feature = "asset-upload-http")]
@@ -648,6 +649,21 @@ fn parse_upload_path(path: &[u8], path_len: u8) -> Result<&str, SdUploadResultCo
     if !path_str.starts_with('/') {
         return Err(SdUploadResultCode::InvalidPath);
     }
+
+    let root = SD_UPLOAD_ROOT;
+    if path_str != root
+        && (!path_str.starts_with(root)
+            || path_str.as_bytes().get(root.len()) != Some(&b'/'))
+    {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+
+    for segment in path_str.split('/').skip(1) {
+        if segment == "." || segment == ".." || segment.chars().any(|ch| ch.is_control()) {
+            return Err(SdUploadResultCode::InvalidPath);
+        }
+    }
+
     Ok(path_str)
 }
 
@@ -1047,5 +1063,40 @@ mod tests {
         assert!(!sd_result_should_retry(SdResultCode::VerifyMismatch));
         assert!(!sd_result_should_retry(SdResultCode::PowerOffFailed));
         assert!(!sd_result_should_retry(SdResultCode::RefusedLba0));
+    }
+
+    #[test]
+    fn upload_path_validation_allows_assets_root_and_children() {
+        assert_eq!(parse_upload_path_bytes("/assets"), Ok("/assets"));
+        assert_eq!(parse_upload_path_bytes("/assets/file.bin"), Ok("/assets/file.bin"));
+    }
+
+    #[test]
+    fn upload_path_validation_rejects_outside_root_and_dot_segments() {
+        assert_eq!(
+            parse_upload_path_bytes("/config/wifi.cfg"),
+            Err(SdUploadResultCode::InvalidPath)
+        );
+        assert_eq!(
+            parse_upload_path_bytes("/assets/../config"),
+            Err(SdUploadResultCode::InvalidPath)
+        );
+        assert_eq!(
+            parse_upload_path_bytes("/assets/./file.bin"),
+            Err(SdUploadResultCode::InvalidPath)
+        );
+    }
+
+    #[test]
+    fn upload_path_validation_rejects_control_characters() {
+        assert_eq!(
+            parse_upload_path_bytes("/assets/file\n.bin"),
+            Err(SdUploadResultCode::InvalidPath)
+        );
+    }
+
+    fn parse_upload_path_bytes(path: &str) -> Result<&str, SdUploadResultCode> {
+        let bytes = path.as_bytes();
+        parse_upload_path(bytes, bytes.len() as u8)
     }
 }
