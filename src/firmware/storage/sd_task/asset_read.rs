@@ -2,10 +2,10 @@
 
 use sdcard::fat;
 
-use super::super::super::config::SD_ASSET_READ_BUFFER;
 use super::super::super::types::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdProbeDriver,
 };
+use super::super::transfer_buffers;
 use super::upload::{ensure_upload_ready, SdUploadSession};
 
 const SD_ASSET_ROOT: &str = "/assets";
@@ -30,8 +30,11 @@ pub(super) async fn process_asset_read_request(
         return asset_read_response(false, map_upload_ready_error(code), 0);
     }
 
-    let mut data = SD_ASSET_READ_BUFFER.lock().await;
-    match fat::read_file(sd_probe, path, &mut data[..]).await {
+    let mut data = match transfer_buffers::lock_asset_read_buffer().await {
+        Ok(buffer) => buffer,
+        Err(_) => return asset_read_response(false, SdAssetReadResultCode::OperationFailed, 0),
+    };
+    match fat::read_file(sd_probe, path, data.as_mut_slice()).await {
         Ok(data_len) => asset_read_response(true, SdAssetReadResultCode::Ok, data_len as u16),
         Err(err) => asset_read_response(false, map_fat_error_to_asset_code(&err), 0),
     }

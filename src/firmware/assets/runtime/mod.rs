@@ -2,14 +2,19 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{with_timeout, Duration};
 
 use super::super::{
-    config::{SD_ASSET_READ_BUFFER, SD_ASSET_READ_REQUESTS, SD_ASSET_READ_RESPONSES},
+    config::{SD_ASSET_READ_REQUESTS, SD_ASSET_READ_RESPONSES},
     runtime::service_mode,
+    storage::transfer_buffers,
     types::{SdAssetReadRequest, SdAssetReadResultCode, SD_PATH_MAX},
 };
 
 mod pirata;
 
 pub(crate) use pirata::draw_pirata_time_centered;
+
+pub(crate) async fn clear_runtime_asset_caches() {
+    pirata::clear_pirata_cache().await;
+}
 
 const SD_ASSET_RESPONSE_TIMEOUT_MS: u64 = 6_000;
 static SD_ASSET_READ_ROUNDTRIP_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
@@ -64,11 +69,13 @@ pub(super) async fn with_sd_asset_read_data<R>(
 
     if response.ok {
         let payload_len = response.data_len as usize;
-        let payload = SD_ASSET_READ_BUFFER.lock().await;
-        if payload_len > payload.len() {
+        let payload = transfer_buffers::lock_asset_read_buffer()
+            .await
+            .map_err(|_| AssetLoadError::Device(SdAssetReadResultCode::OperationFailed))?;
+        if payload_len > payload.as_slice().len() {
             return Err(AssetLoadError::SizeMismatch);
         }
-        f(&payload[..payload_len])
+        f(&payload.as_slice()[..payload_len])
     } else {
         Err(AssetLoadError::Device(response.code))
     }

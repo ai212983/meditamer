@@ -1,10 +1,10 @@
-use super::super::super::config::SD_UPLOAD_CHUNK_BUFFER;
 use sdcard::fat;
 
 use super::super::super::types::{
     SdProbeDriver, SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode,
     SD_UPLOAD_CHUNK_MAX,
 };
+use super::super::transfer_buffers;
 use super::{SD_UPLOAD_PATH_BUF_MAX, SD_UPLOAD_TMP_SUFFIX};
 
 mod helpers;
@@ -119,9 +119,22 @@ pub(super) async fn process_upload_request(
                     Ok(path) => path,
                     Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
                 };
-            let chunk_data = SD_UPLOAD_CHUNK_BUFFER.lock().await;
-            if let Err(err) =
-                fat::append_file(sd_probe, temp_path_str, &chunk_data[..data_len]).await
+            let mut chunk_data = match transfer_buffers::lock_upload_chunk_buffer().await {
+                Ok(buffer) => buffer,
+                Err(_) => {
+                    return upload_result(
+                        false,
+                        SdUploadResultCode::OperationFailed,
+                        active.bytes_written,
+                    );
+                }
+            };
+            if let Err(err) = fat::append_file(
+                sd_probe,
+                temp_path_str,
+                &chunk_data.as_mut_slice()[..data_len],
+            )
+            .await
             {
                 return upload_result(
                     false,

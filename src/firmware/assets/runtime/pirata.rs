@@ -33,6 +33,14 @@ struct PirataClockCache {
 static PIRATA_CLOCK_CACHE: Mutex<CriticalSectionRawMutex, Option<PirataClockCache>> =
     Mutex::new(None);
 
+pub(super) async fn clear_pirata_cache() {
+    #[cfg(feature = "psram-alloc")]
+    {
+        let mut guard = PIRATA_CLOCK_CACHE.lock().await;
+        *guard = None;
+    }
+}
+
 pub(crate) async fn draw_pirata_time_centered<T>(
     display: &mut T,
     text: &str,

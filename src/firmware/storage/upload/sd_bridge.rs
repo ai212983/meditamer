@@ -2,7 +2,8 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::{with_timeout, Duration};
 
 use super::super::super::{
-    config::{SD_UPLOAD_CHUNK_BUFFER, SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
+    config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
+    storage::transfer_buffers,
     types::{
         SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, SD_UPLOAD_CHUNK_MAX,
     },
@@ -25,8 +26,10 @@ pub(crate) async fn sd_upload_chunk(data: &[u8]) -> Result<SdUploadResult, SdUpl
     }
     let _lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
     {
-        let mut payload = SD_UPLOAD_CHUNK_BUFFER.lock().await;
-        payload[..data.len()].copy_from_slice(data);
+        let mut payload = transfer_buffers::lock_upload_chunk_buffer()
+            .await
+            .map_err(|_| SdUploadRoundtripError::Device(SdUploadResultCode::OperationFailed))?;
+        payload.as_mut_slice()[..data.len()].copy_from_slice(data);
     }
     sd_upload_roundtrip_raw_locked(SdUploadCommand::Chunk {
         data_len: data.len() as u16,

@@ -17,6 +17,8 @@ use super::super::super::{
     },
     types::{AppEvent, DisplayContext, DisplayMode, TimeSyncState},
 };
+#[cfg(feature = "graphics")]
+use crate::firmware::assets::runtime::clear_runtime_asset_caches;
 
 use super::state::DisplayLoopState;
 
@@ -237,6 +239,10 @@ pub(super) async fn handle_app_event(
         AppEvent::SetRuntimeServices(services) => {
             service_mode::set_runtime_services(services);
             context.mode_store.save_runtime_services(services);
+            #[cfg(feature = "graphics")]
+            if !services.asset_reads_enabled_flag() {
+                clear_runtime_asset_caches().await;
+            }
             if services.upload_enabled_flag() {
                 let _ = context.inkplate.frontlight_off();
             }
