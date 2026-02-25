@@ -43,6 +43,8 @@ scripts/setup_hooks.sh
 
 Current pre-commit hook:
 
+- Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
+- Auto-stages formatter edits (`stage_fixed: true`) so commits include rustfmt output.
 - Validates links in staged Markdown files via `scripts/check_markdown_links.sh`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
 - Runs host-tooling clippy via `scripts/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
@@ -54,6 +56,10 @@ Current commit-msg hook:
 Current pre-push hook:
 
 - Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
+
+Formatting enforcement:
+
+- CI enforces Rust formatting via `cargo +stable fmt --all -- --check` in `.github/workflows/rust_ci.yml` (`PR Light CI` -> `Rust Format` job).
 
 Optional full (online) validation:
 
