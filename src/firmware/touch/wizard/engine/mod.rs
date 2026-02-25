@@ -1,6 +1,7 @@
 use super::super::types::TouchSwipeDirection;
 
 mod events;
+mod flow;
 mod render;
 mod swipe;
 #[cfg(test)]
