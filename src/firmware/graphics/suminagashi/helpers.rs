@@ -1,4 +1,5 @@
 use super::*;
+use embedded_graphics::pixelcolor::BinaryColor;
 use fixed_sqrt::FixedSqrt;
 
 impl RgssMode {
