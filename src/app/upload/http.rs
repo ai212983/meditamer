@@ -1,7 +1,7 @@
 use core::cmp::min;
 
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
-use embassy_time::{with_timeout, Duration, Timer};
+use embassy_time::{with_timeout, Duration};
 use embedded_io_async::Write;
 
 use super::super::types::{SdUploadCommand, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX};
@@ -11,6 +11,7 @@ use super::sd_bridge::{
 };
 
 const UPLOAD_HTTP_PORT: u16 = 8080;
+const UPLOAD_HTTP_ROOT: &str = "/assets";
 const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 2048;
 
@@ -189,12 +190,6 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
             write_response(socket, b"200 OK", b"abort ok").await;
             Ok(())
         }
-        ("POST", "/reboot") => {
-            drain_remaining_body(socket, content_length, body_bytes_in_buffer).await?;
-            write_response(socket, b"200 OK", b"rebooting").await;
-            Timer::after(Duration::from_millis(100)).await;
-            esp_hal::system::software_reset();
-        }
         ("PUT", "/upload") => {
             let (path, path_len) = match parse_path_query(target, "/upload") {
                 Ok(path) => path,
@@ -345,7 +340,11 @@ fn parse_path_query(target: &str, route: &str) -> Result<([u8; SD_PATH_MAX], u8)
 
     for pair in query.split('&') {
         if let Some(encoded) = pair.strip_prefix("path=") {
-            return percent_decode_to_path_buf(encoded);
+            let (path, path_len) = percent_decode_to_path_buf(encoded)?;
+            if !path_within_upload_root(&path, path_len) {
+                return Err("path outside upload root");
+            }
+            return Ok((path, path_len));
         }
     }
     Err("missing path query")
@@ -366,6 +365,14 @@ fn parse_u32_query(target: &str, route: &str, key: &str) -> Result<u32, &'static
         }
     }
     Err("missing query key")
+}
+
+fn path_within_upload_root(path: &[u8; SD_PATH_MAX], path_len: u8) -> bool {
+    let path_len = path_len as usize;
+    let path_slice = &path[..path_len];
+    let root = UPLOAD_HTTP_ROOT.as_bytes();
+
+    path_slice == root || path_slice.starts_with(root) && path_slice.get(root.len()) == Some(&b'/')
 }
 
 fn percent_decode_to_path_buf(encoded: &str) -> Result<([u8; SD_PATH_MAX], u8), &'static str> {
