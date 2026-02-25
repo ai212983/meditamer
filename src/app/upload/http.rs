@@ -3,6 +3,7 @@ use core::cmp::min;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{with_timeout, Duration};
 use embedded_io_async::Write;
+use static_cell::StaticCell;
 
 use super::super::types::{SdUploadCommand, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX};
 use super::sd_bridge::{
@@ -16,6 +17,12 @@ const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 2048;
 
 pub(super) async fn run_http_server(stack: Stack<'static>) {
+    static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
+    static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
+
+    let rx_buffer = RX_BUFFER.init([0u8; HTTP_RW_BUF]);
+    let tx_buffer = TX_BUFFER.init([0u8; HTTP_RW_BUF]);
+
     stack.wait_config_up().await;
     if let Some(cfg) = stack.config_v4() {
         esp_println::println!(
@@ -26,9 +33,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     }
 
     loop {
-        let mut rx_buffer = [0u8; HTTP_RW_BUF];
-        let mut tx_buffer = [0u8; HTTP_RW_BUF];
-        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = TcpSocket::new(stack, &mut rx_buffer[..], &mut tx_buffer[..]);
         socket.set_timeout(Some(Duration::from_secs(20)));
 
         let accepted = socket
