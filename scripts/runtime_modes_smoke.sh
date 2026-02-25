@@ -17,9 +17,19 @@ monitor_mode="${MODE_SMOKE_MONITOR_MODE:-raw}"
 monitor_raw_backend="${MODE_SMOKE_MONITOR_RAW_BACKEND:-cat}"
 monitor_persist_raw="${MODE_SMOKE_MONITOR_PERSIST_RAW:-1}"
 monitor_raw_tio_mute="${MODE_SMOKE_MONITOR_RAW_TIO_MUTE:-0}"
+post_upload_status_repeats="${MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS:-3}"
+post_upload_timeset_repeats="${MODE_SMOKE_POST_UPLOAD_TIMESET_REPEATS:-2}"
 
 if ! [[ "$mode_settle_ms" =~ ^[0-9]+$ ]]; then
     echo "MODE_SMOKE_SETTLE_MS must be a non-negative integer" >&2
+    exit 1
+fi
+if ! [[ "$post_upload_status_repeats" =~ ^[0-9]+$ ]]; then
+    echo "MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS must be a non-negative integer" >&2
+    exit 1
+fi
+if ! [[ "$post_upload_timeset_repeats" =~ ^[0-9]+$ ]]; then
+    echo "MODE_SMOKE_POST_UPLOAD_TIMESET_REPEATS must be a non-negative integer" >&2
     exit 1
 fi
 
@@ -88,6 +98,20 @@ first_match_from_line() {
 
 psram_samples=()
 mode_samples=()
+timeset_samples=()
+
+calc_local_tz_offset_minutes() {
+    local raw sign hh mm total
+    raw="$(date +%z)"
+    sign="${raw:0:1}"
+    hh="${raw:1:2}"
+    mm="${raw:3:2}"
+    total=$((10#$hh * 60 + 10#$mm))
+    if [[ "$sign" == "-" ]]; then
+        total=$((-total))
+    fi
+    printf '%s' "$total"
+}
 
 capture_psram_snapshot() {
     local label="$1"
@@ -168,11 +192,61 @@ apply_mode() {
     echo "[PASS] $name"
 }
 
+run_timeset_probe() {
+    local label="$1"
+    local tz_offset_minutes="$2"
+
+    local attempt=1
+    local ok=0
+    while ((attempt <= 8)); do
+        local start_line epoch
+        start_line="$(wc -l <"$output_path")"
+        epoch="$(date -u +%s)"
+        send_line "TIMESET $epoch $tz_offset_minutes"
+        if wait_for_pattern_from_line "$start_line" "TIMESET (OK|BUSY)" 4; then
+            local line
+            line="$(first_match_from_line "$start_line" "TIMESET (OK|BUSY)")"
+            if [[ "$line" == *"TIMESET OK"* ]]; then
+                timeset_samples+=("$label: $line")
+                ok=1
+                break
+            fi
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+
+    if [[ "$ok" != "1" ]]; then
+        echo "[FAIL] timeset probe failed after retries: $label" >&2
+        tail -n 120 "$output_path" >&2
+        exit 1
+    fi
+    echo "[PASS] $label"
+}
+
+run_post_upload_uart_regression_checks() {
+    if ((post_upload_status_repeats == 0 && post_upload_timeset_repeats == 0)); then
+        return
+    fi
+
+    echo "Running post-upload UART regression checks..."
+    local i tz_offset_minutes
+    for ((i = 1; i <= post_upload_status_repeats; i++)); do
+        query_mode_status "on" ""
+    done
+
+    tz_offset_minutes="$(calc_local_tz_offset_minutes)"
+    for ((i = 1; i <= post_upload_timeset_repeats; i++)); do
+        run_timeset_probe "timeset probe #$i" "$tz_offset_minutes"
+    done
+}
+
 echo "Running runtime mode smoke checks..."
 query_mode_status
 capture_psram_snapshot "baseline"
 
 apply_mode "upload on" "MODE UPLOAD ON" "on" ""
+run_post_upload_uart_regression_checks
 capture_psram_snapshot "upload_on"
 
 apply_mode "upload off" "MODE UPLOAD OFF" "off" ""
@@ -189,6 +263,12 @@ echo "Mode responses:"
 for line in "${mode_samples[@]}"; do
     echo "  $line"
 done
+echo
+echo "TIMESET probes:"
+for line in "${timeset_samples[@]}"; do
+    echo "  $line"
+done
+echo
 echo
 echo "PSRAM snapshots:"
 for line in "${psram_samples[@]}"; do
