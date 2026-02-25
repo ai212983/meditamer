@@ -1,4 +1,4 @@
-use crate::event_engine::{config::EventEngineConfig, types::EventKind};
+use crate::firmware::event_engine::{config::EventEngineConfig, types::EventKind};
 
 #[derive(Clone, Copy, Debug)]
 pub struct EventRegistration {

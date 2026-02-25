@@ -1,6 +1,6 @@
+use super::super::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 use core::sync::atomic::Ordering;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use meditamer::event_engine::{EngineTraceSample, EventEngine, SensorFrame};
 
 use super::super::{
     config::{

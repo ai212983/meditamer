@@ -2,7 +2,7 @@ use core::cmp::min;
 
 use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
-use crate::event_engine::{
+use crate::firmware::event_engine::{
     config::{active_config, EventEngineConfig},
     features::{assess_tap_candidate, compute_motion_features, CandidateAssessment},
     trace::EngineTraceSample,
@@ -464,7 +464,7 @@ impl TapHsm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_engine::features::{
+    use crate::firmware::event_engine::features::{
         LSM6_TAP_SRC_SINGLE_TAP_BIT, LSM6_TAP_SRC_TAP_EVENT_BIT, LSM6_TAP_SRC_Z_BIT,
     };
 

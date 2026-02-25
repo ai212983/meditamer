@@ -1,4 +1,4 @@
-use crate::event_engine::{
+use crate::firmware::event_engine::{
     config::TripleTapConfig,
     types::{CandidateScore, MotionFeatures, RejectReason, SensorFrame},
 };
@@ -239,7 +239,9 @@ pub fn assess_tap_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_engine::config::{TapThresholdConfig, TapWeightConfig, TripleTapConfig};
+    use crate::firmware::event_engine::config::{
+        TapThresholdConfig, TapWeightConfig, TripleTapConfig,
+    };
 
     fn cfg() -> TripleTapConfig {
         TripleTapConfig {

@@ -1,6 +1,7 @@
 mod bootstrap;
 mod comms;
 pub(crate) mod config;
+pub(crate) mod event_engine;
 pub(crate) mod psram;
 mod render;
 mod runtime;

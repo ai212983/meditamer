@@ -1,4 +1,4 @@
-use crate::event_engine::types::{CandidateScore, EngineStateId, RejectReason};
+use crate::firmware::event_engine::types::{CandidateScore, EngineStateId, RejectReason};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineTraceSample {
