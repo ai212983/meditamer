@@ -698,6 +698,12 @@ fn encode_wifi_config_file(
         return Err(());
     }
 
+    if contains_wifi_config_line_break(&credentials.ssid[..ssid_len])
+        || contains_wifi_config_line_break(&credentials.password[..password_len])
+    {
+        return Err(());
+    }
+
     let mut cursor = 0usize;
     cursor = write_ascii(out, cursor, b"ssid=").ok_or(())?;
     cursor = write_ascii(out, cursor, &credentials.ssid[..ssid_len]).ok_or(())?;
@@ -705,6 +711,11 @@ fn encode_wifi_config_file(
     cursor = write_ascii(out, cursor, &credentials.password[..password_len]).ok_or(())?;
     cursor = write_ascii(out, cursor, b"\n").ok_or(())?;
     Ok(cursor)
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn contains_wifi_config_line_break(bytes: &[u8]) -> bool {
+    bytes.iter().any(|byte| matches!(*byte, b'\n' | b'\r'))
 }
 
 #[cfg(feature = "asset-upload-http")]
