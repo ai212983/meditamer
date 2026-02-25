@@ -305,7 +305,11 @@ async fn process_upload_request(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> SdUploadResult {
-    match request.command {
+    let SdUploadRequest {
+        command,
+        chunk_data,
+    } = request;
+    match command {
         SdUploadCommand::Begin {
             path,
             path_len,
@@ -363,9 +367,16 @@ async fn process_upload_request(
             });
             upload_result(true, SdUploadResultCode::Ok, 0)
         }
-        SdUploadCommand::Chunk { data, data_len } => {
+        SdUploadCommand::Chunk { data_len } => {
             let Some(active) = session.as_mut() else {
                 return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
+            };
+            let Some(data) = chunk_data.as_ref() else {
+                return upload_result(
+                    false,
+                    SdUploadResultCode::OperationFailed,
+                    active.bytes_written,
+                );
             };
             let data_len = (data_len as usize).min(data.len());
             if data_len == 0 {

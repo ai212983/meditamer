@@ -129,7 +129,6 @@ pub(crate) enum SdUploadCommand {
         expected_size: u32,
     },
     Chunk {
-        data: [u8; SD_UPLOAD_CHUNK_MAX],
         data_len: u16,
     },
     Commit,
@@ -146,6 +145,7 @@ pub(crate) enum SdUploadCommand {
 
 pub(crate) struct SdUploadRequest {
     pub(crate) command: SdUploadCommand,
+    pub(crate) chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

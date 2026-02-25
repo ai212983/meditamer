@@ -23,17 +23,19 @@ pub(crate) async fn sd_upload_chunk(data: &[u8]) -> Result<SdUploadResult, SdUpl
     }
     let mut payload = [0u8; SD_UPLOAD_CHUNK_MAX];
     payload[..data.len()].copy_from_slice(data);
-    sd_upload_roundtrip_raw(SdUploadCommand::Chunk {
-        data: payload,
-        data_len: data.len() as u16,
-    })
+    sd_upload_roundtrip_raw(
+        SdUploadCommand::Chunk {
+            data_len: data.len() as u16,
+        },
+        Some(payload),
+    )
     .await
 }
 
 pub(crate) async fn sd_upload_roundtrip(
     command: SdUploadCommand,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
-    sd_upload_roundtrip_raw(command).await
+    sd_upload_roundtrip_raw(command, None).await
 }
 
 pub(crate) fn roundtrip_error_log(error: SdUploadRoundtripError) -> &'static str {
@@ -92,8 +94,14 @@ pub(crate) fn roundtrip_error_body(error: SdUploadRoundtripError) -> &'static [u
 
 async fn sd_upload_roundtrip_raw(
     command: SdUploadCommand,
+    chunk_data: Option<[u8; SD_UPLOAD_CHUNK_MAX]>,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
-    SD_UPLOAD_REQUESTS.send(SdUploadRequest { command }).await;
+    SD_UPLOAD_REQUESTS
+        .send(SdUploadRequest {
+            command,
+            chunk_data,
+        })
+        .await;
     let result = with_timeout(
         Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS),
         SD_UPLOAD_RESULTS.receive(),
