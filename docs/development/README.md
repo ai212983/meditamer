@@ -221,6 +221,46 @@ PSRAMALLOC OK bytes=<n> placement=<placement> len=<n>
 PSRAMALLOC ERR bytes=<n> reason=<reason>
 ```
 
+## Runtime Service Modes
+
+Runtime mode controls are available over `UART0` (`115200` baud):
+
+```text
+MODE STATUS
+MODE UPLOAD ON
+MODE UPLOAD OFF
+MODE ASSETS ON
+MODE ASSETS OFF
+```
+
+Compatibility alias:
+
+```text
+RUNMODE UPLOAD
+RUNMODE NORMAL
+```
+
+Notes:
+
+- `MODE` state is persisted in flash and restored on boot.
+- `MODE UPLOAD OFF` rejects upload operations and releases upload transfer buffers.
+- `MODE ASSETS OFF` disables SD asset reads, clears runtime graphics cache, and releases asset-read transfer buffers.
+- On `psram-alloc` builds, transfer buffers are allocated in PSRAM on-demand and released when the mode is disabled.
+
+Quick RAM check sequence:
+
+```text
+PSRAM
+MODE UPLOAD ON
+PSRAM
+MODE UPLOAD OFF
+PSRAM
+MODE ASSETS OFF
+PSRAM
+MODE ASSETS ON
+PSRAM
+```
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:
@@ -255,12 +295,11 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
 
 ## SD Asset Upload Over Wi-Fi (STA, HTTP)
 
-Feature-gated upload server (disabled by default) for pushing assets to SD card without removing it.
+Upload server for pushing assets to SD card without removing it.
 
-Build/flash with feature:
+Build/flash:
 
 ```bash
-export CARGO_FEATURES=asset-upload-http
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh debug
 ```
 
@@ -268,6 +307,7 @@ Notes:
 
 - optional compile-time credentials are still supported via `MEDITAMER_WIFI_SSID` / `MEDITAMER_WIFI_PASSWORD`
   (fallback `SSID` / `PASSWORD`).
+- upload service must be enabled at runtime (`MODE UPLOAD ON`).
 - if credentials are not compiled in, firmware waits for UART `WIFISET` command.
 - server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
 - when an upload token is configured, all HTTP endpoints except `/health` require an `x-upload-token` header;
@@ -341,6 +381,13 @@ Delete paths (relative to `--dst`, or absolute under `/assets`):
 ```bash
 scripts/upload_assets_http.py --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
+
+Suggested runtime flow:
+
+1. `MODE UPLOAD ON`
+2. `WIFISET <ssid> <password>` (if needed)
+3. Upload files over HTTP
+4. `MODE UPLOAD OFF`
 
 ## Soak Script
 
