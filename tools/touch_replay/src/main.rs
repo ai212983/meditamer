@@ -6,9 +6,9 @@ use std::{
     process,
 };
 
-#[path = "../../../src/app/touch/core.rs"]
+#[path = "../../../src/firmware/touch/core/mod.rs"]
 mod touch_core;
-#[path = "../../../src/app/touch/normalize.rs"]
+#[path = "../../../src/firmware/touch/normalize/mod.rs"]
 mod touch_normalize;
 
 use touch_core::{

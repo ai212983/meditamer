@@ -237,5 +237,4 @@ pub fn assess_tap_candidate(
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;

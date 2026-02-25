@@ -291,5 +291,5 @@ fn recontact_after_release_gap_emits_up_for_previous_interaction() {
     assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
 }
 
-#[test]
+#[cfg(test)]
 mod part2;

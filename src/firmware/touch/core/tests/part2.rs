@@ -1,4 +1,5 @@
 use super::*;
+#[test]
 fn no_move_release_recontact_continues_same_swipe() {
     let mut engine = TouchEngine::new();
     let mut events = std::vec::Vec::new();

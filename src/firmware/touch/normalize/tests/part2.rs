@@ -1,4 +1,5 @@
 use super::*;
+#[test]
 fn dual_contact_reports_multitouch_count_when_both_slots_are_active() {
     let mut n = TouchPresenceNormalizer::new();
 
