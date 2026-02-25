@@ -3,8 +3,17 @@ pre-commit:
   commands:
     markdown-links:
       run: scripts/check_markdown_links.sh
+    host-tools-clippy:
+      glob: "{tools/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
+      run: scripts/lint_host_tools.sh
 
 commit-msg:
   commands:
     conventional-commitlint:
       run: scripts/check_commit_message.sh {1}
+
+pre-push:
+  commands:
+    firmware-clippy:
+      glob: "{src/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
