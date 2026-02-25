@@ -27,7 +27,7 @@ use super::{
 #[cfg(feature = "asset-upload-http")]
 use super::{
     config::{
-        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSE_TIMEOUT_MS, WIFI_CONFIG_RESPONSES,
+        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
         WIFI_CREDENTIALS_UPDATES,
     },
     types::{

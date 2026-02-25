@@ -1,6 +1,10 @@
 pre-commit:
   parallel: true
   commands:
+    rustfmt:
+      glob: "{src/**/*.rs,tools/**/*.rs,build.rs}"
+      run: cargo fmt --all
+      stage_fixed: true
     markdown-links:
       run: scripts/check_markdown_links.sh
     host-tools-clippy:
