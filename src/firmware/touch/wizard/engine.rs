@@ -13,7 +13,7 @@ use crate::firmware::{
     types::InkplateDriver,
 };
 
-use super::{
+use super::super::{
     config::{TOUCH_WIZARD_SESSION_EVENTS, TOUCH_WIZARD_SWIPE_TRACE_SAMPLES},
     types::{
         TouchEvent, TouchEventKind, TouchSwipeDirection, TouchWizardSessionEvent,

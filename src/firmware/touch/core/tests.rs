@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn sample1(x: u16, y: u16) -> TouchSample {
