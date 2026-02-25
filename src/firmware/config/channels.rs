@@ -5,7 +5,8 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::WifiCredentials;
 use super::super::types::{
-    AppEvent, SdPowerRequest, SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
+    AppEvent, SdAssetReadRequest, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
+    SdUploadRequest, SdUploadResult, TapTraceSample,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{WifiConfigRequest, WifiConfigResponse};
@@ -17,6 +18,13 @@ pub(crate) static SD_UPLOAD_REQUESTS: Channel<CriticalSectionRawMutex, SdUploadR
     Channel::new();
 pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadResult, 2> =
     Channel::new();
+pub(crate) static SD_ASSET_READ_REQUESTS: Channel<CriticalSectionRawMutex, SdAssetReadRequest, 2> =
+    Channel::new();
+pub(crate) static SD_ASSET_READ_RESPONSES: Channel<
+    CriticalSectionRawMutex,
+    SdAssetReadResponse,
+    2,
+> = Channel::new();
 #[cfg(feature = "asset-upload-http")]
 pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
     Channel::new();

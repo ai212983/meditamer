@@ -1,4 +1,4 @@
-use super::{SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX};
+use super::{SD_ASSET_READ_MAX, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(crate) enum StorageCommand {
@@ -132,6 +132,32 @@ pub(crate) struct SdUploadResult {
     pub(crate) ok: bool,
     pub(crate) code: SdUploadResultCode,
     pub(crate) bytes_written: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdAssetReadRequest {
+    pub(crate) path: [u8; SD_PATH_MAX],
+    pub(crate) path_len: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SdAssetReadResultCode {
+    Ok,
+    Busy,
+    InvalidPath,
+    NotFound,
+    SizeMismatch,
+    PowerOnFailed,
+    InitFailed,
+    OperationFailed,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SdAssetReadResponse {
+    pub(crate) ok: bool,
+    pub(crate) code: SdAssetReadResultCode,
+    pub(crate) data: [u8; SD_ASSET_READ_MAX],
+    pub(crate) data_len: u16,
 }
 
 #[derive(Clone, Copy)]

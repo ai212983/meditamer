@@ -1,17 +1,21 @@
 #[cfg(not(feature = "asset-upload-http"))]
-use embassy_futures::select::{select, Either};
-#[cfg(feature = "asset-upload-http")]
 use embassy_futures::select::{select3, Either3};
+#[cfg(feature = "asset-upload-http")]
+use embassy_futures::select::{select4, Either4};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use sdcard::runtime as sd_ops;
 
 #[cfg(feature = "asset-upload-http")]
 use super::super::config::WIFI_CONFIG_REQUESTS;
 use super::super::{
-    config::{SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_REQUESTS, SD_UPLOAD_REQUESTS},
+    config::{
+        SD_ASSET_READ_REQUESTS, SD_POWER_REQUESTS, SD_POWER_RESPONSES, SD_REQUESTS,
+        SD_UPLOAD_REQUESTS,
+    },
     types::{SdCommand, SdPowerRequest, SdProbeDriver, SdRequest},
 };
 
+mod asset_read;
 mod dispatch;
 mod logging;
 #[cfg(test)]
@@ -20,10 +24,13 @@ mod upload;
 #[cfg(feature = "asset-upload-http")]
 mod wifi_config;
 
+use asset_read::process_asset_read_request;
 use dispatch::process_request;
 #[cfg(feature = "asset-upload-http")]
 use logging::publish_wifi_config_response;
-use logging::{publish_result, publish_upload_result, sd_power_action_label};
+use logging::{
+    publish_asset_read_response, publish_result, publish_upload_result, sd_power_action_label,
+};
 use upload::{process_upload_request, SdUploadSession};
 #[cfg(feature = "asset-upload-http")]
 use wifi_config::process_wifi_config_request;
@@ -74,9 +81,10 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
 
         #[cfg(feature = "asset-upload-http")]
         let request = if powered {
-            match select3(
+            match select4(
                 WIFI_CONFIG_REQUESTS.receive(),
                 SD_UPLOAD_REQUESTS.receive(),
+                SD_ASSET_READ_REQUESTS.receive(),
                 with_timeout(
                     Duration::from_millis(SD_IDLE_POWER_OFF_MS),
                     SD_REQUESTS.receive(),
@@ -84,7 +92,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             )
             .await
             {
-                Either3::First(config_request) => {
+                Either4::First(config_request) => {
                     let response = process_wifi_config_request(
                         config_request,
                         &upload_session,
@@ -96,7 +104,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     publish_wifi_config_response(response);
                     continue;
                 }
-                Either3::Second(upload_request) => {
+                Either4::Second(upload_request) => {
                     let result = process_upload_request(
                         upload_request,
                         &mut upload_session,
@@ -106,86 +114,142 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     )
                     .await;
                     publish_upload_result(result);
+                    continue;
+                }
+                Either4::Third(asset_request) => {
+                    let response = process_asset_read_request(
+                        asset_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_asset_read_response(response);
+                    continue;
+                }
+                Either4::Fourth(result) => result.ok(),
+            }
+        } else {
+            match select4(
+                WIFI_CONFIG_REQUESTS.receive(),
+                SD_UPLOAD_REQUESTS.receive(),
+                SD_ASSET_READ_REQUESTS.receive(),
+                SD_REQUESTS.receive(),
+            )
+            .await
+            {
+                Either4::First(config_request) => {
+                    let response = process_wifi_config_request(
+                        config_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_wifi_config_response(response);
+                    continue;
+                }
+                Either4::Second(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either4::Third(asset_request) => {
+                    let response = process_asset_read_request(
+                        asset_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_asset_read_response(response);
+                    continue;
+                }
+                Either4::Fourth(request) => Some(request),
+            }
+        };
+
+        #[cfg(not(feature = "asset-upload-http"))]
+        let request = if powered {
+            match select3(
+                SD_UPLOAD_REQUESTS.receive(),
+                SD_ASSET_READ_REQUESTS.receive(),
+                with_timeout(
+                    Duration::from_millis(SD_IDLE_POWER_OFF_MS),
+                    SD_REQUESTS.receive(),
+                ),
+            )
+            .await
+            {
+                Either3::First(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either3::Second(asset_request) => {
+                    let response = process_asset_read_request(
+                        asset_request,
+                        &upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_asset_read_response(response);
                     continue;
                 }
                 Either3::Third(result) => result.ok(),
             }
         } else {
             match select3(
-                WIFI_CONFIG_REQUESTS.receive(),
                 SD_UPLOAD_REQUESTS.receive(),
+                SD_ASSET_READ_REQUESTS.receive(),
                 SD_REQUESTS.receive(),
             )
             .await
             {
-                Either3::First(config_request) => {
-                    let response = process_wifi_config_request(
-                        config_request,
+                Either3::First(upload_request) => {
+                    let result = process_upload_request(
+                        upload_request,
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+                Either3::Second(asset_request) => {
+                    let response = process_asset_read_request(
+                        asset_request,
                         &upload_session,
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
                     )
                     .await;
-                    publish_wifi_config_response(response);
-                    continue;
-                }
-                Either3::Second(upload_request) => {
-                    let result = process_upload_request(
-                        upload_request,
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                    )
-                    .await;
-                    publish_upload_result(result);
+                    publish_asset_read_response(response);
                     continue;
                 }
                 Either3::Third(request) => Some(request),
-            }
-        };
-
-        #[cfg(not(feature = "asset-upload-http"))]
-        let request = if powered {
-            match select(
-                SD_UPLOAD_REQUESTS.receive(),
-                with_timeout(
-                    Duration::from_millis(SD_IDLE_POWER_OFF_MS),
-                    SD_REQUESTS.receive(),
-                ),
-            )
-            .await
-            {
-                Either::First(upload_request) => {
-                    let result = process_upload_request(
-                        upload_request,
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                    )
-                    .await;
-                    publish_upload_result(result);
-                    continue;
-                }
-                Either::Second(result) => result.ok(),
-            }
-        } else {
-            match select(SD_UPLOAD_REQUESTS.receive(), SD_REQUESTS.receive()).await {
-                Either::First(upload_request) => {
-                    let result = process_upload_request(
-                        upload_request,
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                    )
-                    .await;
-                    publish_upload_result(result);
-                    continue;
-                }
-                Either::Second(request) => Some(request),
             }
         };
 

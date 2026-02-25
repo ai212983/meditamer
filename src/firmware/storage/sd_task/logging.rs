@@ -4,9 +4,10 @@ use super::super::super::{
     types::{WifiConfigResponse, WifiConfigResultCode},
 };
 use super::super::super::{
-    config::{SD_RESULTS, SD_UPLOAD_RESULTS},
+    config::{SD_ASSET_READ_RESPONSES, SD_RESULTS, SD_UPLOAD_RESULTS},
     types::{
-        SdCommandKind, SdPowerRequest, SdResult, SdResultCode, SdUploadResult, SdUploadResultCode,
+        SdAssetReadResponse, SdAssetReadResultCode, SdCommandKind, SdPowerRequest, SdResult,
+        SdResultCode, SdUploadResult, SdUploadResultCode,
     },
 };
 
@@ -31,6 +32,17 @@ pub(super) fn publish_upload_result(result: SdUploadResult) {
             result.ok as u8,
             sd_upload_result_code_label(result.code),
             result.bytes_written
+        );
+    }
+}
+
+pub(super) fn publish_asset_read_response(response: SdAssetReadResponse) {
+    if SD_ASSET_READ_RESPONSES.try_send(response).is_err() {
+        esp_println::println!(
+            "sdtask: asset_read_resp_drop ok={} code={} data_len={}",
+            response.ok as u8,
+            sd_asset_read_result_code_label(response.code),
+            response.data_len
         );
     }
 }
@@ -96,6 +108,19 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
         SdUploadResultCode::PowerOnFailed => "power_on_failed",
         SdUploadResultCode::InitFailed => "init_failed",
         SdUploadResultCode::OperationFailed => "operation_failed",
+    }
+}
+
+fn sd_asset_read_result_code_label(code: SdAssetReadResultCode) -> &'static str {
+    match code {
+        SdAssetReadResultCode::Ok => "ok",
+        SdAssetReadResultCode::Busy => "busy",
+        SdAssetReadResultCode::InvalidPath => "invalid_path",
+        SdAssetReadResultCode::NotFound => "not_found",
+        SdAssetReadResultCode::SizeMismatch => "size_mismatch",
+        SdAssetReadResultCode::PowerOnFailed => "power_on_failed",
+        SdAssetReadResultCode::InitFailed => "init_failed",
+        SdAssetReadResultCode::OperationFailed => "operation_failed",
     }
 }
 

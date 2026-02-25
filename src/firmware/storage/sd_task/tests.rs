@@ -1,11 +1,12 @@
 use super::{
+    asset_read::parse_asset_path,
     dispatch::{sd_command_kind, sd_result_should_retry},
     failure_backoff_ms,
     upload::parse_upload_path,
     SD_BACKOFF_BASE_MS, SD_BACKOFF_MAX_MS,
 };
 use crate::firmware::types::{
-    SdCommand, SdCommandKind, SdResultCode, SdUploadResultCode, SD_PATH_MAX,
+    SdAssetReadResultCode, SdCommand, SdCommandKind, SdResultCode, SdUploadResultCode, SD_PATH_MAX,
 };
 
 #[test]
@@ -87,7 +88,37 @@ fn upload_path_validation_rejects_control_characters() {
     );
 }
 
+#[test]
+fn asset_path_validation_allows_assets_root_and_children() {
+    assert_eq!(parse_asset_path_bytes("/assets"), Ok("/assets"));
+    assert_eq!(
+        parse_asset_path_bytes("/assets/raw/fonts/pirata_clock/digit_0_mono1.raw"),
+        Ok("/assets/raw/fonts/pirata_clock/digit_0_mono1.raw")
+    );
+}
+
+#[test]
+fn asset_path_validation_rejects_outside_root_and_dot_segments() {
+    assert_eq!(
+        parse_asset_path_bytes("/config/wifi.cfg"),
+        Err(SdAssetReadResultCode::InvalidPath)
+    );
+    assert_eq!(
+        parse_asset_path_bytes("/assets/../config"),
+        Err(SdAssetReadResultCode::InvalidPath)
+    );
+    assert_eq!(
+        parse_asset_path_bytes("/assets/./font.raw"),
+        Err(SdAssetReadResultCode::InvalidPath)
+    );
+}
+
 fn parse_upload_path_bytes(path: &str) -> Result<&str, SdUploadResultCode> {
     let bytes = path.as_bytes();
     parse_upload_path(bytes, bytes.len() as u8)
+}
+
+fn parse_asset_path_bytes(path: &str) -> Result<&str, SdAssetReadResultCode> {
+    let bytes = path.as_bytes();
+    parse_asset_path(bytes, bytes.len() as u8)
 }
