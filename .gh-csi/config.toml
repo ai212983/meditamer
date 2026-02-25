@@ -15,14 +15,7 @@ allowed_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
 
 [labels]
 queue = "agent:run"
-in_progress = "agent:in-progress"
-done = "agent:done"
-failed = "agent:failed"
 blocked = "agent:blocked"
-# Optional: apply to an issue to use the "heavy" executor model chain.
-heavy = "agent:heavy"
-# Optional: keep the original issue open after a successful run.
-keep_open = "agent:keep-open"
 # Optional: planning-only mode (skip checks; comment plan back to the issue).
 plan = "agent:plan"
 
