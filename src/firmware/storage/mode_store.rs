@@ -1,7 +1,7 @@
 use embedded_storage::{ReadStorage, Storage};
 use esp_storage::FlashStorage;
 
-use super::{
+use super::super::{
     config::{MODE_STORE_MAGIC, MODE_STORE_RECORD_LEN, MODE_STORE_VERSION},
     types::{DisplayMode, RuntimeMode},
 };

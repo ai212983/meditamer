@@ -16,7 +16,7 @@ use super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
     SD_POWER_RESPONSES, UART_BAUD,
 };
-use super::store::ModeStore;
+use super::storage::ModeStore;
 use super::types::{
     AppEvent, DisplayContext, InkplateDriver, PanelPinHold, RuntimeMode, SdPowerRequest,
 };
