@@ -203,6 +203,10 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
                     return Err(err);
                 }
             };
+            if content_length > u32::MAX as usize {
+                write_response(socket, b"413 Payload Too Large", b"content too large").await;
+                return Err("content too large");
+            }
             let expected_size = content_length as u32;
             sd_upload_or_http_error(
                 socket,
