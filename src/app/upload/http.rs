@@ -19,7 +19,6 @@ const HTTP_RW_BUF: usize = 2048;
 
 #[derive(Copy, Clone)]
 enum UploadAuthError {
-    TokenNotConfigured,
     MissingOrInvalidToken,
 }
 
@@ -103,16 +102,6 @@ async fn handle_connection(socket: &mut TcpSocket<'_>) -> Result<(), &'static st
     if request_path != "/health" {
         match validate_upload_auth(header) {
             Ok(()) => {}
-            Err(UploadAuthError::TokenNotConfigured) => {
-                drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
-                write_response(
-                    socket,
-                    b"503 Service Unavailable",
-                    b"upload token not configured",
-                )
-                .await;
-                return Err("upload token not configured");
-            }
             Err(UploadAuthError::MissingOrInvalidToken) => {
                 drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
                 write_response(
@@ -416,9 +405,11 @@ fn target_path(target: &str) -> &str {
 }
 
 fn validate_upload_auth(header: &str) -> Result<(), UploadAuthError> {
-    let expected_token = option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN")
+    let Some(expected_token) = option_env!("MEDITAMER_UPLOAD_HTTP_TOKEN")
         .or(option_env!("UPLOAD_HTTP_TOKEN"))
-        .ok_or(UploadAuthError::TokenNotConfigured)?;
+    else {
+        return Ok(());
+    };
 
     let provided_token = parse_header_value(header, UPLOAD_HTTP_TOKEN_HEADER)
         .ok_or(UploadAuthError::MissingOrInvalidToken)?;
