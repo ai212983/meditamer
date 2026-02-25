@@ -1,4 +1,4 @@
-use meditamer::{
+use crate::{
     drivers::inkplate::{E_INK_HEIGHT, E_INK_WIDTH},
     graphics::suminagashi::{
         DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,

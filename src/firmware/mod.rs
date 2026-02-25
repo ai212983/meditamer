@@ -11,4 +11,4 @@ mod touch;
 pub(crate) mod types;
 pub(crate) mod ui;
 
-pub(crate) use bootstrap::run;
+pub use bootstrap::run;

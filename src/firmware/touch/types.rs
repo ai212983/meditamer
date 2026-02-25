@@ -1,5 +1,5 @@
+use crate::drivers::inkplate::TouchSample;
 use esp_hal::gpio::Input;
-use meditamer::drivers::inkplate::TouchSample;
 
 pub(crate) type TouchIrqPin = Input<'static>;
 

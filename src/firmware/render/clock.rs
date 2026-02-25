@@ -10,7 +10,7 @@ use u8g2_fonts::{
     FontRenderer,
 };
 
-use meditamer::assets::pirata_clock_font;
+use crate::assets::pirata_clock_font;
 
 use super::{
     super::{

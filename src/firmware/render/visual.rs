@@ -1,12 +1,12 @@
 use core::sync::atomic::Ordering;
 
-use embassy_time::{Instant, Timer};
-use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
-use meditamer::graphics::{
+use crate::graphics::{
     shanshui,
     sumi_sun::{self, Fx as SunFx, SumiSunParams},
     suminagashi,
 };
+use embassy_time::{Instant, Timer};
+use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
 
 use super::{
     super::{

@@ -1,8 +1,8 @@
-use esp_hal::{gpio::Output, uart::Uart, Async};
-use meditamer::{
+use crate::{
     drivers::inkplate::InkplateHal,
     drivers::platform::{BusyDelay, HalI2c},
 };
+use esp_hal::{gpio::Output, uart::Uart, Async};
 use sdcard::probe;
 
 use crate::firmware::store::ModeStore;

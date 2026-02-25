@@ -1,3 +1,4 @@
+use crate::drivers::{inkplate::InkplateHal, platform::HalI2c};
 use embassy_time::{Duration, Instant, Ticker};
 use esp_hal::{
     gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
@@ -10,7 +11,6 @@ use esp_hal::{
     timer::timg::TimerGroup,
     uart::{Config as UartConfig, Uart},
 };
-use meditamer::drivers::{inkplate::InkplateHal, platform::HalI2c};
 
 use super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, SD_POWER_REQUESTS,
@@ -23,7 +23,7 @@ use super::types::{
 use super::{comms, psram, runtime, storage, touch};
 use sdcard::probe;
 
-pub(crate) fn run() -> ! {
+pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
     esp_alloc::heap_allocator!(size: 48 * 1024);
@@ -114,11 +114,10 @@ pub(crate) fn run() -> ! {
             .with_sda(peripherals.GPIO21)
             .with_scl(peripherals.GPIO22);
         let i2c = HalI2c::new(i2c);
-        let mut inkplate =
-            match InkplateHal::new(i2c, meditamer::drivers::platform::BusyDelay::new()) {
-                Ok(driver) => driver,
-                Err(_) => halt_forever(),
-            };
+        let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
+            Ok(driver) => driver,
+            Err(_) => halt_forever(),
+        };
         if inkplate.init_core().is_err() {
             halt_forever();
         }
@@ -154,11 +153,10 @@ pub(crate) fn run() -> ! {
             .with_sda(peripherals.GPIO21)
             .with_scl(peripherals.GPIO22);
         let i2c = HalI2c::new(i2c);
-        let mut inkplate =
-            match InkplateHal::new(i2c, meditamer::drivers::platform::BusyDelay::new()) {
-                Ok(driver) => driver,
-                Err(_) => halt_forever(),
-            };
+        let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
+            Ok(driver) => driver,
+            Err(_) => halt_forever(),
+        };
 
         if inkplate.init_core().is_err() {
             halt_forever();

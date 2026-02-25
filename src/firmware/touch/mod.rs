@@ -7,7 +7,7 @@ pub(crate) mod tasks;
 pub(crate) mod types;
 pub(crate) mod wizard;
 
-use meditamer::drivers::inkplate::TouchSample as HalTouchSample;
+use crate::drivers::inkplate::TouchSample as HalTouchSample;
 use normalize::{NormalizedTouchPoint, NormalizedTouchSample, TouchPresenceNormalizer};
 
 use self::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
