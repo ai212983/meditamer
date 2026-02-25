@@ -67,6 +67,21 @@ Optional full (online) validation:
 git ls-files -z '*.md' | xargs -0 env MARKDOWN_LINKS_ONLINE=1 scripts/check_markdown_links.sh
 ```
 
+## File Size Guidelines (Rewrite Phase)
+
+These limits are active during the current rewrite on this branch. Enforcement is manual in review for now (no hooks yet).
+
+- Hard cap: non-generated source files must stay at or below `500` lines.
+- Split-plan trigger: once a file crosses `420` lines, the same PR must include a short split plan.
+- Warning threshold: treat `450` lines as "split now unless there is a blocking reason".
+- New modules target: keep new modules at or below `300` lines.
+- Prefer folder-based splits over flat suffix files. Example: prefer `src/firmware/event_engine/tap/hsm.rs` and `src/firmware/event_engine/tap/trace.rs` over `src/firmware/event_engine/tap_hsm.rs` and `src/firmware/event_engine/tap_trace.rs`.
+- Generated/build outputs are excluded from these limits (for example `target/**` and `**/out/**`).
+
+Suggested PR checklist line:
+
+- `[]` If any touched file is `>= 420` lines, I included a split plan in this PR description.
+
 ## Display Runtime Behavior
 
 - Clock refresh task: every 5 minutes (`300s`)
