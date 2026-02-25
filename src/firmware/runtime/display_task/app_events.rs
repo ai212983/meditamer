@@ -10,6 +10,7 @@ use super::super::super::{
         sample_battery_percent,
     },
     runtime::service_mode,
+    storage::transfer_buffers,
     touch::{
         config::{TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW, TOUCH_SAMPLE_IDLE_FALLBACK_MS},
         tasks::request_touch_pipeline_reset,
@@ -239,6 +240,12 @@ pub(super) async fn handle_app_event(
         AppEvent::SetRuntimeServices(services) => {
             service_mode::set_runtime_services(services);
             context.mode_store.save_runtime_services(services);
+            if !services.upload_enabled_flag() {
+                transfer_buffers::release_upload_chunk_buffer().await;
+            }
+            if !services.asset_reads_enabled_flag() {
+                transfer_buffers::release_asset_read_buffer().await;
+            }
             #[cfg(feature = "graphics")]
             if !services.asset_reads_enabled_flag() {
                 clear_runtime_asset_caches().await;

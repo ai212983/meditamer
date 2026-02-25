@@ -63,6 +63,13 @@ impl UploadChunkBuffer {
             &mut self.data
         }
     }
+
+    fn release(&mut self) {
+        #[cfg(feature = "psram-alloc")]
+        {
+            self.data = None;
+        }
+    }
 }
 
 pub(crate) struct AssetReadBuffer {
@@ -124,6 +131,13 @@ impl AssetReadBuffer {
             &self.data
         }
     }
+
+    fn release(&mut self) {
+        #[cfg(feature = "psram-alloc")]
+        {
+            self.data = None;
+        }
+    }
 }
 
 static UPLOAD_CHUNK_BUFFER: Mutex<CriticalSectionRawMutex, UploadChunkBuffer> =
@@ -143,4 +157,14 @@ pub(crate) async fn lock_asset_read_buffer(
     let mut guard = ASSET_READ_BUFFER.lock().await;
     guard.ensure_ready()?;
     Ok(guard)
+}
+
+pub(crate) async fn release_upload_chunk_buffer() {
+    let mut guard = UPLOAD_CHUNK_BUFFER.lock().await;
+    guard.release();
+}
+
+pub(crate) async fn release_asset_read_buffer() {
+    let mut guard = ASSET_READ_BUFFER.lock().await;
+    guard.release();
 }
