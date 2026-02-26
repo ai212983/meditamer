@@ -9,8 +9,12 @@ static WIFI_REASON_NO_AP_FOUND: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_RUNS: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_EMPTY: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_TARGET_HITS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_ACCEPTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_ACCEPT_ERRORS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_REQUEST_ERRORS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_HEADER_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_READ_BODY_ERRORS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_SD_BUSY_ERRORS: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_ERRORS: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_BUSY: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
@@ -29,8 +33,12 @@ pub(crate) struct Snapshot {
     pub(crate) wifi_scan_runs: u32,
     pub(crate) wifi_scan_empty: u32,
     pub(crate) wifi_scan_target_hits: u32,
+    pub(crate) upload_http_accepts: u32,
     pub(crate) upload_http_accept_errors: u32,
     pub(crate) upload_http_request_errors: u32,
+    pub(crate) upload_http_header_timeouts: u32,
+    pub(crate) upload_http_read_body_errors: u32,
+    pub(crate) upload_http_sd_busy_errors: u32,
     pub(crate) sd_upload_errors: u32,
     pub(crate) sd_upload_busy: u32,
     pub(crate) sd_upload_timeouts: u32,
@@ -56,8 +64,12 @@ pub(crate) fn snapshot() -> Snapshot {
         wifi_scan_runs: WIFI_SCAN_RUNS.load(Ordering::Relaxed),
         wifi_scan_empty: WIFI_SCAN_EMPTY.load(Ordering::Relaxed),
         wifi_scan_target_hits: WIFI_SCAN_TARGET_HITS.load(Ordering::Relaxed),
+        upload_http_accepts: UPLOAD_HTTP_ACCEPTS.load(Ordering::Relaxed),
         upload_http_accept_errors: UPLOAD_HTTP_ACCEPT_ERRORS.load(Ordering::Relaxed),
         upload_http_request_errors: UPLOAD_HTTP_REQUEST_ERRORS.load(Ordering::Relaxed),
+        upload_http_header_timeouts: UPLOAD_HTTP_HEADER_TIMEOUTS.load(Ordering::Relaxed),
+        upload_http_read_body_errors: UPLOAD_HTTP_READ_BODY_ERRORS.load(Ordering::Relaxed),
+        upload_http_sd_busy_errors: UPLOAD_HTTP_SD_BUSY_ERRORS.load(Ordering::Relaxed),
         sd_upload_errors: SD_UPLOAD_ERRORS.load(Ordering::Relaxed),
         sd_upload_busy: SD_UPLOAD_BUSY.load(Ordering::Relaxed),
         sd_upload_timeouts: SD_UPLOAD_TIMEOUTS.load(Ordering::Relaxed),
@@ -112,6 +124,12 @@ pub(crate) fn record_wifi_scan(result_count: usize, target_found: bool) {
     );
 }
 
+pub(crate) fn record_upload_http_accept() {
+    UPLOAD_HTTP_ACCEPTS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::trace!("telemetry upload_http_accept");
+}
+
 pub(crate) fn record_upload_http_accept_error() {
     UPLOAD_HTTP_ACCEPT_ERRORS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
@@ -122,6 +140,21 @@ pub(crate) fn record_upload_http_request_error() {
     UPLOAD_HTTP_REQUEST_ERRORS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
     defmt::warn!("telemetry upload_http_request_error");
+}
+
+pub(crate) fn record_upload_http_request_bucket(error: &'static str) {
+    match error {
+        "request header timeout" => {
+            UPLOAD_HTTP_HEADER_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+        }
+        "read body" => {
+            UPLOAD_HTTP_READ_BODY_ERRORS.fetch_add(1, Ordering::Relaxed);
+        }
+        "sd busy" => {
+            UPLOAD_HTTP_SD_BUSY_ERRORS.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn record_sd_upload_roundtrip_timeout() {

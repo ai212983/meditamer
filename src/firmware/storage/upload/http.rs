@@ -124,6 +124,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             esp_println::println!("upload_http: accept err={:?}", err);
             continue;
         }
+        telemetry::record_upload_http_accept();
 
         if let Err(err) = connection::handle_connection(
             &mut socket,
@@ -133,6 +134,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         .await
         {
             telemetry::record_upload_http_request_error();
+            telemetry::record_upload_http_request_bucket(err);
             esp_println::println!("upload_http: request err={}", err);
         }
 
