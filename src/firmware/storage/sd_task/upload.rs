@@ -65,24 +65,13 @@ pub(super) async fn process_upload_request(
                 Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
             };
 
-            match fat::remove(sd_probe, temp_path_str).await {
-                Ok(()) => {}
-                Err(fat::SdFatError::NotFound) => {}
-                Err(err) => {
-                    return upload_result(false, map_fat_error_to_upload_code(&err), 0);
-                }
-            }
-
-            if let Err(err) = fat::write_file(sd_probe, temp_path_str, &[]).await {
-                return upload_result(false, map_fat_error_to_upload_code(&err), 0);
-            }
-            let append_session = match fat::begin_append_session(sd_probe, temp_path_str).await {
-                Ok(session) => session,
-                Err(err) => {
-                    let _ = fat::remove(sd_probe, temp_path_str).await;
-                    return upload_result(false, map_fat_error_to_upload_code(&err), 0);
-                }
-            };
+            let append_session =
+                match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await {
+                    Ok(session) => session,
+                    Err(err) => {
+                        return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+                    }
+                };
 
             let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
             final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
@@ -187,19 +176,7 @@ pub(super) async fn process_upload_request(
                 );
             }
 
-            match fat::remove(sd_probe, final_path_str).await {
-                Ok(()) => {}
-                Err(fat::SdFatError::NotFound) => {}
-                Err(err) => {
-                    return upload_result(
-                        false,
-                        map_fat_error_to_upload_code(&err),
-                        active.bytes_written,
-                    );
-                }
-            }
-
-            if let Err(err) = fat::rename(sd_probe, temp_path_str, final_path_str).await {
+            if let Err(err) = fat::rename_replace(sd_probe, temp_path_str, final_path_str).await {
                 return upload_result(
                     false,
                     map_fat_error_to_upload_code(&err),

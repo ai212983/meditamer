@@ -159,21 +159,66 @@ pub async fn begin_append_session(
     if found.record.is_dir() {
         return Err(SdFatError::IsDirectory);
     }
-    let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
-    let allocated_clusters = clusters_for_size(found.record.size as usize, cluster_size);
-    let tail_cluster = if allocated_clusters == 0 {
-        0
-    } else {
-        cluster_at_index(sd, &volume, found.record.first_cluster, allocated_clusters - 1).await?
-    };
+    append_session_from_record(sd, volume, found.short_location, found.record).await
+}
 
-    Ok(FatAppendSession {
-        volume,
-        short_location: found.short_location,
-        record: found.record,
-        allocated_clusters,
-        tail_cluster,
-    })
+pub async fn begin_append_session_create_or_open(
+    sd: &mut SdCardProbe<'_>,
+    path: &str,
+) -> Result<FatAppendSession, SdFatError> {
+    let mut segments = [PathSegment::EMPTY; MAX_PATH_SEGMENTS];
+    let count = parse_path(path, &mut segments)?;
+    if count == 0 {
+        return Err(SdFatError::InvalidPath);
+    }
+
+    let volume = mount_fat32(sd).await?;
+    let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
+    let target = segments[count - 1];
+
+    if let Some(found) = scan_directory(sd, &volume, parent_cluster, Some(&target), 1)
+        .await?
+        .found
+    {
+        if found.record.is_dir() {
+            return Err(SdFatError::IsDirectory);
+        }
+        let mut record = found.record;
+        if record.first_cluster >= 2 {
+            free_chain(sd, &volume, record.first_cluster).await?;
+        }
+        record.first_cluster = 0;
+        record.size = 0;
+        write_directory_entry(sd, &found.short_location, &record).await?;
+        return append_session_from_record(sd, volume, found.short_location, record).await;
+    }
+
+    let (short_name, lfn_utf16, lfn_len) =
+        select_new_entry_name(sd, &volume, parent_cluster, target.as_bytes()).await?;
+    let needed_slots = if lfn_len == 0 {
+        1usize
+    } else {
+        ((lfn_len + 12) / 13) + 1
+    };
+    let free_lookup = scan_directory(sd, &volume, parent_cluster, None, needed_slots).await?;
+    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let short_location = free_slots[needed_slots - 1];
+    let record = DirRecord {
+        short_name,
+        display_name: path_segment_to_name(target),
+        display_name_len: target.len,
+        attr: 0x20,
+        first_cluster: 0,
+        size: 0,
+    };
+    write_new_entry(
+        sd,
+        &free_slots[..needed_slots],
+        &record,
+        &lfn_utf16[..lfn_len],
+    )
+    .await?;
+    append_session_from_record(sd, volume, short_location, record).await
 }
 
 pub async fn append_session_write(
@@ -239,6 +284,29 @@ async fn ensure_append_capacity(
     session.tail_cluster = cluster_tail(sd, &session.volume, extra_first, extra_clusters).await?;
     session.allocated_clusters = target_clusters;
     Ok(())
+}
+
+async fn append_session_from_record(
+    sd: &mut SdCardProbe<'_>,
+    volume: Fat32Volume,
+    short_location: DirLocation,
+    record: DirRecord,
+) -> Result<FatAppendSession, SdFatError> {
+    let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
+    let allocated_clusters = clusters_for_size(record.size as usize, cluster_size);
+    let tail_cluster = if allocated_clusters == 0 {
+        0
+    } else {
+        cluster_at_index(sd, &volume, record.first_cluster, allocated_clusters - 1).await?
+    };
+
+    Ok(FatAppendSession {
+        volume,
+        short_location,
+        record,
+        allocated_clusters,
+        tail_cluster,
+    })
 }
 
 async fn cluster_tail(
@@ -312,4 +380,70 @@ pub async fn truncate_file(
     record.first_cluster = first_cluster;
     record.size = new_size as u32;
     write_directory_entry(sd, &found.short_location, &record).await
+}
+
+pub async fn rename_replace(
+    sd: &mut SdCardProbe<'_>,
+    src: &str,
+    dst: &str,
+) -> Result<(), SdFatError> {
+    let mut src_segments = [PathSegment::EMPTY; MAX_PATH_SEGMENTS];
+    let src_count = parse_path(src, &mut src_segments)?;
+    let mut dst_segments = [PathSegment::EMPTY; MAX_PATH_SEGMENTS];
+    let dst_count = parse_path(dst, &mut dst_segments)?;
+    if src_count == 0 || dst_count == 0 {
+        return Err(SdFatError::InvalidPath);
+    }
+
+    let volume = mount_fat32(sd).await?;
+    let src_parent = resolve_dir_cluster(sd, &volume, &src_segments, src_count - 1).await?;
+    let dst_parent = resolve_dir_cluster(sd, &volume, &dst_segments, dst_count - 1).await?;
+    let src_found = scan_directory(sd, &volume, src_parent, Some(&src_segments[src_count - 1]), 1)
+        .await?
+        .found
+        .ok_or(SdFatError::NotFound)?;
+
+    if src_found.record.is_dir() && src_parent != dst_parent {
+        return Err(SdFatError::CrossDirectoryRenameUnsupported);
+    }
+
+    if let Some(dst_found) = scan_directory(sd, &volume, dst_parent, Some(&dst_segments[dst_count - 1]), 1)
+        .await?
+        .found
+    {
+        if dst_found.record.is_dir() {
+            return Err(SdFatError::IsDirectory);
+        }
+        if dst_found.record.first_cluster >= 2 {
+            free_chain(sd, &volume, dst_found.record.first_cluster).await?;
+        }
+        mark_found_deleted(sd, &dst_found).await?;
+    }
+
+    let dst_name = dst_segments[dst_count - 1];
+    let (short_name, lfn_utf16, lfn_len) =
+        select_new_entry_name(sd, &volume, dst_parent, dst_name.as_bytes()).await?;
+    let needed_slots = if lfn_len == 0 {
+        1usize
+    } else {
+        ((lfn_len + 12) / 13) + 1
+    };
+    let free_lookup = scan_directory(sd, &volume, dst_parent, None, needed_slots).await?;
+    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+
+    write_new_entry(
+        sd,
+        &free_slots[..needed_slots],
+        &DirRecord {
+            short_name,
+            display_name: path_segment_to_name(dst_name),
+            display_name_len: dst_name.len,
+            attr: src_found.record.attr,
+            first_cluster: src_found.record.first_cluster,
+            size: src_found.record.size,
+        },
+        &lfn_utf16[..lfn_len],
+    )
+    .await?;
+    mark_found_deleted(sd, &src_found).await
 }
