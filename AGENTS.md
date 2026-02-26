@@ -3,6 +3,7 @@
 |Uses: Rust, esp-hal, Embassy
 |../Inkplate-Arduino-library: Reference C++ library for baseline functionality
 |development/README.md: Build, flash, monitor, time sync, and soak script commands
+|Flash policy: Prefer `scripts/flash.sh` over raw `espflash`; use its timeout/fallback diagnostics before deeper debugging
 |development/event-engine-guide.md: Practical guide for tuning/modifying the event engine
 |development/statig-event-engine-plan.md: Plan for statig-based sensor-event engine
 |development/sensors.md: Sensor details and behavior

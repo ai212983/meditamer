@@ -97,15 +97,6 @@ scripts/build.sh [debug|release]
 
 Default is `release` when no argument is provided.
 
-Optional flash env vars:
-
-- `ESPFLASH_BAUD` (default `460800` in `scripts/flash.sh`)
-- `FLASH_TIMEOUT_SEC` (default `360`; watchdog timeout per primary attempt)
-- `ESPFLASH_ENABLE_FALLBACK` (`1` default; retries with `--no-stub` on failure/timeout)
-- `ESPFLASH_FALLBACK_BAUD` (default `115200`)
-- `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default; avoids crates.io version-check delay)
-- `FLASH_SET_TIME_AFTER_FLASH` (`1` default; set `0` to skip automatic `TIMESET`)
-
 The default Xtensa runner (`scripts/xtensa_runner.sh`) flashes firmware without opening
 an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
 
@@ -122,6 +113,22 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh [debug|release]
 ```
 
 Default is `release` when no argument is provided.
+
+Recommended invocation (stable + deterministic):
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/flash.sh debug
+```
+
+Optional flash env vars:
+
+- `ESPFLASH_BAUD` (default `460800` in `scripts/flash.sh`)
+- `FLASH_TIMEOUT_SEC` (default `360`; watchdog timeout per primary flash attempt)
+- `FLASH_STATUS_INTERVAL_SEC` (default `15`; heartbeat interval while flashing)
+- `ESPFLASH_ENABLE_FALLBACK` (`1` default; retries with `--no-stub` on failure/timeout)
+- `ESPFLASH_FALLBACK_BAUD` (default `115200`)
+- `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default; avoids crates.io version-check delay)
+- `FLASH_SET_TIME_AFTER_FLASH` (`1` default; set `0` to skip automatic `TIMESET`)
 
 ### Port Selection
 
@@ -142,6 +149,27 @@ espflash board-info -p /dev/cu.usbserial-540 -c esp32
 ```
 
 If `espflash` reports `IO error: not a terminal`, set `ESPFLASH_PORT` (or pass `-p`) to avoid interactive port selection.
+
+### Flash Troubleshooting
+
+If flashing appears "stuck":
+
+- `scripts/flash.sh` now prints `Flashing in progress...` every `FLASH_STATUS_INTERVAL_SEC` seconds.
+- A flash watchdog aborts after `FLASH_TIMEOUT_SEC`; with fallback enabled, it retries automatically using `--no-stub`.
+
+If serial port is busy:
+
+```bash
+lsof /dev/cu.usbserial-540
+```
+
+Stop monitor/holder processes, then re-run flash.
+
+Force slow fallback path directly:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_BAUD=115200 ESPFLASH_ENABLE_FALLBACK=0 scripts/flash.sh debug
+```
 
 ## Monitor
 
