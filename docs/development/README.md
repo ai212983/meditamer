@@ -97,6 +97,15 @@ scripts/build.sh [debug|release]
 
 Default is `release` when no argument is provided.
 
+Optional flash env vars:
+
+- `ESPFLASH_BAUD` (default `460800` in `scripts/flash.sh`)
+- `FLASH_TIMEOUT_SEC` (default `360`; watchdog timeout per primary attempt)
+- `ESPFLASH_ENABLE_FALLBACK` (`1` default; retries with `--no-stub` on failure/timeout)
+- `ESPFLASH_FALLBACK_BAUD` (default `115200`)
+- `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default; avoids crates.io version-check delay)
+- `FLASH_SET_TIME_AFTER_FLASH` (`1` default; set `0` to skip automatic `TIMESET`)
+
 The default Xtensa runner (`scripts/xtensa_runner.sh`) flashes firmware without opening
 an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
 
