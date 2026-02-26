@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import http.client
 import os
 import re
 import select
+import signal
 import subprocess
 import sys
 import termios
 import time
 from pathlib import Path
+
+ACTIVE_UPLOAD_PROCESS: subprocess.Popen[str] | None = None
 
 
 def env_int(name: str, default: int) -> int:
@@ -22,6 +26,72 @@ def env_int(name: str, default: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def sanitize_label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    cleaned = cleaned.strip("-")
+    if not cleaned:
+        return "regression"
+    return cleaned[:48]
+
+
+class RunLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.fd: int | None = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            holder = os.read(self.fd, 4096).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"another wifi upload regression run is active (lock: {self.path}, holder: {holder or 'unknown'})"
+            )
+        os.ftruncate(self.fd, 0)
+        os.write(self.fd, f"pid={os.getpid()} started={int(time.time())}\n".encode("utf-8"))
+        os.fsync(self.fd)
+
+    def release(self) -> None:
+        if self.fd is None:
+            return
+        try:
+            os.ftruncate(self.fd, 0)
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+        finally:
+            os.close(self.fd)
+            self.fd = None
+
+
+def terminate_active_upload_process() -> None:
+    global ACTIVE_UPLOAD_PROCESS
+    proc = ACTIVE_UPLOAD_PROCESS
+    if proc is None:
+        return
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+        except Exception:
+            pass
+    ACTIVE_UPLOAD_PROCESS = None
+
+
+def install_signal_handlers() -> None:
+    def _handler(signum: int, _frame) -> None:
+        terminate_active_upload_process()
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
 
 
 def normalize_mac(mac: str) -> str:
@@ -318,6 +388,7 @@ def verify_remote_file(console: SerialConsole, remote_path: str, timeout_ms: int
 
 
 def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_s: int) -> None:
+    global ACTIVE_UPLOAD_PROCESS
     payload_bytes = Path(payload_path).stat().st_size
     # SD append path can be slow on this platform (many 1KiB roundtrips).
     # Budget timeout by payload size to avoid false negatives in regression runs.
@@ -343,14 +414,30 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
         "--timeout",
         str(timeout_s),
     ]
+    process: subprocess.Popen[str] | None = None
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             text=True,
-            capture_output=True,
-            timeout=subprocess_timeout_s,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        ACTIVE_UPLOAD_PROCESS = process
+        stdout_data, stderr_data = process.communicate(timeout=subprocess_timeout_s)
+        completed = subprocess.CompletedProcess(
+            cmd, process.returncode, stdout=stdout_data, stderr=stderr_data
         )
     except subprocess.TimeoutExpired as exc:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=4)
+            except Exception:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except Exception:
+                    pass
         if exc.stdout:
             out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
             sys.stderr.write(out)
@@ -358,6 +445,8 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
             err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
             sys.stderr.write(err)
         raise RuntimeError(f"upload subprocess timed out ({subprocess_timeout_s}s)")
+    finally:
+        ACTIVE_UPLOAD_PROCESS = None
     if completed.returncode != 0:
         sys.stderr.write(completed.stdout)
         sys.stderr.write(completed.stderr)
@@ -383,11 +472,26 @@ def resolve_upload_ip(metrics_ip: str, mac: str, discovery_timeout_s: int) -> st
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("output_path", nargs="?", default="")
+    parser.add_argument(
+        "--test-name",
+        default=os.getenv("WIFI_UPLOAD_TEST_NAME", "regression"),
+        help="label for this run, used in logs and output",
+    )
     args = parser.parse_args()
+
+    install_signal_handlers()
 
     port = os.getenv("ESPFLASH_PORT", "").strip()
     if not port:
         raise SystemExit("ESPFLASH_PORT must be set")
+    test_name = sanitize_label(args.test_name)
+    lock_path = Path(
+        os.getenv(
+            "WIFI_UPLOAD_LOCK_PATH",
+            f"/tmp/meditamer_wifi_upload_{test_name}.lock",
+        )
+    )
+    lock = RunLock(lock_path)
 
     cycles = env_int("WIFI_UPLOAD_CYCLES", 3)
     payload_bytes = env_int("WIFI_UPLOAD_PAYLOAD_BYTES", 524288)
@@ -406,12 +510,13 @@ def main() -> int:
     if args.output_path:
         log_path = Path(args.output_path)
     else:
-        log_path = Path(__file__).resolve().parent.parent / "logs" / f"wifi_upload_regression_{time.strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = Path(__file__).resolve().parent.parent / "logs" / f"wifi_upload_{test_name}_{time.strftime('%Y%m%d_%H%M%S')}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     mac = detect_device_mac(port)
     if mac:
         print(f"Device MAC for host IP discovery: {mac}")
+    print(f"Test name: {test_name}")
 
     print(f"Preparing upload payload: {payload_path} ({payload_bytes} bytes)")
     Path(payload_path).parent.mkdir(parents=True, exist_ok=True)
@@ -433,6 +538,7 @@ def main() -> int:
 
     console: SerialConsole | None = None
     try:
+        lock.acquire()
         console = serial_preflight(port, baud, log_path)
 
         total_start = time.monotonic()
@@ -490,6 +596,7 @@ def main() -> int:
             f"  throughput_kib_s avg={sum(throughput_samples)/len(throughput_samples):.2f} "
             f"min={min(throughput_samples):.2f} max={max(throughput_samples):.2f}"
         )
+        print(f"  test_name={test_name}")
         print(f"Log: {log_path}")
         return 0
     except Exception as exc:
@@ -497,8 +604,10 @@ def main() -> int:
         print(f"Log: {log_path}", file=sys.stderr)
         return 1
     finally:
+        terminate_active_upload_process()
         if console is not None:
             console.close()
+        lock.release()
 
 
 if __name__ == "__main__":

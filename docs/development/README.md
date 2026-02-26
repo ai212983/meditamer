@@ -488,9 +488,12 @@ ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/test_wifi_upload_regression.sh
 ```
 
 - now uses a direct UART request/response harness (`test_wifi_upload_regression_serial.py`) instead of monitor log parsing.
+- enforces single active run via a file lock (`WIFI_UPLOAD_LOCK_PATH`, default `/tmp/meditamer_wifi_upload_<test-name>.lock`).
+- on `SIGINT`/`SIGTERM` it force-cleans child uploader process groups to avoid orphaned uploads.
 - sends serial preflight `PING`/`PONG` before mode/upload steps.
 - resolves upload IP by device MAC from host ARP/DHCP view (fallback to `METRICS NET ip=`).
 - applies payload-aware upload timeout budgeting (tune via `WIFI_UPLOAD_MIN_KIB_PER_SEC`, `WIFI_UPLOAD_TIMEOUT_FLOOR_SEC`, `WIFI_UPLOAD_TIMEOUT_CEIL_SEC`).
+- supports run labeling via `--test-name <name>` or `WIFI_UPLOAD_TEST_NAME=<name>`; this is used in log file names and summary output.
 - set `WIFI_UPLOAD_USE_LEGACY_BASH=1` to use the old monitor-parse shell path for debugging.
 
 ## Soak Script
