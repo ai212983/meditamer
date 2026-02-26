@@ -1,5 +1,5 @@
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
-use embassy_time::{with_timeout, Duration};
+use embassy_time::{with_timeout, Duration, Timer};
 use static_cell::StaticCell;
 
 mod connection;
@@ -17,6 +17,7 @@ const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
 const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 2048;
 const HTTP_SOCKET_TIMEOUT_SECS: u64 = 20;
+const DHCP_POLL_MS: u64 = 250;
 
 enum HttpBuffer<const N: usize> {
     #[cfg(feature = "psram-alloc")]
@@ -76,25 +77,42 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     let mut chunk_buffer = init_http_buffer(&CHUNK_BUFFER, "http_chunk");
 
     let mut listening_logged = false;
+    let mut waiting_dhcp_logged = false;
     telemetry::set_upload_http_listener(false, None);
 
     loop {
         if !service_mode::upload_enabled() {
             listening_logged = false;
+            waiting_dhcp_logged = false;
             telemetry::set_upload_http_listener(false, None);
-            embassy_time::Timer::after(Duration::from_millis(500)).await;
+            Timer::after(Duration::from_millis(500)).await;
             continue;
         }
 
-        let local_ipv4 = match stack.config_v4().map(|cfg| cfg.address.address().octets()) {
+        // Gate HTTP on active link + DHCP lease to avoid advertising an unusable listener.
+        let local_ipv4 = match dhcp_ipv4_ready(&stack) {
             Some(ipv4) => ipv4,
             None => {
                 listening_logged = false;
                 telemetry::set_upload_http_listener(false, None);
-                embassy_time::Timer::after(Duration::from_millis(200)).await;
+                if !waiting_dhcp_logged {
+                    esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
+                    waiting_dhcp_logged = true;
+                }
+                Timer::after(Duration::from_millis(DHCP_POLL_MS)).await;
                 continue;
             }
         };
+        if waiting_dhcp_logged {
+            esp_println::println!(
+                "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
+                local_ipv4[0],
+                local_ipv4[1],
+                local_ipv4[2],
+                local_ipv4[3]
+            );
+            waiting_dhcp_logged = false;
+        }
 
         if !listening_logged {
             esp_println::println!(
@@ -140,6 +158,15 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
 
         let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
         socket.close();
-        telemetry::set_upload_http_listener(false, None);
     }
+}
+
+fn dhcp_ipv4_ready(stack: &Stack<'static>) -> Option<[u8; 4]> {
+    if !telemetry::wifi_link_connected() || !stack.is_link_up() {
+        return None;
+    }
+    stack
+        .config_v4()
+        .map(|cfg| cfg.address.address().octets())
+        .filter(|ip| *ip != [0, 0, 0, 0])
 }

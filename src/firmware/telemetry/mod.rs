@@ -208,6 +208,10 @@ pub(crate) fn set_wifi_link_connected(connected: bool) {
     WIFI_LINK_CONNECTED.store(connected, Ordering::Relaxed);
 }
 
+pub(crate) fn wifi_link_connected() -> bool {
+    WIFI_LINK_CONNECTED.load(Ordering::Relaxed)
+}
+
 pub(crate) fn set_upload_http_listener(listening: bool, ip: Option<[u8; 4]>) {
     UPLOAD_HTTP_LISTENING.store(listening, Ordering::Relaxed);
     let raw_ip = ip.map(u32::from_be_bytes).unwrap_or(0);

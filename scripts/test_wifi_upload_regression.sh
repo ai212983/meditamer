@@ -18,6 +18,8 @@ listen_timeout_s="${WIFI_UPLOAD_LISTEN_TIMEOUT_SEC:-75}"
 upload_timeout_s="${WIFI_UPLOAD_HTTP_TIMEOUT_SEC:-30}"
 health_timeout_s="${WIFI_UPLOAD_HEALTH_TIMEOUT_SEC:-15}"
 stat_timeout_ms="${WIFI_UPLOAD_STAT_TIMEOUT_MS:-30000}"
+host_ip_discovery_timeout_s="${WIFI_UPLOAD_IP_DISCOVERY_TIMEOUT_SEC:-8}"
+device_mac="${WIFI_UPLOAD_DEVICE_MAC:-}"
 baud="${ESPFLASH_BAUD:-115200}"
 remote_root="${WIFI_UPLOAD_REMOTE_ROOT:-/assets/u}"
 monitor_mode="${WIFI_UPLOAD_MONITOR_MODE:-raw}"
@@ -39,7 +41,7 @@ if ! [[ "$payload_bytes" =~ ^[0-9]+$ ]] || ((payload_bytes <= 0)); then
     echo "WIFI_UPLOAD_PAYLOAD_BYTES must be a positive integer" >&2
     exit 1
 fi
-for value_name in connect_timeout_s listen_timeout_s upload_timeout_s health_timeout_s stat_timeout_ms; do
+for value_name in connect_timeout_s listen_timeout_s upload_timeout_s health_timeout_s stat_timeout_ms host_ip_discovery_timeout_s; do
     value="${!value_name}"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || ((value <= 0)); then
         echo "${value_name} must be a positive integer" >&2
@@ -49,6 +51,112 @@ done
 
 mkdir -p "$(dirname "$output_path")"
 output_path="$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
+
+normalize_mac() {
+    local mac="${1:-}"
+    if [[ -z "$mac" ]]; then
+        return 0
+    fi
+    python3 - "$mac" <<'PY'
+import re
+import sys
+
+raw = sys.argv[1].strip().lower()
+parts = re.split(r"[^0-9a-f]+", raw)
+parts = [p for p in parts if p]
+if len(parts) != 6:
+    sys.exit(0)
+try:
+    normalized = ":".join(f"{int(p, 16):02x}" for p in parts)
+except ValueError:
+    sys.exit(0)
+print(normalized)
+PY
+}
+
+detect_device_mac() {
+    if [[ -n "$device_mac" ]]; then
+        echo "$device_mac"
+        return 0
+    fi
+    if ! command -v espflash >/dev/null 2>&1; then
+        return 0
+    fi
+    local info
+    local mac
+    info="$(espflash board-info -p "$ESPFLASH_PORT" -c esp32 2>/dev/null || true)"
+    mac="$(sed -nE 's/.*MAC address:[[:space:]]*([0-9A-Fa-f:]+).*/\1/p' <<<"$info" | head -n1)"
+    if [[ -n "$mac" ]]; then
+        echo "$mac"
+    fi
+}
+
+discover_ip_by_mac() {
+    local mac="$1"
+    if [[ -z "$mac" ]]; then
+        return 1
+    fi
+    local arp_table
+    arp_table="$(arp -an 2>/dev/null || true)"
+    if [[ -z "$arp_table" ]]; then
+        return 1
+    fi
+    python3 - "$mac" "$arp_table" <<'PY'
+import re
+import sys
+
+target = sys.argv[1].strip().lower()
+table = sys.argv[2]
+
+def normalize(mac: str) -> str:
+    parts = re.split(r"[^0-9a-f]+", mac.strip().lower())
+    parts = [p for p in parts if p]
+    if len(parts) != 6:
+        return ""
+    try:
+        return ":".join(f"{int(p, 16):02x}" for p in parts)
+    except ValueError:
+        return ""
+
+target = normalize(target)
+if not target:
+    sys.exit(0)
+
+for line in table.splitlines():
+    m = re.search(r"\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)\s+at\s+([0-9a-fA-F:]+)", line)
+    if not m:
+        continue
+    ip, mac = m.group(1), normalize(m.group(2))
+    if mac == target:
+        print(ip)
+        break
+PY
+}
+
+resolve_upload_ip() {
+    local cycle="$1"
+    local metrics_ip="$2"
+    if [[ -z "$device_mac" ]]; then
+        echo "$metrics_ip"
+        return 0
+    fi
+
+    ping -c 1 -W 1000 "$metrics_ip" >/dev/null 2>&1 || true
+    local deadline=$((SECONDS + host_ip_discovery_timeout_s))
+    while ((SECONDS < deadline)); do
+        local discovered_ip
+        discovered_ip="$(discover_ip_by_mac "$device_mac" || true)"
+        if [[ -n "$discovered_ip" ]]; then
+            if [[ "$discovered_ip" != "$metrics_ip" ]]; then
+                echo "cycle $cycle: host resolved device ip=$discovered_ip (metrics ip=$metrics_ip)" >&2
+            fi
+            echo "$discovered_ip"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "$metrics_ip"
+}
 
 now_ms() {
     python3 -c 'import time; print(int(time.time() * 1000))'
@@ -448,6 +556,11 @@ calc_max() {
     printf '%s\n' "$@" | awk 'NR==1{m=$1} $1>m{m=$1} END { if (NR==0) { print "0"; } else { print m; } }'
 }
 
+device_mac="$(normalize_mac "$(detect_device_mac)")"
+if [[ -n "$device_mac" ]]; then
+    echo "Device MAC for host IP discovery: $device_mac"
+fi
+
 echo "Preparing upload payload: $payload_path (${payload_bytes} bytes)"
 python3 - "$payload_path" "$payload_bytes" <<'PY'
 import pathlib
@@ -493,8 +606,17 @@ for cycle in $(seq 1 "$cycles"); do
     wait_for_upload_network_ready "$cycle" "$cycle_start_ms"
     connect_ms="$network_ready_connect_ms"
     listen_ms="$network_ready_listen_ms"
-    device_ip="$network_ready_ip"
-    wait_for_http_health "$cycle" "$device_ip"
+    device_ip="$(resolve_upload_ip "$cycle" "$network_ready_ip")"
+    if ! wait_for_http_health "$cycle" "$device_ip"; then
+        refreshed_ip="$(resolve_upload_ip "$cycle" "$network_ready_ip")"
+        if [[ "$refreshed_ip" != "$device_ip" ]]; then
+            echo "cycle $cycle: retrying health on refreshed ip=$refreshed_ip" >&2
+            wait_for_http_health "$cycle" "$refreshed_ip"
+            device_ip="$refreshed_ip"
+        else
+            exit 1
+        fi
+    fi
 
     cycle_remote_root="${remote_root}/cycle-${cycle}"
     remote_file="${cycle_remote_root}/$(basename "$payload_path")"

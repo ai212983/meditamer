@@ -130,6 +130,17 @@ def request_sd_busy_aware(
                 headers=headers,
                 retries=retries,
             )
+        except (
+            ConnectionRefusedError,
+            ConnectionResetError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+        ):
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(0.25 * (attempt + 1))
+            continue
         except RuntimeError as exc:
             message = str(exc)
             if "408 Request Timeout" in message:

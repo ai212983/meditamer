@@ -77,6 +77,7 @@ pub(super) async fn run_wifi_connection_task(
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
                 telemetry::set_wifi_link_connected(false);
+                telemetry::set_upload_http_listener(false, None);
                 paused = true;
                 config_applied = false;
                 auth_method_idx = 0;
@@ -207,6 +208,7 @@ pub(super) async fn run_wifi_connection_task(
                     {
                         Either::First(_) => {
                             telemetry::set_wifi_link_connected(false);
+                            telemetry::set_upload_http_listener(false, None);
                             println!("upload_http: wifi disconnected");
                             break;
                         }
@@ -221,6 +223,7 @@ pub(super) async fn run_wifi_connection_task(
                             println!("upload_http: wifi credentials changed, reconnecting");
                             let _ = controller.disconnect_async().await;
                             telemetry::set_wifi_link_connected(false);
+                            telemetry::set_upload_http_listener(false, None);
                             break;
                         }
                     }
@@ -229,6 +232,7 @@ pub(super) async fn run_wifi_connection_task(
             Err(err) => {
                 let disconnect_reason = WIFI_LAST_DISCONNECT_REASON.swap(0, Ordering::Relaxed);
                 telemetry::record_wifi_connect_failure(disconnect_reason);
+                telemetry::set_upload_http_listener(false, None);
                 let discovery_reason = is_discovery_disconnect_reason(disconnect_reason);
                 let should_scan = channel_hint.is_none() || channel_probe_idx % 4 == 0;
                 let mut observed_channel = None;
