@@ -48,11 +48,13 @@ use upload::SdUploadSession;
 use wifi_config::process_wifi_config_request;
 
 const SD_IDLE_POWER_OFF_MS: u64 = 1_500;
+const SD_BOOT_POWER_OFF_GRACE_MS: u64 = 6_000;
 const SD_RETRY_MAX_ATTEMPTS: u8 = 3;
 const SD_RETRY_DELAY_MS: u64 = 120;
 const SD_BACKOFF_BASE_MS: u64 = 300;
 const SD_BACKOFF_MAX_MS: u64 = 2_400;
-const SD_POWER_RESPONSE_TIMEOUT_MS: u64 = 1_500;
+const SD_POWER_ON_RESPONSE_TIMEOUT_MS: u64 = 1_500;
+const SD_POWER_OFF_RESPONSE_TIMEOUT_MS: u64 = 4_000;
 const SD_POWER_REQUEST_ENQUEUE_TIMEOUT_MS: u64 = 1_500;
 const SD_POWER_REQUEST_MAX_ATTEMPTS: u8 = 4;
 const SD_POWER_REQUEST_RETRY_DELAY_MS: u64 = 120;
@@ -68,6 +70,7 @@ const WIFI_CONFIG_PATH: &str = "/config/wifi.cfg";
 
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
+    let boot_started_at = Instant::now();
     let mut powered = false;
     let mut upload_mounted = false;
     let mut upload_session: Option<SdUploadSession> = None;
@@ -237,6 +240,9 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             if upload_session.is_some() {
                 // Keep SD online during an active upload session; stale sessions are cleaned up
                 // by the idle-abort/mode-off checks at the top of this loop.
+                continue;
+            }
+            if powered && duration_ms_since(boot_started_at) < SD_BOOT_POWER_OFF_GRACE_MS as u32 {
                 continue;
             }
             if powered && !request_sd_power(SdPowerRequest::Off).await {
