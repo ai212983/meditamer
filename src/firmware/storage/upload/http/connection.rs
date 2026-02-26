@@ -9,13 +9,12 @@ use super::helpers::{
     parse_request_line, parse_u32_query, sd_upload_or_http_error, target_path,
     validate_upload_auth, write_response, write_roundtrip_error_response, UploadAuthError,
 };
-use super::HTTP_HEADER_MAX;
 
 pub(super) async fn handle_connection(
     socket: &mut TcpSocket<'_>,
-    chunk_buf: &mut [u8; SD_UPLOAD_CHUNK_MAX],
+    chunk_buf: &mut [u8],
+    header_buf: &mut [u8],
 ) -> Result<(), &'static str> {
-    let mut header_buf = [0u8; HTTP_HEADER_MAX];
     let mut filled = 0usize;
     let header_end = loop {
         if filled == header_buf.len() {
