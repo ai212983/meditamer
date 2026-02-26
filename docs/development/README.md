@@ -481,6 +481,7 @@ ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/test_wifi_upload_regression.sh
 - now uses a direct UART request/response harness (`test_wifi_upload_regression_serial.py`) instead of monitor log parsing.
 - sends serial preflight `PING`/`PONG` before mode/upload steps.
 - resolves upload IP by device MAC from host ARP/DHCP view (fallback to `METRICS NET ip=`).
+- applies payload-aware upload timeout budgeting (tune via `WIFI_UPLOAD_MIN_KIB_PER_SEC`, `WIFI_UPLOAD_TIMEOUT_FLOOR_SEC`, `WIFI_UPLOAD_TIMEOUT_CEIL_SEC`).
 - set `WIFI_UPLOAD_USE_LEGACY_BASH=1` to use the old monitor-parse shell path for debugging.
 
 ## Soak Script

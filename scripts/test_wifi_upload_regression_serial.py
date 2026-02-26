@@ -318,8 +318,19 @@ def verify_remote_file(console: SerialConsole, remote_path: str, timeout_ms: int
 
 
 def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_s: int) -> None:
+    payload_bytes = Path(payload_path).stat().st_size
+    # SD append path can be slow on this platform (many 1KiB roundtrips).
+    # Budget timeout by payload size to avoid false negatives in regression runs.
+    per_kib_budget_s = float(os.getenv("WIFI_UPLOAD_SUBPROCESS_SEC_PER_KIB", "1.0"))
+    floor_s = int(os.getenv("WIFI_UPLOAD_SUBPROCESS_TIMEOUT_FLOOR_SEC", "60"))
+    ceiling_s = int(os.getenv("WIFI_UPLOAD_SUBPROCESS_TIMEOUT_CEIL_SEC", "900"))
+    payload_budget_s = int((payload_bytes / 1024.0) * per_kib_budget_s)
+    subprocess_timeout_s = max(timeout_s * 4, floor_s, payload_budget_s)
+    subprocess_timeout_s = min(subprocess_timeout_s, ceiling_s)
+
     cmd = [
         sys.executable,
+        "-u",
         str(Path(__file__).with_name("upload_assets_http.py")),
         "--host",
         host_ip,
@@ -337,14 +348,16 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
             cmd,
             text=True,
             capture_output=True,
-            timeout=max(timeout_s * 4, 30),
+            timeout=subprocess_timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         if exc.stdout:
-            sys.stderr.write(exc.stdout)
+            out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
+            sys.stderr.write(out)
         if exc.stderr:
-            sys.stderr.write(exc.stderr)
-        raise RuntimeError("upload subprocess timed out")
+            err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
+            sys.stderr.write(err)
+        raise RuntimeError(f"upload subprocess timed out ({subprocess_timeout_s}s)")
     if completed.returncode != 0:
         sys.stderr.write(completed.stdout)
         sys.stderr.write(completed.stderr)
@@ -406,6 +419,17 @@ def main() -> int:
     for i in range(payload_bytes):
         data[i] = (i * 31 + 17) & 0xFF
     Path(payload_path).write_bytes(data)
+    payload_kib = payload_bytes / 1024.0
+    min_upload_kib_s = float(os.getenv("WIFI_UPLOAD_MIN_KIB_PER_SEC", "0.15"))
+    timeout_floor_s = int(os.getenv("WIFI_UPLOAD_TIMEOUT_FLOOR_SEC", "60"))
+    timeout_ceil_s = int(os.getenv("WIFI_UPLOAD_TIMEOUT_CEIL_SEC", "3600"))
+    payload_timeout_s = int(payload_kib / max(min_upload_kib_s, 0.01))
+    effective_upload_timeout_s = max(upload_timeout_s, timeout_floor_s, payload_timeout_s)
+    effective_upload_timeout_s = min(effective_upload_timeout_s, timeout_ceil_s)
+    print(
+        f"Upload timeout budget: requested={upload_timeout_s}s effective={effective_upload_timeout_s}s "
+        f"payload_kib={payload_kib:.1f} min_kib_s={min_upload_kib_s:.2f}"
+    )
 
     console: SerialConsole | None = None
     try:
@@ -441,7 +465,7 @@ def main() -> int:
                 raise RuntimeError(f"remote path exceeds SD_PATH_MAX(64): {remote_file}")
 
             started = time.monotonic()
-            run_upload(ip, payload_path, cycle_root, upload_timeout_s)
+            run_upload(ip, payload_path, cycle_root, effective_upload_timeout_s)
             upload_ms = int((time.monotonic() - started) * 1000)
             if not verify_remote_file(console, remote_file, stat_timeout_ms):
                 raise RuntimeError(f"SD verification failed for {remote_file}")
