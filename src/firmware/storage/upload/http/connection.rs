@@ -1,8 +1,9 @@
 use core::cmp::min;
 
 use embassy_net::tcp::TcpSocket;
-use embassy_time::{with_timeout, Duration};
+use embassy_time::{with_timeout, Duration, Instant};
 
+use super::super::super::super::telemetry;
 use super::super::super::super::types::{SdUploadCommand, SD_UPLOAD_CHUNK_MAX};
 use super::super::sd_bridge::{roundtrip_error_log, sd_upload_chunk, sd_upload_roundtrip};
 use super::helpers::{
@@ -147,6 +148,9 @@ pub(super) async fn handle_connection(
                     return Err("missing content-length");
                 }
             };
+            let request_started_at = Instant::now();
+            let mut body_read_ms = 0u32;
+            let mut sd_wait_ms = 0u32;
             let mut sent = 0usize;
             if body_bytes_in_buffer > 0 {
                 let take = min(body_bytes_in_buffer, content_length);
@@ -154,10 +158,12 @@ pub(super) async fn handle_connection(
                 while offset < take {
                     let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
                     let chunk = &header_buf[body_start + offset..body_start + end];
+                    let sd_started_at = Instant::now();
                     if let Err(err) = sd_upload_chunk(chunk).await {
                         write_roundtrip_error_response(socket, err).await;
                         return Err(roundtrip_error_log(err));
                     }
+                    sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
                     sent += chunk.len();
                     offset = end;
                 }
@@ -165,20 +171,30 @@ pub(super) async fn handle_connection(
 
             while sent < content_length {
                 let want = min(chunk_buf.len(), content_length - sent);
+                let read_started_at = Instant::now();
                 let n = socket
                     .read(&mut chunk_buf[..want])
                     .await
                     .map_err(|_| "read body")?;
+                body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
                 if n == 0 {
                     write_response(socket, b"400 Bad Request", b"incomplete body").await;
                     return Err("incomplete body");
                 }
+                let sd_started_at = Instant::now();
                 if let Err(err) = sd_upload_chunk(&chunk_buf[..n]).await {
                     write_roundtrip_error_response(socket, err).await;
                     return Err(roundtrip_error_log(err));
                 }
+                sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
                 sent += n;
             }
+            telemetry::record_upload_http_upload_phase(
+                usize_to_u32_saturating(sent),
+                body_read_ms,
+                sd_wait_ms,
+                elapsed_ms_u32(request_started_at),
+            );
 
             write_response(socket, b"200 OK", b"chunk ok").await;
             Ok(())
@@ -215,7 +231,11 @@ pub(super) async fn handle_connection(
                 write_response(socket, b"413 Payload Too Large", b"content too large").await;
                 return Err("content too large");
             }
+            let request_started_at = Instant::now();
+            let mut body_read_ms = 0u32;
+            let mut sd_wait_ms = 0u32;
             let expected_size = content_length as u32;
+            let begin_started_at = Instant::now();
             sd_upload_or_http_error(
                 socket,
                 SdUploadCommand::Begin {
@@ -225,6 +245,7 @@ pub(super) async fn handle_connection(
                 },
             )
             .await?;
+            sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(begin_started_at));
 
             let mut sent = 0usize;
             if body_bytes_in_buffer > 0 {
@@ -233,11 +254,13 @@ pub(super) async fn handle_connection(
                 while offset < take {
                     let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
                     let chunk = &header_buf[body_start + offset..body_start + end];
+                    let sd_started_at = Instant::now();
                     if let Err(err) = sd_upload_chunk(chunk).await {
                         let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
                         write_roundtrip_error_response(socket, err).await;
                         return Err(roundtrip_error_log(err));
                     }
+                    sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
                     sent += chunk.len();
                     offset = end;
                 }
@@ -245,28 +268,40 @@ pub(super) async fn handle_connection(
 
             while sent < content_length {
                 let want = min(chunk_buf.len(), content_length - sent);
+                let read_started_at = Instant::now();
                 let n = socket
                     .read(&mut chunk_buf[..want])
                     .await
                     .map_err(|_| "read body")?;
+                body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
                 if n == 0 {
                     let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
                     write_response(socket, b"400 Bad Request", b"incomplete body").await;
                     return Err("incomplete body");
                 }
+                let sd_started_at = Instant::now();
                 if let Err(err) = sd_upload_chunk(&chunk_buf[..n]).await {
                     let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
                     write_roundtrip_error_response(socket, err).await;
                     return Err(roundtrip_error_log(err));
                 }
+                sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
                 sent += n;
             }
 
+            let commit_started_at = Instant::now();
             if let Err(err) = sd_upload_roundtrip(SdUploadCommand::Commit).await {
                 let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
                 write_roundtrip_error_response(socket, err).await;
                 return Err(roundtrip_error_log(err));
             }
+            sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(commit_started_at));
+            telemetry::record_upload_http_upload_phase(
+                usize_to_u32_saturating(sent),
+                body_read_ms,
+                sd_wait_ms,
+                elapsed_ms_u32(request_started_at),
+            );
             write_response(socket, b"201 Created", b"upload ok").await;
             Ok(())
         }
@@ -275,5 +310,22 @@ pub(super) async fn handle_connection(
             write_response(socket, b"404 Not Found", b"not found").await;
             Ok(())
         }
+    }
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
+    }
+}
+
+fn usize_to_u32_saturating(value: usize) -> u32 {
+    if value > u32::MAX as usize {
+        u32::MAX
+    } else {
+        value as u32
     }
 }

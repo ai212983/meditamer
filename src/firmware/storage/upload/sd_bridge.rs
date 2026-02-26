@@ -1,5 +1,5 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{with_timeout, Duration};
+use embassy_time::{with_timeout, Duration, Instant};
 
 use super::super::super::{
     config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
@@ -107,10 +107,12 @@ fn drain_stale_sd_upload_results() {
 async fn sd_upload_roundtrip_raw_locked(
     command: SdUploadCommand,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
+    let phase = phase_for_command(&command);
     // A previous request may have timed out locally while the SD task still produced
     // a late result. Drain any queued stale responses before issuing a new request.
     drain_stale_sd_upload_results();
 
+    let started_at = Instant::now();
     SD_UPLOAD_REQUESTS.send(SdUploadRequest { command }).await;
 
     let result = match with_timeout(
@@ -124,15 +126,37 @@ async fn sd_upload_roundtrip_raw_locked(
             // If a response raced with timeout handling, clear it so the next
             // roundtrip cannot consume a stale result.
             drain_stale_sd_upload_results();
+            telemetry::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
             telemetry::record_sd_upload_roundtrip_timeout();
             return Err(SdUploadRoundtripError::Timeout);
         }
     };
+    telemetry::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
 
     if result.ok {
         Ok(result)
     } else {
         telemetry::record_sd_upload_roundtrip_code(result.code);
         Err(SdUploadRoundtripError::Device(result.code))
+    }
+}
+
+fn phase_for_command(command: &SdUploadCommand) -> telemetry::SdUploadRoundtripPhase {
+    match command {
+        SdUploadCommand::Begin { .. } => telemetry::SdUploadRoundtripPhase::Begin,
+        SdUploadCommand::Chunk { .. } => telemetry::SdUploadRoundtripPhase::Chunk,
+        SdUploadCommand::Commit => telemetry::SdUploadRoundtripPhase::Commit,
+        SdUploadCommand::Abort => telemetry::SdUploadRoundtripPhase::Abort,
+        SdUploadCommand::Mkdir { .. } => telemetry::SdUploadRoundtripPhase::Mkdir,
+        SdUploadCommand::Remove { .. } => telemetry::SdUploadRoundtripPhase::Remove,
+    }
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
     }
 }

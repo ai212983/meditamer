@@ -341,8 +341,13 @@ Response lines:
 METRICS MARBLE_REDRAW_MS=<n> MAX_MS=<n>
 METRICS WIFI attempt=<n> success=<n> failure=<n> no_ap=<n> scan_runs=<n> scan_empty=<n> scan_hits=<n>
 METRICS UPLOAD accept_ok=<n> accept_err=<n> request_err=<n> req_hdr_to=<n> req_read_body=<n> req_sd_busy=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n> sess_timeout_abort=<n> sess_mode_off_abort=<n>
+METRICS UPLOAD_PHASE req=<n> bytes=<n> body_ms=<n> body_max=<n> sd_ms=<n> sd_max=<n> req_ms=<n> req_max=<n>
+METRICS UPLOAD_RTT begin_n=<n> begin_ms=<n> begin_max=<n> chunk_n=<n> chunk_ms=<n> chunk_max=<n> commit_n=<n> commit_ms=<n> commit_max=<n> abort_n=<n> abort_ms=<n> abort_max=<n> mkdir_n=<n> mkdir_ms=<n> mkdir_max=<n> rm_n=<n> rm_ms=<n> rm_max=<n>
 METRICS NET wifi_connected=<0|1> http_listening=<0|1> ip=<a.b.c.d>
 ```
+
+`UPLOAD_PHASE` reports end-to-end per-request timing buckets for upload body handling.
+`UPLOAD_RTT` reports SD roundtrip counts and timing totals/maxima by command phase.
 
 ## SD Card Hardware Test
 

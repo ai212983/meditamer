@@ -186,6 +186,46 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
 
+                            let mut upload_phase_line = heapless::String::<320>::new();
+                            let _ = write!(
+                                &mut upload_phase_line,
+                                "METRICS UPLOAD_PHASE req={} bytes={} body_ms={} body_max={} sd_ms={} sd_max={} req_ms={} req_max={}\r\n",
+                                snapshot.upload_http_upload_requests,
+                                snapshot.upload_http_upload_bytes,
+                                snapshot.upload_http_upload_body_read_ms_total,
+                                snapshot.upload_http_upload_body_read_ms_max,
+                                snapshot.upload_http_upload_sd_wait_ms_total,
+                                snapshot.upload_http_upload_sd_wait_ms_max,
+                                snapshot.upload_http_upload_request_ms_total,
+                                snapshot.upload_http_upload_request_ms_max,
+                            );
+                            let _ = uart_write_all(&mut uart, upload_phase_line.as_bytes()).await;
+
+                            let mut upload_rtt_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut upload_rtt_line,
+                                "METRICS UPLOAD_RTT begin_n={} begin_ms={} begin_max={} chunk_n={} chunk_ms={} chunk_max={} commit_n={} commit_ms={} commit_max={} abort_n={} abort_ms={} abort_max={} mkdir_n={} mkdir_ms={} mkdir_max={} rm_n={} rm_ms={} rm_max={}\r\n",
+                                snapshot.sd_upload_rtt_begin_count,
+                                snapshot.sd_upload_rtt_begin_ms_total,
+                                snapshot.sd_upload_rtt_begin_ms_max,
+                                snapshot.sd_upload_rtt_chunk_count,
+                                snapshot.sd_upload_rtt_chunk_ms_total,
+                                snapshot.sd_upload_rtt_chunk_ms_max,
+                                snapshot.sd_upload_rtt_commit_count,
+                                snapshot.sd_upload_rtt_commit_ms_total,
+                                snapshot.sd_upload_rtt_commit_ms_max,
+                                snapshot.sd_upload_rtt_abort_count,
+                                snapshot.sd_upload_rtt_abort_ms_total,
+                                snapshot.sd_upload_rtt_abort_ms_max,
+                                snapshot.sd_upload_rtt_mkdir_count,
+                                snapshot.sd_upload_rtt_mkdir_ms_total,
+                                snapshot.sd_upload_rtt_mkdir_ms_max,
+                                snapshot.sd_upload_rtt_remove_count,
+                                snapshot.sd_upload_rtt_remove_ms_total,
+                                snapshot.sd_upload_rtt_remove_ms_max,
+                            );
+                            let _ = uart_write_all(&mut uart, upload_rtt_line.as_bytes()).await;
+
                             let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
                             let mut net_line = heapless::String::<160>::new();
                             let _ = write!(
