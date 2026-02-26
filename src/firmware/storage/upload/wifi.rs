@@ -17,12 +17,6 @@ use esp_radio::wifi::{
     AccessPointInfo, AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig,
     ScanMethod, ScanTypeConfig, WifiController, WifiEvent,
 };
-const WIFI_RX_QUEUE_SIZE: usize = 3;
-const WIFI_TX_QUEUE_SIZE: usize = 2;
-const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
-const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
-const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
-const WIFI_RX_BA_WIN: u8 = 3;
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
 const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 200;
 const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 600;
@@ -53,14 +47,6 @@ pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
 }
 pub(super) fn wifi_runtime_config() -> WifiRuntimeConfig {
     WifiRuntimeConfig::default()
-        .with_rx_queue_size(WIFI_RX_QUEUE_SIZE)
-        .with_tx_queue_size(WIFI_TX_QUEUE_SIZE)
-        .with_static_rx_buf_num(WIFI_STATIC_RX_BUF_NUM)
-        .with_dynamic_rx_buf_num(WIFI_DYNAMIC_RX_BUF_NUM)
-        .with_dynamic_tx_buf_num(WIFI_DYNAMIC_TX_BUF_NUM)
-        .with_ampdu_rx_enable(false)
-        .with_ampdu_tx_enable(false)
-        .with_rx_ba_win(WIFI_RX_BA_WIN)
 }
 pub(super) async fn run_wifi_connection_task(
     mut controller: WifiController<'static>,

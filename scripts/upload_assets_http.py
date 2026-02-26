@@ -106,6 +106,53 @@ def request(
         raise last_exc
     raise RuntimeError("request failed without an exception")
 
+def request_sd_busy_aware(
+    host: str,
+    port: int,
+    timeout: float,
+    method: str,
+    target: str,
+    body=None,
+    headers=None,
+    retries: int = 1,
+    busy_retries: int = 8,
+) -> bytes:
+    attempts = max(1, busy_retries)
+    for attempt in range(attempts):
+        try:
+            return request(
+                host,
+                port,
+                timeout,
+                method,
+                target,
+                body=body,
+                headers=headers,
+                retries=retries,
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+            if "409 Conflict" in message and "sd busy" in message:
+                try:
+                    request(
+                        host,
+                        port,
+                        timeout,
+                        "POST",
+                        "/upload_abort",
+                        body=b"",
+                        headers=headers,
+                        retries=2,
+                    )
+                except Exception:
+                    pass
+                if attempt + 1 >= attempts:
+                    raise
+                time.sleep(0.25 * (attempt + 1))
+                continue
+            raise
+    raise RuntimeError(f"{method} {target} failed: sd busy persisted")
+
 
 def health_check(host: str, port: int, timeout: float) -> None:
     request(host, port, timeout, "GET", "/health", retries=8)
@@ -113,7 +160,7 @@ def health_check(host: str, port: int, timeout: float) -> None:
 
 def mkdir(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
     target = f"/mkdir?path={quote(remote_path, safe='/')}"
-    request(
+    request_sd_busy_aware(
         host,
         port,
         timeout,
@@ -124,10 +171,21 @@ def mkdir(host: str, port: int, timeout: float, remote_path: str, token: str | N
         retries=8,
     )
 
+def mkdir_p(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
+    if not remote_path.startswith("/"):
+        remote_path = f"/{remote_path}"
+    parts = [p for p in remote_path.split("/") if p]
+    if not parts:
+        return
+    current = ""
+    for part in parts:
+        current = f"{current}/{part}"
+        mkdir(host, port, timeout, current, token)
+
 
 def rm_path(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
     target = f"/rm?path={quote(remote_path, safe='/')}"
-    request(
+    request_sd_busy_aware(
         host,
         port,
         timeout,
@@ -148,8 +206,35 @@ def upload_file(
     token: str | None,
 ) -> None:
     size = local_path.stat().st_size
+    upload_target = f"/upload?path={quote(remote_path, safe='/')}"
+    upload_headers = auth_headers(
+        token,
+        {
+            "Content-Length": str(size),
+            "Content-Type": "application/octet-stream",
+        },
+    )
+    with local_path.open("rb") as body:
+        try:
+            request_sd_busy_aware(
+                host,
+                port,
+                timeout,
+                "PUT",
+                upload_target,
+                body=body,
+                headers=upload_headers,
+                retries=5,
+                busy_retries=6,
+            )
+            return
+        except RuntimeError as exc:
+            if "404 Not Found" not in str(exc):
+                raise
+
+    # Legacy fallback path for firmware variants without /upload support.
     begin_target = f"/upload_begin?path={quote(remote_path, safe='/')}&size={size}"
-    request(
+    request_sd_busy_aware(
         host,
         port,
         timeout,
@@ -158,6 +243,7 @@ def upload_file(
         body=b"",
         headers=auth_headers(token),
         retries=8,
+        busy_retries=6,
     )
     try:
         with local_path.open("rb") as f:
@@ -263,17 +349,21 @@ def main() -> int:
     if src.is_file():
         remote_file = remote_join(args.dst, Path(src.name))
         remote_dir = posixpath.dirname(remote_file) or "/"
-        print(f"[mkdir] {remote_dir}")
-        mkdir(args.host, args.port, args.timeout, remote_dir, token)
+        print(f"[mkdir -p] {remote_dir}")
+        mkdir_p(args.host, args.port, args.timeout, remote_dir, token)
         print(f"[upload] {src} -> {remote_file}")
         upload_file(args.host, args.port, args.timeout, src, remote_file, token)
         print("Upload complete.")
         return 0
 
+    created_dirs = set()
     for rel_dir in iter_dirs(src):
         remote_dir = remote_join(args.dst, rel_dir)
-        print(f"[mkdir] {remote_dir}")
-        mkdir(args.host, args.port, args.timeout, remote_dir, token)
+        if remote_dir in created_dirs:
+            continue
+        print(f"[mkdir -p] {remote_dir}")
+        mkdir_p(args.host, args.port, args.timeout, remote_dir, token)
+        created_dirs.add(remote_dir)
 
     for rel_file, local_file in iter_files(src):
         remote_file = remote_join(args.dst, rel_file)
