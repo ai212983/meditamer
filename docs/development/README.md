@@ -243,6 +243,7 @@ RUNMODE NORMAL
 Notes:
 
 - `MODE` state is persisted in flash and restored on boot.
+- `MODE` / `RUNMODE` return `OK` only after the mode update is applied by runtime tasks.
 - `MODE UPLOAD OFF` rejects upload operations and releases upload transfer buffers.
 - `MODE ASSETS OFF` disables SD asset reads, clears runtime graphics cache, and releases asset-read transfer buffers.
 - On `psram-alloc` builds, transfer buffers are allocated in PSRAM on-demand and released when the mode is disabled.
@@ -266,6 +267,10 @@ Automated smoke run (mode toggles + PSRAM snapshots):
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/runtime_modes_smoke.sh
 ```
+
+Optional env var:
+
+- `MODE_SMOKE_SETTLE_MS` (default `0`; can be raised if extra post-command delay is desired)
 
 ## SD Card Hardware Test
 

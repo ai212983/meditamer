@@ -11,7 +11,7 @@ if [[ -z "${ESPFLASH_PORT:-}" ]]; then
 fi
 
 baud="${ESPFLASH_BAUD:-115200}"
-mode_settle_ms="${MODE_SMOKE_SETTLE_MS:-300}"
+mode_settle_ms="${MODE_SMOKE_SETTLE_MS:-0}"
 output_path="${1:-$repo_root/logs/runtime_modes_smoke_$(date +%Y%m%d_%H%M%S).log}"
 monitor_mode="${MODE_SMOKE_MONITOR_MODE:-raw}"
 monitor_raw_backend="${MODE_SMOKE_MONITOR_RAW_BACKEND:-cat}"
