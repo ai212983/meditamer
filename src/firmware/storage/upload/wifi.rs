@@ -23,7 +23,6 @@ const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
 const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
-const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
 const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 200;
 const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 600;
@@ -36,6 +35,15 @@ const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::Wpa3Personal,
     AuthMethod::Wpa,
 ];
+const WIFI_REASON_BEACON_TIMEOUT: u8 = 200;
+const WIFI_REASON_NO_AP_FOUND: u8 = 201;
+const WIFI_REASON_AUTH_FAIL: u8 = 202;
+const WIFI_REASON_ASSOC_FAIL: u8 = 203;
+const WIFI_REASON_HANDSHAKE_TIMEOUT: u8 = 204;
+const WIFI_REASON_CONNECTION_FAIL: u8 = 205;
+const WIFI_REASON_NO_AP_FOUND_COMPAT_SECURITY: u8 = 210;
+const WIFI_REASON_NO_AP_FOUND_AUTHMODE_THRESHOLD: u8 = 211;
+const WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD: u8 = 212;
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
@@ -175,6 +183,23 @@ pub(super) async fn run_wifi_connection_task(
             }
         }
 
+        if channel_hint.is_none() {
+            if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
+                if let Some(channel) = log_scan_for_target(&mut controller, ssid).await {
+                    channel_hint = Some(channel);
+                    auth_method_idx = 0;
+                    config_applied = false;
+                    channel_probe_idx = 0;
+                    println!(
+                        "upload_http: pre-connect discovered channel_hint={}",
+                        channel
+                    );
+                    Timer::after(Duration::from_millis(500)).await;
+                    continue;
+                }
+            }
+        }
+
         match controller.connect_async().await {
             Ok(()) => {
                 println!("upload_http: wifi connected");
@@ -198,9 +223,10 @@ pub(super) async fn run_wifi_connection_task(
             }
             Err(err) => {
                 let disconnect_reason = WIFI_LAST_DISCONNECT_REASON.swap(0, Ordering::Relaxed);
-                let discovery_failed = is_discovery_disconnect_reason(disconnect_reason);
+                let discovery_reason = is_discovery_disconnect_reason(disconnect_reason);
+                let should_scan = channel_hint.is_none() || channel_probe_idx % 4 == 0;
                 let mut observed_channel = None;
-                if discovery_failed && WIFI_LOG_SCAN_ON_CONNECT {
+                if should_scan {
                     if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize])
                     {
                         observed_channel = log_scan_for_target(&mut controller, ssid).await;
@@ -208,13 +234,17 @@ pub(super) async fn run_wifi_connection_task(
                 }
                 let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
                 println!(
-                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} observed_channel={:?} reason={} ({})",
+                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} observed_channel={:?} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} probe_idx={}",
                     err,
                     auth_method,
                     channel_hint,
                     observed_channel,
                     disconnect_reason,
+                    disconnect_reason,
                     disconnect_reason_label(disconnect_reason),
+                    discovery_reason,
+                    should_scan,
+                    channel_probe_idx,
                 );
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
@@ -227,21 +257,31 @@ pub(super) async fn run_wifi_connection_task(
                         Timer::after(Duration::from_secs(2)).await;
                         continue;
                     }
+                    println!(
+                        "upload_http: keeping discovered channel_hint={} for next auth attempt",
+                        channel
+                    );
                 }
-                if discovery_failed {
+                if channel_probe_idx < WIFI_CHANNEL_PROBE_SEQUENCE.len() {
                     let next_channel = next_probe_channel(&mut channel_probe_idx);
                     channel_hint = Some(next_channel);
                     auth_method_idx = 0;
                     config_applied = false;
                     println!(
-                        "upload_http: discovery retry using channel_hint={}",
-                        next_channel
+                        "upload_http: channel probe retry using channel_hint={} probe_idx={}",
+                        next_channel, channel_probe_idx
                     );
                     Timer::after(Duration::from_secs(2)).await;
                     continue;
                 }
+                channel_probe_idx = 0;
+                channel_hint = None;
                 auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
                 config_applied = false;
+                println!(
+                    "upload_http: rotating auth after channel sweep auth={:?}",
+                    WIFI_AUTH_METHODS[auth_method_idx]
+                );
                 Timer::after(Duration::from_secs(3)).await;
             }
         }
@@ -298,21 +338,25 @@ fn install_wifi_event_logger() {
 
 fn disconnect_reason_label(reason: u8) -> &'static str {
     match reason {
-        200 => "beacon_timeout",
-        201 => "no_ap_found",
-        202 => "auth_fail",
-        203 => "assoc_fail",
-        204 => "handshake_timeout",
-        205 => "connection_fail",
-        210 => "no_ap_found_compatible_security",
-        211 => "no_ap_found_authmode_threshold",
-        212 => "no_ap_found_rssi_threshold",
+        WIFI_REASON_BEACON_TIMEOUT => "beacon_timeout",
+        WIFI_REASON_NO_AP_FOUND => "no_ap_found",
+        WIFI_REASON_AUTH_FAIL => "auth_fail",
+        WIFI_REASON_ASSOC_FAIL => "assoc_fail",
+        WIFI_REASON_HANDSHAKE_TIMEOUT => "handshake_timeout",
+        WIFI_REASON_CONNECTION_FAIL => "connection_fail",
+        WIFI_REASON_NO_AP_FOUND_COMPAT_SECURITY => "no_ap_found_compatible_security",
+        WIFI_REASON_NO_AP_FOUND_AUTHMODE_THRESHOLD => "no_ap_found_authmode_threshold",
+        WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD => "no_ap_found_rssi_threshold",
         _ => "other",
     }
 }
 
 fn is_discovery_disconnect_reason(reason: u8) -> bool {
-    matches!(reason, 200 | 201 | 210 | 211 | 212)
+    reason == WIFI_REASON_BEACON_TIMEOUT
+        || reason == WIFI_REASON_NO_AP_FOUND
+        || reason == WIFI_REASON_NO_AP_FOUND_COMPAT_SECURITY
+        || reason == WIFI_REASON_NO_AP_FOUND_AUTHMODE_THRESHOLD
+        || reason == WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD
 }
 
 fn next_probe_channel(index: &mut usize) -> u8 {
