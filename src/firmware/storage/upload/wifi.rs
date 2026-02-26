@@ -28,9 +28,9 @@ const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
 const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
-const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 80;
-const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 240;
-const WIFI_SCAN_PASSIVE_MS: u64 = 240;
+const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 200;
+const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 600;
+const WIFI_SCAN_PASSIVE_MS: u64 = 800;
 const WIFI_TARGET_CHANNEL_PROBE: Option<u8> = Some(8);
 const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::Wpa2Personal,
