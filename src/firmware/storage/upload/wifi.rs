@@ -32,7 +32,13 @@ const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 80;
 const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 240;
 const WIFI_SCAN_PASSIVE_MS: u64 = 240;
 const WIFI_TARGET_CHANNEL_PROBE: Option<u8> = Some(8);
-const WIFI_AUTH_METHODS: [AuthMethod; 1] = [AuthMethod::Wpa2Personal];
+const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
+    AuthMethod::Wpa2Personal,
+    AuthMethod::WpaWpa2Personal,
+    AuthMethod::Wpa2Wpa3Personal,
+    AuthMethod::Wpa3Personal,
+    AuthMethod::Wpa,
+];
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
@@ -62,13 +68,13 @@ pub(super) async fn run_wifi_connection_task(
     let mut config_applied = false;
     let mut auth_method_idx = 0usize;
     let mut paused = false;
-    let mut channel_hint = WIFI_TARGET_CHANNEL_PROBE;
+    let mut channel_hint = None;
 
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
         config_applied = false;
         auth_method_idx = 0;
-        channel_hint = WIFI_TARGET_CHANNEL_PROBE;
+        channel_hint = None;
         println!("upload_http: loaded wifi credentials from SD");
     }
 
@@ -84,7 +90,7 @@ pub(super) async fn run_wifi_connection_task(
                 paused = true;
                 config_applied = false;
                 auth_method_idx = 0;
-                channel_hint = WIFI_TARGET_CHANNEL_PROBE;
+                channel_hint = None;
                 println!("upload_http: upload mode off; wifi paused");
             }
             Timer::after(Duration::from_millis(500)).await;
@@ -100,7 +106,7 @@ pub(super) async fn run_wifi_connection_task(
             credentials = Some(updated);
             config_applied = false;
             auth_method_idx = 0;
-            channel_hint = WIFI_TARGET_CHANNEL_PROBE;
+            channel_hint = None;
             println!("upload_http: wifi credentials updated");
         }
 
@@ -111,7 +117,7 @@ pub(super) async fn run_wifi_connection_task(
                 credentials = Some(first);
                 config_applied = false;
                 auth_method_idx = 0;
-                channel_hint = WIFI_TARGET_CHANNEL_PROBE;
+                channel_hint = None;
                 println!("upload_http: wifi credentials received");
                 continue;
             }
@@ -348,7 +354,7 @@ fn mode_config_from_credentials(
         .with_ssid(ssid.into())
         .with_password(password.into())
         .with_auth_method(auth_method)
-        .with_scan_method(ScanMethod::Fast);
+        .with_scan_method(ScanMethod::AllChannels);
     if let Some(channel) = channel_hint {
         client = client.with_channel(channel);
     }
