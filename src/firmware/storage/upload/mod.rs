@@ -22,7 +22,7 @@ pub(crate) fn setup(
     let initial_credentials = wifi::compiled_wifi_credentials();
 
     static RADIO_CTRL: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
-    static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    static STACK_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
 
     let radio_ctrl = esp_radio::init().map_err(|_| "asset-upload-http: esp_radio::init failed")?;
     let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
@@ -36,7 +36,7 @@ pub(crate) fn setup(
     let (stack, net_runner) = embassy_net::new(
         ifaces.sta,
         embassy_net::Config::dhcpv4(Default::default()),
-        STACK_RESOURCES.init(StackResources::<3>::new()),
+        STACK_RESOURCES.init(StackResources::<8>::new()),
         seed,
     );
 

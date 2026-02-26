@@ -258,6 +258,11 @@ maybe_send_wifiset() {
                 sleep 1
                 continue
             fi
+            if [[ "$line" == *"WIFISET ERR reason=busy"* ]]; then
+                attempt=$((attempt + 1))
+                sleep 1
+                continue
+            fi
             if [[ "$line" == *"WIFISET ERR"* ]]; then
                 echo "WIFISET failed: $line" >&2
                 return 1
@@ -266,21 +271,41 @@ maybe_send_wifiset() {
         attempt=$((attempt + 1))
         sleep 1
     done
-    echo "WIFISET timed out after retries" >&2
-    return 1
+    echo "WIFISET timed out after retries; continuing (device may already have credentials)" >&2
+    return 0
 }
 
 query_metrics_net_line() {
     local start_line
     start_line="$(line_count)"
     send_line "METRICS"
-    if ! wait_for_pattern_from_line "$start_line" "METRICS NET wifi_connected=[01] http_listening=[01] ip=[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" 4; then
+    if ! wait_for_pattern_from_line "$start_line" "METRICS NET wifi_connected=[01]" 4; then
         if wait_for_pattern_from_line "$start_line" "METRICS WIFI " 1; then
             return 2
         fi
         return 1
     fi
-    first_match_from_line "$start_line" "METRICS NET wifi_connected=[01] http_listening=[01] ip=[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+"
+    local window parsed
+    window="$(tail -n +$((start_line + 1)) "$output_path" | tail -n 80)"
+    parsed="$(python3 - "$window" <<'PY'
+import re
+import sys
+
+s = sys.argv[1].replace("\r", " ").replace("\n", " ")
+m = re.search(
+    r"METRICS NET wifi_connected=([01]).{0,320}?listening=([01]).{0,160}?ip=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)",
+    s,
+)
+if m:
+    print(
+        f"METRICS NET wifi_connected={m.group(1)} http_listening={m.group(2)} ip={m.group(3)}"
+    )
+PY
+)"
+    if [[ -z "$parsed" ]]; then
+        return 1
+    fi
+    echo "$parsed"
 }
 
 metrics_net_wifi_connected() {

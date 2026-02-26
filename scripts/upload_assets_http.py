@@ -132,6 +132,11 @@ def request_sd_busy_aware(
             )
         except RuntimeError as exc:
             message = str(exc)
+            if "408 Request Timeout" in message:
+                if attempt + 1 >= attempts:
+                    raise
+                time.sleep(0.25 * (attempt + 1))
+                continue
             if "409 Conflict" in message and "sd busy" in message:
                 try:
                     request(
@@ -155,7 +160,7 @@ def request_sd_busy_aware(
 
 
 def health_check(host: str, port: int, timeout: float) -> None:
-    request(host, port, timeout, "GET", "/health", retries=8)
+    request(host, port, timeout, "GET", "/health", retries=20)
 
 
 def mkdir(host: str, port: int, timeout: float, remote_path: str, token: str | None) -> None:
@@ -224,15 +229,29 @@ def upload_file(
                 upload_target,
                 body=body,
                 headers=upload_headers,
-                retries=5,
-                busy_retries=6,
+                retries=4,
+                busy_retries=3,
             )
             return
-        except RuntimeError as exc:
-            if "404 Not Found" not in str(exc):
-                raise
+        except Exception:
+            # Fall back to legacy chunked upload flow when single-shot PUT
+            # is unavailable or unstable under current link conditions.
+            try:
+                request(
+                    host,
+                    port,
+                    timeout,
+                    "POST",
+                    "/upload_abort",
+                    body=b"",
+                    headers=auth_headers(token),
+                    retries=2,
+                )
+            except Exception:
+                pass
 
-    # Legacy fallback path for firmware variants without /upload support.
+    # Legacy fallback path for firmware variants without /upload support,
+    # or as a resilience fallback after PUT failures.
     begin_target = f"/upload_begin?path={quote(remote_path, safe='/')}&size={size}"
     request_sd_busy_aware(
         host,

@@ -16,6 +16,7 @@ const UPLOAD_HTTP_ROOT: &str = "/assets";
 const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
 const HTTP_HEADER_MAX: usize = 2048;
 const HTTP_RW_BUF: usize = 2048;
+const HTTP_SOCKET_TIMEOUT_SECS: u64 = 20;
 
 enum HttpBuffer<const N: usize> {
     #[cfg(feature = "psram-alloc")]
@@ -85,18 +86,12 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             continue;
         }
 
-        if with_timeout(Duration::from_millis(500), stack.wait_config_up())
-            .await
-            .is_err()
-        {
-            telemetry::set_upload_http_listener(false, None);
-            continue;
-        }
-
         let local_ipv4 = match stack.config_v4().map(|cfg| cfg.address.address().octets()) {
             Some(ipv4) => ipv4,
             None => {
+                listening_logged = false;
                 telemetry::set_upload_http_listener(false, None);
+                embassy_time::Timer::after(Duration::from_millis(200)).await;
                 continue;
             }
         };
@@ -114,7 +109,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         }
 
         let mut socket = TcpSocket::new(stack, rx_buffer.as_mut_slice(), tx_buffer.as_mut_slice());
-        socket.set_timeout(Some(Duration::from_secs(20)));
+        socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
         telemetry::set_upload_http_listener(true, Some(local_ipv4));
 
         let accepted = socket

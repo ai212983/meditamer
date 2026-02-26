@@ -1,6 +1,7 @@
 use core::cmp::min;
 
 use embassy_net::tcp::TcpSocket;
+use embassy_time::{with_timeout, Duration};
 
 use super::super::super::super::types::{SdUploadCommand, SD_UPLOAD_CHUNK_MAX};
 use super::super::sd_bridge::{roundtrip_error_log, sd_upload_chunk, sd_upload_roundtrip};
@@ -9,6 +10,8 @@ use super::helpers::{
     parse_request_line, parse_u32_query, sd_upload_or_http_error, target_path,
     validate_upload_auth, write_response, write_roundtrip_error_response, UploadAuthError,
 };
+
+const HTTP_HEADER_READ_TIMEOUT_MS: u64 = 10_000;
 
 pub(super) async fn handle_connection(
     socket: &mut TcpSocket<'_>,
@@ -22,10 +25,19 @@ pub(super) async fn handle_connection(
             return Err("header too large");
         }
 
-        let n = socket
-            .read(&mut header_buf[filled..])
-            .await
-            .map_err(|_| "read")?;
+        let n = match with_timeout(
+            Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS),
+            socket.read(&mut header_buf[filled..]),
+        )
+        .await
+        {
+            Ok(Ok(n)) => n,
+            Ok(Err(_)) => return Err("read"),
+            Err(_) => {
+                write_response(socket, b"408 Request Timeout", b"request header timeout").await;
+                return Err("request header timeout");
+            }
+        };
         if n == 0 {
             return Err("eof");
         }
