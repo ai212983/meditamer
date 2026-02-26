@@ -105,11 +105,26 @@ def normalize_mac(mac: str) -> str:
         return ""
 
 
+def espflash_reset_run_mode(port: str, timeout_s: float = 7.0) -> bool:
+    try:
+        proc = subprocess.run(
+            ["espflash", "reset", "-p", port, "-c", "esp32"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout_s,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 def detect_device_mac(port: str) -> str:
     configured = normalize_mac(os.getenv("WIFI_UPLOAD_DEVICE_MAC", ""))
     if configured:
         return configured
+    used_board_info = False
     try:
+        used_board_info = True
         out = subprocess.check_output(
             ["espflash", "board-info", "-p", port, "-c", "esp32"],
             text=True,
@@ -118,6 +133,11 @@ def detect_device_mac(port: str) -> str:
         )
     except Exception:
         return ""
+    finally:
+        if used_board_info and os.getenv("WIFI_UPLOAD_RESET_AFTER_BOARD_INFO", "1") != "0":
+            # board-info can leave the target outside normal app runtime;
+            # reset back into run mode before UART preflight.
+            espflash_reset_run_mode(port)
     m = re.search(r"MAC address:\s*([0-9A-Fa-f:]+)", out)
     if not m:
         return ""
@@ -260,7 +280,7 @@ class SerialConsole:
 
 def serial_preflight(port: str, baud: int, log_path: Path) -> SerialConsole:
     last_error = "unknown"
-    allow_reset = os.getenv("WIFI_UPLOAD_PREFLIGHT_RESET", "0") == "1"
+    allow_reset = os.getenv("WIFI_UPLOAD_PREFLIGHT_RESET", "1") != "0"
     for attempt in range(1, 4):
         console = SerialConsole(port, baud, log_path)
         try:
@@ -274,17 +294,9 @@ def serial_preflight(port: str, baud: int, log_path: Path) -> SerialConsole:
         except Exception as exc:
             last_error = str(exc)
         console.close()
-        if allow_reset and attempt == 1:
-            try:
-                subprocess.run(
-                    ["espflash", "reset", "-p", port, "-c", "esp32"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                )
-            except Exception:
-                pass
-        time.sleep(1.5)
+        if allow_reset:
+            espflash_reset_run_mode(port)
+        time.sleep(1.5 + 0.3 * attempt)
     raise RuntimeError(f"serial preflight failed: {last_error}")
 
 
@@ -548,6 +560,17 @@ def capture_metrics_lines(console: SerialConsole, timeout_s: float = 3.0) -> lis
     return lines
 
 
+def print_metrics_snapshot(
+    console: SerialConsole,
+    *,
+    prefix: str,
+    to_stderr: bool = False,
+) -> None:
+    stream = sys.stderr if to_stderr else sys.stdout
+    for line in capture_metrics_lines(console):
+        print(f"{prefix} {line}", file=stream)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("output_path", nargs="?", default="")
@@ -657,6 +680,11 @@ def main() -> int:
                 except Exception as exc:
                     upload_ms = int((time.monotonic() - started) * 1000)
                     last_upload_error = exc
+                    print_metrics_snapshot(
+                        console,
+                        prefix=f"[cycle {cycle} upload_fail]",
+                        to_stderr=True,
+                    )
                     if upload_attempt >= operation_retries:
                         raise
                     print(
@@ -668,6 +696,11 @@ def main() -> int:
                             console, metrics_ip, mac, health_timeout_s, ip_discovery_timeout_s
                         )
                     except Exception as health_exc:
+                        print_metrics_snapshot(
+                            console,
+                            prefix=f"[cycle {cycle} health_recovery_fail]",
+                            to_stderr=True,
+                        )
                         print(
                             f"cycle {cycle}: health recovery failed ({health_exc}); "
                             "cycling upload mode to recover Wi-Fi stack"
