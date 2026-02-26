@@ -75,10 +75,12 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     let mut chunk_buffer = init_http_buffer(&CHUNK_BUFFER, "http_chunk");
 
     let mut listening_logged = false;
+    telemetry::set_upload_http_listener(false, None);
 
     loop {
         if !service_mode::upload_enabled() {
             listening_logged = false;
+            telemetry::set_upload_http_listener(false, None);
             embassy_time::Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -87,22 +89,33 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             .await
             .is_err()
         {
+            telemetry::set_upload_http_listener(false, None);
             continue;
         }
 
-        if !listening_logged {
-            if let Some(cfg) = stack.config_v4() {
-                esp_println::println!(
-                    "upload_http: listening on {}:{}",
-                    cfg.address.address(),
-                    UPLOAD_HTTP_PORT
-                );
+        let local_ipv4 = match stack.config_v4().map(|cfg| cfg.address.address().octets()) {
+            Some(ipv4) => ipv4,
+            None => {
+                telemetry::set_upload_http_listener(false, None);
+                continue;
             }
+        };
+
+        if !listening_logged {
+            esp_println::println!(
+                "upload_http: listening on {}.{}.{}.{}:{}",
+                local_ipv4[0],
+                local_ipv4[1],
+                local_ipv4[2],
+                local_ipv4[3],
+                UPLOAD_HTTP_PORT
+            );
             listening_logged = true;
         }
 
         let mut socket = TcpSocket::new(stack, rx_buffer.as_mut_slice(), tx_buffer.as_mut_slice());
         socket.set_timeout(Some(Duration::from_secs(20)));
+        telemetry::set_upload_http_listener(true, Some(local_ipv4));
 
         let accepted = socket
             .accept(IpListenEndpoint {
@@ -112,6 +125,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             .await;
         if let Err(err) = accepted {
             telemetry::record_upload_http_accept_error();
+            telemetry::set_upload_http_listener(false, None);
             esp_println::println!("upload_http: accept err={:?}", err);
             continue;
         }
@@ -129,5 +143,6 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
 
         let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
         socket.close();
+        telemetry::set_upload_http_listener(false, None);
     }
 }

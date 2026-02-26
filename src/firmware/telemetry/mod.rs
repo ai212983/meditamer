@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use super::types::SdUploadResultCode;
 
@@ -16,6 +16,9 @@ static SD_UPLOAD_BUSY: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_POWER_ON_FAILED: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_INIT_FAILED: AtomicU32 = AtomicU32::new(0);
+static WIFI_LINK_CONNECTED: AtomicBool = AtomicBool::new(false);
+static UPLOAD_HTTP_LISTENING: AtomicBool = AtomicBool::new(false);
+static UPLOAD_HTTP_IPV4: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy)]
 pub(crate) struct Snapshot {
@@ -33,9 +36,18 @@ pub(crate) struct Snapshot {
     pub(crate) sd_upload_timeouts: u32,
     pub(crate) sd_upload_power_on_failed: u32,
     pub(crate) sd_upload_init_failed: u32,
+    pub(crate) wifi_link_connected: bool,
+    pub(crate) upload_http_listening: bool,
+    pub(crate) upload_http_ipv4: Option<[u8; 4]>,
 }
 
 pub(crate) fn snapshot() -> Snapshot {
+    let upload_http_ipv4_raw = UPLOAD_HTTP_IPV4.load(Ordering::Relaxed);
+    let upload_http_ipv4 = if upload_http_ipv4_raw == 0 {
+        None
+    } else {
+        Some(upload_http_ipv4_raw.to_be_bytes())
+    };
     Snapshot {
         wifi_connect_attempts: WIFI_CONNECT_ATTEMPTS.load(Ordering::Relaxed),
         wifi_connect_successes: WIFI_CONNECT_SUCCESSES.load(Ordering::Relaxed),
@@ -51,6 +63,9 @@ pub(crate) fn snapshot() -> Snapshot {
         sd_upload_timeouts: SD_UPLOAD_TIMEOUTS.load(Ordering::Relaxed),
         sd_upload_power_on_failed: SD_UPLOAD_POWER_ON_FAILED.load(Ordering::Relaxed),
         sd_upload_init_failed: SD_UPLOAD_INIT_FAILED.load(Ordering::Relaxed),
+        wifi_link_connected: WIFI_LINK_CONNECTED.load(Ordering::Relaxed),
+        upload_http_listening: UPLOAD_HTTP_LISTENING.load(Ordering::Relaxed),
+        upload_http_ipv4,
     }
 }
 
@@ -66,12 +81,14 @@ pub(crate) fn record_wifi_connect_attempt(_channel_hint: Option<u8>, _auth_idx: 
 
 pub(crate) fn record_wifi_connect_success() {
     WIFI_CONNECT_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+    WIFI_LINK_CONNECTED.store(true, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
     defmt::info!("telemetry wifi_connect_success");
 }
 
 pub(crate) fn record_wifi_connect_failure(reason: u8) {
     WIFI_CONNECT_FAILURES.fetch_add(1, Ordering::Relaxed);
+    WIFI_LINK_CONNECTED.store(false, Ordering::Relaxed);
     if reason == 201 {
         WIFI_REASON_NO_AP_FOUND.fetch_add(1, Ordering::Relaxed);
     }
@@ -133,6 +150,16 @@ pub(crate) fn record_sd_upload_roundtrip_code(code: SdUploadResultCode) {
         "telemetry sd_upload_roundtrip_code code={=u8}",
         sd_upload_result_code_to_u8(code),
     );
+}
+
+pub(crate) fn set_wifi_link_connected(connected: bool) {
+    WIFI_LINK_CONNECTED.store(connected, Ordering::Relaxed);
+}
+
+pub(crate) fn set_upload_http_listener(listening: bool, ip: Option<[u8; 4]>) {
+    UPLOAD_HTTP_LISTENING.store(listening, Ordering::Relaxed);
+    let raw_ip = ip.map(u32::from_be_bytes).unwrap_or(0);
+    UPLOAD_HTTP_IPV4.store(raw_ip, Ordering::Relaxed);
 }
 
 #[cfg(feature = "telemetry-defmt")]

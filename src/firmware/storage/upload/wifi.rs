@@ -54,6 +54,7 @@ pub(super) async fn run_wifi_connection_task(
     mut credentials: Option<WifiCredentials>,
 ) {
     install_wifi_event_logger();
+    telemetry::set_wifi_link_connected(false);
     let mut config_applied = false;
     let mut auth_method_idx = 0usize;
     let mut paused = false;
@@ -75,6 +76,7 @@ pub(super) async fn run_wifi_connection_task(
             if !paused {
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
+                telemetry::set_wifi_link_connected(false);
                 paused = true;
                 config_applied = false;
                 auth_method_idx = 0;
@@ -92,6 +94,10 @@ pub(super) async fn run_wifi_connection_task(
         }
 
         while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
+            if credentials == Some(updated) {
+                println!("upload_http: wifi credentials unchanged; skipping reconfigure");
+                continue;
+            }
             credentials = Some(updated);
             config_applied = false;
             auth_method_idx = 0;
@@ -192,21 +198,31 @@ pub(super) async fn run_wifi_connection_task(
             Ok(()) => {
                 telemetry::record_wifi_connect_success();
                 println!("upload_http: wifi connected");
-                match select(
-                    controller.wait_for_event(WifiEvent::StaDisconnected),
-                    WIFI_CREDENTIALS_UPDATES.receive(),
-                )
-                .await
-                {
-                    Either::First(_) => {
-                        println!("upload_http: wifi disconnected");
-                    }
-                    Either::Second(updated) => {
-                        credentials = Some(updated);
-                        config_applied = false;
-                        auth_method_idx = 0;
-                        println!("upload_http: wifi credentials changed, reconnecting");
-                        let _ = controller.disconnect_async().await;
+                loop {
+                    match select(
+                        controller.wait_for_event(WifiEvent::StaDisconnected),
+                        WIFI_CREDENTIALS_UPDATES.receive(),
+                    )
+                    .await
+                    {
+                        Either::First(_) => {
+                            telemetry::set_wifi_link_connected(false);
+                            println!("upload_http: wifi disconnected");
+                            break;
+                        }
+                        Either::Second(updated) => {
+                            if credentials == Some(updated) {
+                                println!("upload_http: wifi credentials unchanged while connected");
+                                continue;
+                            }
+                            credentials = Some(updated);
+                            config_applied = false;
+                            auth_method_idx = 0;
+                            println!("upload_http: wifi credentials changed, reconnecting");
+                            let _ = controller.disconnect_async().await;
+                            telemetry::set_wifi_link_connected(false);
+                            break;
+                        }
                     }
                 }
             }

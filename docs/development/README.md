@@ -327,6 +327,23 @@ Optional env var:
 
 - `MODE_SMOKE_SETTLE_MS` (default `0`; can be raised if extra post-command delay is desired)
 
+## Runtime Metrics
+
+Runtime metrics are available over `UART0` (`115200` baud):
+
+```text
+METRICS
+```
+
+Response lines:
+
+```text
+METRICS MARBLE_REDRAW_MS=<n> MAX_MS=<n>
+METRICS WIFI attempt=<n> success=<n> failure=<n> no_ap=<n> scan_runs=<n> scan_empty=<n> scan_hits=<n>
+METRICS UPLOAD accept_err=<n> request_err=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n>
+METRICS NET wifi_connected=<0|1> http_listening=<0|1> ip=<a.b.c.d>
+```
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:
@@ -375,7 +392,7 @@ Notes:
   (fallback `SSID` / `PASSWORD`).
 - upload service must be enabled at runtime (`MODE UPLOAD ON`).
 - if credentials are not compiled in, firmware waits for UART `WIFISET` command.
-- server listens on port `8080` after DHCP lease (`upload_http: listening on <ip>:8080` in logs).
+- server listens on port `8080` after DHCP lease; scripts should poll `METRICS NET` and use `ip=<a.b.c.d>` when `http_listening=1` instead of parsing async logs.
 - when an upload token is configured, all HTTP endpoints except `/health` require an `x-upload-token` header;
   requests without a valid token are rejected.
 - if neither `MEDITAMER_UPLOAD_HTTP_TOKEN` nor `UPLOAD_HTTP_TOKEN` is set at build time, authentication is

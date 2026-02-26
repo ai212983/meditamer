@@ -176,6 +176,20 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.sd_upload_init_failed,
                             );
                             let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
+
+                            let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
+                            let mut net_line = heapless::String::<160>::new();
+                            let _ = write!(
+                                &mut net_line,
+                                "METRICS NET wifi_connected={} http_listening={} ip={}.{}.{}.{}\r\n",
+                                if snapshot.wifi_link_connected { 1 } else { 0 },
+                                if snapshot.upload_http_listening { 1 } else { 0 },
+                                ip[0],
+                                ip[1],
+                                ip[2],
+                                ip[3],
+                            );
+                            let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
                         }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;

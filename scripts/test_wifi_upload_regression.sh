@@ -16,6 +16,7 @@ reset_each_cycle="${WIFI_UPLOAD_RESET_EACH_CYCLE:-0}"
 connect_timeout_s="${WIFI_UPLOAD_CONNECT_TIMEOUT_SEC:-45}"
 listen_timeout_s="${WIFI_UPLOAD_LISTEN_TIMEOUT_SEC:-75}"
 upload_timeout_s="${WIFI_UPLOAD_HTTP_TIMEOUT_SEC:-30}"
+health_timeout_s="${WIFI_UPLOAD_HEALTH_TIMEOUT_SEC:-15}"
 stat_timeout_ms="${WIFI_UPLOAD_STAT_TIMEOUT_MS:-30000}"
 baud="${ESPFLASH_BAUD:-115200}"
 remote_root="${WIFI_UPLOAD_REMOTE_ROOT:-/assets/u}"
@@ -38,7 +39,7 @@ if ! [[ "$payload_bytes" =~ ^[0-9]+$ ]] || ((payload_bytes <= 0)); then
     echo "WIFI_UPLOAD_PAYLOAD_BYTES must be a positive integer" >&2
     exit 1
 fi
-for value_name in connect_timeout_s listen_timeout_s upload_timeout_s stat_timeout_ms; do
+for value_name in connect_timeout_s listen_timeout_s upload_timeout_s health_timeout_s stat_timeout_ms; do
     value="${!value_name}"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || ((value <= 0)); then
         echo "${value_name} must be a positive integer" >&2
@@ -231,12 +232,8 @@ set_upload_mode_off() {
 }
 
 maybe_send_wifiset() {
-    local start_line="$1"
     local ssid="${WIFI_UPLOAD_SSID:-}"
     if [[ -z "$ssid" ]]; then
-        return 0
-    fi
-    if ! wait_for_pattern_from_line "$start_line" "waiting for WIFISET credentials over UART|SD wifi config invalid; waiting for WIFISET" 4; then
         return 0
     fi
     local password="${WIFI_UPLOAD_PASSWORD:-}"
@@ -256,6 +253,11 @@ maybe_send_wifiset() {
             if [[ "$line" == *"WIFISET OK"* ]]; then
                 return 0
             fi
+            if [[ "$line" == *"WIFISET BUSY"* ]]; then
+                attempt=$((attempt + 1))
+                sleep 1
+                continue
+            fi
             if [[ "$line" == *"WIFISET ERR"* ]]; then
                 echo "WIFISET failed: $line" >&2
                 return 1
@@ -265,6 +267,110 @@ maybe_send_wifiset() {
         sleep 1
     done
     echo "WIFISET timed out after retries" >&2
+    return 1
+}
+
+query_metrics_net_line() {
+    local start_line
+    start_line="$(line_count)"
+    send_line "METRICS"
+    if ! wait_for_pattern_from_line "$start_line" "METRICS NET wifi_connected=[01] http_listening=[01] ip=[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" 4; then
+        if wait_for_pattern_from_line "$start_line" "METRICS WIFI " 1; then
+            return 2
+        fi
+        return 1
+    fi
+    first_match_from_line "$start_line" "METRICS NET wifi_connected=[01] http_listening=[01] ip=[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+"
+}
+
+metrics_net_wifi_connected() {
+    local line="$1"
+    sed -nE 's/.*wifi_connected=([01]).*/\1/p' <<<"$line"
+}
+
+metrics_net_http_listening() {
+    local line="$1"
+    sed -nE 's/.*http_listening=([01]).*/\1/p' <<<"$line"
+}
+
+metrics_net_ip() {
+    local line="$1"
+    sed -nE 's/.*ip=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"$line"
+}
+
+wait_for_upload_network_ready() {
+    local cycle="$1"
+    local cycle_start_ms="$2"
+    local connect_deadline=$((SECONDS + connect_timeout_s))
+    local listen_deadline=$((SECONDS + listen_timeout_s))
+    local connected_at_ms=""
+    local last_line=""
+
+    while ((SECONDS < listen_deadline)); do
+        local line
+        line=""
+        if line="$(query_metrics_net_line)"; then
+            last_line="$line"
+            local wifi_connected
+            local http_listening
+            local ip
+            wifi_connected="$(metrics_net_wifi_connected "$line")"
+            http_listening="$(metrics_net_http_listening "$line")"
+            ip="$(metrics_net_ip "$line")"
+
+            if [[ "$wifi_connected" == "1" && -z "$connected_at_ms" ]]; then
+                connected_at_ms="$(( $(now_ms) - cycle_start_ms ))"
+            fi
+
+            if [[ "$http_listening" == "1" && "$ip" != "0.0.0.0" && -n "$ip" ]]; then
+                if [[ -z "$connected_at_ms" ]]; then
+                    connected_at_ms="$(( $(now_ms) - cycle_start_ms ))"
+                fi
+                network_ready_connect_ms="$connected_at_ms"
+                network_ready_listen_ms="$(( $(now_ms) - cycle_start_ms ))"
+                network_ready_ip="$ip"
+                return 0
+            fi
+        else
+            local query_rc=$?
+            if [[ "$query_rc" -eq 2 ]]; then
+                echo "[FAIL] cycle $cycle: firmware does not emit METRICS NET line; flash latest build first" >&2
+                tail -n 120 "$output_path" >&2
+                return 1
+            fi
+        fi
+
+        if [[ -z "$connected_at_ms" && SECONDS -ge $connect_deadline ]]; then
+            echo "[FAIL] cycle $cycle: wifi did not connect within ${connect_timeout_s}s (METRICS NET polling)" >&2
+            if [[ -n "$last_line" ]]; then
+                echo "Last metrics line: $last_line" >&2
+            fi
+            tail -n 200 "$output_path" >&2
+            return 1
+        fi
+        sleep 1
+    done
+
+    echo "[FAIL] cycle $cycle: upload server did not start within ${listen_timeout_s}s (METRICS NET polling)" >&2
+    if [[ -n "$last_line" ]]; then
+        echo "Last metrics line: $last_line" >&2
+    fi
+    tail -n 200 "$output_path" >&2
+    return 1
+}
+
+wait_for_http_health() {
+    local cycle="$1"
+    local device_ip="$2"
+    local deadline=$((SECONDS + health_timeout_s))
+    while ((SECONDS < deadline)); do
+        if curl -fsS -m 3 "http://${device_ip}:8080/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "[FAIL] cycle $cycle: /health did not respond within ${health_timeout_s}s after METRICS NET readiness" >&2
+    tail -n 200 "$output_path" >&2
     return 1
 }
 
@@ -338,6 +444,9 @@ connect_ms_samples=()
 listen_ms_samples=()
 upload_ms_samples=()
 upload_kib_s_samples=()
+network_ready_connect_ms=""
+network_ready_listen_ms=""
+network_ready_ip=""
 
 total_start_ms="$(now_ms)"
 
@@ -354,31 +463,13 @@ for cycle in $(seq 1 "$cycles"); do
         sleep 1
     fi
 
-    cycle_start_line="$(line_count)"
     set_upload_mode_on
-    maybe_send_wifiset "$cycle_start_line"
-
-    if ! wait_for_pattern_from_line "$cycle_start_line" "upload_http: wifi connected" "$connect_timeout_s"; then
-        echo "[FAIL] cycle $cycle: wifi did not connect within ${connect_timeout_s}s" >&2
-        tail -n 200 "$output_path" >&2
-        exit 1
-    fi
-    connect_ms="$(( $(now_ms) - cycle_start_ms ))"
-
-    if ! wait_for_pattern_from_line "$cycle_start_line" "upload_http: listening on [0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+:8080" "$listen_timeout_s"; then
-        echo "[FAIL] cycle $cycle: upload server did not start within ${listen_timeout_s}s" >&2
-        tail -n 200 "$output_path" >&2
-        exit 1
-    fi
-    listen_ms="$(( $(now_ms) - cycle_start_ms ))"
-
-    listen_line="$(first_match_from_line "$cycle_start_line" "upload_http: listening on [0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+:8080")"
-    device_ip="$(sed -nE 's/.*listening on ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):8080.*/\1/p' <<<"$listen_line")"
-    if [[ -z "$device_ip" ]]; then
-        echo "[FAIL] cycle $cycle: failed to parse device IP" >&2
-        tail -n 200 "$output_path" >&2
-        exit 1
-    fi
+    maybe_send_wifiset
+    wait_for_upload_network_ready "$cycle" "$cycle_start_ms"
+    connect_ms="$network_ready_connect_ms"
+    listen_ms="$network_ready_listen_ms"
+    device_ip="$network_ready_ip"
+    wait_for_http_health "$cycle" "$device_ip"
 
     cycle_remote_root="${remote_root}/cycle-${cycle}"
     remote_file="${cycle_remote_root}/$(basename "$payload_path")"
