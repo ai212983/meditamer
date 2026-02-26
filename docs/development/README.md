@@ -497,6 +497,7 @@ ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/test_wifi_upload_regression.sh
 - supports run labeling via `--test-name <name>` or `WIFI_UPLOAD_TEST_NAME=<name>`; this is used in log file names and summary output.
 - set `WIFI_UPLOAD_USE_LEGACY_BASH=1` to use the old monitor-parse shell path for debugging.
 - `WIFI_UPLOAD_HEALTH_TIMEOUT_SEC` default is `45` seconds.
+- throughput history and iteration comparisons are tracked in `docs/development/upload-throughput-history.md`.
 
 ## Soak Script
 
