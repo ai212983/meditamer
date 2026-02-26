@@ -18,13 +18,13 @@ listen_timeout_s="${WIFI_UPLOAD_LISTEN_TIMEOUT_SEC:-75}"
 upload_timeout_s="${WIFI_UPLOAD_HTTP_TIMEOUT_SEC:-30}"
 stat_timeout_ms="${WIFI_UPLOAD_STAT_TIMEOUT_MS:-30000}"
 baud="${ESPFLASH_BAUD:-115200}"
-remote_root="${WIFI_UPLOAD_REMOTE_ROOT:-/assets/upload-regression}"
+remote_root="${WIFI_UPLOAD_REMOTE_ROOT:-/assets/u}"
 monitor_mode="${WIFI_UPLOAD_MONITOR_MODE:-raw}"
 monitor_raw_backend="${WIFI_UPLOAD_MONITOR_RAW_BACKEND:-cat}"
 monitor_persist_raw="${WIFI_UPLOAD_MONITOR_PERSIST_RAW:-1}"
 monitor_raw_tio_mute="${WIFI_UPLOAD_MONITOR_RAW_TIO_MUTE:-0}"
 output_path="${1:-$repo_root/logs/wifi_upload_regression_$(date +%Y%m%d_%H%M%S).log}"
-payload_path="${WIFI_UPLOAD_PAYLOAD_PATH:-/tmp/wifi_upload_regression_payload.bin}"
+payload_path="${WIFI_UPLOAD_PAYLOAD_PATH:-/tmp/u.bin}"
 
 if ! [[ "$cycles" =~ ^[0-9]+$ ]] || ((cycles <= 0)); then
     echo "WIFI_UPLOAD_CYCLES must be a positive integer" >&2
@@ -382,6 +382,10 @@ for cycle in $(seq 1 "$cycles"); do
 
     cycle_remote_root="${remote_root}/cycle-${cycle}"
     remote_file="${cycle_remote_root}/$(basename "$payload_path")"
+    if (( ${#remote_file} > 64 )); then
+        echo "[FAIL] cycle $cycle: remote path exceeds SD_PATH_MAX(64): $remote_file" >&2
+        exit 1
+    fi
     upload_start_ms="$(now_ms)"
     python3 "$script_dir/upload_assets_http.py" \
         --host "$device_ip" \
