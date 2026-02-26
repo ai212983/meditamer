@@ -5,8 +5,8 @@ use embassy_time::{with_timeout, Duration, Timer};
 use esp_println::println;
 use esp_radio::wifi::{
     event::{self, EventExt},
-    AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig, ScanMethod,
-    ScanTypeConfig, WifiController, WifiEvent,
+    AccessPointInfo, AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig,
+    ScanMethod, ScanTypeConfig, WifiController, WifiEvent,
 };
 
 use super::super::super::{
@@ -27,9 +27,10 @@ const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
 const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
-const WIFI_SCAN_DIAG_MAX_APS: usize = 16;
+const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
 const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 80;
 const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 240;
+const WIFI_SCAN_PASSIVE_MS: u64 = 240;
 const WIFI_TARGET_CHANNEL_PROBE: Option<u8> = Some(8);
 const WIFI_AUTH_METHODS: [AuthMethod; 1] = [AuthMethod::Wpa2Personal];
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
@@ -358,38 +359,43 @@ async fn log_scan_for_target(
     controller: &mut WifiController<'static>,
     target_ssid: &str,
 ) -> Option<u8> {
-    let config = ScanConfig::default()
-        .with_show_hidden(false)
+    let mut discovered_channel = None;
+
+    let active = ScanConfig::default()
+        .with_show_hidden(true)
         .with_max(WIFI_SCAN_DIAG_MAX_APS)
         .with_scan_type(ScanTypeConfig::Active {
             min: Duration::from_millis(WIFI_SCAN_ACTIVE_MIN_MS).into(),
             max: Duration::from_millis(WIFI_SCAN_ACTIVE_MAX_MS).into(),
         });
-
-    let mut discovered_channel = None;
-    match controller.scan_with_config_async(config).await {
-        Ok(results) if results.is_empty() => {
-            println!("upload_http: scan all found=0 target_ssid={}", target_ssid);
-        }
+    match controller.scan_with_config_async(active).await {
         Ok(results) => {
-            println!(
-                "upload_http: scan all found={} target_ssid={}",
-                results.len(),
-                target_ssid,
-            );
-            for ap in results.iter() {
-                println!(
-                    "upload_http: scan ap ssid={} channel={} rssi={} auth={:?}",
-                    ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
-                );
-                if discovered_channel.is_none() && ap.ssid == target_ssid {
-                    discovered_channel = Some(ap.channel);
-                }
-            }
+            discovered_channel = log_scan_results("active", target_ssid, &results);
         }
         Err(err) => {
             println!(
-                "upload_http: scan all err={:?} target_ssid={}",
+                "upload_http: scan active err={:?} target_ssid={}",
+                err, target_ssid
+            );
+        }
+    }
+    if discovered_channel.is_some() {
+        return discovered_channel;
+    }
+
+    let passive = ScanConfig::default()
+        .with_show_hidden(true)
+        .with_max(WIFI_SCAN_DIAG_MAX_APS)
+        .with_scan_type(ScanTypeConfig::Passive(
+            Duration::from_millis(WIFI_SCAN_PASSIVE_MS).into(),
+        ));
+    match controller.scan_with_config_async(passive).await {
+        Ok(results) => {
+            discovered_channel = log_scan_results("passive", target_ssid, &results);
+        }
+        Err(err) => {
+            println!(
+                "upload_http: scan passive err={:?} target_ssid={}",
                 err, target_ssid
             );
         }
@@ -407,7 +413,7 @@ async fn log_scan_for_target(
         let probe = ScanConfig::default()
             .with_ssid(target_ssid)
             .with_channel(channel)
-            .with_show_hidden(false)
+            .with_show_hidden(true)
             .with_max(WIFI_SCAN_DIAG_MAX_APS)
             .with_scan_type(ScanTypeConfig::Active {
                 min: Duration::from_millis(WIFI_SCAN_ACTIVE_MIN_MS).into(),
@@ -446,4 +452,40 @@ async fn log_scan_for_target(
 
     println!("upload_http: scan target_ssid={} found=0", target_ssid);
     None
+}
+
+fn log_scan_results(label: &str, target_ssid: &str, results: &[AccessPointInfo]) -> Option<u8> {
+    if results.is_empty() {
+        println!(
+            "upload_http: scan {} found=0 target_ssid={}",
+            label, target_ssid
+        );
+        return None;
+    }
+
+    println!(
+        "upload_http: scan {} found={} target_ssid={}",
+        label,
+        results.len(),
+        target_ssid
+    );
+
+    let mut discovered_channel = None;
+    for ap in results.iter() {
+        println!(
+            "upload_http: scan ap ssid={} channel={} rssi={} auth={:?}",
+            ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
+        );
+        if discovered_channel.is_none() && ap.ssid == target_ssid {
+            discovered_channel = Some(ap.channel);
+        }
+    }
+
+    if let Some(channel) = discovered_channel {
+        println!(
+            "upload_http: scan target_ssid={} found_channel={} via={}",
+            target_ssid, channel, label
+        );
+    }
+    discovered_channel
 }
