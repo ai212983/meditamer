@@ -7,6 +7,7 @@ use crate::firmware::types::{
 
 #[derive(Clone, Copy)]
 pub(super) enum SerialCommand {
+    Ping,
     TimeSync(TimeSyncCommand),
     TouchWizard,
     TouchWizardDump,
@@ -253,6 +254,7 @@ pub(super) fn serial_command_event_and_responses(
         SerialCommand::TouchWizardDump => {
             unreachable!("touch wizard dump command is handled inline")
         }
+        SerialCommand::Ping => unreachable!("ping command is handled inline"),
         SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
         SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
         SerialCommand::AllocatorAllocProbe { .. } => {

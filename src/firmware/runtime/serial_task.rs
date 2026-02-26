@@ -136,6 +136,9 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                         SerialCommand::TouchWizardDump => {
                             touch_wizard_log.write_dump(&mut uart).await;
                         }
+                        SerialCommand::Ping => {
+                            let _ = uart_write_all(&mut uart, b"PONG\r\n").await;
+                        }
                         SerialCommand::Metrics => {
                             let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
                             let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);

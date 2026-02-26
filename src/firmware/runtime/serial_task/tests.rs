@@ -80,6 +80,12 @@ fn parses_psram_allocator_status_command() {
 }
 
 #[test]
+fn parses_ping_command() {
+    let cmd = parse_serial_command(b"PING");
+    assert!(matches!(cmd, Some(SerialCommand::Ping)));
+}
+
+#[test]
 fn parses_heap_allocator_status_alias() {
     let cmd = parse_serial_command(b"HEAP");
     assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));

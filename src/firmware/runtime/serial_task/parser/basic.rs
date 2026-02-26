@@ -51,6 +51,10 @@ pub(super) fn parse_metrics_command(line: &[u8]) -> bool {
     cmd == b"METRICS" || cmd == b"PERF"
 }
 
+pub(super) fn parse_ping_command(line: &[u8]) -> bool {
+    trim_ascii_whitespace(line) == b"PING"
+}
+
 pub(super) fn parse_allocator_status_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"PSRAM" || cmd == b"ALLOCATOR" || cmd == b"HEAP"

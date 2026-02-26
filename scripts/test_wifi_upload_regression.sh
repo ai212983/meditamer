@@ -5,6 +5,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
+if [[ "${WIFI_UPLOAD_USE_LEGACY_BASH:-0}" != "1" ]]; then
+    exec python3 "$script_dir/test_wifi_upload_regression_serial.py" "$@"
+fi
+
 if [[ -z "${ESPFLASH_PORT:-}" ]]; then
     echo "ESPFLASH_PORT must be set (example: /dev/cu.usbserial-510)" >&2
     exit 1

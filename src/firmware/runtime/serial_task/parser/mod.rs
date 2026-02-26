@@ -23,6 +23,9 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if basic::parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
     }
+    if basic::parse_ping_command(line) {
+        return Some(SerialCommand::Ping);
+    }
     if let Some(bytes) = basic::parse_allocator_alloc_probe_command(line) {
         return Some(SerialCommand::AllocatorAllocProbe { bytes });
     }
