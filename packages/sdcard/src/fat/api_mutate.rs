@@ -128,13 +128,16 @@ pub async fn append_file(
     data: &[u8],
 ) -> Result<(), SdFatError> {
     let mut session = begin_append_session(sd, path).await?;
-    append_session_write(sd, &mut session, data).await
+    append_session_write(sd, &mut session, data).await?;
+    append_session_flush(sd, &session).await
 }
 
 pub struct FatAppendSession {
     volume: Fat32Volume,
     short_location: DirLocation,
     record: DirRecord,
+    allocated_clusters: usize,
+    tail_cluster: u32,
 }
 
 pub async fn begin_append_session(
@@ -156,11 +159,20 @@ pub async fn begin_append_session(
     if found.record.is_dir() {
         return Err(SdFatError::IsDirectory);
     }
+    let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
+    let allocated_clusters = clusters_for_size(found.record.size as usize, cluster_size);
+    let tail_cluster = if allocated_clusters == 0 {
+        0
+    } else {
+        cluster_at_index(sd, &volume, found.record.first_cluster, allocated_clusters - 1).await?
+    };
 
     Ok(FatAppendSession {
         volume,
         short_location: found.short_location,
         record: found.record,
+        allocated_clusters,
+        tail_cluster,
     })
 }
 
@@ -180,23 +192,63 @@ pub async fn append_session_write(
             needed: usize::MAX,
         })?;
     let cluster_size = SD_SECTOR_SIZE * session.volume.sectors_per_cluster as usize;
-    let old_clusters = clusters_for_size(old_size, cluster_size);
     let new_clusters = clusters_for_size(new_size, cluster_size);
+    ensure_append_capacity(sd, session, new_clusters).await?;
+    write_data_at(sd, &session.volume, session.record.first_cluster, old_size, data).await?;
+    session.record.size = new_size as u32;
+    Ok(())
+}
 
-    let mut first_cluster = session.record.first_cluster;
-    if old_clusters == 0 {
-        first_cluster = allocate_chain(sd, &session.volume, new_clusters as u32).await?;
-    } else if new_clusters > old_clusters {
-        let extra = allocate_chain(sd, &session.volume, (new_clusters - old_clusters) as u32).await?;
-        let tail = cluster_at_index(sd, &session.volume, first_cluster, old_clusters - 1).await?;
-        set_fat_entry(sd, &session.volume, tail, extra).await?;
+pub async fn append_session_reserve(
+    sd: &mut SdCardProbe<'_>,
+    session: &mut FatAppendSession,
+    target_size: usize,
+) -> Result<(), SdFatError> {
+    let cluster_size = SD_SECTOR_SIZE * session.volume.sectors_per_cluster as usize;
+    let target_clusters = clusters_for_size(target_size, cluster_size);
+    ensure_append_capacity(sd, session, target_clusters).await
+}
+
+pub async fn append_session_flush(
+    sd: &mut SdCardProbe<'_>,
+    session: &FatAppendSession,
+) -> Result<(), SdFatError> {
+    write_directory_entry(sd, &session.short_location, &session.record).await
+}
+
+async fn ensure_append_capacity(
+    sd: &mut SdCardProbe<'_>,
+    session: &mut FatAppendSession,
+    target_clusters: usize,
+) -> Result<(), SdFatError> {
+    if target_clusters <= session.allocated_clusters {
+        return Ok(());
     }
 
-    write_data_at(sd, &session.volume, first_cluster, old_size, data).await?;
+    if session.allocated_clusters == 0 {
+        let first = allocate_chain(sd, &session.volume, target_clusters as u32).await?;
+        session.record.first_cluster = first;
+        session.tail_cluster = cluster_tail(sd, &session.volume, first, target_clusters).await?;
+        session.allocated_clusters = target_clusters;
+        return Ok(());
+    }
 
-    session.record.first_cluster = first_cluster;
-    session.record.size = new_size as u32;
-    write_directory_entry(sd, &session.short_location, &session.record).await
+    let extra_clusters = target_clusters - session.allocated_clusters;
+    let extra_first = allocate_chain(sd, &session.volume, extra_clusters as u32).await?;
+    set_fat_entry(sd, &session.volume, session.tail_cluster, extra_first).await?;
+    session.tail_cluster = cluster_tail(sd, &session.volume, extra_first, extra_clusters).await?;
+    session.allocated_clusters = target_clusters;
+    Ok(())
+}
+
+async fn cluster_tail(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    first_cluster: u32,
+    cluster_count: usize,
+) -> Result<u32, SdFatError> {
+    debug_assert!(cluster_count > 0);
+    cluster_at_index(sd, volume, first_cluster, cluster_count.saturating_sub(1)).await
 }
 
 pub async fn truncate_file(

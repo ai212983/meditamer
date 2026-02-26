@@ -179,6 +179,13 @@ pub(super) async fn process_upload_request(
                     Ok(path) => path,
                     Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
                 };
+            if let Err(err) = fat::append_session_flush(sd_probe, &active.append_session).await {
+                return upload_result(
+                    false,
+                    map_fat_error_to_upload_code(&err),
+                    active.bytes_written,
+                );
+            }
 
             match fat::remove(sd_probe, final_path_str).await {
                 Ok(()) => {}
