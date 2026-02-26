@@ -1,14 +1,3 @@
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use embassy_futures::select::{select, Either};
-use embassy_time::{with_timeout, Duration, Timer};
-use esp_println::println;
-use esp_radio::wifi::{
-    event::{self, EventExt},
-    AccessPointInfo, AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig,
-    ScanMethod, ScanTypeConfig, WifiController, WifiEvent,
-};
-
 use super::super::super::{
     config::{
         WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
@@ -19,7 +8,15 @@ use super::super::super::{
         WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
 };
-
+use core::sync::atomic::{AtomicBool, Ordering};
+use embassy_futures::select::{select, Either};
+use embassy_time::{with_timeout, Duration, Timer};
+use esp_println::println;
+use esp_radio::wifi::{
+    event::{self, EventExt},
+    AccessPointInfo, AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig,
+    ScanMethod, ScanTypeConfig, WifiController, WifiEvent,
+};
 const WIFI_RX_QUEUE_SIZE: usize = 3;
 const WIFI_TX_QUEUE_SIZE: usize = 2;
 const WIFI_STATIC_RX_BUF_NUM: u8 = 4;
@@ -40,13 +37,11 @@ const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::Wpa,
 ];
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
-
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     wifi_credentials().and_then(|(ssid, password)| {
         wifi_credentials_from_parts(ssid.as_bytes(), password.as_bytes()).ok()
     })
 }
-
 pub(super) fn wifi_runtime_config() -> WifiRuntimeConfig {
     WifiRuntimeConfig::default()
         .with_rx_queue_size(WIFI_RX_QUEUE_SIZE)
@@ -58,18 +53,15 @@ pub(super) fn wifi_runtime_config() -> WifiRuntimeConfig {
         .with_ampdu_tx_enable(false)
         .with_rx_ba_win(WIFI_RX_BA_WIN)
 }
-
 pub(super) async fn run_wifi_connection_task(
     mut controller: WifiController<'static>,
     mut credentials: Option<WifiCredentials>,
 ) {
     install_wifi_event_logger();
-
     let mut config_applied = false;
     let mut auth_method_idx = 0usize;
     let mut paused = false;
     let mut channel_hint = None;
-
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
         config_applied = false;
@@ -77,11 +69,9 @@ pub(super) async fn run_wifi_connection_task(
         channel_hint = None;
         println!("upload_http: loaded wifi credentials from SD");
     }
-
     if credentials.is_none() {
         println!("upload_http: waiting for WIFISET credentials over UART");
     }
-
     loop {
         if !service_mode::upload_enabled() {
             if !paused {
@@ -113,12 +103,23 @@ pub(super) async fn run_wifi_connection_task(
         let active = match credentials {
             Some(value) => value,
             None => {
-                let first = WIFI_CREDENTIALS_UPDATES.receive().await;
-                credentials = Some(first);
-                config_applied = false;
-                auth_method_idx = 0;
-                channel_hint = None;
-                println!("upload_http: wifi credentials received");
+                if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
+                    credentials = Some(sd_credentials);
+                    config_applied = false;
+                    auth_method_idx = 0;
+                    channel_hint = None;
+                    println!("upload_http: loaded wifi credentials from SD");
+                    continue;
+                }
+                if let Ok(first) =
+                    with_timeout(Duration::from_secs(3), WIFI_CREDENTIALS_UPDATES.receive()).await
+                {
+                    credentials = Some(first);
+                    config_applied = false;
+                    auth_method_idx = 0;
+                    channel_hint = None;
+                    println!("upload_http: wifi credentials received");
+                }
                 continue;
             }
         };
