@@ -1,3 +1,4 @@
+use embassy_time::Instant;
 use sdcard::fat;
 
 use super::super::super::types::{
@@ -18,6 +19,7 @@ pub(super) struct SdUploadSession {
     pub(super) temp_path_len: u8,
     pub(super) expected_size: u32,
     pub(super) bytes_written: u32,
+    pub(super) last_activity_at: Instant,
 }
 
 pub(super) async fn process_upload_request(
@@ -83,6 +85,7 @@ pub(super) async fn process_upload_request(
                 temp_path_len: temp_len as u8,
                 expected_size,
                 bytes_written: 0,
+                last_activity_at: Instant::now(),
             });
             upload_result(true, SdUploadResultCode::Ok, 0)
         }
@@ -143,6 +146,7 @@ pub(super) async fn process_upload_request(
                 );
             }
             active.bytes_written = next_bytes_written;
+            active.last_activity_at = Instant::now();
             upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
         }
         SdUploadCommand::Commit => {
@@ -263,6 +267,10 @@ pub(super) async fn process_upload_request(
             }
         }
     }
+}
+
+pub(super) fn active_session_last_activity(session: &Option<SdUploadSession>) -> Option<Instant> {
+    session.as_ref().map(|active| active.last_activity_at)
 }
 
 pub(super) async fn ensure_upload_ready(

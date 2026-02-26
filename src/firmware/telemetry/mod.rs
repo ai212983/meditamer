@@ -20,6 +20,8 @@ static SD_UPLOAD_BUSY: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_POWER_ON_FAILED: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_INIT_FAILED: AtomicU32 = AtomicU32::new(0);
+static SD_UPLOAD_SESSION_TIMEOUT_ABORTS: AtomicU32 = AtomicU32::new(0);
+static SD_UPLOAD_SESSION_MODE_OFF_ABORTS: AtomicU32 = AtomicU32::new(0);
 static WIFI_LINK_CONNECTED: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_LISTENING: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_IPV4: AtomicU32 = AtomicU32::new(0);
@@ -44,6 +46,8 @@ pub(crate) struct Snapshot {
     pub(crate) sd_upload_timeouts: u32,
     pub(crate) sd_upload_power_on_failed: u32,
     pub(crate) sd_upload_init_failed: u32,
+    pub(crate) sd_upload_session_timeout_aborts: u32,
+    pub(crate) sd_upload_session_mode_off_aborts: u32,
     pub(crate) wifi_link_connected: bool,
     pub(crate) upload_http_listening: bool,
     pub(crate) upload_http_ipv4: Option<[u8; 4]>,
@@ -75,6 +79,9 @@ pub(crate) fn snapshot() -> Snapshot {
         sd_upload_timeouts: SD_UPLOAD_TIMEOUTS.load(Ordering::Relaxed),
         sd_upload_power_on_failed: SD_UPLOAD_POWER_ON_FAILED.load(Ordering::Relaxed),
         sd_upload_init_failed: SD_UPLOAD_INIT_FAILED.load(Ordering::Relaxed),
+        sd_upload_session_timeout_aborts: SD_UPLOAD_SESSION_TIMEOUT_ABORTS.load(Ordering::Relaxed),
+        sd_upload_session_mode_off_aborts: SD_UPLOAD_SESSION_MODE_OFF_ABORTS
+            .load(Ordering::Relaxed),
         wifi_link_connected: WIFI_LINK_CONNECTED.load(Ordering::Relaxed),
         upload_http_listening: UPLOAD_HTTP_LISTENING.load(Ordering::Relaxed),
         upload_http_ipv4,
@@ -183,6 +190,18 @@ pub(crate) fn record_sd_upload_roundtrip_code(code: SdUploadResultCode) {
         "telemetry sd_upload_roundtrip_code code={=u8}",
         sd_upload_result_code_to_u8(code),
     );
+}
+
+pub(crate) fn record_sd_upload_session_timeout_abort() {
+    SD_UPLOAD_SESSION_TIMEOUT_ABORTS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::warn!("telemetry sd_upload_session_timeout_abort");
+}
+
+pub(crate) fn record_sd_upload_session_mode_off_abort() {
+    SD_UPLOAD_SESSION_MODE_OFF_ABORTS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::warn!("telemetry sd_upload_session_mode_off_abort");
 }
 
 pub(crate) fn set_wifi_link_connected(connected: bool) {

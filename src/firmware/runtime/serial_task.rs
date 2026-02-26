@@ -166,7 +166,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             let mut upload_line = heapless::String::<320>::new();
                             let _ = write!(
                                 &mut upload_line,
-                                "METRICS UPLOAD accept_ok={} accept_err={} request_err={} req_hdr_to={} req_read_body={} req_sd_busy={} sd_errors={} sd_busy={} sd_timeouts={} sd_power_on_fail={} sd_init_fail={}\r\n",
+                                "METRICS UPLOAD accept_ok={} accept_err={} request_err={} req_hdr_to={} req_read_body={} req_sd_busy={} sd_errors={} sd_busy={} sd_timeouts={} sd_power_on_fail={} sd_init_fail={} sess_timeout_abort={} sess_mode_off_abort={}\r\n",
                                 snapshot.upload_http_accepts,
                                 snapshot.upload_http_accept_errors,
                                 snapshot.upload_http_request_errors,
@@ -178,6 +178,8 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.sd_upload_timeouts,
                                 snapshot.sd_upload_power_on_failed,
                                 snapshot.sd_upload_init_failed,
+                                snapshot.sd_upload_session_timeout_aborts,
+                                snapshot.sd_upload_session_mode_off_aborts,
                             );
                             let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
 

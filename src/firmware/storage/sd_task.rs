@@ -11,10 +11,13 @@ use super::super::config::WIFI_CONFIG_REQUESTS;
 use super::super::config::{SD_REQUESTS, SD_UPLOAD_REQUESTS};
 #[cfg(feature = "asset-upload-http")]
 use super::super::runtime::service_mode;
+#[cfg(feature = "asset-upload-http")]
+use super::super::telemetry;
 use super::super::types::{SdCommand, SdPowerRequest, SdProbeDriver, SdRequest};
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{
-    SdUploadResult, SdUploadResultCode, WifiConfigResponse, WifiConfigResultCode,
+    SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, WifiConfigResponse,
+    WifiConfigResultCode,
 };
 
 mod asset_read;
@@ -54,6 +57,8 @@ const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
 const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
 const SD_UPLOAD_ROOT: &str = "/assets";
 #[cfg(feature = "asset-upload-http")]
+const SD_UPLOAD_SESSION_IDLE_ABORT_MS: u32 = 12_000;
+#[cfg(feature = "asset-upload-http")]
 const WIFI_CONFIG_DIR: &str = "/config";
 #[cfg(feature = "asset-upload-http")]
 const WIFI_CONFIG_PATH: &str = "/config/wifi.cfg";
@@ -86,6 +91,43 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 Timer::after(until.saturating_duration_since(now)).await;
             }
             backoff_until = None;
+        }
+
+        #[cfg(feature = "asset-upload-http")]
+        if upload_session.is_some() {
+            if !service_mode::upload_enabled() {
+                telemetry::record_sd_upload_session_mode_off_abort();
+                let result = abort_active_upload_session(
+                    &mut upload_session,
+                    &mut sd_probe,
+                    &mut powered,
+                    &mut upload_mounted,
+                )
+                .await;
+                publish_upload_result(result);
+                continue;
+            }
+
+            if let Some(last_activity_at) = upload::active_session_last_activity(&upload_session) {
+                let idle_ms = duration_ms_since(last_activity_at);
+                if idle_ms >= SD_UPLOAD_SESSION_IDLE_ABORT_MS {
+                    telemetry::record_sd_upload_session_timeout_abort();
+                    esp_println::println!(
+                        "sdtask: upload_session_idle_abort idle_ms={} threshold_ms={}",
+                        idle_ms,
+                        SD_UPLOAD_SESSION_IDLE_ABORT_MS
+                    );
+                    let result = abort_active_upload_session(
+                        &mut upload_session,
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await;
+                    publish_upload_result(result);
+                    continue;
+                }
+            }
         }
 
         #[cfg(feature = "asset-upload-http")]
@@ -188,6 +230,12 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         .await;
 
         let Some(request) = request else {
+            #[cfg(feature = "asset-upload-http")]
+            if upload_session.is_some() {
+                // Keep SD online during an active upload session; stale sessions are cleaned up
+                // by the idle-abort/mode-off checks at the top of this loop.
+                continue;
+            }
             if powered && !request_sd_power(SdPowerRequest::Off).await {
                 esp_println::println!("sdtask: idle_power_off_failed");
             }
@@ -231,4 +279,23 @@ fn disabled_wifi_config_response() -> WifiConfigResponse {
         code: WifiConfigResultCode::Busy,
         credentials: None,
     }
+}
+
+#[cfg(feature = "asset-upload-http")]
+async fn abort_active_upload_session(
+    upload_session: &mut Option<SdUploadSession>,
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> SdUploadResult {
+    process_upload_request(
+        SdUploadRequest {
+            command: SdUploadCommand::Abort,
+        },
+        upload_session,
+        sd_probe,
+        powered,
+        upload_mounted,
+    )
+    .await
 }
