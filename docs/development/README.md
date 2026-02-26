@@ -464,6 +464,10 @@ Upload a single file:
 scripts/upload_assets_http.py --host <device-ip> --src ./path/to/file.bin --dst /assets
 ```
 
+Optional upload helper tuning:
+
+- `UPLOAD_CHUNK_SIZE` controls legacy fallback chunk size in bytes for `/upload_chunk` flow (default `8192`).
+
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
 ```bash

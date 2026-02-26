@@ -5,6 +5,7 @@ use static_cell::StaticCell;
 mod connection;
 mod helpers;
 
+#[cfg(feature = "psram-alloc")]
 use super::super::super::types::SD_UPLOAD_CHUNK_MAX;
 #[cfg(feature = "psram-alloc")]
 use crate::firmware::psram;
@@ -15,8 +16,17 @@ const UPLOAD_HTTP_PORT: u16 = 8080;
 const UPLOAD_HTTP_ROOT: &str = "/assets";
 const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
 const HTTP_HEADER_MAX: usize = 2048;
-const HTTP_RW_BUF: usize = 2048;
-const HTTP_SOCKET_TIMEOUT_SECS: u64 = 20;
+const HTTP_RW_BUF_FALLBACK: usize = 2048;
+#[cfg(feature = "psram-alloc")]
+const HTTP_RW_BUF_TARGET: usize = 4096;
+#[cfg(not(feature = "psram-alloc"))]
+const HTTP_RW_BUF_TARGET: usize = HTTP_RW_BUF_FALLBACK;
+const HTTP_CHUNK_BUF_FALLBACK: usize = 4096;
+#[cfg(feature = "psram-alloc")]
+const HTTP_CHUNK_BUF_TARGET: usize = SD_UPLOAD_CHUNK_MAX;
+#[cfg(not(feature = "psram-alloc"))]
+const HTTP_CHUNK_BUF_TARGET: usize = HTTP_CHUNK_BUF_FALLBACK;
+const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
 const DHCP_POLL_MS: u64 = 250;
 
 enum HttpBuffer<const N: usize> {
@@ -37,17 +47,18 @@ impl<const N: usize> HttpBuffer<N> {
 
 fn init_http_buffer<const N: usize>(
     cell: &'static StaticCell<[u8; N]>,
+    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] alloc_bytes: usize,
     #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] tag: &'static str,
 ) -> HttpBuffer<N> {
     #[cfg(feature = "psram-alloc")]
     {
-        match psram::alloc_large_byte_buffer(N) {
+        match psram::alloc_large_byte_buffer(alloc_bytes) {
             Ok(buffer) => {
                 esp_println::println!(
                     "upload_http: {} buffer placement={:?} bytes={}",
                     tag,
                     buffer.placement(),
-                    N
+                    alloc_bytes
                 );
                 psram::log_allocator_high_water(tag);
                 return HttpBuffer::Psram(buffer);
@@ -66,15 +77,15 @@ fn init_http_buffer<const N: usize>(
 }
 
 pub(super) async fn run_http_server(stack: Stack<'static>) {
-    static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
-    static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
+    static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
+    static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
     static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
-    static CHUNK_BUFFER: StaticCell<[u8; SD_UPLOAD_CHUNK_MAX]> = StaticCell::new();
+    static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
 
-    let mut rx_buffer = init_http_buffer(&RX_BUFFER, "http_rx");
-    let mut tx_buffer = init_http_buffer(&TX_BUFFER, "http_tx");
-    let mut header_buffer = init_http_buffer(&HEADER_BUFFER, "http_header");
-    let mut chunk_buffer = init_http_buffer(&CHUNK_BUFFER, "http_chunk");
+    let mut rx_buffer = init_http_buffer(&RX_BUFFER, HTTP_RW_BUF_TARGET, "http_rx");
+    let mut tx_buffer = init_http_buffer(&TX_BUFFER, HTTP_RW_BUF_TARGET, "http_tx");
+    let mut header_buffer = init_http_buffer(&HEADER_BUFFER, HTTP_HEADER_MAX, "http_header");
+    let mut chunk_buffer = init_http_buffer(&CHUNK_BUFFER, HTTP_CHUNK_BUF_TARGET, "http_chunk");
 
     let mut listening_logged = false;
     let mut waiting_dhcp_logged = false;

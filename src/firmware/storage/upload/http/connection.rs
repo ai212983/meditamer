@@ -4,8 +4,10 @@ use embassy_net::tcp::TcpSocket;
 use embassy_time::{with_timeout, Duration, Instant};
 
 use super::super::super::super::telemetry;
-use super::super::super::super::types::{SdUploadCommand, SD_UPLOAD_CHUNK_MAX};
-use super::super::sd_bridge::{roundtrip_error_log, sd_upload_chunk, sd_upload_roundtrip};
+use super::super::super::super::types::SdUploadCommand;
+use super::super::sd_bridge::{
+    roundtrip_error_log, sd_upload_chunk, sd_upload_roundtrip, SdUploadRoundtripError,
+};
 use super::helpers::{
     drain_remaining_body, find_header_end, parse_content_length, parse_path_query,
     parse_request_line, parse_u32_query, sd_upload_or_http_error, target_path,
@@ -149,50 +151,25 @@ pub(super) async fn handle_connection(
                 }
             };
             let request_started_at = Instant::now();
-            let mut body_read_ms = 0u32;
-            let mut sd_wait_ms = 0u32;
-            let mut sent = 0usize;
-            if body_bytes_in_buffer > 0 {
-                let take = min(body_bytes_in_buffer, content_length);
-                let mut offset = 0usize;
-                while offset < take {
-                    let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
-                    let chunk = &header_buf[body_start + offset..body_start + end];
-                    let sd_started_at = Instant::now();
-                    if let Err(err) = sd_upload_chunk(chunk).await {
+            let prefetched_len = min(body_bytes_in_buffer, content_length);
+            let prefetched = &header_buf[body_start..body_start + prefetched_len];
+            let stats =
+                match forward_upload_body(socket, chunk_buf, prefetched, content_length).await {
+                    Ok(stats) => stats,
+                    Err(UploadBodyError::ReadBody) => return Err("read body"),
+                    Err(UploadBodyError::IncompleteBody) => {
+                        write_response(socket, b"400 Bad Request", b"incomplete body").await;
+                        return Err("incomplete body");
+                    }
+                    Err(UploadBodyError::Roundtrip(err)) => {
                         write_roundtrip_error_response(socket, err).await;
                         return Err(roundtrip_error_log(err));
                     }
-                    sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
-                    sent += chunk.len();
-                    offset = end;
-                }
-            }
-
-            while sent < content_length {
-                let want = min(chunk_buf.len(), content_length - sent);
-                let read_started_at = Instant::now();
-                let n = socket
-                    .read(&mut chunk_buf[..want])
-                    .await
-                    .map_err(|_| "read body")?;
-                body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
-                if n == 0 {
-                    write_response(socket, b"400 Bad Request", b"incomplete body").await;
-                    return Err("incomplete body");
-                }
-                let sd_started_at = Instant::now();
-                if let Err(err) = sd_upload_chunk(&chunk_buf[..n]).await {
-                    write_roundtrip_error_response(socket, err).await;
-                    return Err(roundtrip_error_log(err));
-                }
-                sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
-                sent += n;
-            }
+                };
             telemetry::record_upload_http_upload_phase(
-                usize_to_u32_saturating(sent),
-                body_read_ms,
-                sd_wait_ms,
+                usize_to_u32_saturating(stats.sent_bytes),
+                stats.body_read_ms,
+                stats.sd_wait_ms,
                 elapsed_ms_u32(request_started_at),
             );
 
@@ -232,7 +209,6 @@ pub(super) async fn handle_connection(
                 return Err("content too large");
             }
             let request_started_at = Instant::now();
-            let mut body_read_ms = 0u32;
             let mut sd_wait_ms = 0u32;
             let expected_size = content_length as u32;
             let begin_started_at = Instant::now();
@@ -247,47 +223,26 @@ pub(super) async fn handle_connection(
             .await?;
             sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(begin_started_at));
 
-            let mut sent = 0usize;
-            if body_bytes_in_buffer > 0 {
-                let take = min(body_bytes_in_buffer, content_length);
-                let mut offset = 0usize;
-                while offset < take {
-                    let end = min(offset + SD_UPLOAD_CHUNK_MAX, take);
-                    let chunk = &header_buf[body_start + offset..body_start + end];
-                    let sd_started_at = Instant::now();
-                    if let Err(err) = sd_upload_chunk(chunk).await {
+            let prefetched_len = min(body_bytes_in_buffer, content_length);
+            let prefetched = &header_buf[body_start..body_start + prefetched_len];
+            let stats =
+                match forward_upload_body(socket, chunk_buf, prefetched, content_length).await {
+                    Ok(stats) => stats,
+                    Err(UploadBodyError::ReadBody) => {
+                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                        return Err("read body");
+                    }
+                    Err(UploadBodyError::IncompleteBody) => {
+                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                        write_response(socket, b"400 Bad Request", b"incomplete body").await;
+                        return Err("incomplete body");
+                    }
+                    Err(UploadBodyError::Roundtrip(err)) => {
                         let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
                         write_roundtrip_error_response(socket, err).await;
                         return Err(roundtrip_error_log(err));
                     }
-                    sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
-                    sent += chunk.len();
-                    offset = end;
-                }
-            }
-
-            while sent < content_length {
-                let want = min(chunk_buf.len(), content_length - sent);
-                let read_started_at = Instant::now();
-                let n = socket
-                    .read(&mut chunk_buf[..want])
-                    .await
-                    .map_err(|_| "read body")?;
-                body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
-                if n == 0 {
-                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                    write_response(socket, b"400 Bad Request", b"incomplete body").await;
-                    return Err("incomplete body");
-                }
-                let sd_started_at = Instant::now();
-                if let Err(err) = sd_upload_chunk(&chunk_buf[..n]).await {
-                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                    write_roundtrip_error_response(socket, err).await;
-                    return Err(roundtrip_error_log(err));
-                }
-                sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
-                sent += n;
-            }
+                };
 
             let commit_started_at = Instant::now();
             if let Err(err) = sd_upload_roundtrip(SdUploadCommand::Commit).await {
@@ -297,9 +252,9 @@ pub(super) async fn handle_connection(
             }
             sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(commit_started_at));
             telemetry::record_upload_http_upload_phase(
-                usize_to_u32_saturating(sent),
-                body_read_ms,
-                sd_wait_ms,
+                usize_to_u32_saturating(stats.sent_bytes),
+                stats.body_read_ms,
+                sd_wait_ms.saturating_add(stats.sd_wait_ms),
                 elapsed_ms_u32(request_started_at),
             );
             write_response(socket, b"201 Created", b"upload ok").await;
@@ -328,4 +283,84 @@ fn usize_to_u32_saturating(value: usize) -> u32 {
     } else {
         value as u32
     }
+}
+
+struct UploadBodyStats {
+    sent_bytes: usize,
+    body_read_ms: u32,
+    sd_wait_ms: u32,
+}
+
+enum UploadBodyError {
+    ReadBody,
+    IncompleteBody,
+    Roundtrip(SdUploadRoundtripError),
+}
+
+async fn forward_upload_body(
+    socket: &mut TcpSocket<'_>,
+    chunk_buf: &mut [u8],
+    prefetched: &[u8],
+    content_length: usize,
+) -> Result<UploadBodyStats, UploadBodyError> {
+    let mut consumed = 0usize;
+    let mut pending = 0usize;
+    let mut body_read_ms = 0u32;
+    let mut sd_wait_ms = 0u32;
+    let mut sent_bytes = 0usize;
+
+    let mut prefetched_offset = 0usize;
+    while prefetched_offset < prefetched.len() && consumed < content_length {
+        let free = chunk_buf.len().saturating_sub(pending);
+        let copy_len = min(free, prefetched.len() - prefetched_offset);
+        chunk_buf[pending..pending + copy_len]
+            .copy_from_slice(&prefetched[prefetched_offset..prefetched_offset + copy_len]);
+        pending += copy_len;
+        consumed += copy_len;
+        prefetched_offset += copy_len;
+
+        if pending == chunk_buf.len() || consumed == content_length {
+            let sd_started_at = Instant::now();
+            sd_upload_chunk(&chunk_buf[..pending])
+                .await
+                .map_err(UploadBodyError::Roundtrip)?;
+            sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
+            sent_bytes += pending;
+            pending = 0;
+        }
+    }
+
+    while consumed < content_length {
+        let want = min(
+            chunk_buf.len().saturating_sub(pending),
+            content_length - consumed,
+        );
+        let read_started_at = Instant::now();
+        let n = socket
+            .read(&mut chunk_buf[pending..pending + want])
+            .await
+            .map_err(|_| UploadBodyError::ReadBody)?;
+        body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
+        if n == 0 {
+            return Err(UploadBodyError::IncompleteBody);
+        }
+        pending += n;
+        consumed += n;
+
+        if pending == chunk_buf.len() || consumed == content_length {
+            let sd_started_at = Instant::now();
+            sd_upload_chunk(&chunk_buf[..pending])
+                .await
+                .map_err(UploadBodyError::Roundtrip)?;
+            sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
+            sent_bytes += pending;
+            pending = 0;
+        }
+    }
+
+    Ok(UploadBodyStats {
+        sent_bytes,
+        body_read_ms,
+        sd_wait_ms,
+    })
 }

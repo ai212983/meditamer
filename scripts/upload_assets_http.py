@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
-UPLOAD_CHUNK_SIZE = 4096
+UPLOAD_CHUNK_SIZE = int(os.getenv("UPLOAD_CHUNK_SIZE", "8192"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -244,7 +244,11 @@ def upload_file(
                 busy_retries=3,
             )
             return
-        except Exception:
+        except Exception as exc:
+            print(
+                f"[upload] single-shot PUT failed ({exc}); falling back to /upload_chunk flow",
+                file=sys.stderr,
+            )
             # Fall back to legacy chunked upload flow when single-shot PUT
             # is unavailable or unstable under current link conditions.
             try:
