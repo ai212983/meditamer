@@ -1,9 +1,12 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use embassy_futures::select::{select, Either};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_println::println;
 use esp_radio::wifi::{
+    event::{self, EventExt},
     AuthMethod, ClientConfig, Config as WifiRuntimeConfig, ModeConfig, ScanConfig, ScanMethod,
-    WifiController, WifiEvent,
+    ScanTypeConfig, WifiController, WifiEvent,
 };
 
 use super::super::super::{
@@ -24,12 +27,17 @@ const WIFI_DYNAMIC_RX_BUF_NUM: u16 = 8;
 const WIFI_DYNAMIC_TX_BUF_NUM: u16 = 8;
 const WIFI_RX_BA_WIN: u8 = 3;
 const WIFI_LOG_SCAN_ON_CONNECT: bool = cfg!(debug_assertions);
+const WIFI_SCAN_DIAG_MAX_APS: usize = 16;
+const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 80;
+const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 240;
+const WIFI_TARGET_CHANNEL_PROBE: Option<u8> = Some(8);
 const WIFI_AUTH_METHODS: [AuthMethod; 4] = [
     AuthMethod::Wpa2Personal,
     AuthMethod::WpaWpa2Personal,
     AuthMethod::Wpa2Wpa3Personal,
     AuthMethod::Wpa,
 ];
+static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     wifi_credentials().and_then(|(ssid, password)| {
@@ -53,14 +61,18 @@ pub(super) async fn run_wifi_connection_task(
     mut controller: WifiController<'static>,
     mut credentials: Option<WifiCredentials>,
 ) {
+    install_wifi_event_logger();
+
     let mut config_applied = false;
     let mut auth_method_idx = 0usize;
     let mut paused = false;
+    let mut channel_hint = None;
 
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
         config_applied = false;
         auth_method_idx = 0;
+        channel_hint = None;
         println!("upload_http: loaded wifi credentials from SD");
     }
 
@@ -76,6 +88,7 @@ pub(super) async fn run_wifi_connection_task(
                 paused = true;
                 config_applied = false;
                 auth_method_idx = 0;
+                channel_hint = None;
                 println!("upload_http: upload mode off; wifi paused");
             }
             Timer::after(Duration::from_millis(500)).await;
@@ -91,6 +104,7 @@ pub(super) async fn run_wifi_connection_task(
             credentials = Some(updated);
             config_applied = false;
             auth_method_idx = 0;
+            channel_hint = None;
             println!("upload_http: wifi credentials updated");
         }
 
@@ -101,6 +115,7 @@ pub(super) async fn run_wifi_connection_task(
                 credentials = Some(first);
                 config_applied = false;
                 auth_method_idx = 0;
+                channel_hint = None;
                 println!("upload_http: wifi credentials received");
                 continue;
             }
@@ -108,7 +123,7 @@ pub(super) async fn run_wifi_connection_task(
 
         if !config_applied {
             let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
-            let mode = match mode_config_from_credentials(active, auth_method) {
+            let mode = match mode_config_from_credentials(active, auth_method, channel_hint) {
                 Some(mode) => mode,
                 None => {
                     println!("upload_http: wifi credentials invalid utf8 or length");
@@ -127,8 +142,8 @@ pub(super) async fn run_wifi_connection_task(
                 continue;
             }
             println!(
-                "upload_http: applying station config auth={:?}",
-                auth_method
+                "upload_http: applying station config auth={:?} channel_hint={:?}",
+                auth_method, channel_hint
             );
             config_applied = true;
         }
@@ -141,6 +156,7 @@ pub(super) async fn run_wifi_connection_task(
                     Timer::after(Duration::from_secs(3)).await;
                     continue;
                 }
+                Timer::after(Duration::from_millis(800)).await;
             }
             Err(err) => {
                 println!("upload_http: wifi status err={:?}", err);
@@ -149,9 +165,10 @@ pub(super) async fn run_wifi_connection_task(
             }
         }
 
+        let mut observed_channel = None;
         if WIFI_LOG_SCAN_ON_CONNECT {
             if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
-                log_scan_for_target(&mut controller, ssid).await;
+                observed_channel = log_scan_for_target(&mut controller, ssid).await;
             }
         }
 
@@ -179,16 +196,88 @@ pub(super) async fn run_wifi_connection_task(
             Err(err) => {
                 let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
                 println!(
-                    "upload_http: wifi connect err={:?} auth={:?}",
-                    err, auth_method
+                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} observed_channel={:?}",
+                    err, auth_method, channel_hint, observed_channel
                 );
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
+                if let Some(channel) = observed_channel {
+                    if channel_hint != Some(channel) {
+                        channel_hint = Some(channel);
+                        auth_method_idx = 0;
+                        config_applied = false;
+                        println!("upload_http: retrying with channel_hint={}", channel);
+                        Timer::after(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                }
                 auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
                 config_applied = false;
                 Timer::after(Duration::from_secs(3)).await;
             }
         }
+    }
+}
+
+fn install_wifi_event_logger() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    if WIFI_EVENT_LOGGER_INSTALLED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+
+    event::StaStart::update_handler(|_| {
+        println!("upload_http: event sta_start");
+    });
+
+    event::StaStop::update_handler(|_| {
+        println!("upload_http: event sta_stop");
+    });
+
+    event::ScanDone::update_handler(|event| {
+        println!(
+            "upload_http: event scan_done status={} count={} scan_id={}",
+            event.status(),
+            event.number(),
+            event.id()
+        );
+    });
+
+    event::StaConnected::update_handler(|event| {
+        let ssid_len = (event.ssid_len() as usize).min(event.ssid().len());
+        let ssid = core::str::from_utf8(&event.ssid()[..ssid_len]).unwrap_or("<non_utf8>");
+        println!(
+            "upload_http: event sta_connected ssid={} channel={} authmode={}",
+            ssid,
+            event.channel(),
+            event.authmode()
+        );
+    });
+
+    event::StaDisconnected::update_handler(|event| {
+        let reason = event.reason();
+        println!(
+            "upload_http: event sta_disconnected reason={} ({}) rssi={}",
+            reason,
+            disconnect_reason_label(reason),
+            event.rssi()
+        );
+    });
+}
+
+fn disconnect_reason_label(reason: u8) -> &'static str {
+    match reason {
+        200 => "beacon_timeout",
+        201 => "no_ap_found",
+        202 => "auth_fail",
+        203 => "assoc_fail",
+        204 => "handshake_timeout",
+        205 => "connection_fail",
+        210 => "no_ap_found_compatible_security",
+        211 => "no_ap_found_authmode_threshold",
+        212 => "no_ap_found_rssi_threshold",
+        _ => "other",
     }
 }
 
@@ -249,6 +338,7 @@ fn wifi_credentials_from_parts(
 fn mode_config_from_credentials(
     credentials: WifiCredentials,
     auth_method: AuthMethod,
+    channel_hint: Option<u8>,
 ) -> Option<ModeConfig> {
     let ssid = core::str::from_utf8(&credentials.ssid[..credentials.ssid_len as usize]).ok()?;
     let password =
@@ -258,42 +348,107 @@ fn mode_config_from_credentials(
     } else {
         auth_method
     };
-    Some(ModeConfig::Client(
-        ClientConfig::default()
-            .with_ssid(ssid.into())
-            .with_password(password.into())
-            .with_auth_method(auth_method)
-            .with_scan_method(ScanMethod::AllChannels),
-    ))
+    let mut client = ClientConfig::default()
+        .with_ssid(ssid.into())
+        .with_password(password.into())
+        .with_auth_method(auth_method)
+        .with_scan_method(ScanMethod::AllChannels);
+    if let Some(channel) = channel_hint {
+        client = client.with_channel(channel);
+    }
+    Some(ModeConfig::Client(client))
 }
 
-async fn log_scan_for_target(controller: &mut WifiController<'static>, target_ssid: &str) {
+async fn log_scan_for_target(
+    controller: &mut WifiController<'static>,
+    target_ssid: &str,
+) -> Option<u8> {
     let config = ScanConfig::default()
-        .with_ssid(target_ssid)
-        .with_show_hidden(true)
-        .with_max(8);
+        .with_show_hidden(false)
+        .with_max(WIFI_SCAN_DIAG_MAX_APS)
+        .with_scan_type(ScanTypeConfig::Active {
+            min: Duration::from_millis(WIFI_SCAN_ACTIVE_MIN_MS).into(),
+            max: Duration::from_millis(WIFI_SCAN_ACTIVE_MAX_MS).into(),
+        });
+
+    let mut discovered_channel = None;
     match controller.scan_with_config_async(config).await {
         Ok(results) if results.is_empty() => {
-            println!("upload_http: scan target_ssid={} found=0", target_ssid);
+            println!("upload_http: scan all found=0 target_ssid={}", target_ssid);
         }
         Ok(results) => {
             println!(
-                "upload_http: scan target_ssid={} found={}",
+                "upload_http: scan all found={} target_ssid={}",
+                results.len(),
                 target_ssid,
-                results.len()
             );
             for ap in results.iter() {
                 println!(
                     "upload_http: scan ap ssid={} channel={} rssi={} auth={:?}",
                     ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
                 );
+                if discovered_channel.is_none() && ap.ssid == target_ssid {
+                    discovered_channel = Some(ap.channel);
+                }
             }
         }
         Err(err) => {
             println!(
-                "upload_http: scan target_ssid={} err={:?}",
-                target_ssid, err
+                "upload_http: scan all err={:?} target_ssid={}",
+                err, target_ssid
             );
         }
     }
+
+    if discovered_channel.is_some() {
+        println!(
+            "upload_http: scan target_ssid={} found_channel={:?}",
+            target_ssid, discovered_channel
+        );
+        return discovered_channel;
+    }
+
+    if let Some(channel) = WIFI_TARGET_CHANNEL_PROBE {
+        let probe = ScanConfig::default()
+            .with_ssid(target_ssid)
+            .with_channel(channel)
+            .with_show_hidden(false)
+            .with_max(WIFI_SCAN_DIAG_MAX_APS)
+            .with_scan_type(ScanTypeConfig::Active {
+                min: Duration::from_millis(WIFI_SCAN_ACTIVE_MIN_MS).into(),
+                max: Duration::from_millis(WIFI_SCAN_ACTIVE_MAX_MS).into(),
+            });
+        match controller.scan_with_config_async(probe).await {
+            Ok(results) if results.is_empty() => {
+                println!(
+                    "upload_http: scan target_ssid={} channel_probe={} found=0",
+                    target_ssid, channel
+                );
+            }
+            Ok(results) => {
+                println!(
+                    "upload_http: scan target_ssid={} channel_probe={} found={}",
+                    target_ssid,
+                    channel,
+                    results.len()
+                );
+                for ap in results.iter() {
+                    println!(
+                        "upload_http: scan probe ap ssid={} channel={} rssi={} auth={:?}",
+                        ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
+                    );
+                }
+                return Some(channel);
+            }
+            Err(err) => {
+                println!(
+                    "upload_http: scan target_ssid={} channel_probe={} err={:?}",
+                    target_ssid, channel, err
+                );
+            }
+        }
+    }
+
+    println!("upload_http: scan target_ssid={} found=0", target_ssid);
+    None
 }
