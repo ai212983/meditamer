@@ -538,6 +538,7 @@ def main() -> int:
     health_timeout_s = env_int("WIFI_UPLOAD_HEALTH_TIMEOUT_SEC", 45)
     stat_timeout_ms = env_int("WIFI_UPLOAD_STAT_TIMEOUT_MS", 30000)
     ip_discovery_timeout_s = env_int("WIFI_UPLOAD_IP_DISCOVERY_TIMEOUT_SEC", 8)
+    operation_retries = env_int("WIFI_UPLOAD_OPERATION_RETRIES", 3)
     baud = env_int("ESPFLASH_BAUD", 115200)
     remote_root = os.getenv("WIFI_UPLOAD_REMOTE_ROOT", "/assets/u")
     payload_path = os.getenv("WIFI_UPLOAD_PAYLOAD_PATH", "/tmp/u.bin")
@@ -603,9 +604,62 @@ def main() -> int:
             if len(remote_file) > 64:
                 raise RuntimeError(f"remote path exceeds SD_PATH_MAX(64): {remote_file}")
 
-            started = time.monotonic()
-            run_upload(ip, payload_path, cycle_root, effective_upload_timeout_s)
-            upload_ms = int((time.monotonic() - started) * 1000)
+            upload_ms = 0
+            last_upload_error: Exception | None = None
+            for upload_attempt in range(1, operation_retries + 1):
+                started = time.monotonic()
+                try:
+                    run_upload(ip, payload_path, cycle_root, effective_upload_timeout_s)
+                    upload_ms = int((time.monotonic() - started) * 1000)
+                    break
+                except Exception as exc:
+                    upload_ms = int((time.monotonic() - started) * 1000)
+                    last_upload_error = exc
+                    if upload_attempt >= operation_retries:
+                        raise
+                    print(
+                        f"cycle {cycle}: upload attempt {upload_attempt}/{operation_retries} failed "
+                        f"(ip={ip}, elapsed_ms={upload_ms}): {exc}; retrying after health recheck"
+                    )
+                    try:
+                        ip = wait_health_reachable(
+                            console, metrics_ip, mac, health_timeout_s, ip_discovery_timeout_s
+                        )
+                    except Exception as health_exc:
+                        print(
+                            f"cycle {cycle}: health recovery failed ({health_exc}); "
+                            "cycling upload mode to recover Wi-Fi stack"
+                        )
+                        if not wait_mode_ack(console, "MODE UPLOAD OFF", "MODE", 12):
+                            print(
+                                f"cycle {cycle}: MODE UPLOAD OFF did not ACK during recovery; "
+                                "continuing with MODE UPLOAD ON"
+                            )
+                        time.sleep(1)
+                        if not wait_mode_ack(console, "MODE UPLOAD ON", "MODE", 20):
+                            print(
+                                f"cycle {cycle}: MODE UPLOAD ON failed during recovery; "
+                                "resetting device and re-running UART preflight"
+                            )
+                            try:
+                                console.close()
+                            except Exception:
+                                pass
+                            console = serial_preflight(port, baud, log_path)
+                            if not wait_mode_ack(console, "MODE UPLOAD ON", "MODE", 20):
+                                raise RuntimeError(
+                                    "MODE UPLOAD ON failed during recovery after reset"
+                                )
+                        maybe_wifiset(console, ssid, password)
+                        _, _, metrics_ip = wait_network_ready(
+                            console, connect_timeout_s, listen_timeout_s
+                        )
+                        ip = wait_health_reachable(
+                            console, metrics_ip, mac, health_timeout_s, ip_discovery_timeout_s
+                        )
+            if upload_ms == 0 and last_upload_error is not None:
+                raise last_upload_error
+
             if not verify_remote_file(console, remote_file, stat_timeout_ms):
                 raise RuntimeError(f"SD verification failed for {remote_file}")
 

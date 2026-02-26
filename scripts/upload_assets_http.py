@@ -10,6 +10,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 UPLOAD_CHUNK_SIZE = int(os.getenv("UPLOAD_CHUNK_SIZE", "8192"))
+UPLOAD_NET_RECOVERY_TIMEOUT_S = float(
+    os.getenv("UPLOAD_NET_RECOVERY_TIMEOUT_SEC", "45")
+)
+UPLOAD_NET_RECOVERY_POLL_S = float(os.getenv("UPLOAD_NET_RECOVERY_POLL_SEC", "0.8"))
+UPLOAD_SD_BUSY_TOTAL_RETRY_S = float(os.getenv("UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", "180"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,7 +123,11 @@ def request_sd_busy_aware(
     busy_retries: int = 8,
 ) -> bytes:
     attempts = max(1, busy_retries)
-    for attempt in range(attempts):
+    deadline = time.monotonic() + max(1.0, UPLOAD_SD_BUSY_TOTAL_RETRY_S)
+    for attempt in range(10_000):
+        retries_remaining = attempt + 1 < attempts
+        time_remaining = time.monotonic() < deadline
+        can_retry = retries_remaining or time_remaining
         try:
             return request(
                 host,
@@ -137,15 +146,27 @@ def request_sd_busy_aware(
             OSError,
             http.client.HTTPException,
         ):
-            if attempt + 1 >= attempts:
+            if not can_retry:
                 raise
+            _wait_for_network_recovery(
+                host,
+                port,
+                timeout=min(timeout, 4.0),
+                window_s=min(UPLOAD_NET_RECOVERY_TIMEOUT_S, max(0.0, deadline - time.monotonic())),
+            )
             time.sleep(0.25 * (attempt + 1))
             continue
         except RuntimeError as exc:
             message = str(exc)
             if "408 Request Timeout" in message:
-                if attempt + 1 >= attempts:
+                if not can_retry:
                     raise
+                _wait_for_network_recovery(
+                    host,
+                    port,
+                    timeout=min(timeout, 4.0),
+                    window_s=min(UPLOAD_NET_RECOVERY_TIMEOUT_S, max(0.0, deadline - time.monotonic())),
+                )
                 time.sleep(0.25 * (attempt + 1))
                 continue
             if "409 Conflict" in message and "sd busy" in message:
@@ -162,12 +183,30 @@ def request_sd_busy_aware(
                     )
                 except Exception:
                     pass
-                if attempt + 1 >= attempts:
+                if not can_retry:
                     raise
                 time.sleep(0.25 * (attempt + 1))
                 continue
             raise
     raise RuntimeError(f"{method} {target} failed: sd busy persisted")
+
+
+def _wait_for_network_recovery(
+    host: str,
+    port: int,
+    timeout: float,
+    window_s: float,
+) -> bool:
+    if window_s <= 0:
+        return False
+    deadline = time.monotonic() + window_s
+    while time.monotonic() < deadline:
+        try:
+            request(host, port, timeout, "GET", "/health", retries=1)
+            return True
+        except Exception:
+            time.sleep(UPLOAD_NET_RECOVERY_POLL_S)
+    return False
 
 
 def health_check(host: str, port: int, timeout: float) -> None:
@@ -241,7 +280,7 @@ def upload_file(
                 body=body,
                 headers=upload_headers,
                 retries=4,
-                busy_retries=3,
+                busy_retries=6,
             )
             return
         except Exception as exc:
@@ -292,7 +331,7 @@ def upload_file(
                         "Content-Type": "application/octet-stream",
                     },
                 )
-                request(
+                request_sd_busy_aware(
                     host,
                     port,
                     timeout,
@@ -301,8 +340,9 @@ def upload_file(
                     body=chunk,
                     headers=headers,
                     retries=5,
+                    busy_retries=6,
                 )
-        request(
+        request_sd_busy_aware(
             host,
             port,
             timeout,
@@ -311,6 +351,7 @@ def upload_file(
             body=b"",
             headers=auth_headers(token),
             retries=8,
+            busy_retries=6,
         )
     except Exception:
         try:

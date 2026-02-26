@@ -497,6 +497,10 @@ ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/test_wifi_upload_regression.sh
 - supports run labeling via `--test-name <name>` or `WIFI_UPLOAD_TEST_NAME=<name>`; this is used in log file names and summary output.
 - set `WIFI_UPLOAD_USE_LEGACY_BASH=1` to use the old monitor-parse shell path for debugging.
 - `WIFI_UPLOAD_HEALTH_TIMEOUT_SEC` default is `45` seconds.
+- `WIFI_UPLOAD_OPERATION_RETRIES` controls full upload retries per cycle after subprocess failure (default `3`).
+- uploader-side transient network recovery is tunable via `UPLOAD_SD_BUSY_TOTAL_RETRY_SEC`, `UPLOAD_NET_RECOVERY_TIMEOUT_SEC`, and `UPLOAD_NET_RECOVERY_POLL_SEC`.
+- when health cannot be restored after an upload attempt failure, the serial harness auto-cycles `MODE UPLOAD OFF/ON` and retries after re-establishing Wi-Fi readiness.
+- if mode recovery does not ACK, the serial harness performs a device reset + UART preflight before the next upload retry.
 - throughput history and iteration comparisons are tracked in `docs/development/upload-throughput-history.md`.
 
 ## Soak Script
