@@ -17,6 +17,7 @@ pub(super) struct SdUploadSession {
     pub(super) final_path_len: u8,
     pub(super) temp_path: [u8; SD_UPLOAD_PATH_BUF_MAX],
     pub(super) temp_path_len: u8,
+    pub(super) append_session: fat::FatAppendSession,
     pub(super) expected_size: u32,
     pub(super) bytes_written: u32,
     pub(super) last_activity_at: Instant,
@@ -75,6 +76,13 @@ pub(super) async fn process_upload_request(
             if let Err(err) = fat::write_file(sd_probe, temp_path_str, &[]).await {
                 return upload_result(false, map_fat_error_to_upload_code(&err), 0);
             }
+            let append_session = match fat::begin_append_session(sd_probe, temp_path_str).await {
+                Ok(session) => session,
+                Err(err) => {
+                    let _ = fat::remove(sd_probe, temp_path_str).await;
+                    return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+                }
+            };
 
             let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
             final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
@@ -83,6 +91,7 @@ pub(super) async fn process_upload_request(
                 final_path_len: final_path_bytes.len() as u8,
                 temp_path,
                 temp_path_len: temp_len as u8,
+                append_session,
                 expected_size,
                 bytes_written: 0,
                 last_activity_at: Instant::now(),
@@ -117,11 +126,6 @@ pub(super) async fn process_upload_request(
                 return upload_result(false, code, active.bytes_written);
             }
 
-            let temp_path_str =
-                match core::str::from_utf8(&active.temp_path[..active.temp_path_len as usize]) {
-                    Ok(path) => path,
-                    Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
-                };
             let mut chunk_data = match transfer_buffers::lock_upload_chunk_buffer().await {
                 Ok(buffer) => buffer,
                 Err(_) => {
@@ -132,9 +136,9 @@ pub(super) async fn process_upload_request(
                     );
                 }
             };
-            if let Err(err) = fat::append_file(
+            if let Err(err) = fat::append_session_write(
                 sd_probe,
-                temp_path_str,
+                &mut active.append_session,
                 &chunk_data.as_mut_slice()[..data_len],
             )
             .await
