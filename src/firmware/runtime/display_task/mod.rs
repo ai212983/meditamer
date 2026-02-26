@@ -27,6 +27,8 @@ const SD_POWER_POLL_SLICE_MS: u64 = 5;
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
     let mut state = DisplayLoopState::new(&mut context);
+    // Service any early SD power requests before boot-time rendering paths.
+    process_sd_power_requests(&mut context).await;
 
     if state.touch_wizard.is_active() {
         state.touch_wizard.render_full(&mut context.inkplate).await;
@@ -35,6 +37,8 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
         render_touch_wizard_waiting_screen(&mut context.inkplate).await;
         state.screen_initialized = true;
     }
+    // Rendering above can take a while; drain queued power requests again.
+    process_sd_power_requests(&mut context).await;
     request_touch_pipeline_reset();
 
     loop {
