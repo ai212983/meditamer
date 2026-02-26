@@ -11,8 +11,8 @@ use crate::firmware::runtime::service_mode;
 const UPLOAD_HTTP_PORT: u16 = 8080;
 const UPLOAD_HTTP_ROOT: &str = "/assets";
 const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
-const HTTP_HEADER_MAX: usize = 1024;
-const HTTP_RW_BUF: usize = 1024;
+const HTTP_HEADER_MAX: usize = 2048;
+const HTTP_RW_BUF: usize = 2048;
 
 pub(super) async fn run_http_server(stack: Stack<'static>) {
     static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF]> = StaticCell::new();
