@@ -8,7 +8,7 @@ use super::super::super::{
         WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
 };
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use embassy_futures::select::{select, Either};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_println::println;
@@ -28,7 +28,7 @@ const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
 const WIFI_SCAN_ACTIVE_MIN_MS: u64 = 200;
 const WIFI_SCAN_ACTIVE_MAX_MS: u64 = 600;
 const WIFI_SCAN_PASSIVE_MS: u64 = 800;
-const WIFI_TARGET_CHANNEL_PROBE: Option<u8> = Some(8);
+const WIFI_CHANNEL_PROBE_SEQUENCE: [u8; 13] = [8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13];
 const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::Wpa2Personal,
     AuthMethod::WpaWpa2Personal,
@@ -37,6 +37,7 @@ const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::Wpa,
 ];
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
+static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     wifi_credentials().and_then(|(ssid, password)| {
         wifi_credentials_from_parts(ssid.as_bytes(), password.as_bytes()).ok()
@@ -62,11 +63,13 @@ pub(super) async fn run_wifi_connection_task(
     let mut auth_method_idx = 0usize;
     let mut paused = false;
     let mut channel_hint = None;
+    let mut channel_probe_idx = 0usize;
     if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
         credentials = Some(sd_credentials);
         config_applied = false;
         auth_method_idx = 0;
         channel_hint = None;
+        channel_probe_idx = 0;
         println!("upload_http: loaded wifi credentials from SD");
     }
     if credentials.is_none() {
@@ -81,6 +84,7 @@ pub(super) async fn run_wifi_connection_task(
                 config_applied = false;
                 auth_method_idx = 0;
                 channel_hint = None;
+                channel_probe_idx = 0;
                 println!("upload_http: upload mode off; wifi paused");
             }
             Timer::after(Duration::from_millis(500)).await;
@@ -97,6 +101,7 @@ pub(super) async fn run_wifi_connection_task(
             config_applied = false;
             auth_method_idx = 0;
             channel_hint = None;
+            channel_probe_idx = 0;
             println!("upload_http: wifi credentials updated");
         }
 
@@ -108,6 +113,7 @@ pub(super) async fn run_wifi_connection_task(
                     config_applied = false;
                     auth_method_idx = 0;
                     channel_hint = None;
+                    channel_probe_idx = 0;
                     println!("upload_http: loaded wifi credentials from SD");
                     continue;
                 }
@@ -118,6 +124,7 @@ pub(super) async fn run_wifi_connection_task(
                     config_applied = false;
                     auth_method_idx = 0;
                     channel_hint = None;
+                    channel_probe_idx = 0;
                     println!("upload_http: wifi credentials received");
                 }
                 continue;
@@ -168,13 +175,6 @@ pub(super) async fn run_wifi_connection_task(
             }
         }
 
-        let mut observed_channel = None;
-        if WIFI_LOG_SCAN_ON_CONNECT {
-            if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
-                observed_channel = log_scan_for_target(&mut controller, ssid).await;
-            }
-        }
-
         match controller.connect_async().await {
             Ok(()) => {
                 println!("upload_http: wifi connected");
@@ -197,10 +197,24 @@ pub(super) async fn run_wifi_connection_task(
                 }
             }
             Err(err) => {
+                let disconnect_reason = WIFI_LAST_DISCONNECT_REASON.swap(0, Ordering::Relaxed);
+                let discovery_failed = is_discovery_disconnect_reason(disconnect_reason);
+                let mut observed_channel = None;
+                if discovery_failed && WIFI_LOG_SCAN_ON_CONNECT {
+                    if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize])
+                    {
+                        observed_channel = log_scan_for_target(&mut controller, ssid).await;
+                    }
+                }
                 let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
                 println!(
-                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} observed_channel={:?}",
-                    err, auth_method, channel_hint, observed_channel
+                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} observed_channel={:?} reason={} ({})",
+                    err,
+                    auth_method,
+                    channel_hint,
+                    observed_channel,
+                    disconnect_reason,
+                    disconnect_reason_label(disconnect_reason),
                 );
                 let _ = controller.disconnect_async().await;
                 let _ = controller.stop_async().await;
@@ -213,6 +227,18 @@ pub(super) async fn run_wifi_connection_task(
                         Timer::after(Duration::from_secs(2)).await;
                         continue;
                     }
+                }
+                if discovery_failed {
+                    let next_channel = next_probe_channel(&mut channel_probe_idx);
+                    channel_hint = Some(next_channel);
+                    auth_method_idx = 0;
+                    config_applied = false;
+                    println!(
+                        "upload_http: discovery retry using channel_hint={}",
+                        next_channel
+                    );
+                    Timer::after(Duration::from_secs(2)).await;
+                    continue;
                 }
                 auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
                 config_applied = false;
@@ -260,6 +286,7 @@ fn install_wifi_event_logger() {
 
     event::StaDisconnected::update_handler(|event| {
         let reason = event.reason();
+        WIFI_LAST_DISCONNECT_REASON.store(reason, Ordering::Relaxed);
         println!(
             "upload_http: event sta_disconnected reason={} ({}) rssi={}",
             reason,
@@ -282,6 +309,16 @@ fn disconnect_reason_label(reason: u8) -> &'static str {
         212 => "no_ap_found_rssi_threshold",
         _ => "other",
     }
+}
+
+fn is_discovery_disconnect_reason(reason: u8) -> bool {
+    matches!(reason, 200 | 201 | 210 | 211 | 212)
+}
+
+fn next_probe_channel(index: &mut usize) -> u8 {
+    let channel = WIFI_CHANNEL_PROBE_SEQUENCE[*index % WIFI_CHANNEL_PROBE_SEQUENCE.len()];
+    *index = index.saturating_add(1);
+    channel
 }
 
 fn wifi_credentials() -> Option<(&'static str, &'static str)> {
@@ -351,11 +388,16 @@ fn mode_config_from_credentials(
     } else {
         auth_method
     };
+    let scan_method = if channel_hint.is_some() {
+        ScanMethod::Fast
+    } else {
+        ScanMethod::AllChannels
+    };
     let mut client = ClientConfig::default()
         .with_ssid(ssid.into())
         .with_password(password.into())
         .with_auth_method(auth_method)
-        .with_scan_method(ScanMethod::AllChannels);
+        .with_scan_method(scan_method);
     if let Some(channel) = channel_hint {
         client = client.with_channel(channel);
     }
@@ -414,47 +456,6 @@ async fn log_scan_for_target(
             target_ssid, discovered_channel
         );
         return discovered_channel;
-    }
-
-    if let Some(channel) = WIFI_TARGET_CHANNEL_PROBE {
-        let probe = ScanConfig::default()
-            .with_ssid(target_ssid)
-            .with_channel(channel)
-            .with_show_hidden(true)
-            .with_max(WIFI_SCAN_DIAG_MAX_APS)
-            .with_scan_type(ScanTypeConfig::Active {
-                min: Duration::from_millis(WIFI_SCAN_ACTIVE_MIN_MS).into(),
-                max: Duration::from_millis(WIFI_SCAN_ACTIVE_MAX_MS).into(),
-            });
-        match controller.scan_with_config_async(probe).await {
-            Ok(results) if results.is_empty() => {
-                println!(
-                    "upload_http: scan target_ssid={} channel_probe={} found=0",
-                    target_ssid, channel
-                );
-            }
-            Ok(results) => {
-                println!(
-                    "upload_http: scan target_ssid={} channel_probe={} found={}",
-                    target_ssid,
-                    channel,
-                    results.len()
-                );
-                for ap in results.iter() {
-                    println!(
-                        "upload_http: scan probe ap ssid={} channel={} rssi={} auth={:?}",
-                        ap.ssid, ap.channel, ap.signal_strength, ap.auth_method
-                    );
-                }
-                return Some(channel);
-            }
-            Err(err) => {
-                println!(
-                    "upload_http: scan target_ssid={} channel_probe={} err={:?}",
-                    target_ssid, channel, err
-                );
-            }
-        }
     }
 
     println!("upload_http: scan target_ssid={} found=0", target_ssid);
