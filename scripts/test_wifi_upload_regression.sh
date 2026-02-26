@@ -20,7 +20,7 @@ reset_each_cycle="${WIFI_UPLOAD_RESET_EACH_CYCLE:-0}"
 connect_timeout_s="${WIFI_UPLOAD_CONNECT_TIMEOUT_SEC:-45}"
 listen_timeout_s="${WIFI_UPLOAD_LISTEN_TIMEOUT_SEC:-75}"
 upload_timeout_s="${WIFI_UPLOAD_HTTP_TIMEOUT_SEC:-30}"
-health_timeout_s="${WIFI_UPLOAD_HEALTH_TIMEOUT_SEC:-15}"
+health_timeout_s="${WIFI_UPLOAD_HEALTH_TIMEOUT_SEC:-45}"
 stat_timeout_ms="${WIFI_UPLOAD_STAT_TIMEOUT_MS:-30000}"
 host_ip_discovery_timeout_s="${WIFI_UPLOAD_IP_DISCOVERY_TIMEOUT_SEC:-8}"
 device_mac="${WIFI_UPLOAD_DEVICE_MAC:-}"
@@ -95,7 +95,7 @@ detect_device_mac() {
     fi
 }
 
-discover_ip_by_mac() {
+discover_ips_by_mac() {
     local mac="$1"
     if [[ -z "$mac" ]]; then
         return 1
@@ -126,40 +126,16 @@ target = normalize(target)
 if not target:
     sys.exit(0)
 
+seen = set()
 for line in table.splitlines():
     m = re.search(r"\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)\s+at\s+([0-9a-fA-F:]+)", line)
     if not m:
         continue
     ip, mac = m.group(1), normalize(m.group(2))
-    if mac == target:
+    if mac == target and ip not in seen:
+        seen.add(ip)
         print(ip)
-        break
 PY
-}
-
-resolve_upload_ip() {
-    local cycle="$1"
-    local metrics_ip="$2"
-    if [[ -z "$device_mac" ]]; then
-        echo "$metrics_ip"
-        return 0
-    fi
-
-    ping -c 1 -W 1000 "$metrics_ip" >/dev/null 2>&1 || true
-    local deadline=$((SECONDS + host_ip_discovery_timeout_s))
-    while ((SECONDS < deadline)); do
-        local discovered_ip
-        discovered_ip="$(discover_ip_by_mac "$device_mac" || true)"
-        if [[ -n "$discovered_ip" ]]; then
-            if [[ "$discovered_ip" != "$metrics_ip" ]]; then
-                echo "cycle $cycle: host resolved device ip=$discovered_ip (metrics ip=$metrics_ip)" >&2
-            fi
-            echo "$discovered_ip"
-            return 0
-        fi
-        sleep 1
-    done
-    echo "$metrics_ip"
 }
 
 now_ms() {
@@ -496,17 +472,55 @@ wait_for_upload_network_ready() {
     return 1
 }
 
+resolved_health_ip=""
 wait_for_http_health() {
     local cycle="$1"
-    local device_ip="$2"
+    local metrics_ip="$2"
     local deadline=$((SECONDS + health_timeout_s))
+    local discovery_deadline=$((SECONDS + host_ip_discovery_timeout_s))
+    local discovered_ips=()
+    local last_candidates=""
     while ((SECONDS < deadline)); do
-        if curl -fsS -m 3 "http://${device_ip}:8080/health" >/dev/null 2>&1; then
-            return 0
+        if [[ -n "$device_mac" && SECONDS -lt discovery_deadline ]]; then
+            while IFS= read -r ip; do
+                [[ -z "$ip" ]] && continue
+                discovered_ips+=("$ip")
+            done < <(discover_ips_by_mac "$device_mac" || true)
+        fi
+
+        local merged=("$metrics_ip" "${discovered_ips[@]}")
+        local candidates=()
+        for ip in "${merged[@]}"; do
+            [[ -z "$ip" || "$ip" == "0.0.0.0" ]] && continue
+            local seen=0
+            for existing in "${candidates[@]}"; do
+                if [[ "$existing" == "$ip" ]]; then
+                    seen=1
+                    break
+                fi
+            done
+            if [[ "$seen" == "0" ]]; then
+                candidates+=("$ip")
+            fi
+        done
+        last_candidates="${candidates[*]}"
+
+        for ip in "${candidates[@]}"; do
+            if curl -fsS -m 3 "http://${ip}:8080/health" >/dev/null 2>&1; then
+                resolved_health_ip="$ip"
+                return 0
+            fi
+        done
+        if line="$(query_metrics_net_line 2>/dev/null || true)"; then
+            local refreshed_ip
+            refreshed_ip="$(metrics_net_ip "$line")"
+            if [[ -n "$refreshed_ip" && "$refreshed_ip" != "0.0.0.0" ]]; then
+                metrics_ip="$refreshed_ip"
+            fi
         fi
         sleep 1
     done
-    echo "[FAIL] cycle $cycle: /health did not respond within ${health_timeout_s}s after METRICS NET readiness" >&2
+    echo "[FAIL] cycle $cycle: /health did not respond within ${health_timeout_s}s after METRICS NET readiness (candidates: ${last_candidates})" >&2
     tail -n 200 "$output_path" >&2
     return 1
 }
@@ -610,17 +624,9 @@ for cycle in $(seq 1 "$cycles"); do
     wait_for_upload_network_ready "$cycle" "$cycle_start_ms"
     connect_ms="$network_ready_connect_ms"
     listen_ms="$network_ready_listen_ms"
-    device_ip="$(resolve_upload_ip "$cycle" "$network_ready_ip")"
-    if ! wait_for_http_health "$cycle" "$device_ip"; then
-        refreshed_ip="$(resolve_upload_ip "$cycle" "$network_ready_ip")"
-        if [[ "$refreshed_ip" != "$device_ip" ]]; then
-            echo "cycle $cycle: retrying health on refreshed ip=$refreshed_ip" >&2
-            wait_for_http_health "$cycle" "$refreshed_ip"
-            device_ip="$refreshed_ip"
-        else
-            exit 1
-        fi
-    fi
+    device_ip="$network_ready_ip"
+    wait_for_http_health "$cycle" "$device_ip"
+    device_ip="$resolved_health_ip"
 
     cycle_remote_root="${remote_root}/cycle-${cycle}"
     remote_file="${cycle_remote_root}/$(basename "$payload_path")"

@@ -123,21 +123,22 @@ def detect_device_mac(port: str) -> str:
     return normalize_mac(m.group(1))
 
 
-def discover_ip_by_mac(mac: str) -> str:
+def discover_ips_by_mac(mac: str) -> list[str]:
     if not mac:
-        return ""
+        return []
     try:
         out = subprocess.check_output(["arp", "-an"], text=True, timeout=2)
     except Exception:
-        return ""
+        return []
+    ips: list[str] = []
     for line in out.splitlines():
         m = re.search(r"\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)\s+at\s+([0-9a-fA-F:]+)", line)
         if not m:
             continue
         ip, found = m.group(1), normalize_mac(m.group(2))
-        if found == mac:
-            return ip
-    return ""
+        if found == mac and ip not in ips:
+            ips.append(ip)
+    return ips
 
 
 class SerialConsole:
@@ -265,22 +266,17 @@ def serial_preflight(port: str, baud: int, log_path: Path) -> SerialConsole:
     raise RuntimeError(f"serial preflight failed: {last_error}")
 
 
-def http_health(ip: str, timeout_s: int) -> bool:
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        conn = http.client.HTTPConnection(ip, 8080, timeout=3)
-        try:
-            conn.request("GET", "/health")
-            resp = conn.getresponse()
-            _ = resp.read()
-            if resp.status == 200:
-                return True
-        except Exception:
-            pass
-        finally:
-            conn.close()
-        time.sleep(1)
-    return False
+def http_health_once(ip: str, timeout_s: float = 2.5) -> bool:
+    conn = http.client.HTTPConnection(ip, 8080, timeout=timeout_s)
+    try:
+        conn.request("GET", "/health")
+        resp = conn.getresponse()
+        _ = resp.read()
+        return resp.status == 200
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
 def wait_mode_ack(console: SerialConsole, command: str, tag: str, attempts: int = 20) -> bool:
@@ -340,6 +336,8 @@ def wait_network_ready(
     connect_deadline = started + connect_timeout_s
     listen_deadline = started + listen_timeout_s
     connect_ms = 0
+    ready_streak = 0
+    ready_ip = ""
     while time.monotonic() < listen_deadline:
         metrics = query_metrics_net(console)
         if not metrics:
@@ -350,9 +348,18 @@ def wait_network_ready(
         if wifi_connected and connect_ms == 0:
             connect_ms = now_ms
         if listening and ip != "0.0.0.0":
-            if connect_ms == 0:
-                connect_ms = now_ms
-            return connect_ms, now_ms, ip
+            if ip == ready_ip:
+                ready_streak += 1
+            else:
+                ready_ip = ip
+                ready_streak = 1
+            if ready_streak >= 2:
+                if connect_ms == 0:
+                    connect_ms = now_ms
+                return connect_ms, now_ms, ip
+        else:
+            ready_streak = 0
+            ready_ip = ""
         if connect_ms == 0 and time.monotonic() > connect_deadline:
             raise RuntimeError(f"wifi did not connect within {connect_timeout_s}s")
         time.sleep(1)
@@ -453,20 +460,50 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
         raise RuntimeError("upload failed")
 
 
-def resolve_upload_ip(metrics_ip: str, mac: str, discovery_timeout_s: int) -> str:
-    if not mac:
-        return metrics_ip
-    try:
-        subprocess.run(["ping", "-c", "1", "-W", "1000", metrics_ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-    deadline = time.monotonic() + discovery_timeout_s
+def dedupe_ips(candidates: list[str]) -> list[str]:
+    result: list[str] = []
+    for ip in candidates:
+        if not ip or ip == "0.0.0.0":
+            continue
+        if ip not in result:
+            result.append(ip)
+    return result
+
+
+def wait_health_reachable(
+    console: SerialConsole,
+    metrics_ip: str,
+    mac: str,
+    timeout_s: int,
+    discovery_timeout_s: int,
+) -> str:
+    deadline = time.monotonic() + timeout_s
+    discovery_deadline = time.monotonic() + discovery_timeout_s
+    discovered_ips: list[str] = []
+    next_discovery_at = 0.0
+
     while time.monotonic() < deadline:
-        ip = discover_ip_by_mac(mac)
-        if ip:
-            return ip
+        metrics = query_metrics_net(console)
+        if metrics:
+            _wifi_connected, listening, ip = metrics
+            if listening and ip != "0.0.0.0":
+                metrics_ip = ip
+
+        now = time.monotonic()
+        if mac and now >= next_discovery_at and now < discovery_deadline:
+            for ip in discover_ips_by_mac(mac):
+                if ip not in discovered_ips:
+                    discovered_ips.append(ip)
+            next_discovery_at = now + 1
+
+        candidates = dedupe_ips([metrics_ip] + discovered_ips)
+        for ip in candidates:
+            if http_health_once(ip):
+                return ip
         time.sleep(1)
-    return metrics_ip
+
+    candidates = dedupe_ips([metrics_ip] + discovered_ips)
+    raise RuntimeError(f"/health did not respond (candidates={candidates})")
 
 
 def main() -> int:
@@ -498,7 +535,7 @@ def main() -> int:
     connect_timeout_s = env_int("WIFI_UPLOAD_CONNECT_TIMEOUT_SEC", 45)
     listen_timeout_s = env_int("WIFI_UPLOAD_LISTEN_TIMEOUT_SEC", 75)
     upload_timeout_s = env_int("WIFI_UPLOAD_HTTP_TIMEOUT_SEC", 30)
-    health_timeout_s = env_int("WIFI_UPLOAD_HEALTH_TIMEOUT_SEC", 15)
+    health_timeout_s = env_int("WIFI_UPLOAD_HEALTH_TIMEOUT_SEC", 45)
     stat_timeout_ms = env_int("WIFI_UPLOAD_STAT_TIMEOUT_MS", 30000)
     ip_discovery_timeout_s = env_int("WIFI_UPLOAD_IP_DISCOVERY_TIMEOUT_SEC", 8)
     baud = env_int("ESPFLASH_BAUD", 115200)
@@ -557,13 +594,9 @@ def main() -> int:
                 raise RuntimeError("MODE UPLOAD ON did not return OK")
             maybe_wifiset(console, ssid, password)
             connect_ms, listen_ms, metrics_ip = wait_network_ready(console, connect_timeout_s, listen_timeout_s)
-            ip = resolve_upload_ip(metrics_ip, mac, ip_discovery_timeout_s)
-            if not http_health(ip, health_timeout_s):
-                refreshed = resolve_upload_ip(metrics_ip, mac, ip_discovery_timeout_s)
-                if refreshed != ip and http_health(refreshed, health_timeout_s):
-                    ip = refreshed
-                else:
-                    raise RuntimeError(f"/health did not respond for ip={ip}")
+            ip = wait_health_reachable(
+                console, metrics_ip, mac, health_timeout_s, ip_discovery_timeout_s
+            )
 
             cycle_root = f"{remote_root}/cycle-{cycle}"
             remote_file = f"{cycle_root}/{Path(payload_path).name}"
