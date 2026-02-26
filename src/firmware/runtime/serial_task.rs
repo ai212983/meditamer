@@ -10,8 +10,8 @@ use embassy_time::{with_timeout, Duration};
 
 use super::super::{
     config::{
-        LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, SD_RESULTS, TAP_TRACE_ENABLED,
-        TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
+        LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, MODE_APPLY_ACK_TIMEOUT_MS, SD_RESULTS,
+        TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
     touch::{
         config::{
@@ -24,14 +24,17 @@ use super::super::{
             write_touch_wizard_swipe_trace_sample, TouchWizardSessionLog,
         },
     },
-    types::{SdCommand, SdRequest, SdResult, SerialUart},
+    types::{AppEvent, SdCommand, SdRequest, SdResult, SerialUart},
 };
 
-use commands::{serial_command_event_and_responses, SerialCommand};
+use commands::{
+    runtime_services_update_for_command, serial_command_event_and_responses, SerialCommand,
+};
 #[cfg(feature = "asset-upload-http")]
 use io::run_wifiset_command;
 use io::{
-    cache_sd_result, run_allocator_alloc_probe, run_sdwait_command, write_allocator_status_line,
+    cache_sd_result, drain_runtime_services_apply_acks, run_allocator_alloc_probe,
+    run_sdwait_command, wait_runtime_services_apply_ack, write_allocator_status_line,
     write_mode_status_line, write_sd_request_queued, write_sd_result, write_tap_trace_sample,
     SD_RESULT_CACHE_CAP,
 };
@@ -45,6 +48,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     let mut rx = [0u8; 1];
     let mut touch_wizard_log = TouchWizardSessionLog::new();
     let mut next_sd_request_id = 1u32;
+    let mut next_mode_request_id = 1u16;
     let mut last_sd_request_id: Option<u32> = None;
     let mut sd_result_cache = heapless::Vec::<SdResult, SD_RESULT_CACHE_CAP>::new();
 
@@ -147,6 +151,47 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                         }
                         SerialCommand::ModeStatus => {
                             write_mode_status_line(&mut uart).await;
+                        }
+                        SerialCommand::ModeSet { .. } | SerialCommand::RunMode { .. } => {
+                            let update = runtime_services_update_for_command(cmd)
+                                .expect("mode commands must map to runtime services updates");
+                            let (ok_response, busy_response, timeout_response) = match cmd {
+                                SerialCommand::ModeSet { .. } => (
+                                    b"MODE OK\r\n".as_slice(),
+                                    b"MODE BUSY\r\n".as_slice(),
+                                    b"MODE ERR reason=timeout\r\n".as_slice(),
+                                ),
+                                SerialCommand::RunMode { .. } => (
+                                    b"RUNMODE OK\r\n".as_slice(),
+                                    b"RUNMODE BUSY\r\n".as_slice(),
+                                    b"RUNMODE ERR reason=timeout\r\n".as_slice(),
+                                ),
+                                _ => unreachable!("non-mode command routed to mode handler"),
+                            };
+                            drain_runtime_services_apply_acks();
+                            let request_id = next_mode_request_id;
+                            next_mode_request_id = next_mode_request_id.wrapping_add(1);
+                            let queued =
+                                enqueue_app_event_with_retry(AppEvent::UpdateRuntimeServices {
+                                    update,
+                                    ack_request_id: Some(request_id),
+                                })
+                                .await;
+                            if !queued {
+                                let _ = uart.write_async(busy_response).await;
+                                continue;
+                            }
+                            if wait_runtime_services_apply_ack(
+                                request_id,
+                                MODE_APPLY_ACK_TIMEOUT_MS,
+                            )
+                            .await
+                            .is_some()
+                            {
+                                let _ = uart.write_async(ok_response).await;
+                            } else {
+                                let _ = uart.write_async(timeout_response).await;
+                            }
                         }
                         SerialCommand::AllocatorAllocProbe { bytes } => {
                             run_allocator_alloc_probe(&mut uart, bytes as usize).await;

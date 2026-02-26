@@ -95,6 +95,12 @@ impl RuntimeServicesUpdate {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeServicesApplyAck {
+    pub(crate) request_id: u16,
+    pub(crate) applied: RuntimeServices,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DisplayMode {
     Clock,
     Suminagashi,

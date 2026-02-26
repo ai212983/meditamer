@@ -5,8 +5,8 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::WifiCredentials;
 use super::super::types::{
-    AppEvent, SdAssetReadRequest, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
-    SdUploadRequest, SdUploadResult, TapTraceSample,
+    AppEvent, RuntimeServicesApplyAck, SdAssetReadRequest, SdAssetReadResponse, SdPowerRequest,
+    SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{WifiConfigRequest, WifiConfigResponse};
@@ -37,6 +37,11 @@ pub(crate) static WIFI_CONFIG_RESPONSES: Channel<CriticalSectionRawMutex, WifiCo
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
+pub(crate) static RUNTIME_SERVICES_APPLY_ACKS: Channel<
+    CriticalSectionRawMutex,
+    RuntimeServicesApplyAck,
+    2,
+> = Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

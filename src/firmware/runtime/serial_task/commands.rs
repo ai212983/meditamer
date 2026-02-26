@@ -87,11 +87,30 @@ pub(super) enum ModeSetOperation {
     AssetReads(bool),
 }
 
+impl ModeSetOperation {
+    pub(super) fn as_update(self) -> RuntimeServicesUpdate {
+        match self {
+            Self::Upload(enabled) => RuntimeServicesUpdate::Upload(enabled),
+            Self::AssetReads(enabled) => RuntimeServicesUpdate::AssetReads(enabled),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum SdWaitTarget {
     Next,
     Last,
     Id(u32),
+}
+
+pub(super) fn runtime_services_update_for_command(
+    cmd: SerialCommand,
+) -> Option<RuntimeServicesUpdate> {
+    match cmd {
+        SerialCommand::ModeSet { operation } => Some(operation.as_update()),
+        SerialCommand::RunMode { mode } => Some(RuntimeServicesUpdate::Replace(mode.as_services())),
+        _ => None,
+    }
 }
 
 pub(super) fn serial_command_event_and_responses(
@@ -241,32 +260,8 @@ pub(super) fn serial_command_event_and_responses(
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
         SerialCommand::ModeStatus => unreachable!("mode status command is handled inline"),
-        SerialCommand::ModeSet { operation } => match operation {
-            ModeSetOperation::Upload(enabled) => (
-                Some(AppEvent::UpdateRuntimeServices(
-                    RuntimeServicesUpdate::Upload(enabled),
-                )),
-                None,
-                b"MODE OK\r\n",
-                b"MODE BUSY\r\n",
-            ),
-            ModeSetOperation::AssetReads(enabled) => (
-                Some(AppEvent::UpdateRuntimeServices(
-                    RuntimeServicesUpdate::AssetReads(enabled),
-                )),
-                None,
-                b"MODE OK\r\n",
-                b"MODE BUSY\r\n",
-            ),
-        },
-        SerialCommand::RunMode { mode } => (
-            Some(AppEvent::UpdateRuntimeServices(
-                RuntimeServicesUpdate::Replace(mode.as_services()),
-            )),
-            None,
-            b"RUNMODE OK\r\n",
-            b"RUNMODE BUSY\r\n",
-        ),
+        SerialCommand::ModeSet { .. } => unreachable!("mode set command is handled inline"),
+        SerialCommand::RunMode { .. } => unreachable!("runmode command is handled inline"),
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::WifiSet { .. } => unreachable!("wifiset command is handled inline"),
     }

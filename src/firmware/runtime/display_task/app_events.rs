@@ -3,7 +3,7 @@ use core::sync::atomic::Ordering;
 use embassy_time::{Duration, Instant};
 
 use super::super::super::{
-    config::FULL_REFRESH_EVERY_N_UPDATES,
+    config::{FULL_REFRESH_EVERY_N_UPDATES, RUNTIME_SERVICES_APPLY_ACKS},
     render::{
         next_visual_seed, render_active_mode, render_battery_update, render_clock_update,
         render_shanshui_update, render_suminagashi_update, render_visual_update,
@@ -15,7 +15,7 @@ use super::super::super::{
         tasks::request_touch_pipeline_reset,
         wizard::{render_touch_wizard_waiting_screen, TouchCalibrationWizard},
     },
-    types::{AppEvent, DisplayContext, DisplayMode, TimeSyncState},
+    types::{AppEvent, DisplayContext, DisplayMode, RuntimeServicesApplyAck, TimeSyncState},
 };
 
 use super::{runtime_services::apply_runtime_services_update, state::DisplayLoopState};
@@ -234,8 +234,19 @@ pub(super) async fn handle_app_event(
                 state.screen_initialized = true;
             }
         }
-        AppEvent::UpdateRuntimeServices(update) => {
-            apply_runtime_services_update(context, update).await;
+        AppEvent::UpdateRuntimeServices {
+            update,
+            ack_request_id,
+        } => {
+            let applied = apply_runtime_services_update(context, update).await;
+            if let Some(request_id) = ack_request_id {
+                RUNTIME_SERVICES_APPLY_ACKS
+                    .send(RuntimeServicesApplyAck {
+                        request_id,
+                        applied,
+                    })
+                    .await;
+            }
         }
     }
 }

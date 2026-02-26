@@ -8,11 +8,13 @@ use crate::firmware::{
     types::{SdCommand, SdResult, SerialUart, TapTraceSample},
 };
 
+mod mode_ack;
 mod sdwait;
 #[cfg(feature = "asset-upload-http")]
 mod wifiset;
 
 pub(super) const SD_RESULT_CACHE_CAP: usize = 16;
+pub(super) use mode_ack::{drain_runtime_services_apply_acks, wait_runtime_services_apply_ack};
 pub(super) use sdwait::run_sdwait_command;
 #[cfg(feature = "asset-upload-http")]
 pub(super) use wifiset::run_wifiset_command;

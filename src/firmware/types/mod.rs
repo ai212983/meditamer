@@ -14,7 +14,9 @@ pub(crate) use base::{
 };
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use base::{WIFI_CONFIG_FILE_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX};
-pub(crate) use modes::{DisplayMode, RuntimeMode, RuntimeServices, RuntimeServicesUpdate};
+pub(crate) use modes::{
+    DisplayMode, RuntimeMode, RuntimeServices, RuntimeServicesApplyAck, RuntimeServicesUpdate,
+};
 pub(crate) use sd::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdCommand, SdCommandKind,
     SdPowerRequest, SdRequest, SdResult, SdResultCode, SdUploadCommand, SdUploadRequest,

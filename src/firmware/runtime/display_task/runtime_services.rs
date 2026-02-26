@@ -3,17 +3,17 @@ use crate::firmware::assets::runtime::clear_runtime_asset_caches;
 use crate::firmware::{
     runtime::service_mode,
     storage::transfer_buffers,
-    types::{DisplayContext, RuntimeServicesUpdate},
+    types::{DisplayContext, RuntimeServices, RuntimeServicesUpdate},
 };
 
 pub(super) async fn apply_runtime_services_update(
     context: &mut DisplayContext,
     update: RuntimeServicesUpdate,
-) {
+) -> RuntimeServices {
     let previous = service_mode::runtime_services();
     let next = update.apply(previous);
     if next == previous {
-        return;
+        return next;
     }
 
     service_mode::set_runtime_services(next);
@@ -44,4 +44,6 @@ pub(super) async fn apply_runtime_services_update(
             "off"
         }
     );
+
+    next
 }

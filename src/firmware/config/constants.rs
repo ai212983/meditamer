@@ -69,6 +69,7 @@ pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
 pub(crate) const BACKLIGHT_MAX_BRIGHTNESS: u8 = 63;
 pub(crate) const BACKLIGHT_HOLD_MS: u64 = 3_000;
 pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
+pub(crate) const MODE_APPLY_ACK_TIMEOUT_MS: u64 = 1_500;
 pub(crate) const TAP_TRACE_ENABLED: bool = false;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
