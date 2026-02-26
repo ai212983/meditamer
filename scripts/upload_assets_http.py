@@ -15,6 +15,7 @@ UPLOAD_NET_RECOVERY_TIMEOUT_S = float(
 )
 UPLOAD_NET_RECOVERY_POLL_S = float(os.getenv("UPLOAD_NET_RECOVERY_POLL_SEC", "0.8"))
 UPLOAD_SD_BUSY_TOTAL_RETRY_S = float(os.getenv("UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", "180"))
+UPLOAD_SKIP_MKDIR = os.getenv("UPLOAD_SKIP_MKDIR", "0") == "1"
 
 
 def parse_args() -> argparse.Namespace:
@@ -424,8 +425,11 @@ def main() -> int:
     if src.is_file():
         remote_file = remote_join(args.dst, Path(src.name))
         remote_dir = posixpath.dirname(remote_file) or "/"
-        print(f"[mkdir -p] {remote_dir}")
-        mkdir_p(args.host, args.port, args.timeout, remote_dir, token)
+        if UPLOAD_SKIP_MKDIR:
+            print(f"[mkdir -p] skipped ({remote_dir})")
+        else:
+            print(f"[mkdir -p] {remote_dir}")
+            mkdir_p(args.host, args.port, args.timeout, remote_dir, token)
         print(f"[upload] {src} -> {remote_file}")
         upload_file(args.host, args.port, args.timeout, src, remote_file, token)
         print("Upload complete.")

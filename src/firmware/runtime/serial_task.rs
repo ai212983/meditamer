@@ -239,6 +239,16 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 ip[3],
                             );
                             let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
+
+                            let mut liveness_line = heapless::String::<224>::new();
+                            let _ = write!(
+                                &mut liveness_line,
+                                "METRICS LIVENESS accept_link_reset={} health={} wifi_watchdog_disc={}\r\n",
+                                snapshot.upload_http_accept_link_resets,
+                                snapshot.upload_http_health_requests,
+                                snapshot.wifi_connected_watchdog_disconnects,
+                            );
+                            let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
                         }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;

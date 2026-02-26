@@ -37,16 +37,20 @@ pub(crate) async fn run_wifiset_command(uart: &mut SerialUart, credentials: Wifi
             let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
         }
         Ok(result) => {
-            let mut line = heapless::String::<96>::new();
+            // Runtime credentials update already succeeded; persistence to SD is best-effort.
+            let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
+            let mut warn = heapless::String::<112>::new();
             let _ = write!(
-                &mut line,
-                "WIFISET ERR reason={}\r\n",
+                &mut warn,
+                "WIFISET WARN persist={}\r\n",
                 wifi_config_result_code_label(result.code)
             );
-            let _ = uart_write_all(uart, line.as_bytes()).await;
+            let _ = uart_write_all(uart, warn.as_bytes()).await;
         }
         Err(_) => {
-            let _ = uart_write_all(uart, b"WIFISET ERR reason=timeout\r\n").await;
+            // Keep volatile credentials active even when SD persistence times out.
+            let _ = uart_write_all(uart, b"WIFISET OK\r\n").await;
+            let _ = uart_write_all(uart, b"WIFISET WARN persist=timeout\r\n").await;
         }
     }
 }

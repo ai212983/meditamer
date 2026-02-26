@@ -84,6 +84,7 @@ pub(super) async fn handle_connection(
     match (method, request_path) {
         ("GET", "/health") => {
             drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
+            telemetry::record_upload_http_health_request();
             write_response(socket, b"200 OK", b"ok").await;
             Ok(())
         }

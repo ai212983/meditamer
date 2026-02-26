@@ -149,8 +149,15 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             .await;
         if let Err(err) = accepted {
             telemetry::record_upload_http_accept_error();
+            if dhcp_ipv4_ready(&stack).is_none() {
+                telemetry::record_upload_http_accept_link_reset();
+                listening_logged = false;
+                waiting_dhcp_logged = false;
+            }
             telemetry::set_upload_http_listener(false, None);
             esp_println::println!("upload_http: accept err={:?}", err);
+            let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
+            socket.abort();
             continue;
         }
         telemetry::record_upload_http_accept();

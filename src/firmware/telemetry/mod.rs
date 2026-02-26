@@ -9,12 +9,15 @@ static WIFI_REASON_NO_AP_FOUND: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_RUNS: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_EMPTY: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_TARGET_HITS: AtomicU32 = AtomicU32::new(0);
+static WIFI_CONNECTED_WATCHDOG_DISCONNECTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_ACCEPTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_ACCEPT_ERRORS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_ACCEPT_LINK_RESETS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_REQUEST_ERRORS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_HEADER_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_READ_BODY_ERRORS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_SD_BUSY_ERRORS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_HEALTH_REQUESTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_REQUESTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_BYTES: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
@@ -71,12 +74,15 @@ pub(crate) struct Snapshot {
     pub(crate) wifi_scan_runs: u32,
     pub(crate) wifi_scan_empty: u32,
     pub(crate) wifi_scan_target_hits: u32,
+    pub(crate) wifi_connected_watchdog_disconnects: u32,
     pub(crate) upload_http_accepts: u32,
     pub(crate) upload_http_accept_errors: u32,
+    pub(crate) upload_http_accept_link_resets: u32,
     pub(crate) upload_http_request_errors: u32,
     pub(crate) upload_http_header_timeouts: u32,
     pub(crate) upload_http_read_body_errors: u32,
     pub(crate) upload_http_sd_busy_errors: u32,
+    pub(crate) upload_http_health_requests: u32,
     pub(crate) upload_http_upload_requests: u32,
     pub(crate) upload_http_upload_bytes: u32,
     pub(crate) upload_http_upload_body_read_ms_total: u32,
@@ -130,12 +136,16 @@ pub(crate) fn snapshot() -> Snapshot {
         wifi_scan_runs: WIFI_SCAN_RUNS.load(Ordering::Relaxed),
         wifi_scan_empty: WIFI_SCAN_EMPTY.load(Ordering::Relaxed),
         wifi_scan_target_hits: WIFI_SCAN_TARGET_HITS.load(Ordering::Relaxed),
+        wifi_connected_watchdog_disconnects: WIFI_CONNECTED_WATCHDOG_DISCONNECTS
+            .load(Ordering::Relaxed),
         upload_http_accepts: UPLOAD_HTTP_ACCEPTS.load(Ordering::Relaxed),
         upload_http_accept_errors: UPLOAD_HTTP_ACCEPT_ERRORS.load(Ordering::Relaxed),
+        upload_http_accept_link_resets: UPLOAD_HTTP_ACCEPT_LINK_RESETS.load(Ordering::Relaxed),
         upload_http_request_errors: UPLOAD_HTTP_REQUEST_ERRORS.load(Ordering::Relaxed),
         upload_http_header_timeouts: UPLOAD_HTTP_HEADER_TIMEOUTS.load(Ordering::Relaxed),
         upload_http_read_body_errors: UPLOAD_HTTP_READ_BODY_ERRORS.load(Ordering::Relaxed),
         upload_http_sd_busy_errors: UPLOAD_HTTP_SD_BUSY_ERRORS.load(Ordering::Relaxed),
+        upload_http_health_requests: UPLOAD_HTTP_HEALTH_REQUESTS.load(Ordering::Relaxed),
         upload_http_upload_requests: UPLOAD_HTTP_UPLOAD_REQUESTS.load(Ordering::Relaxed),
         upload_http_upload_bytes: UPLOAD_HTTP_UPLOAD_BYTES.load(Ordering::Relaxed),
         upload_http_upload_body_read_ms_total: UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL
@@ -237,6 +247,12 @@ pub(crate) fn record_upload_http_accept_error() {
     defmt::warn!("telemetry upload_http_accept_error");
 }
 
+pub(crate) fn record_upload_http_accept_link_reset() {
+    UPLOAD_HTTP_ACCEPT_LINK_RESETS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::warn!("telemetry upload_http_accept_link_reset");
+}
+
 pub(crate) fn record_upload_http_request_error() {
     UPLOAD_HTTP_REQUEST_ERRORS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
@@ -256,6 +272,12 @@ pub(crate) fn record_upload_http_request_bucket(error: &'static str) {
         }
         _ => {}
     }
+}
+
+pub(crate) fn record_upload_http_health_request() {
+    UPLOAD_HTTP_HEALTH_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::trace!("telemetry upload_http_health_request");
 }
 
 pub(crate) fn record_upload_http_upload_phase(
@@ -354,6 +376,12 @@ pub(crate) fn record_sd_upload_session_mode_off_abort() {
 
 pub(crate) fn set_wifi_link_connected(connected: bool) {
     WIFI_LINK_CONNECTED.store(connected, Ordering::Relaxed);
+}
+
+pub(crate) fn record_wifi_watchdog_disconnect() {
+    WIFI_CONNECTED_WATCHDOG_DISCONNECTS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::warn!("telemetry wifi_watchdog_disconnect");
 }
 
 pub(crate) fn wifi_link_connected() -> bool {

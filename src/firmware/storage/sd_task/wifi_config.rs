@@ -70,6 +70,7 @@ pub(super) async fn process_wifi_config_request(
     }
 }
 
+#[inline(never)]
 fn map_upload_ready_error(code: SdUploadResultCode) -> WifiConfigResultCode {
     match code {
         SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
@@ -78,6 +79,7 @@ fn map_upload_ready_error(code: SdUploadResultCode) -> WifiConfigResultCode {
     }
 }
 
+#[inline(never)]
 fn map_fat_error_to_wifi_config_code(error: &fat::SdFatError) -> WifiConfigResultCode {
     match error {
         fat::SdFatError::NotFound => WifiConfigResultCode::NotFound,
@@ -88,6 +90,7 @@ fn map_fat_error_to_wifi_config_code(error: &fat::SdFatError) -> WifiConfigResul
     }
 }
 
+#[inline(never)]
 fn wifi_config_response(
     ok: bool,
     code: WifiConfigResultCode,
@@ -100,6 +103,7 @@ fn wifi_config_response(
     }
 }
 
+#[inline(never)]
 fn encode_wifi_config_file(
     credentials: WifiCredentials,
     out: &mut [u8; WIFI_CONFIG_FILE_MAX],

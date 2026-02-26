@@ -1,16 +1,11 @@
 use super::super::super::{
-    config::{
-        WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES, WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
-        WIFI_CREDENTIALS_UPDATES,
-    },
+    config::WIFI_CREDENTIALS_UPDATES,
     runtime::service_mode,
     telemetry,
-    types::{
-        WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
-    },
+    types::{WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX},
 };
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either3};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_println::println;
 use esp_radio::wifi::{
@@ -39,6 +34,7 @@ const WIFI_REASON_CONNECTION_FAIL: u8 = 205;
 const WIFI_REASON_NO_AP_FOUND_COMPAT_SECURITY: u8 = 210;
 const WIFI_REASON_NO_AP_FOUND_AUTHMODE_THRESHOLD: u8 = 211;
 const WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD: u8 = 212;
+const WIFI_CONNECTED_WATCHDOG_MS: u64 = 2_000;
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
@@ -60,14 +56,6 @@ pub(super) async fn run_wifi_connection_task(
     let mut paused = false;
     let mut channel_hint = None;
     let mut channel_probe_idx = 0usize;
-    if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
-        credentials = Some(sd_credentials);
-        config_applied = false;
-        auth_method_idx = 0;
-        channel_hint = None;
-        channel_probe_idx = 0;
-        println!("upload_http: loaded wifi credentials from SD");
-    }
     if credentials.is_none() {
         println!("upload_http: waiting for WIFISET credentials over UART");
     }
@@ -110,15 +98,6 @@ pub(super) async fn run_wifi_connection_task(
         let active = match credentials {
             Some(value) => value,
             None => {
-                if let Some(sd_credentials) = load_wifi_credentials_from_sd().await {
-                    credentials = Some(sd_credentials);
-                    config_applied = false;
-                    auth_method_idx = 0;
-                    channel_hint = None;
-                    channel_probe_idx = 0;
-                    println!("upload_http: loaded wifi credentials from SD");
-                    continue;
-                }
                 if let Ok(first) =
                     with_timeout(Duration::from_secs(3), WIFI_CREDENTIALS_UPDATES.receive()).await
                 {
@@ -200,19 +179,20 @@ pub(super) async fn run_wifi_connection_task(
                 telemetry::record_wifi_connect_success();
                 println!("upload_http: wifi connected");
                 loop {
-                    match select(
+                    match select3(
                         controller.wait_for_event(WifiEvent::StaDisconnected),
                         WIFI_CREDENTIALS_UPDATES.receive(),
+                        Timer::after(Duration::from_millis(WIFI_CONNECTED_WATCHDOG_MS)),
                     )
                     .await
                     {
-                        Either::First(_) => {
+                        Either3::First(_) => {
                             telemetry::set_wifi_link_connected(false);
                             telemetry::set_upload_http_listener(false, None);
                             println!("upload_http: wifi disconnected");
                             break;
                         }
-                        Either::Second(updated) => {
+                        Either3::Second(updated) => {
                             if credentials == Some(updated) {
                                 println!("upload_http: wifi credentials unchanged while connected");
                                 continue;
@@ -225,6 +205,28 @@ pub(super) async fn run_wifi_connection_task(
                             telemetry::set_wifi_link_connected(false);
                             telemetry::set_upload_http_listener(false, None);
                             break;
+                        }
+                        Either3::Third(_) => {
+                            if !service_mode::upload_enabled() {
+                                telemetry::set_wifi_link_connected(false);
+                                telemetry::set_upload_http_listener(false, None);
+                                let _ = controller.disconnect_async().await;
+                                println!("upload_http: upload mode off while connected");
+                                break;
+                            }
+                            match controller.is_connected() {
+                                Ok(true) => {}
+                                Ok(false) | Err(_) => {
+                                    telemetry::record_wifi_watchdog_disconnect();
+                                    telemetry::set_wifi_link_connected(false);
+                                    telemetry::set_upload_http_listener(false, None);
+                                    let _ = controller.disconnect_async().await;
+                                    println!(
+                                        "upload_http: watchdog forced reconnect (is_connected=false)"
+                                    );
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -381,34 +383,6 @@ fn wifi_credentials() -> Option<(&'static str, &'static str)> {
         .or(option_env!("PASSWORD"))
         .unwrap_or("");
     Some((ssid, password))
-}
-
-async fn load_wifi_credentials_from_sd() -> Option<WifiCredentials> {
-    drain_wifi_config_responses();
-    WIFI_CONFIG_REQUESTS.send(WifiConfigRequest::Load).await;
-    let response = with_timeout(
-        Duration::from_millis(WIFI_CONFIG_RESPONSE_TIMEOUT_MS),
-        WIFI_CONFIG_RESPONSES.receive(),
-    )
-    .await
-    .ok()?;
-
-    if response.ok {
-        return response.credentials;
-    }
-
-    match response.code {
-        WifiConfigResultCode::NotFound => {}
-        WifiConfigResultCode::InvalidData => {
-            println!("upload_http: SD wifi config invalid; waiting for WIFISET")
-        }
-        code => println!("upload_http: SD wifi config load failed code={:?}", code),
-    }
-    None
-}
-
-fn drain_wifi_config_responses() {
-    while WIFI_CONFIG_RESPONSES.try_receive().is_ok() {}
 }
 
 fn wifi_credentials_from_parts(

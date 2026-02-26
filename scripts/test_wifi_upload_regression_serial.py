@@ -9,6 +9,7 @@ import os
 import re
 import select
 import signal
+import struct
 import subprocess
 import sys
 import termios
@@ -175,11 +176,28 @@ class SerialConsole:
         attrs[6][termios.VMIN] = 0
         attrs[6][termios.VTIME] = 0
         termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
+        self._force_run_mode_lines()
         termios.tcflush(self.fd, termios.TCIFLUSH)
 
     def close(self) -> None:
+        self._force_run_mode_lines()
         self.log_file.close()
         os.close(self.fd)
+
+    def _force_run_mode_lines(self) -> None:
+        if not hasattr(termios, "TIOCMBIC"):
+            return
+        bits = 0
+        if hasattr(termios, "TIOCM_DTR"):
+            bits |= termios.TIOCM_DTR
+        if hasattr(termios, "TIOCM_RTS"):
+            bits |= termios.TIOCM_RTS
+        if bits == 0:
+            return
+        try:
+            fcntl.ioctl(self.fd, termios.TIOCMBIC, struct.pack("I", bits))
+        except Exception:
+            pass
 
     def drain(self, seconds: float) -> None:
         end = time.monotonic() + seconds
@@ -242,17 +260,21 @@ class SerialConsole:
 
 def serial_preflight(port: str, baud: int, log_path: Path) -> SerialConsole:
     last_error = "unknown"
+    allow_reset = os.getenv("WIFI_UPLOAD_PREFLIGHT_RESET", "0") == "1"
     for attempt in range(1, 4):
         console = SerialConsole(port, baud, log_path)
         try:
-            pong, _ = console.command_wait("PING", r"^PONG$", 2.5)
+            pong, seen = console.command_wait("PING", r"^PONG$", 2.5)
             if pong is not None:
                 return console
-            last_error = "no PONG"
+            if any("DOWNLOAD_BOOT" in line for line in seen):
+                last_error = "device stuck in ROM download boot"
+            else:
+                last_error = "no PONG"
         except Exception as exc:
             last_error = str(exc)
         console.close()
-        if attempt == 1:
+        if allow_reset and attempt == 1:
             try:
                 subprocess.run(
                     ["espflash", "reset", "-p", port, "-c", "esp32"],
@@ -422,6 +444,9 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
         str(timeout_s),
     ]
     process: subprocess.Popen[str] | None = None
+    upload_env = os.environ.copy()
+    if upload_env.get("WIFI_UPLOAD_SKIP_MKDIR") == "1":
+        upload_env["UPLOAD_SKIP_MKDIR"] = "1"
     try:
         process = subprocess.Popen(
             cmd,
@@ -429,6 +454,7 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            env=upload_env,
         )
         ACTIVE_UPLOAD_PROCESS = process
         stdout_data, stderr_data = process.communicate(timeout=subprocess_timeout_s)
@@ -504,6 +530,22 @@ def wait_health_reachable(
 
     candidates = dedupe_ips([metrics_ip] + discovered_ips)
     raise RuntimeError(f"/health did not respond (candidates={candidates})")
+
+
+def capture_metrics_lines(console: SerialConsole, timeout_s: float = 3.0) -> list[str]:
+    lines: list[str] = []
+    try:
+        console.send_line("METRICS")
+    except Exception:
+        return lines
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        for line in console._read_lines(0.1):
+            if line.startswith("METRICS "):
+                lines.append(line)
+                if line.startswith("METRICS LIVENESS"):
+                    return lines
+    return lines
 
 
 def main() -> int:
@@ -687,6 +729,9 @@ def main() -> int:
         print(f"Log: {log_path}")
         return 0
     except Exception as exc:
+        if console is not None:
+            for line in capture_metrics_lines(console):
+                print(f"[FAIL_METRICS] {line}", file=sys.stderr)
         print(f"[FAIL] {exc}", file=sys.stderr)
         print(f"Log: {log_path}", file=sys.stderr)
         return 1

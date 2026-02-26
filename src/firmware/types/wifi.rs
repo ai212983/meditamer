@@ -11,6 +11,7 @@ pub(crate) struct WifiCredentials {
 
 #[cfg(feature = "asset-upload-http")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum WifiConfigRequest {
     Load,
     Store { credentials: WifiCredentials },
