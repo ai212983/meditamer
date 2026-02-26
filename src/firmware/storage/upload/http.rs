@@ -9,6 +9,7 @@ use super::super::super::types::SD_UPLOAD_CHUNK_MAX;
 #[cfg(feature = "psram-alloc")]
 use crate::firmware::psram;
 use crate::firmware::runtime::service_mode;
+use crate::firmware::telemetry;
 
 const UPLOAD_HTTP_PORT: u16 = 8080;
 const UPLOAD_HTTP_ROOT: &str = "/assets";
@@ -110,6 +111,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             })
             .await;
         if let Err(err) = accepted {
+            telemetry::record_upload_http_accept_error();
             esp_println::println!("upload_http: accept err={:?}", err);
             continue;
         }
@@ -121,6 +123,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         )
         .await
         {
+            telemetry::record_upload_http_request_error();
             esp_println::println!("upload_http: request err={}", err);
         }
 

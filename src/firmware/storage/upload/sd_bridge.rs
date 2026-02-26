@@ -4,6 +4,7 @@ use embassy_time::{with_timeout, Duration};
 use super::super::super::{
     config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
     storage::transfer_buffers,
+    telemetry,
     types::{
         SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, SD_UPLOAD_CHUNK_MAX,
     },
@@ -20,6 +21,7 @@ pub(crate) enum SdUploadRoundtripError {
 
 pub(crate) async fn sd_upload_chunk(data: &[u8]) -> Result<SdUploadResult, SdUploadRoundtripError> {
     if data.len() > SD_UPLOAD_CHUNK_MAX {
+        telemetry::record_sd_upload_roundtrip_code(SdUploadResultCode::OperationFailed);
         return Err(SdUploadRoundtripError::Device(
             SdUploadResultCode::OperationFailed,
         ));
@@ -122,6 +124,7 @@ async fn sd_upload_roundtrip_raw_locked(
             // If a response raced with timeout handling, clear it so the next
             // roundtrip cannot consume a stale result.
             drain_stale_sd_upload_results();
+            telemetry::record_sd_upload_roundtrip_timeout();
             return Err(SdUploadRoundtripError::Timeout);
         }
     };
@@ -129,6 +132,7 @@ async fn sd_upload_roundtrip_raw_locked(
     if result.ok {
         Ok(result)
     } else {
+        telemetry::record_sd_upload_roundtrip_code(result.code);
         Err(SdUploadRoundtripError::Device(result.code))
     }
 }

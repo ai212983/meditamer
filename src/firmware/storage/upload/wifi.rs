@@ -4,6 +4,7 @@ use super::super::super::{
         WIFI_CREDENTIALS_UPDATES,
     },
     runtime::service_mode,
+    telemetry,
     types::{
         WifiConfigRequest, WifiConfigResultCode, WifiCredentials, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
     },
@@ -186,8 +187,10 @@ pub(super) async fn run_wifi_connection_task(
             }
         }
 
+        telemetry::record_wifi_connect_attempt(channel_hint, auth_method_idx);
         match controller.connect_async().await {
             Ok(()) => {
+                telemetry::record_wifi_connect_success();
                 println!("upload_http: wifi connected");
                 match select(
                     controller.wait_for_event(WifiEvent::StaDisconnected),
@@ -209,6 +212,7 @@ pub(super) async fn run_wifi_connection_task(
             }
             Err(err) => {
                 let disconnect_reason = WIFI_LAST_DISCONNECT_REASON.swap(0, Ordering::Relaxed);
+                telemetry::record_wifi_connect_failure(disconnect_reason);
                 let discovery_reason = is_discovery_disconnect_reason(disconnect_reason);
                 let should_scan = channel_hint.is_none() || channel_probe_idx % 4 == 0;
                 let mut observed_channel = None;
@@ -494,6 +498,7 @@ async fn log_scan_for_target(
 
 fn log_scan_results(label: &str, target_ssid: &str, results: &[AccessPointInfo]) -> Option<u8> {
     if results.is_empty() {
+        telemetry::record_wifi_scan(0, false);
         println!(
             "upload_http: scan {} found=0 target_ssid={}",
             label, target_ssid
@@ -525,5 +530,6 @@ fn log_scan_results(label: &str, target_ssid: &str, results: &[AccessPointInfo])
             target_ssid, channel, label
         );
     }
+    telemetry::record_wifi_scan(results.len(), discovered_channel.is_some());
     discovered_channel
 }

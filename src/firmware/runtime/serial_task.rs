@@ -13,6 +13,7 @@ use super::super::{
         LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, MODE_APPLY_ACK_TIMEOUT_MS, SD_RESULTS,
         TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
     },
+    telemetry,
     touch::{
         config::{
             TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED,
@@ -138,13 +139,43 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                         SerialCommand::Metrics => {
                             let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
                             let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                            let mut line = heapless::String::<96>::new();
+                            let snapshot = telemetry::snapshot();
+
+                            let mut line = heapless::String::<160>::new();
                             let _ = write!(
                                 &mut line,
                                 "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
                                 last_ms, max_ms
                             );
                             let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+
+                            let mut wifi_line = heapless::String::<256>::new();
+                            let _ = write!(
+                                &mut wifi_line,
+                                "METRICS WIFI attempt={} success={} failure={} no_ap={} scan_runs={} scan_empty={} scan_hits={}\r\n",
+                                snapshot.wifi_connect_attempts,
+                                snapshot.wifi_connect_successes,
+                                snapshot.wifi_connect_failures,
+                                snapshot.wifi_reason_no_ap_found,
+                                snapshot.wifi_scan_runs,
+                                snapshot.wifi_scan_empty,
+                                snapshot.wifi_scan_target_hits,
+                            );
+                            let _ = uart_write_all(&mut uart, wifi_line.as_bytes()).await;
+
+                            let mut upload_line = heapless::String::<256>::new();
+                            let _ = write!(
+                                &mut upload_line,
+                                "METRICS UPLOAD accept_err={} request_err={} sd_errors={} sd_busy={} sd_timeouts={} sd_power_on_fail={} sd_init_fail={}\r\n",
+                                snapshot.upload_http_accept_errors,
+                                snapshot.upload_http_request_errors,
+                                snapshot.sd_upload_errors,
+                                snapshot.sd_upload_busy,
+                                snapshot.sd_upload_timeouts,
+                                snapshot.sd_upload_power_on_failed,
+                                snapshot.sd_upload_init_failed,
+                            );
+                            let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
                         }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;

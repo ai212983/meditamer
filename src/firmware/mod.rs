@@ -7,6 +7,7 @@ pub(crate) mod psram;
 mod render;
 mod runtime;
 mod storage;
+pub(crate) mod telemetry;
 mod touch;
 pub(crate) mod types;
 pub(crate) mod ui;

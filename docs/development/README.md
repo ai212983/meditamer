@@ -195,6 +195,24 @@ For boards without reset wiring/button, prefer raw mode:
 ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=raw scripts/monitor.sh
 ```
 
+### Defmt Telemetry
+
+Firmware supports optional `defmt` telemetry via feature `telemetry-defmt`.
+
+Build/flash with defmt telemetry enabled:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 CARGO_FEATURES=telemetry-defmt scripts/flash.sh debug
+```
+
+Use espflash monitor mode (not raw cat/tio) to decode defmt frames:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=espflash scripts/monitor.sh
+```
+
+Raw monitor mode (`ESPFLASH_MONITOR_MODE=raw`) does not decode defmt frames.
+
 ## Time Sync
 
 Firmware accepts a UART command on `UART0` (`115200` baud):
