@@ -166,12 +166,17 @@ apply_mode() {
         local start_line
         start_line="$(wc -l <"$output_path")"
         send_line "$command"
-        if wait_for_pattern_from_line "$start_line" "MODE (OK|BUSY)" 4; then
+        if wait_for_pattern_from_line "$start_line" "MODE (OK|BUSY|ERR)" 4; then
             local line
-            line="$(first_match_from_line "$start_line" "MODE (OK|BUSY)")"
+            line="$(first_match_from_line "$start_line" "MODE (OK|BUSY|ERR)")"
             if [[ "$line" == *"MODE OK"* ]]; then
                 ok=1
                 break
+            fi
+            if [[ "$line" == *"MODE ERR"* ]]; then
+                echo "[FAIL] mode command returned error: $line" >&2
+                tail -n 120 "$output_path" >&2
+                exit 1
             fi
         fi
         attempt=$((attempt + 1))
