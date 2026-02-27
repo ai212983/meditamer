@@ -1,5 +1,5 @@
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
-use embassy_time::{with_timeout, Duration, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use static_cell::StaticCell;
 
 mod connection;
@@ -89,31 +89,47 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
 
     let mut listening_logged = false;
     let mut waiting_dhcp_logged = false;
+    let mut dhcp_wait_started_at: Option<Instant> = None;
+    let mut dhcp_ready = false;
     telemetry::set_upload_http_listener(false, None);
 
     loop {
         if !service_mode::upload_enabled() {
             listening_logged = false;
             waiting_dhcp_logged = false;
+            dhcp_wait_started_at = None;
+            dhcp_ready = false;
             telemetry::set_upload_http_listener(false, None);
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
 
         // Gate HTTP on active link + DHCP lease to avoid advertising an unusable listener.
-        let local_ipv4 = match dhcp_ipv4_ready(&stack) {
-            Some(ipv4) => ipv4,
-            None => {
+        let local_ipv4 = match dhcp_ipv4_status(&stack) {
+            Ok(ipv4) => ipv4,
+            Err(gate_reason) => {
+                telemetry::record_net_pipeline_gate(gate_reason);
+                dhcp_ready = false;
                 listening_logged = false;
                 telemetry::set_upload_http_listener(false, None);
                 if !waiting_dhcp_logged {
                     esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
                     waiting_dhcp_logged = true;
                 }
+                if dhcp_wait_started_at.is_none() {
+                    dhcp_wait_started_at = Some(Instant::now());
+                }
                 Timer::after(Duration::from_millis(DHCP_POLL_MS)).await;
                 continue;
             }
         };
+        if let Some(started_at) = dhcp_wait_started_at.take() {
+            telemetry::record_net_pipeline_dhcp_wait(elapsed_ms_u32(started_at));
+        }
+        if !dhcp_ready {
+            telemetry::record_net_pipeline_dhcp_ready();
+            dhcp_ready = true;
+        }
         if waiting_dhcp_logged {
             esp_println::println!(
                 "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
@@ -141,18 +157,21 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
         telemetry::set_upload_http_listener(true, Some(local_ipv4));
 
+        let accept_started_at = Instant::now();
         let accepted = socket
             .accept(IpListenEndpoint {
                 addr: None,
                 port: UPLOAD_HTTP_PORT,
             })
             .await;
+        telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
         if let Err(err) = accepted {
             telemetry::record_upload_http_accept_error();
-            if dhcp_ipv4_ready(&stack).is_none() {
+            if dhcp_ipv4_status(&stack).is_err() {
                 telemetry::record_upload_http_accept_link_reset();
                 listening_logged = false;
                 waiting_dhcp_logged = false;
+                dhcp_ready = false;
             }
             telemetry::set_upload_http_listener(false, None);
             esp_println::println!("upload_http: accept err={:?}", err);
@@ -179,12 +198,25 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     }
 }
 
-fn dhcp_ipv4_ready(stack: &Stack<'static>) -> Option<[u8; 4]> {
+fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPipelineGate> {
     if !telemetry::wifi_link_connected() || !stack.is_link_up() {
-        return None;
+        if !telemetry::wifi_link_connected() {
+            return Err(telemetry::NetPipelineGate::WifiDown);
+        }
+        return Err(telemetry::NetPipelineGate::LinkDown);
     }
     stack
         .config_v4()
         .map(|cfg| cfg.address.address().octets())
         .filter(|ip| *ip != [0, 0, 0, 0])
+        .ok_or(telemetry::NetPipelineGate::NoIpv4)
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
+    }
 }

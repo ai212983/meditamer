@@ -166,6 +166,70 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, wifi_line.as_bytes()).await;
 
+                            let mut wifi_reassoc_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut wifi_reassoc_line,
+                                "METRICS WIFI_REASSOC mode_pause={} mode_resume={} cred_rx={} cred_chg={} cfg_apply={} start_ok={} start_err={} conn_begin={} conn_ok={} conn_err={} disc_evt={} probe={} auth_rot={} hint_retry={} conn_ms={} conn_ms_max={}\r\n",
+                                snapshot.wifi_reassoc_mode_pauses,
+                                snapshot.wifi_reassoc_mode_resumes,
+                                snapshot.wifi_reassoc_credentials_received,
+                                snapshot.wifi_reassoc_credentials_changed,
+                                snapshot.wifi_reassoc_config_applied,
+                                snapshot.wifi_reassoc_start_ok,
+                                snapshot.wifi_reassoc_start_err,
+                                snapshot.wifi_reassoc_connect_begin,
+                                snapshot.wifi_reassoc_connect_success,
+                                snapshot.wifi_reassoc_connect_failure,
+                                snapshot.wifi_reassoc_disconnect_events,
+                                snapshot.wifi_reassoc_channel_probes,
+                                snapshot.wifi_reassoc_auth_rotations,
+                                snapshot.wifi_reassoc_hint_retries,
+                                snapshot.wifi_reassoc_connect_ms_total,
+                                snapshot.wifi_reassoc_connect_ms_max,
+                            );
+                            let _ = uart_write_all(&mut uart, wifi_reassoc_line.as_bytes()).await;
+
+                            let mut wifi_scan_diag_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut wifi_scan_diag_line,
+                                "METRICS WIFI_SCAN_DIAG active_n={} active_empty={} active_hit={} active_ms={} active_ms_max={} passive_n={} passive_empty={} passive_hit={} passive_ms={} passive_ms_max={} last_scan_ch={}\r\n",
+                                snapshot.wifi_reassoc_scan_active_runs,
+                                snapshot.wifi_reassoc_scan_active_empty,
+                                snapshot.wifi_reassoc_scan_active_hits,
+                                snapshot.wifi_reassoc_scan_active_ms_total,
+                                snapshot.wifi_reassoc_scan_active_ms_max,
+                                snapshot.wifi_reassoc_scan_passive_runs,
+                                snapshot.wifi_reassoc_scan_passive_empty,
+                                snapshot.wifi_reassoc_scan_passive_hits,
+                                snapshot.wifi_reassoc_scan_passive_ms_total,
+                                snapshot.wifi_reassoc_scan_passive_ms_max,
+                                snapshot.wifi_reassoc_last_scan_channel,
+                            );
+                            let _ = uart_write_all(&mut uart, wifi_scan_diag_line.as_bytes()).await;
+
+                            let mut wifi_reason_diag_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut wifi_reason_diag_line,
+                                "METRICS WIFI_REASON_DIAG r2={} r201={} r202={} r203={} r204={} r205={} r210={} r211={} r212={} rother={} last_reason={} last_auth={} last_ch={} last_probe={} last_stage={}\r\n",
+                                snapshot.wifi_reassoc_reason_2,
+                                snapshot.wifi_reassoc_reason_201,
+                                snapshot.wifi_reassoc_reason_202,
+                                snapshot.wifi_reassoc_reason_203,
+                                snapshot.wifi_reassoc_reason_204,
+                                snapshot.wifi_reassoc_reason_205,
+                                snapshot.wifi_reassoc_reason_210,
+                                snapshot.wifi_reassoc_reason_211,
+                                snapshot.wifi_reassoc_reason_212,
+                                snapshot.wifi_reassoc_reason_other,
+                                snapshot.wifi_reassoc_last_reason,
+                                snapshot.wifi_reassoc_last_auth_idx,
+                                snapshot.wifi_reassoc_last_channel_hint,
+                                snapshot.wifi_reassoc_last_probe_idx,
+                                snapshot.wifi_reassoc_last_stage,
+                            );
+                            let _ =
+                                uart_write_all(&mut uart, wifi_reason_diag_line.as_bytes()).await;
+
                             let mut upload_line = heapless::String::<320>::new();
                             let _ = write!(
                                 &mut upload_line,
@@ -240,6 +304,25 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
 
+                            let mut net_pipeline_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut net_pipeline_line,
+                                "METRICS NET_PIPELINE dhcp_wait_n={} dhcp_wait_ms={} dhcp_wait_ms_max={} dhcp_ready={} gate_wifi_down={} gate_link_down={} gate_no_ipv4={} listener_on={} listener_off={} accept_wait_n={} accept_wait_ms={} accept_wait_ms_max={}\r\n",
+                                snapshot.net_pipeline_dhcp_wait_count,
+                                snapshot.net_pipeline_dhcp_wait_ms_total,
+                                snapshot.net_pipeline_dhcp_wait_ms_max,
+                                snapshot.net_pipeline_dhcp_ready_count,
+                                snapshot.net_pipeline_gate_wifi_down,
+                                snapshot.net_pipeline_gate_link_down,
+                                snapshot.net_pipeline_gate_no_ipv4,
+                                snapshot.net_pipeline_listener_on,
+                                snapshot.net_pipeline_listener_off,
+                                snapshot.net_pipeline_accept_wait_count,
+                                snapshot.net_pipeline_accept_wait_ms_total,
+                                snapshot.net_pipeline_accept_wait_ms_max,
+                            );
+                            let _ = uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
+
                             let mut liveness_line = heapless::String::<224>::new();
                             let _ = write!(
                                 &mut liveness_line,
@@ -249,6 +332,52 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_connected_watchdog_disconnects,
                             );
                             let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+                        }
+                        SerialCommand::MetricsNet => {
+                            let snapshot = telemetry::snapshot();
+                            let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
+
+                            let mut net_line = heapless::String::<160>::new();
+                            let _ = write!(
+                                &mut net_line,
+                                "METRICS NET wifi_connected={} http_listening={} ip={}.{}.{}.{}\r\n",
+                                if snapshot.wifi_link_connected { 1 } else { 0 },
+                                if snapshot.upload_http_listening { 1 } else { 0 },
+                                ip[0],
+                                ip[1],
+                                ip[2],
+                                ip[3],
+                            );
+                            let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
+
+                            let mut liveness_line = heapless::String::<224>::new();
+                            let _ = write!(
+                                &mut liveness_line,
+                                "METRICS LIVENESS accept_link_reset={} health={} wifi_watchdog_disc={}\r\n",
+                                snapshot.upload_http_accept_link_resets,
+                                snapshot.upload_http_health_requests,
+                                snapshot.wifi_connected_watchdog_disconnects,
+                            );
+                            let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+
+                            let mut net_pipeline_line = heapless::String::<512>::new();
+                            let _ = write!(
+                                &mut net_pipeline_line,
+                                "METRICS NET_PIPELINE dhcp_wait_n={} dhcp_wait_ms={} dhcp_wait_ms_max={} dhcp_ready={} gate_wifi_down={} gate_link_down={} gate_no_ipv4={} listener_on={} listener_off={} accept_wait_n={} accept_wait_ms={} accept_wait_ms_max={}\r\n",
+                                snapshot.net_pipeline_dhcp_wait_count,
+                                snapshot.net_pipeline_dhcp_wait_ms_total,
+                                snapshot.net_pipeline_dhcp_wait_ms_max,
+                                snapshot.net_pipeline_dhcp_ready_count,
+                                snapshot.net_pipeline_gate_wifi_down,
+                                snapshot.net_pipeline_gate_link_down,
+                                snapshot.net_pipeline_gate_no_ipv4,
+                                snapshot.net_pipeline_listener_on,
+                                snapshot.net_pipeline_listener_off,
+                                snapshot.net_pipeline_accept_wait_count,
+                                snapshot.net_pipeline_accept_wait_ms_total,
+                                snapshot.net_pipeline_accept_wait_ms_max,
+                            );
+                            let _ = uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
                         }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;

@@ -9,6 +9,7 @@ import os
 import re
 import select
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -313,6 +314,52 @@ def http_health_once(ip: str, timeout_s: float = 2.5) -> bool:
         conn.close()
 
 
+def run_host_command(cmd: list[str], timeout_s: float = 2.0) -> str:
+    try:
+        out = subprocess.check_output(
+            cmd,
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=timeout_s,
+        )
+        result = out.strip()
+        return result if result else "<empty>"
+    except Exception as exc:
+        return f"<err {type(exc).__name__}: {exc}>"
+
+
+def tcp_connect_probe(ip: str, port: int = 8080, timeout_s: float = 1.5) -> str:
+    started = time.monotonic()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout_s)
+    try:
+        sock.connect((ip, port))
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return f"ok {elapsed_ms}ms"
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return f"err {elapsed_ms}ms {type(exc).__name__}: {exc}"
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def build_health_timeout_diag(candidates: list[str], mac: str) -> str:
+    parts: list[str] = []
+    if mac:
+        parts.append(f"target_mac={mac}")
+    for ip in candidates:
+        arp_line = run_host_command(["arp", "-an", ip], timeout_s=2)
+        route_line = run_host_command(["route", "-n", "get", ip], timeout_s=2)
+        tcp_line = tcp_connect_probe(ip)
+        parts.append(
+            f"ip={ip} tcp={tcp_line} arp={arp_line!r} route={route_line!r}"
+        )
+    return " | ".join(parts)
+
+
 def wait_mode_ack(console: SerialConsole, command: str, tag: str, attempts: int = 20) -> bool:
     for _ in range(attempts):
         line, _ = console.command_wait(command, rf"^{tag} (OK|BUSY|ERR)", 4)
@@ -350,7 +397,7 @@ def maybe_wifiset(console: SerialConsole, ssid: str, password: str) -> None:
 
 
 def query_metrics_net(console: SerialConsole) -> tuple[int, int, str] | None:
-    console.send_line("METRICS")
+    console.send_line("METRICSNET")
     line, _ = console.wait_regex(
         r"^METRICS NET wifi_connected=([01]) http_listening=([01]) ip=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$",
         4,
@@ -541,7 +588,10 @@ def wait_health_reachable(
         time.sleep(1)
 
     candidates = dedupe_ips([metrics_ip] + discovered_ips)
-    raise RuntimeError(f"/health did not respond (candidates={candidates})")
+    diag = build_health_timeout_diag(candidates, mac)
+    raise RuntimeError(
+        f"/health did not respond (candidates={candidates}; host_diag={diag})"
+    )
 
 
 def capture_metrics_lines(console: SerialConsole, timeout_s: float = 3.0) -> list[str]:
