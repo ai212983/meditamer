@@ -15,6 +15,7 @@ UPLOAD_NET_RECOVERY_TIMEOUT_S = float(
 )
 UPLOAD_NET_RECOVERY_POLL_S = float(os.getenv("UPLOAD_NET_RECOVERY_POLL_SEC", "0.8"))
 UPLOAD_SD_BUSY_TOTAL_RETRY_S = float(os.getenv("UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", "180"))
+UPLOAD_CONNECT_TIMEOUT_S = float(os.getenv("UPLOAD_CONNECT_TIMEOUT_SEC", "4"))
 UPLOAD_SKIP_MKDIR = os.getenv("UPLOAD_SKIP_MKDIR", "0") == "1"
 
 
@@ -83,10 +84,16 @@ def request(
     attempts = max(1, retries)
     last_exc = None
     for attempt in range(attempts):
-        conn = http.client.HTTPConnection(host=host, port=port, timeout=timeout)
+        connect_timeout = min(timeout, max(0.5, UPLOAD_CONNECT_TIMEOUT_S))
+        conn = http.client.HTTPConnection(host=host, port=port, timeout=connect_timeout)
         try:
             if attempt > 0 and hasattr(body, "seek"):
                 body.seek(0)
+            # Keep connect timeout short so transient reachability loss does not
+            # pin the uploader in long SYN_SENT states.
+            conn.connect()
+            if conn.sock is not None:
+                conn.sock.settimeout(timeout)
             conn.request(method=method, url=target, body=body, headers=headers)
             resp = conn.getresponse()
             data = resp.read()
