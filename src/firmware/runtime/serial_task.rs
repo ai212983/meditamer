@@ -332,6 +332,14 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_connected_watchdog_disconnects,
                             );
                             let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+
+                            let mut boot_line = heapless::String::<96>::new();
+                            let _ = write!(
+                                &mut boot_line,
+                                "METRICS BOOT reset_code={}\r\n",
+                                snapshot.boot_reset_reason_code,
+                            );
+                            let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
                         }
                         SerialCommand::MetricsNet => {
                             let snapshot = telemetry::snapshot();
@@ -359,6 +367,14 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_connected_watchdog_disconnects,
                             );
                             let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+
+                            let mut boot_line = heapless::String::<96>::new();
+                            let _ = write!(
+                                &mut boot_line,
+                                "METRICS BOOT reset_code={}\r\n",
+                                snapshot.boot_reset_reason_code,
+                            );
+                            let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
 
                             let mut net_pipeline_line = heapless::String::<512>::new();
                             let _ = write!(

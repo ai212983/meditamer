@@ -105,6 +105,7 @@ static SD_UPLOAD_RTT_MKDIR_MS_MAX: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_RTT_REMOVE_COUNT: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_RTT_REMOVE_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_RTT_REMOVE_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static BOOT_RESET_REASON_CODE: AtomicU32 = AtomicU32::new(0);
 static WIFI_LINK_CONNECTED: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_LISTENING: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_IPV4: AtomicU32 = AtomicU32::new(0);
@@ -237,6 +238,7 @@ pub(crate) struct Snapshot {
     pub(crate) sd_upload_rtt_remove_count: u32,
     pub(crate) sd_upload_rtt_remove_ms_total: u32,
     pub(crate) sd_upload_rtt_remove_ms_max: u32,
+    pub(crate) boot_reset_reason_code: u8,
     pub(crate) wifi_link_connected: bool,
     pub(crate) upload_http_listening: bool,
     pub(crate) upload_http_ipv4: Option<[u8; 4]>,
@@ -367,6 +369,7 @@ pub(crate) fn snapshot() -> Snapshot {
         sd_upload_rtt_remove_count: SD_UPLOAD_RTT_REMOVE_COUNT.load(Ordering::Relaxed),
         sd_upload_rtt_remove_ms_total: SD_UPLOAD_RTT_REMOVE_MS_TOTAL.load(Ordering::Relaxed),
         sd_upload_rtt_remove_ms_max: SD_UPLOAD_RTT_REMOVE_MS_MAX.load(Ordering::Relaxed),
+        boot_reset_reason_code: BOOT_RESET_REASON_CODE.load(Ordering::Relaxed) as u8,
         wifi_link_connected: WIFI_LINK_CONNECTED.load(Ordering::Relaxed),
         upload_http_listening: UPLOAD_HTTP_LISTENING.load(Ordering::Relaxed),
         upload_http_ipv4,
@@ -728,6 +731,10 @@ pub(crate) fn record_sd_upload_roundtrip_timing(phase: SdUploadRoundtripPhase, e
     count.fetch_add(1, Ordering::Relaxed);
     saturating_add_u32(total, elapsed_ms);
     update_max_u32(max, elapsed_ms);
+}
+
+pub(crate) fn set_boot_reset_reason_code(code: Option<u8>) {
+    BOOT_RESET_REASON_CODE.store(code.unwrap_or(0) as u32, Ordering::Relaxed);
 }
 
 pub(crate) fn record_sd_upload_session_timeout_abort() {

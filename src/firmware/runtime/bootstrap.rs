@@ -17,13 +17,14 @@ use super::super::config::{
 };
 use super::super::storage::ModeStore;
 use super::super::types::{AppEvent, DisplayContext, PanelPinHold, RuntimeServices};
-use super::super::{psram, storage, touch};
+use super::super::{psram, storage, telemetry, touch};
 use super::service_mode;
 use sdcard::probe;
 
 pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let reset_reason = esp_hal::system::reset_reason();
+    telemetry::set_boot_reset_reason_code(reset_reason.map(|value| value as u8));
     esp_println::println!(
         "BOOT_RESET reason={:?} code={}",
         reset_reason,
