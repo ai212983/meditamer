@@ -366,24 +366,38 @@ pub(super) async fn handle_mkdir(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> SdUploadResult {
+    esp_println::println!("sd_upload: mkdir enter");
     if session.is_some() {
+        esp_println::println!("sd_upload: mkdir busy(active session)");
         return upload_result(false, SdUploadResultCode::Busy, 0);
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        esp_println::println!(
+            "sd_upload: mkdir ensure_upload_ready failed code={:?}",
+            code
+        );
         return upload_result(false, code, 0);
     }
 
     let path_str = match parse_upload_path(&path, path_len) {
         Ok(path) => path,
-        Err(code) => return upload_result(false, code, 0),
+        Err(code) => {
+            esp_println::println!("sd_upload: mkdir invalid path code={:?}", code);
+            return upload_result(false, code, 0);
+        }
     };
+    esp_println::println!("sd_upload: mkdir path={}", path_str);
 
     match fat::mkdir(sd_probe, path_str).await {
         Ok(()) | Err(fat::SdFatError::AlreadyExists) => {
+            esp_println::println!("sd_upload: mkdir ok/already_exists");
             upload_result(true, SdUploadResultCode::Ok, 0)
         }
-        Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+        Err(err) => {
+            esp_println::println!("sd_upload: mkdir fat error={:?}", err);
+            upload_result(false, map_fat_error_to_upload_code(&err), 0)
+        }
     }
 }
 

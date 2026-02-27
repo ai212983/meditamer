@@ -476,7 +476,13 @@ def verify_remote_file(console: SerialConsole, remote_path: str, timeout_ms: int
     return False
 
 
-def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_s: int) -> None:
+def run_upload(
+    host_ip: str,
+    payload_path: str,
+    cycle_remote_root: str,
+    timeout_s: int,
+    console: SerialConsole | None = None,
+) -> None:
     global ACTIVE_UPLOAD_PROCESS
     payload_bytes = Path(payload_path).stat().st_size
     # SD append path can be slow on this platform (many 1KiB roundtrips).
@@ -517,7 +523,17 @@ def run_upload(host_ip: str, payload_path: str, cycle_remote_root: str, timeout_
             env=upload_env,
         )
         ACTIVE_UPLOAD_PROCESS = process
-        stdout_data, stderr_data = process.communicate(timeout=subprocess_timeout_s)
+        deadline = time.monotonic() + subprocess_timeout_s
+        while process.poll() is None:
+            if console is not None:
+                try:
+                    console._read_lines(0.05)
+                except Exception:
+                    pass
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(cmd, subprocess_timeout_s)
+            time.sleep(0.05)
+        stdout_data, stderr_data = process.communicate(timeout=2)
         completed = subprocess.CompletedProcess(
             cmd, process.returncode, stdout=stdout_data, stderr=stderr_data
         )
@@ -781,7 +797,13 @@ def main() -> int:
             for upload_attempt in range(1, operation_retries + 1):
                 started = time.monotonic()
                 try:
-                    run_upload(ip, payload_path, cycle_root, effective_upload_timeout_s)
+                    run_upload(
+                        ip,
+                        payload_path,
+                        cycle_root,
+                        effective_upload_timeout_s,
+                        console,
+                    )
                     upload_ms = int((time.monotonic() - started) * 1000)
                     break
                 except Exception as exc:

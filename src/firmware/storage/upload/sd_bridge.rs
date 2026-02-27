@@ -1,5 +1,5 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{with_timeout, Duration, Instant};
+use embassy_time::{Duration, Instant, Timer};
 
 use super::super::super::{
     config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
@@ -115,14 +115,9 @@ async fn sd_upload_roundtrip_raw_locked(
     let started_at = Instant::now();
     SD_UPLOAD_REQUESTS.send(SdUploadRequest { command }).await;
 
-    let result = match with_timeout(
-        Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS),
-        SD_UPLOAD_RESULTS.receive(),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
+    let result = match receive_sd_upload_result_with_timeout(started_at).await {
+        Some(result) => result,
+        None => {
             // If a response raced with timeout handling, clear it so the next
             // roundtrip cannot consume a stale result.
             drain_stale_sd_upload_results();
@@ -138,6 +133,18 @@ async fn sd_upload_roundtrip_raw_locked(
     } else {
         telemetry::record_sd_upload_roundtrip_code(result.code);
         Err(SdUploadRoundtripError::Device(result.code))
+    }
+}
+
+async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<SdUploadResult> {
+    loop {
+        if let Ok(result) = SD_UPLOAD_RESULTS.try_receive() {
+            return Some(result);
+        }
+        if started_at.elapsed() >= Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS) {
+            return None;
+        }
+        Timer::after(Duration::from_millis(1)).await;
     }
 }
 
