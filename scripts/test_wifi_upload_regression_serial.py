@@ -9,6 +9,7 @@ import os
 import re
 import select
 import signal
+import shlex
 import socket
 import struct
 import subprocess
@@ -621,6 +622,62 @@ def print_metrics_snapshot(
         print(f"{prefix} {line}", file=stream)
 
 
+def extract_backtrace_addresses_from_log(log_path: Path, limit: int = 24) -> list[str]:
+    if not log_path.exists():
+        return []
+    addresses: list[str] = []
+    seen = set()
+    try:
+        for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            for match in re.findall(r"0x401[0-9a-fA-F]+", line):
+                if match in seen:
+                    continue
+                seen.add(match)
+                addresses.append(match)
+                if len(addresses) >= limit:
+                    return addresses
+    except Exception:
+        return []
+    return addresses
+
+
+def decode_backtrace_addresses(addresses: list[str], elf_path: Path) -> list[str]:
+    if not addresses or not elf_path.exists():
+        return []
+    addr2line_cmd = [
+        "xtensa-esp32-elf-addr2line",
+        "-pfiaC",
+        "-e",
+        str(elf_path),
+        *addresses,
+    ]
+    commands: list[list[str]] = [
+        addr2line_cmd,
+        [
+            "zsh",
+            "-lc",
+            (
+                "source \"$HOME/export-esp.sh\" >/dev/null 2>&1 && "
+                + " ".join(shlex.quote(part) for part in addr2line_cmd)
+            ),
+        ],
+    ]
+    for cmd in commands:
+        try:
+            out = subprocess.check_output(
+                cmd,
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=6,
+            )
+        except Exception:
+            continue
+        decoded = [line.strip() for line in out.splitlines() if line.strip()]
+        if decoded:
+            return decoded
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("output_path", nargs="?", default="")
@@ -815,6 +872,17 @@ def main() -> int:
         if console is not None:
             for line in capture_metrics_lines(console):
                 print(f"[FAIL_METRICS] {line}", file=sys.stderr)
+        addrs = extract_backtrace_addresses_from_log(log_path)
+        if addrs:
+            print(f"[FAIL_BT_ADDRS] {' '.join(addrs)}", file=sys.stderr)
+            elf_env = os.getenv("WIFI_UPLOAD_ADDR2LINE_ELF", "").strip()
+            if elf_env:
+                elf_path = Path(elf_env)
+            else:
+                elf_path = Path("target/xtensa-esp32-none-elf/debug/meditamer")
+            decoded = decode_backtrace_addresses(addrs, elf_path)
+            for line in decoded:
+                print(f"[FAIL_BT_DECODE] {line}", file=sys.stderr)
         print(f"[FAIL] {exc}", file=sys.stderr)
         print(f"Log: {log_path}", file=sys.stderr)
         return 1

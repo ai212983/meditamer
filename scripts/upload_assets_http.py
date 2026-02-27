@@ -17,6 +17,13 @@ UPLOAD_NET_RECOVERY_POLL_S = float(os.getenv("UPLOAD_NET_RECOVERY_POLL_SEC", "0.
 UPLOAD_SD_BUSY_TOTAL_RETRY_S = float(os.getenv("UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", "180"))
 UPLOAD_CONNECT_TIMEOUT_S = float(os.getenv("UPLOAD_CONNECT_TIMEOUT_SEC", "4"))
 UPLOAD_SKIP_MKDIR = os.getenv("UPLOAD_SKIP_MKDIR", "0") == "1"
+UPLOAD_TRACE_REQUESTS = os.getenv("UPLOAD_TRACE_REQUESTS", "1") != "0"
+
+
+def trace_request(message: str) -> None:
+    if not UPLOAD_TRACE_REQUESTS:
+        return
+    print(f"[http] {message}", file=sys.stderr, flush=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,6 +98,10 @@ def request(
                 body.seek(0)
             # Keep connect timeout short so transient reachability loss does not
             # pin the uploader in long SYN_SENT states.
+            trace_request(
+                f"{method} {target} attempt={attempt + 1}/{attempts} "
+                f"connect_timeout={connect_timeout:.2f}s timeout={timeout:.2f}s"
+            )
             conn.connect()
             if conn.sock is not None:
                 conn.sock.settimeout(timeout)
@@ -101,6 +112,9 @@ def request(
                 raise RuntimeError(
                     f"{method} {target} failed: {resp.status} {resp.reason} {data.decode(errors='ignore')}"
                 )
+            trace_request(
+                f"{method} {target} status={resp.status} bytes={len(data)}"
+            )
             return data
         except (
             ConnectionRefusedError,
@@ -109,6 +123,10 @@ def request(
             OSError,
             http.client.HTTPException,
         ) as exc:
+            trace_request(
+                f"{method} {target} attempt={attempt + 1}/{attempts} "
+                f"error={type(exc).__name__}: {exc}"
+            )
             last_exc = exc
             if attempt + 1 >= attempts:
                 raise
