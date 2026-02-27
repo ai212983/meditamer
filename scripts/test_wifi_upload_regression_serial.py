@@ -352,7 +352,18 @@ def build_health_timeout_diag(candidates: list[str], mac: str) -> str:
     if mac:
         parts.append(f"target_mac={mac}")
     for ip in candidates:
-        arp_line = run_host_command(["arp", "-an", ip], timeout_s=2)
+        arp_dump = run_host_command(["arp", "-an"], timeout_s=2)
+        arp_line = "<missing>"
+        if "<err " in arp_dump:
+            arp_line = arp_dump
+        else:
+            match = re.search(
+                rf"^.*\({re.escape(ip)}\).*$",
+                arp_dump,
+                flags=re.MULTILINE,
+            )
+            if match:
+                arp_line = match.group(0)
         route_line = run_host_command(["route", "-n", "get", ip], timeout_s=2)
         tcp_line = tcp_connect_probe(ip)
         parts.append(

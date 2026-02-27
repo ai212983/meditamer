@@ -151,6 +151,7 @@ pub fn run() -> ! {
             spawner.must_spawn(storage::upload::wifi_connection_task(
                 upload_http_runtime.wifi_controller,
                 upload_http_runtime.initial_credentials,
+                upload_http_runtime.stack,
             ));
             spawner.must_spawn(storage::upload::net_task(upload_http_runtime.net_runner));
             spawner.must_spawn(storage::upload::http_server_task(upload_http_runtime.stack));
