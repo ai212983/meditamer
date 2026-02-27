@@ -21,10 +21,9 @@ where
         esp_println::println!("sdfat[{}]: ls power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: ls init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "ls", sd_probe, power, power_mode).await
+    {
+        return code;
     }
 
     let mut code = SdRuntimeResultCode::Ok;
@@ -80,14 +79,13 @@ where
         esp_println::println!("sdfat[{}]: read power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: read init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "read", sd_probe, power, power_mode).await
+    {
+        return code;
     }
 
     let mut code = SdRuntimeResultCode::Ok;
-    let mut data = [0u8; 256];
+    let mut data = [0u8; 96];
     match fat::read_file(sd_probe, path, &mut data).await {
         Ok(size) => {
             let preview_len = core::cmp::min(size, 64);
@@ -153,43 +151,15 @@ where
         esp_println::println!("sdfat[{}]: write power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: write init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "write", sd_probe, power, power_mode).await
+    {
+        return code;
     }
 
     let mut code = SdRuntimeResultCode::Ok;
     match fat::write_file(sd_probe, path, data).await {
         Ok(()) => {
-            let mut verify = [0u8; SD_WRITE_MAX];
-            let read_result = fat::read_file(sd_probe, path, &mut verify).await;
-            match read_result {
-                Ok(read_len) => {
-                    let cmp_len = core::cmp::min(read_len, data.len());
-                    let ok = cmp_len == data.len() && verify[..cmp_len] == data[..cmp_len];
-                    esp_println::println!(
-                        "sdfat[{}]: write_ok path={} bytes={} verify={}",
-                        reason,
-                        path,
-                        data.len(),
-                        if ok { "ok" } else { "mismatch" }
-                    );
-                    if !ok {
-                        code = SdRuntimeResultCode::VerifyMismatch;
-                    }
-                }
-                Err(err) => {
-                    esp_println::println!(
-                        "sdfat[{}]: write_ok path={} bytes={} verify_read_err={:?}",
-                        reason,
-                        path,
-                        data.len(),
-                        err
-                    );
-                    code = SdRuntimeResultCode::OperationFailed;
-                }
-            }
+            esp_println::println!("sdfat[{}]: write_ok path={} bytes={}", reason, path, data.len());
         }
         Err(err) => {
             esp_println::println!("sdfat[{}]: write_error path={} err={:?}", reason, path, err);

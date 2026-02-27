@@ -28,6 +28,20 @@ pub(super) async fn process_request(
         *powered = true;
     }
 
+    if !matches!(request.command, SdCommand::Probe) && !sd_probe.is_initialized() {
+        if let Err(err) = sd_probe.init().await {
+            esp_println::println!("sdtask: init_error id={} err={:?}", request.id, err);
+            return SdResult {
+                id: request.id,
+                kind,
+                ok: false,
+                code: SdResultCode::InitFailed,
+                attempts: 0,
+                duration_ms: 0,
+            };
+        }
+    }
+
     let start = Instant::now();
     let mut attempts = 0u8;
     let mut code = SdResultCode::OperationFailed;
@@ -47,6 +61,7 @@ pub(super) async fn process_request(
             if !request_sd_power(SdPowerRequest::Off).await {
                 let duration_ms = duration_ms_since(start);
                 *powered = false;
+                sd_probe.invalidate();
                 return SdResult {
                     id: request.id,
                     kind,
@@ -57,6 +72,7 @@ pub(super) async fn process_request(
                 };
             }
             *powered = false;
+            sd_probe.invalidate();
             if !request_sd_power(SdPowerRequest::On).await {
                 let duration_ms = duration_ms_since(start);
                 return SdResult {

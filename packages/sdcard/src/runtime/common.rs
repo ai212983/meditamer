@@ -60,3 +60,24 @@ fn fat_error_result_code(error: &fat::SdFatError) -> SdRuntimeResultCode {
         _ => SdRuntimeResultCode::OperationFailed,
     }
 }
+
+async fn ensure_initialized_for_fat<E, P>(
+    reason: &str,
+    op: &str,
+    sd_probe: &mut probe::SdCardProbe<'_>,
+    power: &mut P,
+    power_mode: SdPowerMode,
+) -> Result<(), SdRuntimeResultCode>
+where
+    P: FnMut(SdPowerAction) -> Result<(), E>,
+{
+    if sd_probe.is_initialized() {
+        return Ok(());
+    }
+    if let Err(err) = sd_probe.init().await {
+        esp_println::println!("sdfat[{}]: {} init_error={:?}", reason, op, err);
+        let _ = power_off_io(power, power_mode);
+        return Err(SdRuntimeResultCode::InitFailed);
+    }
+    Ok(())
+}

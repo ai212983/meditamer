@@ -153,6 +153,16 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         publish_wifi_config_response(disabled_wifi_config_response());
                         continue;
                     }
+                    if let Err(code) = ensure_upload_storage_ready(
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await
+                    {
+                        publish_wifi_config_response(wifi_config_error_response(code));
+                        continue;
+                    }
                     let response = process_wifi_config_request(
                         config_request,
                         &upload_session,
@@ -167,6 +177,20 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 Either3::Second(upload_request) => {
                     if !service_mode::upload_enabled() {
                         publish_upload_result(disabled_upload_result());
+                        continue;
+                    }
+                    if let Err(code) = ensure_upload_storage_ready(
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await
+                    {
+                        publish_upload_result(SdUploadResult {
+                            ok: false,
+                            code,
+                            bytes_written: 0,
+                        });
                         continue;
                     }
                     let result = process_upload_request(
@@ -195,6 +219,16 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         publish_wifi_config_response(disabled_wifi_config_response());
                         continue;
                     }
+                    if let Err(code) = ensure_upload_storage_ready(
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await
+                    {
+                        publish_wifi_config_response(wifi_config_error_response(code));
+                        continue;
+                    }
                     let response = process_wifi_config_request(
                         config_request,
                         &upload_session,
@@ -209,6 +243,20 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 Either3::Second(upload_request) => {
                     if !service_mode::upload_enabled() {
                         publish_upload_result(disabled_upload_result());
+                        continue;
+                    }
+                    if let Err(code) = ensure_upload_storage_ready(
+                        &mut sd_probe,
+                        &mut powered,
+                        &mut upload_mounted,
+                    )
+                    .await
+                    {
+                        publish_upload_result(SdUploadResult {
+                            ok: false,
+                            code,
+                            bytes_written: 0,
+                        });
                         continue;
                     }
                     let result = process_upload_request(
@@ -249,6 +297,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 esp_println::println!("sdtask: idle_power_off_failed");
             }
             powered = false;
+            sd_probe.invalidate();
             upload_mounted = false;
             continue;
         };
@@ -267,6 +316,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 esp_println::println!("sdtask: fail_power_off_failed");
             }
             powered = false;
+            sd_probe.invalidate();
             upload_mounted = false;
         }
     }
@@ -288,6 +338,46 @@ fn disabled_wifi_config_response() -> WifiConfigResponse {
         code: WifiConfigResultCode::Busy,
         credentials: None,
     }
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
+    let mapped = match code {
+        SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
+        SdUploadResultCode::InitFailed => WifiConfigResultCode::InitFailed,
+        _ => WifiConfigResultCode::OperationFailed,
+    };
+    WifiConfigResponse {
+        ok: false,
+        code: mapped,
+        credentials: None,
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+async fn ensure_upload_storage_ready(
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> Result<(), SdUploadResultCode> {
+    if !*powered {
+        if !request_sd_power(SdPowerRequest::On).await {
+            return Err(SdUploadResultCode::PowerOnFailed);
+        }
+        *powered = true;
+        *upload_mounted = false;
+    }
+
+    if !*upload_mounted {
+        if !sd_probe.is_initialized() {
+            if sd_probe.init().await.is_err() {
+                return Err(SdUploadResultCode::InitFailed);
+            }
+        }
+        *upload_mounted = true;
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "asset-upload-http")]

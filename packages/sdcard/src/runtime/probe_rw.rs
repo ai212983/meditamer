@@ -1,6 +1,6 @@
 use core::fmt::Write;
 
-use crate::{fat, power_off, power_on_for_io, probe, SD_WRITE_MAX};
+use crate::{fat, power_off, power_on_for_io, probe};
 
 #[derive(Clone, Copy)]
 pub enum SdPowerAction {

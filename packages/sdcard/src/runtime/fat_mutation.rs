@@ -20,10 +20,9 @@ where
         esp_println::println!("sdfat[{}]: stat power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: stat init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "stat", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::stat(sd_probe, path).await {
@@ -73,10 +72,9 @@ where
         esp_println::println!("sdfat[{}]: mkdir power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: mkdir init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "mkdir", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::mkdir(sd_probe, path).await {
@@ -115,10 +113,9 @@ where
         esp_println::println!("sdfat[{}]: rm power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: rm init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "rm", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::remove(sd_probe, path).await {
@@ -166,10 +163,9 @@ where
         esp_println::println!("sdfat[{}]: ren power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: ren init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "ren", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::rename(sd_probe, src_path, dst_path).await {
@@ -223,10 +219,9 @@ where
         esp_println::println!("sdfat[{}]: append power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: append init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "append", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::append_file(sd_probe, path, data).await {
@@ -277,10 +272,9 @@ where
         esp_println::println!("sdfat[{}]: trunc power_on_error", reason);
         return SdRuntimeResultCode::PowerOnFailed;
     }
-    if let Err(err) = sd_probe.init().await {
-        esp_println::println!("sdfat[{}]: trunc init_error={:?}", reason, err);
-        let _ = power_off_io(power, power_mode);
-        return SdRuntimeResultCode::InitFailed;
+    if let Err(code) = ensure_initialized_for_fat(reason, "trunc", sd_probe, power, power_mode).await
+    {
+        return code;
     }
     let mut code = SdRuntimeResultCode::Ok;
     match fat::truncate_file(sd_probe, path, size as usize).await {

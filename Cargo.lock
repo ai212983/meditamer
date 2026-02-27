@@ -1435,6 +1435,7 @@ name = "sdcard"
 version = "0.1.0"
 dependencies = [
  "embassy-time",
+ "embedded-hal 1.0.0",
  "esp-hal",
  "esp-println",
  "heapless 0.8.0",

@@ -21,6 +21,7 @@ monitor_mode="${SDCARD_TEST_MONITOR_MODE:-raw}"
 monitor_raw_backend="${SDCARD_TEST_MONITOR_RAW_BACKEND:-cat}"
 monitor_persist_raw="${SDCARD_TEST_MONITOR_PERSIST_RAW:-1}"
 monitor_raw_tio_mute="${SDCARD_TEST_MONITOR_RAW_TIO_MUTE:-0}"
+monitor_port="${SDCARD_TEST_MONITOR_PORT:-}"
 
 case "$suite" in
 all | baseline | burst | failures) ;;
@@ -32,6 +33,16 @@ esac
 
 mkdir -p "$(dirname "$output_path")"
 output_path="$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
+
+if [[ -z "$monitor_port" ]]; then
+    monitor_port="$ESPFLASH_PORT"
+    if [[ "$monitor_raw_backend" != "cat" && "$ESPFLASH_PORT" == /dev/cu.* ]]; then
+        candidate_monitor_port="/dev/tty.${ESPFLASH_PORT#/dev/cu.}"
+        if [[ -e "$candidate_monitor_port" ]]; then
+            monitor_port="$candidate_monitor_port"
+        fi
+    fi
+fi
 
 port_flag() {
     if stty --help >/dev/null 2>&1; then
@@ -59,7 +70,8 @@ if [[ "$flash_first" == "1" ]]; then
 fi
 
 echo "Starting monitor capture: $output_path"
-ESPFLASH_PORT="$ESPFLASH_PORT" \
+echo "Monitor port: $monitor_port (command port: $ESPFLASH_PORT)"
+ESPFLASH_PORT="$monitor_port" \
 ESPFLASH_MONITOR_MODE="$monitor_mode" \
 ESPFLASH_MONITOR_RAW_BACKEND="$monitor_raw_backend" \
 ESPFLASH_MONITOR_PERSIST_RAW="$monitor_persist_raw" \

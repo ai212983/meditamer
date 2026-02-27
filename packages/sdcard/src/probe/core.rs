@@ -1,4 +1,5 @@
 use embassy_time::Timer;
+use embedded_hal::spi::SpiBus;
 use esp_hal::{
     gpio::Output,
     spi::{
@@ -7,7 +8,7 @@ use esp_hal::{
         Mode as SpiMode,
     },
     time::Rate,
-    Async,
+    Blocking,
 };
 
 const SD_CMD0: u8 = 0;
@@ -82,7 +83,7 @@ impl From<SpiConfigError> for SdProbeError {
 }
 
 pub struct SdCardProbe<'d> {
-    spi: Spi<'d, Async>,
+    spi: Spi<'d, Blocking>,
     cs: Output<'d>,
     high_capacity: Option<bool>,
     cached_sector_lba: Option<u32>,
@@ -91,7 +92,7 @@ pub struct SdCardProbe<'d> {
 }
 
 impl<'d> SdCardProbe<'d> {
-    pub fn new(spi: Spi<'d, Async>, mut cs: Output<'d>) -> Self {
+    pub fn new(spi: Spi<'d, Blocking>, mut cs: Output<'d>) -> Self {
         cs.set_high();
         Self {
             spi,
@@ -101,6 +102,16 @@ impl<'d> SdCardProbe<'d> {
             cached_sector: [0; SD_SECTOR_SIZE],
             next_free_cluster_hint: None,
         }
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.high_capacity.is_some()
+    }
+
+    pub fn invalidate(&mut self) {
+        self.high_capacity = None;
+        self.cached_sector_lba = None;
+        self.next_free_cluster_hint = None;
     }
 
     pub async fn init(&mut self) -> Result<SdProbeStatus, SdProbeError> {
@@ -382,7 +393,7 @@ impl<'d> SdCardProbe<'d> {
 
     async fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
         let mut frame = [byte];
-        self.spi.transfer_in_place_async(&mut frame).await?;
+        self.spi.transfer_in_place(&mut frame)?;
         Ok(frame[0])
     }
 

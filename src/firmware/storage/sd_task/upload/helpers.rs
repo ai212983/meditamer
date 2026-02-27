@@ -19,7 +19,7 @@ pub(super) async fn ensure_upload_ready(
     }
 
     if !*upload_mounted {
-        if sd_probe.init().await.is_err() {
+        if !sd_probe.is_initialized() {
             return Err(SdUploadResultCode::InitFailed);
         }
         *upload_mounted = true;

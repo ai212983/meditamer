@@ -28,7 +28,7 @@ opt-level = 2
 opt-level = 3
 
 [features]
-default = ["esp-hal-runtime", "graphics", "asset-upload-http"]
+default = ["esp-hal-runtime", "graphics", "asset-upload-http", "psram-alloc"]
 esp-hal-runtime = []
 graphics = ["dep:embedded-graphics", "dep:heapless", "dep:u8g2-fonts"]
 psram-alloc = ["dep:esp-alloc", "esp-hal/psram"]

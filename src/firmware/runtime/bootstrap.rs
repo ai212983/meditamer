@@ -80,8 +80,7 @@ pub fn run() -> ! {
         .expect("failed to init SPI2 for SD probe")
         .with_sck(peripherals.GPIO14)
         .with_mosi(peripherals.GPIO13)
-        .with_miso(peripherals.GPIO12)
-        .into_async();
+        .with_miso(peripherals.GPIO12);
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
