@@ -14,6 +14,11 @@ pub(super) enum SerialCommand {
     Repaint,
     RepaintMarble,
     Metrics,
+    MetricsNet,
+    TelemetryStatus,
+    TelemetrySet {
+        operation: TelemetrySetOperation,
+    },
     AllocatorStatus,
     AllocatorAllocProbe {
         bytes: u32,
@@ -86,6 +91,27 @@ pub(super) enum SerialCommand {
 pub(super) enum ModeSetOperation {
     Upload(bool),
     AssetReads(bool),
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum TelemetryDomain {
+    Wifi,
+    Reassoc,
+    Net,
+    Http,
+    Sd,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum TelemetrySetOperation {
+    Domain {
+        domain: TelemetryDomain,
+        enabled: bool,
+    },
+    All {
+        enabled: bool,
+    },
+    Default,
 }
 
 impl ModeSetOperation {
@@ -255,7 +281,12 @@ pub(super) fn serial_command_event_and_responses(
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Ping => unreachable!("ping command is handled inline"),
-        SerialCommand::Metrics => unreachable!("metrics command is handled inline"),
+        SerialCommand::Metrics
+        | SerialCommand::MetricsNet
+        | SerialCommand::TelemetryStatus
+        | SerialCommand::TelemetrySet { .. } => {
+            unreachable!("metrics command is handled inline")
+        }
         SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
         SerialCommand::AllocatorAllocProbe { .. } => {
             unreachable!("allocator allocation probe command is handled inline")

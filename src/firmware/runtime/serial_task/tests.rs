@@ -2,7 +2,7 @@ use super::{commands::SdWaitTarget, parser::SDWAIT_DEFAULT_TIMEOUT_MS, *};
 
 use super::super::types::RuntimeMode;
 use super::super::types::{AppEvent, RuntimeServicesUpdate, SD_PATH_MAX, SD_WRITE_MAX};
-use super::commands::ModeSetOperation;
+use super::commands::{ModeSetOperation, TelemetryDomain, TelemetrySetOperation};
 
 fn path_from(buf: &[u8; SD_PATH_MAX], len: u8) -> &str {
     core::str::from_utf8(&buf[..len as usize]).unwrap()
@@ -132,6 +132,43 @@ fn parses_runmode_normal_case_insensitive() {
 fn parses_mode_status() {
     let cmd = parse_serial_command(b"MODE STATUS");
     assert!(matches!(cmd, Some(SerialCommand::ModeStatus)));
+}
+
+#[test]
+fn parses_telemetry_status() {
+    let cmd = parse_serial_command(b"TELEM STATUS");
+    assert!(matches!(cmd, Some(SerialCommand::TelemetryStatus)));
+}
+
+#[test]
+fn parses_telemetry_set_domain_on() {
+    let cmd = parse_serial_command(b"TELEMSET WIFI ON");
+    match cmd {
+        Some(SerialCommand::TelemetrySet { operation }) => {
+            assert!(matches!(
+                operation,
+                TelemetrySetOperation::Domain {
+                    domain: TelemetryDomain::Wifi,
+                    enabled: true
+                }
+            ));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_telemetry_set_all_off() {
+    let cmd = parse_serial_command(b"TELEMSET ALL OFF");
+    match cmd {
+        Some(SerialCommand::TelemetrySet { operation }) => {
+            assert!(matches!(
+                operation,
+                TelemetrySetOperation::All { enabled: false }
+            ));
+        }
+        _ => panic!("unexpected command"),
+    }
 }
 
 #[test]

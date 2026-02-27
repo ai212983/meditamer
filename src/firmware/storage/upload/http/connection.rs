@@ -65,10 +65,12 @@ pub(super) async fn handle_connection(
     let body_start = header_end + 4;
     let body_bytes_in_buffer = filled.saturating_sub(body_start);
     let request_path = target_path(target);
-    println!(
-        "upload_http: request method={} path={}",
-        method, request_path
-    );
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: request method={} path={}",
+            method, request_path
+        );
+    }
 
     if request_path != "/health" {
         match validate_upload_auth(header) {
@@ -90,7 +92,9 @@ pub(super) async fn handle_connection(
         ("GET", "/health") => {
             drain_remaining_body(socket, content_length_or_zero, body_bytes_in_buffer).await?;
             telemetry::record_upload_http_health_request();
-            println!("upload_http: health ok");
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                println!("upload_http: health ok");
+            }
             write_response(socket, b"200 OK", b"ok").await;
             Ok(())
         }
@@ -104,9 +108,13 @@ pub(super) async fn handle_connection(
                 }
             };
             let path_str = core::str::from_utf8(&path[..path_len as usize]).unwrap_or("<invalid>");
-            println!("upload_http: mkdir begin path={}", path_str);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+                println!("upload_http: mkdir begin path={}", path_str);
+            }
             sd_upload_or_http_error(socket, SdUploadCommand::Mkdir { path, path_len }).await?;
-            println!("upload_http: mkdir done path={}", path_str);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+                println!("upload_http: mkdir done path={}", path_str);
+            }
             write_response(socket, b"200 OK", b"mkdir ok").await;
             Ok(())
         }

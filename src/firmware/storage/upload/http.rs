@@ -63,21 +63,25 @@ fn init_http_buffer<const N: usize>(
     {
         match psram::alloc_large_byte_buffer(alloc_bytes) {
             Ok(buffer) => {
-                esp_println::println!(
-                    "upload_http: {} buffer placement={:?} bytes={}",
-                    tag,
-                    buffer.placement(),
-                    alloc_bytes
-                );
+                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                    esp_println::println!(
+                        "upload_http: {} buffer placement={:?} bytes={}",
+                        tag,
+                        buffer.placement(),
+                        alloc_bytes
+                    );
+                }
                 psram::log_allocator_high_water(tag);
                 return HttpBuffer::Psram(buffer);
             }
             Err(err) => {
-                esp_println::println!(
-                    "upload_http: {} psram alloc failed ({:?}); using internal ram",
-                    tag,
-                    err
-                );
+                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                    esp_println::println!(
+                        "upload_http: {} psram alloc failed ({:?}); using internal ram",
+                        tag,
+                        err
+                    );
+                }
             }
         }
     }
@@ -122,7 +126,9 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
                 listening_logged = false;
                 telemetry::set_upload_http_listener(false, None);
                 if !waiting_dhcp_logged {
-                    esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
+                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                        esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
+                    }
                     waiting_dhcp_logged = true;
                 }
                 if dhcp_wait_started_at.is_none() {
@@ -140,25 +146,29 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             dhcp_ready = true;
         }
         if waiting_dhcp_logged {
-            esp_println::println!(
-                "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
-                local_ipv4[0],
-                local_ipv4[1],
-                local_ipv4[2],
-                local_ipv4[3]
-            );
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!(
+                    "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
+                    local_ipv4[0],
+                    local_ipv4[1],
+                    local_ipv4[2],
+                    local_ipv4[3]
+                );
+            }
             waiting_dhcp_logged = false;
         }
 
         if !listening_logged {
-            esp_println::println!(
-                "upload_http: listening on {}.{}.{}.{}:{}",
-                local_ipv4[0],
-                local_ipv4[1],
-                local_ipv4[2],
-                local_ipv4[3],
-                UPLOAD_HTTP_PORT
-            );
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!(
+                    "upload_http: listening on {}.{}.{}.{}:{}",
+                    local_ipv4[0],
+                    local_ipv4[1],
+                    local_ipv4[2],
+                    local_ipv4[3],
+                    UPLOAD_HTTP_PORT
+                );
+            }
             listening_logged = true;
         }
 
@@ -183,13 +193,17 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
                 dhcp_ready = false;
             }
             telemetry::set_upload_http_listener(false, None);
-            esp_println::println!("upload_http: accept err={:?}", err);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!("upload_http: accept err={:?}", err);
+            }
             let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
             socket.abort();
             continue;
         }
         telemetry::record_upload_http_accept();
-        esp_println::println!("upload_http: accepted connection");
+        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+            esp_println::println!("upload_http: accepted connection");
+        }
 
         if let Err(err) = connection::handle_connection(
             &mut socket,
@@ -200,7 +214,9 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         {
             telemetry::record_upload_http_request_error();
             telemetry::record_upload_http_request_bucket(err);
-            esp_println::println!("upload_http: request err={}", err);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                esp_println::println!("upload_http: request err={}", err);
+            }
         }
 
         let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;

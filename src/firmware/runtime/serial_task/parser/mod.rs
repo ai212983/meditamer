@@ -20,6 +20,15 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if basic::parse_touch_wizard_command(line) {
         return Some(SerialCommand::TouchWizard);
     }
+    if basic::parse_metrics_net_command(line) {
+        return Some(SerialCommand::MetricsNet);
+    }
+    if basic::parse_telemetry_status_command(line) {
+        return Some(SerialCommand::TelemetryStatus);
+    }
+    if let Some(operation) = basic::parse_telemetry_set_command(line) {
+        return Some(SerialCommand::TelemetrySet { operation });
+    }
     if basic::parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
     }

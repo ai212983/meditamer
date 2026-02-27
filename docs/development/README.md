@@ -349,6 +349,26 @@ METRICS NET wifi_connected=<0|1> http_listening=<0|1> ip=<a.b.c.d>
 `UPLOAD_PHASE` reports end-to-end per-request timing buckets for upload body handling.
 `UPLOAD_RTT` reports SD roundtrip counts and timing totals/maxima by command phase.
 
+### Runtime Telemetry Domain Control
+
+Use runtime telemetry domain toggles to reduce log pressure without reflashing.
+
+```text
+TELEM
+TELEMSET NONE
+TELEMSET WIFI ON
+TELEMSET NET ON
+TELEMSET REASSOC ON
+```
+
+- `TELEM` returns current domain mask/status.
+- `TELEMSET` updates enabled domains (`WIFI`, `REASSOC`, `NET`, `HTTP`, `SD`, `ALL`, `DEFAULT`, `NONE`).
+- `METRICS` / `METRICSNET` remain available regardless of telemetry domain settings.
+
+Agent-oriented contract and runbook:
+
+- `docs/development/telemetry-control-agent.md`
+
 ## SD Card Hardware Test
 
 Automated UART-driven SD/FAT end-to-end validation:

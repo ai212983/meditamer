@@ -43,6 +43,24 @@ const WIFI_DHCP_LEASE_TIMEOUT_PINNED_BSSID_MS: u64 = 15_000;
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 static WIFI_DISCONNECTED_EVENT: AtomicBool = AtomicBool::new(false);
+const DIAG_WIFI: u32 = telemetry::DIAG_DOMAIN_WIFI;
+const DIAG_REASSOC: u32 = telemetry::DIAG_DOMAIN_REASSOC;
+
+macro_rules! diag_wifi {
+    ($($arg:tt)*) => {
+        if telemetry::diag_enabled(DIAG_WIFI) {
+            println!($($arg)*);
+        }
+    };
+}
+
+macro_rules! diag_reassoc {
+    ($($arg:tt)*) => {
+        if telemetry::diag_enabled(DIAG_REASSOC) {
+            println!($($arg)*);
+        }
+    };
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TargetApHint {
@@ -72,7 +90,7 @@ pub(super) async fn run_wifi_connection_task(
     let mut bssid_hint = None;
     let mut channel_probe_idx = 0usize;
     if credentials.is_none() {
-        println!("upload_http: waiting for WIFISET credentials over UART");
+        diag_wifi!("upload_http: waiting for WIFISET credentials over UART");
     }
     loop {
         if !service_mode::upload_enabled() {
@@ -88,7 +106,7 @@ pub(super) async fn run_wifi_connection_task(
                 channel_hint = None;
                 bssid_hint = None;
                 channel_probe_idx = 0;
-                println!("upload_http: upload mode off; wifi paused");
+                diag_wifi!("upload_http: upload mode off; wifi paused");
             }
             Timer::after(Duration::from_millis(500)).await;
             continue;
@@ -97,12 +115,12 @@ pub(super) async fn run_wifi_connection_task(
         if paused {
             paused = false;
             telemetry::record_wifi_reassoc_mode_resume();
-            println!("upload_http: upload mode on; wifi resuming");
+            diag_wifi!("upload_http: upload mode on; wifi resuming");
         }
 
         while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
             if credentials == Some(updated) {
-                println!("upload_http: wifi credentials unchanged; skipping reconfigure");
+                diag_wifi!("upload_http: wifi credentials unchanged; skipping reconfigure");
                 continue;
             }
             credentials = Some(updated);
@@ -112,7 +130,7 @@ pub(super) async fn run_wifi_connection_task(
             bssid_hint = None;
             channel_probe_idx = 0;
             telemetry::record_wifi_reassoc_credentials_changed();
-            println!("upload_http: wifi credentials updated");
+            diag_wifi!("upload_http: wifi credentials updated");
         }
 
         let active = match credentials {
@@ -128,7 +146,7 @@ pub(super) async fn run_wifi_connection_task(
                     bssid_hint = None;
                     channel_probe_idx = 0;
                     telemetry::record_wifi_reassoc_credentials_received();
-                    println!("upload_http: wifi credentials received");
+                    diag_wifi!("upload_http: wifi credentials received");
                 }
                 continue;
             }
@@ -140,14 +158,14 @@ pub(super) async fn run_wifi_connection_task(
                 match mode_config_from_credentials(active, auth_method, channel_hint, bssid_hint) {
                     Some(mode) => mode,
                     None => {
-                        println!("upload_http: wifi credentials invalid utf8 or length");
+                        diag_wifi!("upload_http: wifi credentials invalid utf8 or length");
                         credentials = None;
                         continue;
                     }
                 };
 
             if let Err(err) = controller.set_config(&mode) {
-                println!("upload_http: wifi station config err={:?}", err);
+                diag_wifi!("upload_http: wifi station config err={:?}", err);
                 if matches!(controller.is_started(), Ok(true)) {
                     let _ = controller.stop_async().await;
                 }
@@ -155,7 +173,7 @@ pub(super) async fn run_wifi_connection_task(
                 Timer::after(Duration::from_secs(2)).await;
                 continue;
             }
-            println!(
+            diag_reassoc!(
                 "upload_http: applying station config auth={:?} channel_hint={:?} bssid_hint={}",
                 auth_method,
                 channel_hint,
@@ -173,7 +191,7 @@ pub(super) async fn run_wifi_connection_task(
             Ok(true) => {}
             Ok(false) => {
                 if let Err(err) = controller.start_async().await {
-                    println!("upload_http: wifi start err={:?}", err);
+                    diag_wifi!("upload_http: wifi start err={:?}", err);
                     telemetry::record_wifi_reassoc_start_err();
                     Timer::after(Duration::from_secs(3)).await;
                     continue;
@@ -182,7 +200,7 @@ pub(super) async fn run_wifi_connection_task(
                 Timer::after(Duration::from_millis(800)).await;
             }
             Err(err) => {
-                println!("upload_http: wifi status err={:?}", err);
+                diag_wifi!("upload_http: wifi status err={:?}", err);
                 Timer::after(Duration::from_secs(3)).await;
                 continue;
             }
@@ -195,7 +213,7 @@ pub(super) async fn run_wifi_connection_task(
                     auth_method_idx = 0;
                     config_applied = false;
                     channel_probe_idx = 0;
-                    println!(
+                    diag_reassoc!(
                         "upload_http: pre-connect discovered channel_hint={} (observed_bssid={})",
                         channel.channel,
                         format_bssid(channel.bssid),
@@ -220,7 +238,7 @@ pub(super) async fn run_wifi_connection_task(
             Ok(()) => {
                 telemetry::record_wifi_connect_success();
                 telemetry::record_wifi_reassoc_connect_success(elapsed_ms_u32(connect_started_at));
-                println!("upload_http: wifi connected");
+                diag_wifi!("upload_http: wifi connected");
                 let mut dhcp_lease_observed = has_ipv4_lease(&stack);
                 let dhcp_wait_started_at = Instant::now();
                 loop {
@@ -228,14 +246,14 @@ pub(super) async fn run_wifi_connection_task(
                         telemetry::set_wifi_link_connected(false);
                         telemetry::set_upload_http_listener(false, None);
                         let _ = controller.disconnect_async().await;
-                        println!("upload_http: upload mode off while connected");
+                        diag_wifi!("upload_http: upload mode off while connected");
                         break;
                     }
 
                     let mut reconnect_due_to_credentials = false;
                     while let Ok(updated) = WIFI_CREDENTIALS_UPDATES.try_receive() {
                         if credentials == Some(updated) {
-                            println!("upload_http: wifi credentials unchanged while connected");
+                            diag_wifi!("upload_http: wifi credentials unchanged while connected");
                             continue;
                         }
                         credentials = Some(updated);
@@ -247,7 +265,7 @@ pub(super) async fn run_wifi_connection_task(
                         reconnect_due_to_credentials = true;
                     }
                     if reconnect_due_to_credentials {
-                        println!("upload_http: wifi credentials changed, reconnecting");
+                        diag_wifi!("upload_http: wifi credentials changed, reconnecting");
                         telemetry::record_wifi_reassoc_credentials_changed();
                         let _ = controller.disconnect_async().await;
                         telemetry::set_wifi_link_connected(false);
@@ -261,7 +279,7 @@ pub(super) async fn run_wifi_connection_task(
                         );
                         telemetry::set_wifi_link_connected(false);
                         telemetry::set_upload_http_listener(false, None);
-                        println!("upload_http: wifi disconnected");
+                        diag_wifi!("upload_http: wifi disconnected");
                         break;
                     }
 
@@ -275,11 +293,11 @@ pub(super) async fn run_wifi_connection_task(
                             };
                             if dhcp_wait_started_at.elapsed().as_millis() >= dhcp_timeout_ms {
                                 if bssid_hint.take().is_some() {
-                                    println!(
+                                    diag_wifi!(
                                         "upload_http: dhcp timeout on pinned bssid; clearing bssid hint and reconnecting"
                                     );
                                 } else {
-                                    println!(
+                                    diag_wifi!(
                                         "upload_http: dhcp timeout; reconnecting and retrying scan/auth"
                                     );
                                     channel_hint = None;
@@ -315,7 +333,7 @@ pub(super) async fn run_wifi_connection_task(
                     }
                 }
                 let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
-                println!(
+                diag_reassoc!(
                     "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} bssid_hint={} observed_channel={:?} observed_bssid={} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} probe_idx={}",
                     err,
                     auth_method,
@@ -345,7 +363,7 @@ pub(super) async fn run_wifi_connection_task(
                             auth_method_idx,
                             channel_probe_idx,
                         );
-                        println!(
+                        diag_reassoc!(
                             "upload_http: retrying with channel_hint={} (observed_bssid={})",
                             ap.channel,
                             format_bssid(ap.bssid),
@@ -353,7 +371,7 @@ pub(super) async fn run_wifi_connection_task(
                         Timer::after(Duration::from_secs(2)).await;
                         continue;
                     }
-                    println!(
+                    diag_reassoc!(
                         "upload_http: keeping discovered channel_hint={} bssid_hint={} for next auth attempt",
                         ap.channel,
                         format_bssid(ap.bssid),
@@ -367,7 +385,7 @@ pub(super) async fn run_wifi_connection_task(
                         channel_hint,
                         channel_probe_idx,
                     );
-                    println!(
+                    diag_reassoc!(
                         "upload_http: rotating auth on hinted channel auth={:?} channel_hint={:?} bssid_hint={}",
                         WIFI_AUTH_METHODS[auth_method_idx],
                         channel_hint,
@@ -383,9 +401,10 @@ pub(super) async fn run_wifi_connection_task(
                     auth_method_idx = 0;
                     config_applied = false;
                     telemetry::record_wifi_reassoc_channel_probe(next_channel, channel_probe_idx);
-                    println!(
+                    diag_reassoc!(
                         "upload_http: channel probe retry using channel_hint={} probe_idx={}",
-                        next_channel, channel_probe_idx
+                        next_channel,
+                        channel_probe_idx
                     );
                     Timer::after(Duration::from_secs(2)).await;
                     continue;
@@ -395,7 +414,7 @@ pub(super) async fn run_wifi_connection_task(
                 bssid_hint = None;
                 auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
                 config_applied = false;
-                println!(
+                diag_reassoc!(
                     "upload_http: rotating auth after channel sweep auth={:?}",
                     WIFI_AUTH_METHODS[auth_method_idx]
                 );
@@ -415,7 +434,7 @@ fn install_wifi_event_logger() {
         WIFI_LAST_DISCONNECT_REASON.store(reason, Ordering::Relaxed);
         WIFI_DISCONNECTED_EVENT.store(true, Ordering::Relaxed);
         if cfg!(debug_assertions) {
-            println!(
+            diag_reassoc!(
                 "upload_http: event sta_disconnected reason={} ({}) rssi={}",
                 reason,
                 disconnect_reason_label(reason),
@@ -429,15 +448,15 @@ fn install_wifi_event_logger() {
     }
 
     event::StaStart::update_handler(|_| {
-        println!("upload_http: event sta_start");
+        diag_reassoc!("upload_http: event sta_start");
     });
 
     event::StaStop::update_handler(|_| {
-        println!("upload_http: event sta_stop");
+        diag_reassoc!("upload_http: event sta_stop");
     });
 
     event::ScanDone::update_handler(|event| {
-        println!(
+        diag_reassoc!(
             "upload_http: event scan_done status={} count={} scan_id={}",
             event.status(),
             event.number(),
@@ -449,7 +468,7 @@ fn install_wifi_event_logger() {
         let ssid_len = (event.ssid_len() as usize).min(event.ssid().len());
         let ssid = core::str::from_utf8(&event.ssid()[..ssid_len]).unwrap_or("<non_utf8>");
         let bssid = event.bssid();
-        println!(
+        diag_reassoc!(
             "upload_http: event sta_connected ssid={} channel={} authmode={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
             ssid,
             event.channel(),
@@ -579,9 +598,10 @@ async fn log_scan_for_target(
             );
         }
         Err(err) => {
-            println!(
+            diag_reassoc!(
                 "upload_http: scan active err={:?} target_ssid={}",
-                err, target_ssid
+                err,
+                target_ssid
             );
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Active,
@@ -615,9 +635,10 @@ async fn log_scan_for_target(
             );
         }
         Err(err) => {
-            println!(
+            diag_reassoc!(
                 "upload_http: scan passive err={:?} target_ssid={}",
-                err, target_ssid
+                err,
+                target_ssid
             );
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Passive,
@@ -630,7 +651,7 @@ async fn log_scan_for_target(
     }
 
     if discovered_channel.is_some() {
-        println!(
+        diag_reassoc!(
             "upload_http: scan target_ssid={} found_channel={:?} found_bssid={}",
             target_ssid,
             discovered_channel.map(|ap| ap.channel),
@@ -639,7 +660,7 @@ async fn log_scan_for_target(
         return discovered_channel;
     }
 
-    println!("upload_http: scan target_ssid={} found=0", target_ssid);
+    diag_reassoc!("upload_http: scan target_ssid={} found=0", target_ssid);
     None
 }
 
@@ -650,14 +671,15 @@ fn log_scan_results(
 ) -> Option<TargetApHint> {
     if results.is_empty() {
         telemetry::record_wifi_scan(0, false);
-        println!(
+        diag_reassoc!(
             "upload_http: scan {} found=0 target_ssid={}",
-            label, target_ssid
+            label,
+            target_ssid
         );
         return None;
     }
 
-    println!(
+    diag_reassoc!(
         "upload_http: scan {} found={} target_ssid={}",
         label,
         results.len(),
@@ -666,7 +688,7 @@ fn log_scan_results(
 
     let mut discovered_ap: Option<&AccessPointInfo> = None;
     for ap in results.iter() {
-        println!(
+        diag_reassoc!(
             "upload_http: scan ap ssid={} channel={} bssid={} rssi={} auth={:?}",
             ap.ssid,
             ap.channel,
@@ -691,7 +713,7 @@ fn log_scan_results(
     });
 
     if let Some(ap) = discovered_channel {
-        println!(
+        diag_reassoc!(
             "upload_http: scan target_ssid={} found_channel={} found_bssid={} via={}",
             target_ssid,
             ap.channel,

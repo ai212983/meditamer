@@ -109,6 +109,15 @@ static BOOT_RESET_REASON_CODE: AtomicU32 = AtomicU32::new(0);
 static WIFI_LINK_CONNECTED: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_LISTENING: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_IPV4: AtomicU32 = AtomicU32::new(0);
+pub(crate) const DIAG_DOMAIN_WIFI: u32 = 1 << 0;
+pub(crate) const DIAG_DOMAIN_REASSOC: u32 = 1 << 1;
+pub(crate) const DIAG_DOMAIN_NET: u32 = 1 << 2;
+pub(crate) const DIAG_DOMAIN_HTTP: u32 = 1 << 3;
+pub(crate) const DIAG_DOMAIN_SD: u32 = 1 << 4;
+pub(crate) const DIAG_MASK_ALL: u32 =
+    DIAG_DOMAIN_WIFI | DIAG_DOMAIN_REASSOC | DIAG_DOMAIN_NET | DIAG_DOMAIN_HTTP | DIAG_DOMAIN_SD;
+pub(crate) const DIAG_MASK_DEFAULT: u32 = DIAG_MASK_ALL;
+static DIAG_MASK: AtomicU32 = AtomicU32::new(DIAG_MASK_DEFAULT);
 
 #[derive(Clone, Copy)]
 pub(crate) enum SdUploadRoundtripPhase {
@@ -772,6 +781,33 @@ pub(crate) fn set_upload_http_listener(listening: bool, ip: Option<[u8; 4]>) {
     }
     let raw_ip = ip.map(u32::from_be_bytes).unwrap_or(0);
     UPLOAD_HTTP_IPV4.store(raw_ip, Ordering::Relaxed);
+}
+
+pub(crate) fn diag_mask() -> u32 {
+    DIAG_MASK.load(Ordering::Relaxed)
+}
+
+pub(crate) fn diag_enabled(domain: u32) -> bool {
+    (diag_mask() & domain) != 0
+}
+
+pub(crate) fn diag_set_mask(mask: u32) -> u32 {
+    let normalized = mask & DIAG_MASK_ALL;
+    DIAG_MASK.store(normalized, Ordering::Relaxed);
+    normalized
+}
+
+pub(crate) fn diag_set_domain(domain: u32, enabled: bool) -> u32 {
+    let domain = domain & DIAG_MASK_ALL;
+    let _ = DIAG_MASK.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        let next = if enabled {
+            current | domain
+        } else {
+            current & !domain
+        };
+        Some(next)
+    });
+    diag_mask()
 }
 
 fn saturating_add_u32(counter: &AtomicU32, value: u32) {

@@ -30,6 +30,7 @@ use super::super::{
 
 use commands::{
     runtime_services_update_for_command, serial_command_event_and_responses, SerialCommand,
+    TelemetryDomain, TelemetrySetOperation,
 };
 #[cfg(feature = "asset-upload-http")]
 use io::run_wifiset_command;
@@ -395,6 +396,42 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                             );
                             let _ = uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
                         }
+                        SerialCommand::TelemetryStatus => {
+                            write_telemetry_status_line(&mut uart).await;
+                        }
+                        SerialCommand::TelemetrySet { operation } => {
+                            let mask = match operation {
+                                TelemetrySetOperation::Domain { domain, enabled } => {
+                                    telemetry::diag_set_domain(
+                                        telemetry_domain_mask(domain),
+                                        enabled,
+                                    )
+                                }
+                                TelemetrySetOperation::All { enabled } => {
+                                    telemetry::diag_set_mask(if enabled {
+                                        telemetry::DIAG_MASK_ALL
+                                    } else {
+                                        0
+                                    })
+                                }
+                                TelemetrySetOperation::Default => {
+                                    telemetry::diag_set_mask(telemetry::DIAG_MASK_DEFAULT)
+                                }
+                            };
+
+                            let mut line = heapless::String::<192>::new();
+                            let _ = write!(
+                                &mut line,
+                                "TELEMSET OK mask=0x{:02x} wifi={} reassoc={} net={} http={} sd={}\r\n",
+                                mask,
+                                on_off(mask, telemetry::DIAG_DOMAIN_WIFI),
+                                on_off(mask, telemetry::DIAG_DOMAIN_REASSOC),
+                                on_off(mask, telemetry::DIAG_DOMAIN_NET),
+                                on_off(mask, telemetry::DIAG_DOMAIN_HTTP),
+                                on_off(mask, telemetry::DIAG_DOMAIN_SD),
+                            );
+                            let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                        }
                         SerialCommand::AllocatorStatus => {
                             write_allocator_status_line(&mut uart).await;
                         }
@@ -501,5 +538,40 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
         }
     }
 }
+
+fn telemetry_domain_mask(domain: TelemetryDomain) -> u32 {
+    match domain {
+        TelemetryDomain::Wifi => telemetry::DIAG_DOMAIN_WIFI,
+        TelemetryDomain::Reassoc => telemetry::DIAG_DOMAIN_REASSOC,
+        TelemetryDomain::Net => telemetry::DIAG_DOMAIN_NET,
+        TelemetryDomain::Http => telemetry::DIAG_DOMAIN_HTTP,
+        TelemetryDomain::Sd => telemetry::DIAG_DOMAIN_SD,
+    }
+}
+
+fn on_off(mask: u32, domain: u32) -> &'static str {
+    if (mask & domain) != 0 {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+async fn write_telemetry_status_line(uart: &mut SerialUart) {
+    let mask = telemetry::diag_mask();
+    let mut line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut line,
+        "TELEM mask=0x{:02x} wifi={} reassoc={} net={} http={} sd={}\r\n",
+        mask,
+        on_off(mask, telemetry::DIAG_DOMAIN_WIFI),
+        on_off(mask, telemetry::DIAG_DOMAIN_REASSOC),
+        on_off(mask, telemetry::DIAG_DOMAIN_NET),
+        on_off(mask, telemetry::DIAG_DOMAIN_HTTP),
+        on_off(mask, telemetry::DIAG_DOMAIN_SD),
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
 #[cfg(test)]
 mod tests;
