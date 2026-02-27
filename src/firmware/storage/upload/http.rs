@@ -180,6 +180,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             continue;
         }
         telemetry::record_upload_http_accept();
+        esp_println::println!("upload_http: accepted connection");
 
         if let Err(err) = connection::handle_connection(
             &mut socket,
