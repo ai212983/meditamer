@@ -13,7 +13,8 @@ fi
 flash_first="${SDCARD_TEST_FLASH_FIRST:-0}"
 build_mode="${1:-debug}"
 verify_lba="${SDCARD_TEST_VERIFY_LBA:-2048}"
-base_path="${SDCARD_TEST_BASE_PATH:-/sdt$(date +%H%M%S)}"
+run_tag="$(date +%H%M%S)"
+base_path="${SDCARD_TEST_BASE_PATH:-/sd${run_tag}}"
 output_path="${2:-$repo_root/logs/sdcard_hw_test_$(date +%Y%m%d_%H%M%S).log}"
 suite="${SDCARD_TEST_SUITE:-all}"
 sdwait_timeout_ms="${SDCARD_TEST_SDWAIT_TIMEOUT_MS:-300000}"
@@ -323,7 +324,7 @@ run_raw_command_expect_pattern() {
 }
 
 run_burst_sequence() {
-    local burst_root="${base_path}_burst"
+    local burst_root="/b${run_tag}"
     local burst_file="$burst_root/io.txt"
     local start_line
 
@@ -373,8 +374,8 @@ run_burst_sequence() {
 }
 
 run_failure_sequence() {
-    local fail_root="${base_path}_fail"
-    local rename_root="${base_path}_rename"
+    local fail_root="/f${run_tag}"
+    local rename_root="/r${run_tag}"
     local file_a="$rename_root/a.txt"
     local file_b="$rename_root/b.txt"
 
