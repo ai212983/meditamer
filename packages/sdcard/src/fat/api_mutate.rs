@@ -13,9 +13,6 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
         return Err(SdFatError::AlreadyExists);
     }
 
-    let dir_cluster = allocate_chain(sd, &volume, 1).await?;
-    initialize_directory_cluster(sd, &volume, dir_cluster, parent_cluster).await?;
-
     let (short_name, lfn_utf16, lfn_len) =
         select_new_entry_name(sd, &volume, parent_cluster, target.as_bytes()).await?;
     let needed_slots = if lfn_len == 0 {
@@ -25,8 +22,10 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
     };
     let free_lookup = scan_directory(sd, &volume, parent_cluster, None, needed_slots).await?;
     let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let dir_cluster = allocate_chain(sd, &volume, 1).await?;
+    initialize_directory_cluster(sd, &volume, dir_cluster, parent_cluster).await?;
 
-    write_new_entry(
+    if let Err(err) = write_new_entry(
         sd,
         &free_slots[..needed_slots],
         &DirRecord {
@@ -40,6 +39,11 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
         &lfn_utf16[..lfn_len],
     )
     .await
+    {
+        let _ = free_chain(sd, &volume, dir_cluster).await;
+        return Err(err);
+    }
+    Ok(())
 }
 
 pub async fn remove(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatError> {
