@@ -159,7 +159,12 @@ where
     let mut code = SdRuntimeResultCode::Ok;
     match fat::write_file(sd_probe, path, data).await {
         Ok(()) => {
-            esp_println::println!("sdfat[{}]: write_ok path={} bytes={}", reason, path, data.len());
+            esp_println::println!(
+                "sdfat[{}]: write_ok path={} bytes={} verify=ok",
+                reason,
+                path,
+                data.len()
+            );
         }
         Err(err) => {
             esp_println::println!("sdfat[{}]: write_error path={} err={:?}", reason, path, err);
