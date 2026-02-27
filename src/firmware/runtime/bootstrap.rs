@@ -23,7 +23,12 @@ use sdcard::probe;
 
 pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    esp_println::println!("boot: reset_reason={:?}", esp_hal::system::reset_reason());
+    let reset_reason = esp_hal::system::reset_reason();
+    esp_println::println!(
+        "BOOT_RESET reason={:?} code={}",
+        reset_reason,
+        reset_reason.map(|value| value as u8).unwrap_or(0),
+    );
     #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
     esp_alloc::heap_allocator!(size: 48 * 1024);
 
