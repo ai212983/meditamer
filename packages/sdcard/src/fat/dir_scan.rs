@@ -52,7 +52,7 @@ async fn scan_directory(
                             free_slots = Some(selected);
                         }
                     }
-                    if first == 0x00 && target_name.is_none() && free_slots.is_some() {
+                    if first == 0x00 {
                         return Ok(DirLookup {
                             found: None,
                             free: free_slots,
@@ -192,4 +192,3 @@ async fn write_chain_data(
 
     Ok(())
 }
-

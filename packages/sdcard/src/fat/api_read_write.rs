@@ -99,7 +99,7 @@ pub async fn read_file(
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
     let name = &segments[count - 1];
 
-    let lookup = scan_directory(sd, &volume, parent_cluster, Some(name), 1).await?;
+    let lookup = scan_directory(sd, &volume, parent_cluster, Some(name), 0).await?;
     let found = lookup.found.ok_or(SdFatError::NotFound)?;
     let record = found.record;
     if record.is_dir() {
@@ -259,7 +259,7 @@ pub async fn stat(sd: &mut SdCardProbe<'_>, path: &str) -> Result<FatDirEntry, S
     }
 
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
-    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 1)
+    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
@@ -271,4 +271,3 @@ pub async fn stat(sd: &mut SdCardProbe<'_>, path: &str) -> Result<FatDirEntry, S
         size: found.record.size,
     })
 }
-

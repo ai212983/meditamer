@@ -8,7 +8,7 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
     let volume = mount_fat32(sd).await?;
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
     let target = segments[count - 1];
-    let existing = scan_directory(sd, &volume, parent_cluster, Some(&target), 1).await?;
+    let existing = scan_directory(sd, &volume, parent_cluster, Some(&target), 0).await?;
     if existing.found.is_some() {
         return Err(SdFatError::AlreadyExists);
     }
@@ -51,7 +51,7 @@ pub async fn remove(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErr
 
     let volume = mount_fat32(sd).await?;
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
-    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 1)
+    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
@@ -79,14 +79,14 @@ pub async fn rename(sd: &mut SdCardProbe<'_>, src: &str, dst: &str) -> Result<()
     let volume = mount_fat32(sd).await?;
     let src_parent = resolve_dir_cluster(sd, &volume, &src_segments, src_count - 1).await?;
     let dst_parent = resolve_dir_cluster(sd, &volume, &dst_segments, dst_count - 1).await?;
-    let src_found = scan_directory(sd, &volume, src_parent, Some(&src_segments[src_count - 1]), 1)
+    let src_found = scan_directory(sd, &volume, src_parent, Some(&src_segments[src_count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
     if src_found.record.is_dir() && src_parent != dst_parent {
         return Err(SdFatError::CrossDirectoryRenameUnsupported);
     }
-    if scan_directory(sd, &volume, dst_parent, Some(&dst_segments[dst_count - 1]), 1)
+    if scan_directory(sd, &volume, dst_parent, Some(&dst_segments[dst_count - 1]), 0)
         .await?
         .found
         .is_some()
@@ -152,7 +152,7 @@ pub async fn begin_append_session(
 
     let volume = mount_fat32(sd).await?;
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
-    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 1)
+    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
@@ -176,7 +176,7 @@ pub async fn begin_append_session_create_or_open(
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
     let target = segments[count - 1];
 
-    if let Some(found) = scan_directory(sd, &volume, parent_cluster, Some(&target), 1)
+    if let Some(found) = scan_directory(sd, &volume, parent_cluster, Some(&target), 0)
         .await?
         .found
     {
@@ -332,7 +332,7 @@ pub async fn truncate_file(
 
     let volume = mount_fat32(sd).await?;
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
-    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 1)
+    let found = scan_directory(sd, &volume, parent_cluster, Some(&segments[count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
@@ -398,7 +398,7 @@ pub async fn rename_replace(
     let volume = mount_fat32(sd).await?;
     let src_parent = resolve_dir_cluster(sd, &volume, &src_segments, src_count - 1).await?;
     let dst_parent = resolve_dir_cluster(sd, &volume, &dst_segments, dst_count - 1).await?;
-    let src_found = scan_directory(sd, &volume, src_parent, Some(&src_segments[src_count - 1]), 1)
+    let src_found = scan_directory(sd, &volume, src_parent, Some(&src_segments[src_count - 1]), 0)
         .await?
         .found
         .ok_or(SdFatError::NotFound)?;
@@ -407,7 +407,7 @@ pub async fn rename_replace(
         return Err(SdFatError::CrossDirectoryRenameUnsupported);
     }
 
-    if let Some(dst_found) = scan_directory(sd, &volume, dst_parent, Some(&dst_segments[dst_count - 1]), 1)
+    if let Some(dst_found) = scan_directory(sd, &volume, dst_parent, Some(&dst_segments[dst_count - 1]), 0)
         .await?
         .found
     {

@@ -153,7 +153,7 @@ async fn resolve_dir_cluster(
 ) -> Result<u32, SdFatError> {
     let mut cluster = volume.root_cluster;
     for segment in path.iter().take(count) {
-        let lookup = scan_directory(sd, volume, cluster, Some(segment), 1).await?;
+        let lookup = scan_directory(sd, volume, cluster, Some(segment), 0).await?;
         let found = lookup.found.ok_or(SdFatError::NotFound)?;
         let record = found.record;
         if !record.is_dir() {
@@ -167,4 +167,3 @@ async fn resolve_dir_cluster(
     }
     Ok(cluster)
 }
-
