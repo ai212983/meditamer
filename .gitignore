@@ -9,6 +9,8 @@
 /tools/*/out
 /tools/**/__pycache__/
 /tools/**/*.py[cod]
+/scripts/**/__pycache__/
+/scripts/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
 
