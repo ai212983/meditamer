@@ -2,22 +2,25 @@ use core::fmt::Write;
 
 use super::labels::{sd_command_label, sd_result_code_label, sd_result_kind_label};
 use crate::firmware::{
+    app_state::{
+        read_app_state_snapshot, BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode,
+    },
     psram,
-    runtime::service_mode,
+    runtime::diagnostics::read_diag_runtime_status,
     touch::debug_log::uart_write_all,
     types::{SdCommand, SdResult, SerialUart, TapTraceSample},
 };
 
-mod mode_ack;
-mod sdwait;
 #[cfg(feature = "asset-upload-http")]
-mod wifiset;
+mod netcfg;
+mod sdwait;
+mod state_ack;
 
 pub(super) const SD_RESULT_CACHE_CAP: usize = 16;
-pub(super) use mode_ack::{drain_runtime_services_apply_acks, wait_runtime_services_apply_ack};
-pub(super) use sdwait::run_sdwait_command;
 #[cfg(feature = "asset-upload-http")]
-pub(super) use wifiset::run_wifiset_command;
+pub(super) use netcfg::{run_netcfg_get_command, run_netcfg_set_command};
+pub(super) use sdwait::run_sdwait_command;
+pub(super) use state_ack::{drain_app_state_apply_acks, wait_app_state_apply_ack};
 
 pub(super) async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
     let mut line = heapless::String::<256>::new();
@@ -68,22 +71,112 @@ pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
-pub(super) async fn write_mode_status_line(uart: &mut SerialUart) {
-    let services = service_mode::runtime_services();
-    let mut line = heapless::String::<128>::new();
+fn phase_label(phase: crate::firmware::app_state::Phase) -> &'static str {
+    match phase {
+        crate::firmware::app_state::Phase::Initializing => "INITIALIZING",
+        crate::firmware::app_state::Phase::Operating => "OPERATING",
+        crate::firmware::app_state::Phase::DiagnosticsExclusive => "DIAGNOSTICS_EXCLUSIVE",
+    }
+}
+
+fn base_label(base: BaseMode) -> &'static str {
+    match base {
+        BaseMode::Day => "DAY",
+        BaseMode::TouchWizard => "TOUCH_WIZARD",
+    }
+}
+
+fn day_bg_label(day_background: DayBackground) -> &'static str {
+    match day_background {
+        DayBackground::Suminagashi => "SUMINAGASHI",
+        DayBackground::Shanshui => "SHANSHUI",
+    }
+}
+
+fn overlay_label(overlay: OverlayMode) -> &'static str {
+    match overlay {
+        OverlayMode::None => "NONE",
+        OverlayMode::Clock => "CLOCK",
+    }
+}
+
+fn diag_label(kind: DiagKind) -> &'static str {
+    match kind {
+        DiagKind::None => "NONE",
+        DiagKind::Debug => "DEBUG",
+        DiagKind::Test => "TEST",
+    }
+}
+
+fn write_diag_targets_label(
+    out: &mut heapless::String<48>,
+    targets: DiagTargets,
+) -> Result<(), core::fmt::Error> {
+    let bits = targets.as_persisted();
+    if bits == 0 {
+        return out.push_str("NONE").map_err(|_| core::fmt::Error);
+    }
+
+    let mut wrote_any = false;
+    for (label, bit) in [
+        ("SD", 1 << 0),
+        ("WIFI", 1 << 1),
+        ("DISPLAY", 1 << 2),
+        ("TOUCH", 1 << 3),
+        ("IMU", 1 << 4),
+    ] {
+        if (bits & bit) == 0 {
+            continue;
+        }
+        if wrote_any {
+            out.push('|').map_err(|_| core::fmt::Error)?;
+        }
+        out.push_str(label).map_err(|_| core::fmt::Error)?;
+        wrote_any = true;
+    }
+    Ok(())
+}
+
+pub(super) async fn write_state_status_line(uart: &mut SerialUart) {
+    let snapshot = read_app_state_snapshot();
+    let mut targets = heapless::String::<48>::new();
+    let _ = write_diag_targets_label(&mut targets, snapshot.diag_targets);
+    let mut line = heapless::String::<256>::new();
     let _ = write!(
         &mut line,
-        "MODE upload={} assets={}\r\n",
-        if services.upload_enabled_flag() {
+        "STATE phase={} base={} day_bg={} overlay={} upload={} assets={} diag_kind={} targets={}\r\n",
+        phase_label(snapshot.phase),
+        base_label(snapshot.base),
+        day_bg_label(snapshot.day_background),
+        overlay_label(snapshot.overlay),
+        if snapshot.services.upload_enabled {
             "on"
         } else {
             "off"
         },
-        if services.asset_reads_enabled_flag() {
+        if snapshot.services.asset_reads_enabled {
             "on"
         } else {
             "off"
-        }
+        },
+        diag_label(snapshot.diag_kind),
+        targets.as_str(),
+    );
+    let _ = uart_write_all(uart, line.as_bytes()).await;
+}
+
+pub(super) async fn write_diag_status_line(uart: &mut SerialUart) {
+    let status = read_diag_runtime_status();
+    let mut targets = heapless::String::<48>::new();
+    let _ = write_diag_targets_label(&mut targets, DiagTargets::from_persisted(status.targets));
+    let mut line = heapless::String::<160>::new();
+    let _ = write!(
+        &mut line,
+        "DIAG state={} targets={} step={} code={}\r\n",
+        status.state_label(),
+        targets.as_str(),
+        status.step_label(),
+        status.code
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }

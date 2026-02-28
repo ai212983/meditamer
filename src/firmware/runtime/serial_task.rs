@@ -1,6 +1,7 @@
 mod commands;
 mod io;
 mod labels;
+mod line_reader;
 mod parser;
 mod queue;
 
@@ -10,9 +11,10 @@ use embassy_time::{with_timeout, Duration};
 
 use super::super::{
     config::{
-        LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS, MODE_APPLY_ACK_TIMEOUT_MS, SD_RESULTS,
-        TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES, TIMESET_CMD_BUF_LEN,
+        APP_STATE_APPLY_ACK_TIMEOUT_MS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS,
+        NET_CONTROL_COMMANDS, SD_RESULTS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES,
     },
+    storage::upload::wifi,
     telemetry,
     touch::{
         config::{
@@ -25,32 +27,30 @@ use super::super::{
             write_touch_wizard_swipe_trace_sample, TouchWizardSessionLog,
         },
     },
-    types::{AppEvent, SdCommand, SdRequest, SdResult, SerialUart},
+    types::{AppEvent, NetControlCommand, SdCommand, SdRequest, SdResult, SerialUart},
 };
 
 use commands::{
-    runtime_services_update_for_command, serial_command_event_and_responses, SerialCommand,
+    app_state_command_for_serial, serial_command_event_and_responses, SerialCommand,
     TelemetryDomain, TelemetrySetOperation,
 };
-#[cfg(feature = "asset-upload-http")]
-use io::run_wifiset_command;
 use io::{
-    cache_sd_result, drain_runtime_services_apply_acks, run_allocator_alloc_probe,
-    run_sdwait_command, wait_runtime_services_apply_ack, write_allocator_status_line,
-    write_mode_status_line, write_sd_request_queued, write_sd_result, write_tap_trace_sample,
-    SD_RESULT_CACHE_CAP,
+    cache_sd_result, drain_app_state_apply_acks, run_allocator_alloc_probe, run_netcfg_get_command,
+    run_netcfg_set_command, run_sdwait_command, wait_app_state_apply_ack,
+    write_allocator_status_line, write_diag_status_line, write_sd_request_queued, write_sd_result,
+    write_state_status_line, write_tap_trace_sample, SD_RESULT_CACHE_CAP,
 };
+use line_reader::{LineReadEvent, SerialLineReader};
 use parser::parse_serial_command;
 use queue::{enqueue_app_event_with_retry, enqueue_sd_request_with_retry};
 
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {
-    let mut line_buf = [0u8; TIMESET_CMD_BUF_LEN];
-    let mut line_len = 0usize;
+    let mut line_reader = SerialLineReader::new();
     let mut rx = [0u8; 1];
     let mut touch_wizard_log = TouchWizardSessionLog::new();
     let mut next_sd_request_id = 1u32;
-    let mut next_mode_request_id = 1u16;
+    let mut next_state_request_id = 1u16;
     let mut last_sd_request_id: Option<u32> = None;
     let mut sd_result_cache = heapless::Vec::<SdResult, SD_RESULT_CACHE_CAP>::new();
 
@@ -128,33 +128,35 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
 
         if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
             let byte = rx[0];
-            if byte == b'\r' || byte == b'\n' {
-                if line_len == 0 {
-                    continue;
+            match line_reader.push_byte(byte) {
+                LineReadEvent::None => {}
+                LineReadEvent::Overflow => {
+                    let _ = uart_write_all(&mut uart, b"CMD ERR reason=overflow\r\n").await;
                 }
-                if let Some(cmd) = parse_serial_command(&line_buf[..line_len]) {
-                    match cmd {
-                        SerialCommand::TouchWizardDump => {
-                            touch_wizard_log.write_dump(&mut uart).await;
-                        }
-                        SerialCommand::Ping => {
-                            let _ = uart_write_all(&mut uart, b"PONG\r\n").await;
-                        }
-                        SerialCommand::Metrics => {
-                            let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                            let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-                            let snapshot = telemetry::snapshot();
+                LineReadEvent::Complete(line) => {
+                    if let Some(cmd) = parse_serial_command(line) {
+                        match cmd {
+                            SerialCommand::TouchWizardDump => {
+                                touch_wizard_log.write_dump(&mut uart).await;
+                            }
+                            SerialCommand::Ping => {
+                                let _ = uart_write_all(&mut uart, b"PONG\r\n").await;
+                            }
+                            SerialCommand::Metrics => {
+                                let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                                let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
+                                let snapshot = telemetry::snapshot();
 
-                            let mut line = heapless::String::<160>::new();
-                            let _ = write!(
-                                &mut line,
-                                "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
-                                last_ms, max_ms
-                            );
-                            let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                                let mut line = heapless::String::<160>::new();
+                                let _ = write!(
+                                    &mut line,
+                                    "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
+                                    last_ms, max_ms
+                                );
+                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
 
-                            let mut wifi_line = heapless::String::<256>::new();
-                            let _ = write!(
+                                let mut wifi_line = heapless::String::<256>::new();
+                                let _ = write!(
                                 &mut wifi_line,
                                 "METRICS WIFI attempt={} success={} failure={} no_ap={} scan_runs={} scan_empty={} scan_hits={}\r\n",
                                 snapshot.wifi_connect_attempts,
@@ -165,10 +167,10 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_scan_empty,
                                 snapshot.wifi_scan_target_hits,
                             );
-                            let _ = uart_write_all(&mut uart, wifi_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, wifi_line.as_bytes()).await;
 
-                            let mut wifi_reassoc_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut wifi_reassoc_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut wifi_reassoc_line,
                                 "METRICS WIFI_REASSOC mode_pause={} mode_resume={} cred_rx={} cred_chg={} cfg_apply={} start_ok={} start_err={} conn_begin={} conn_ok={} conn_err={} disc_evt={} probe={} auth_rot={} hint_retry={} conn_ms={} conn_ms_max={}\r\n",
                                 snapshot.wifi_reassoc_mode_pauses,
@@ -188,10 +190,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_reassoc_connect_ms_total,
                                 snapshot.wifi_reassoc_connect_ms_max,
                             );
-                            let _ = uart_write_all(&mut uart, wifi_reassoc_line.as_bytes()).await;
+                                let _ =
+                                    uart_write_all(&mut uart, wifi_reassoc_line.as_bytes()).await;
 
-                            let mut wifi_scan_diag_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut wifi_scan_diag_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut wifi_scan_diag_line,
                                 "METRICS WIFI_SCAN_DIAG active_n={} active_empty={} active_hit={} active_ms={} active_ms_max={} passive_n={} passive_empty={} passive_hit={} passive_ms={} passive_ms_max={} last_scan_ch={}\r\n",
                                 snapshot.wifi_reassoc_scan_active_runs,
@@ -206,10 +209,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_reassoc_scan_passive_ms_max,
                                 snapshot.wifi_reassoc_last_scan_channel,
                             );
-                            let _ = uart_write_all(&mut uart, wifi_scan_diag_line.as_bytes()).await;
+                                let _ =
+                                    uart_write_all(&mut uart, wifi_scan_diag_line.as_bytes()).await;
 
-                            let mut wifi_reason_diag_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut wifi_reason_diag_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut wifi_reason_diag_line,
                                 "METRICS WIFI_REASON_DIAG r2={} r201={} r202={} r203={} r204={} r205={} r210={} r211={} r212={} rother={} last_reason={} last_auth={} last_ch={} last_probe={} last_stage={}\r\n",
                                 snapshot.wifi_reassoc_reason_2,
@@ -228,11 +232,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.wifi_reassoc_last_probe_idx,
                                 snapshot.wifi_reassoc_last_stage,
                             );
-                            let _ =
-                                uart_write_all(&mut uart, wifi_reason_diag_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, wifi_reason_diag_line.as_bytes())
+                                    .await;
 
-                            let mut upload_line = heapless::String::<320>::new();
-                            let _ = write!(
+                                let mut upload_line = heapless::String::<320>::new();
+                                let _ = write!(
                                 &mut upload_line,
                                 "METRICS UPLOAD accept_ok={} accept_err={} request_err={} req_hdr_to={} req_read_body={} req_sd_busy={} sd_errors={} sd_busy={} sd_timeouts={} sd_power_on_fail={} sd_init_fail={} sess_timeout_abort={} sess_mode_off_abort={}\r\n",
                                 snapshot.upload_http_accepts,
@@ -249,10 +253,10 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.sd_upload_session_timeout_aborts,
                                 snapshot.sd_upload_session_mode_off_aborts,
                             );
-                            let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, upload_line.as_bytes()).await;
 
-                            let mut upload_phase_line = heapless::String::<320>::new();
-                            let _ = write!(
+                                let mut upload_phase_line = heapless::String::<320>::new();
+                                let _ = write!(
                                 &mut upload_phase_line,
                                 "METRICS UPLOAD_PHASE req={} bytes={} body_ms={} body_max={} sd_ms={} sd_max={} req_ms={} req_max={}\r\n",
                                 snapshot.upload_http_upload_requests,
@@ -264,10 +268,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.upload_http_upload_request_ms_total,
                                 snapshot.upload_http_upload_request_ms_max,
                             );
-                            let _ = uart_write_all(&mut uart, upload_phase_line.as_bytes()).await;
+                                let _ =
+                                    uart_write_all(&mut uart, upload_phase_line.as_bytes()).await;
 
-                            let mut upload_rtt_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut upload_rtt_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut upload_rtt_line,
                                 "METRICS UPLOAD_RTT begin_n={} begin_ms={} begin_max={} chunk_n={} chunk_ms={} chunk_max={} commit_n={} commit_ms={} commit_max={} abort_n={} abort_ms={} abort_max={} mkdir_n={} mkdir_ms={} mkdir_max={} rm_n={} rm_ms={} rm_max={}\r\n",
                                 snapshot.sd_upload_rtt_begin_count,
@@ -289,11 +294,11 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.sd_upload_rtt_remove_ms_total,
                                 snapshot.sd_upload_rtt_remove_ms_max,
                             );
-                            let _ = uart_write_all(&mut uart, upload_rtt_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, upload_rtt_line.as_bytes()).await;
 
-                            let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
-                            let mut net_line = heapless::String::<160>::new();
-                            let _ = write!(
+                                let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
+                                let mut net_line = heapless::String::<160>::new();
+                                let _ = write!(
                                 &mut net_line,
                                 "METRICS NET wifi_connected={} http_listening={} ip={}.{}.{}.{}\r\n",
                                 if snapshot.wifi_link_connected { 1 } else { 0 },
@@ -303,10 +308,10 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 ip[2],
                                 ip[3],
                             );
-                            let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
 
-                            let mut net_pipeline_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut net_pipeline_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut net_pipeline_line,
                                 "METRICS NET_PIPELINE dhcp_wait_n={} dhcp_wait_ms={} dhcp_wait_ms_max={} dhcp_ready={} gate_wifi_down={} gate_link_down={} gate_no_ipv4={} listener_on={} listener_off={} accept_wait_n={} accept_wait_ms={} accept_wait_ms_max={}\r\n",
                                 snapshot.net_pipeline_dhcp_wait_count,
@@ -322,32 +327,33 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.net_pipeline_accept_wait_ms_total,
                                 snapshot.net_pipeline_accept_wait_ms_max,
                             );
-                            let _ = uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
+                                let _ =
+                                    uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
 
-                            let mut liveness_line = heapless::String::<224>::new();
-                            let _ = write!(
+                                let mut liveness_line = heapless::String::<224>::new();
+                                let _ = write!(
                                 &mut liveness_line,
                                 "METRICS LIVENESS accept_link_reset={} health={} wifi_watchdog_disc={}\r\n",
                                 snapshot.upload_http_accept_link_resets,
                                 snapshot.upload_http_health_requests,
                                 snapshot.wifi_connected_watchdog_disconnects,
                             );
-                            let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
 
-                            let mut boot_line = heapless::String::<96>::new();
-                            let _ = write!(
-                                &mut boot_line,
-                                "METRICS BOOT reset_code={}\r\n",
-                                snapshot.boot_reset_reason_code,
-                            );
-                            let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
-                        }
-                        SerialCommand::MetricsNet => {
-                            let snapshot = telemetry::snapshot();
-                            let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
+                                let mut boot_line = heapless::String::<96>::new();
+                                let _ = write!(
+                                    &mut boot_line,
+                                    "METRICS BOOT reset_code={}\r\n",
+                                    snapshot.boot_reset_reason_code,
+                                );
+                                let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
+                            }
+                            SerialCommand::MetricsNet => {
+                                let snapshot = telemetry::snapshot();
+                                let ip = snapshot.upload_http_ipv4.unwrap_or([0, 0, 0, 0]);
 
-                            let mut net_line = heapless::String::<160>::new();
-                            let _ = write!(
+                                let mut net_line = heapless::String::<160>::new();
+                                let _ = write!(
                                 &mut net_line,
                                 "METRICS NET wifi_connected={} http_listening={} ip={}.{}.{}.{}\r\n",
                                 if snapshot.wifi_link_connected { 1 } else { 0 },
@@ -357,28 +363,28 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 ip[2],
                                 ip[3],
                             );
-                            let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, net_line.as_bytes()).await;
 
-                            let mut liveness_line = heapless::String::<224>::new();
-                            let _ = write!(
+                                let mut liveness_line = heapless::String::<224>::new();
+                                let _ = write!(
                                 &mut liveness_line,
                                 "METRICS LIVENESS accept_link_reset={} health={} wifi_watchdog_disc={}\r\n",
                                 snapshot.upload_http_accept_link_resets,
                                 snapshot.upload_http_health_requests,
                                 snapshot.wifi_connected_watchdog_disconnects,
                             );
-                            let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
+                                let _ = uart_write_all(&mut uart, liveness_line.as_bytes()).await;
 
-                            let mut boot_line = heapless::String::<96>::new();
-                            let _ = write!(
-                                &mut boot_line,
-                                "METRICS BOOT reset_code={}\r\n",
-                                snapshot.boot_reset_reason_code,
-                            );
-                            let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
+                                let mut boot_line = heapless::String::<96>::new();
+                                let _ = write!(
+                                    &mut boot_line,
+                                    "METRICS BOOT reset_code={}\r\n",
+                                    snapshot.boot_reset_reason_code,
+                                );
+                                let _ = uart_write_all(&mut uart, boot_line.as_bytes()).await;
 
-                            let mut net_pipeline_line = heapless::String::<512>::new();
-                            let _ = write!(
+                                let mut net_pipeline_line = heapless::String::<512>::new();
+                                let _ = write!(
                                 &mut net_pipeline_line,
                                 "METRICS NET_PIPELINE dhcp_wait_n={} dhcp_wait_ms={} dhcp_wait_ms_max={} dhcp_ready={} gate_wifi_down={} gate_link_down={} gate_no_ipv4={} listener_on={} listener_off={} accept_wait_n={} accept_wait_ms={} accept_wait_ms_max={}\r\n",
                                 snapshot.net_pipeline_dhcp_wait_count,
@@ -394,33 +400,34 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 snapshot.net_pipeline_accept_wait_ms_total,
                                 snapshot.net_pipeline_accept_wait_ms_max,
                             );
-                            let _ = uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
-                        }
-                        SerialCommand::TelemetryStatus => {
-                            write_telemetry_status_line(&mut uart).await;
-                        }
-                        SerialCommand::TelemetrySet { operation } => {
-                            let mask = match operation {
-                                TelemetrySetOperation::Domain { domain, enabled } => {
-                                    telemetry::diag_set_domain(
-                                        telemetry_domain_mask(domain),
-                                        enabled,
-                                    )
-                                }
-                                TelemetrySetOperation::All { enabled } => {
-                                    telemetry::diag_set_mask(if enabled {
-                                        telemetry::DIAG_MASK_ALL
-                                    } else {
-                                        0
-                                    })
-                                }
-                                TelemetrySetOperation::Default => {
-                                    telemetry::diag_set_mask(telemetry::DIAG_MASK_DEFAULT)
-                                }
-                            };
+                                let _ =
+                                    uart_write_all(&mut uart, net_pipeline_line.as_bytes()).await;
+                            }
+                            SerialCommand::TelemetryStatus => {
+                                write_telemetry_status_line(&mut uart).await;
+                            }
+                            SerialCommand::TelemetrySet { operation } => {
+                                let mask = match operation {
+                                    TelemetrySetOperation::Domain { domain, enabled } => {
+                                        telemetry::diag_set_domain(
+                                            telemetry_domain_mask(domain),
+                                            enabled,
+                                        )
+                                    }
+                                    TelemetrySetOperation::All { enabled } => {
+                                        telemetry::diag_set_mask(if enabled {
+                                            telemetry::DIAG_MASK_ALL
+                                        } else {
+                                            0
+                                        })
+                                    }
+                                    TelemetrySetOperation::Default => {
+                                        telemetry::diag_set_mask(telemetry::DIAG_MASK_DEFAULT)
+                                    }
+                                };
 
-                            let mut line = heapless::String::<192>::new();
-                            let _ = write!(
+                                let mut line = heapless::String::<192>::new();
+                                let _ = write!(
                                 &mut line,
                                 "TELEMSET OK mask=0x{:02x} wifi={} reassoc={} net={} http={} sd={}\r\n",
                                 mask,
@@ -430,110 +437,214 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 on_off(mask, telemetry::DIAG_DOMAIN_HTTP),
                                 on_off(mask, telemetry::DIAG_DOMAIN_SD),
                             );
-                            let _ = uart_write_all(&mut uart, line.as_bytes()).await;
-                        }
-                        SerialCommand::AllocatorStatus => {
-                            write_allocator_status_line(&mut uart).await;
-                        }
-                        SerialCommand::ModeStatus => {
-                            write_mode_status_line(&mut uart).await;
-                        }
-                        SerialCommand::ModeSet { .. } | SerialCommand::RunMode { .. } => {
-                            let update = runtime_services_update_for_command(cmd)
-                                .expect("mode commands must map to runtime services updates");
-                            let (ok_response, busy_response, timeout_response) = match cmd {
-                                SerialCommand::ModeSet { .. } => (
-                                    b"MODE OK\r\n".as_slice(),
-                                    b"MODE BUSY\r\n".as_slice(),
-                                    b"MODE ERR reason=timeout\r\n".as_slice(),
-                                ),
-                                SerialCommand::RunMode { .. } => (
-                                    b"RUNMODE OK\r\n".as_slice(),
-                                    b"RUNMODE BUSY\r\n".as_slice(),
-                                    b"RUNMODE ERR reason=timeout\r\n".as_slice(),
-                                ),
-                                _ => unreachable!("non-mode command routed to mode handler"),
-                            };
-                            drain_runtime_services_apply_acks();
-                            let request_id = next_mode_request_id;
-                            next_mode_request_id = next_mode_request_id.wrapping_add(1);
-                            let queued =
-                                enqueue_app_event_with_retry(AppEvent::UpdateRuntimeServices {
-                                    update,
-                                    ack_request_id: Some(request_id),
-                                })
-                                .await;
-                            if !queued {
-                                let _ = uart.write_async(busy_response).await;
-                                continue;
+                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
                             }
-                            if wait_runtime_services_apply_ack(
-                                request_id,
-                                MODE_APPLY_ACK_TIMEOUT_MS,
-                            )
-                            .await
-                            .is_some()
-                            {
-                                let _ = uart.write_async(ok_response).await;
-                            } else {
-                                let _ = uart.write_async(timeout_response).await;
+                            SerialCommand::AllocatorStatus => {
+                                write_allocator_status_line(&mut uart).await;
                             }
-                        }
-                        SerialCommand::AllocatorAllocProbe { bytes } => {
-                            run_allocator_alloc_probe(&mut uart, bytes as usize).await;
-                        }
-                        SerialCommand::SdWait { target, timeout_ms } => {
-                            run_sdwait_command(
-                                &mut uart,
-                                &mut sd_result_cache,
-                                last_sd_request_id,
-                                target,
-                                timeout_ms,
-                            )
-                            .await;
-                        }
-                        #[cfg(feature = "asset-upload-http")]
-                        SerialCommand::WifiSet { credentials } => {
-                            run_wifiset_command(&mut uart, credentials).await;
-                        }
-                        _ => {
-                            let (app_event, sd_command, ok_response, busy_response) =
-                                serial_command_event_and_responses(cmd);
-                            let mut sd_request_meta: Option<(u32, SdCommand)> = None;
-                            let queued = if let Some(event) = app_event {
-                                enqueue_app_event_with_retry(event).await
-                            } else if let Some(command) = sd_command {
-                                let request_id = next_sd_request_id;
-                                next_sd_request_id = next_sd_request_id.wrapping_add(1);
-                                let request = SdRequest {
-                                    id: request_id,
-                                    command,
+                            SerialCommand::DiagGet => {
+                                write_diag_status_line(&mut uart).await;
+                            }
+                            SerialCommand::StateGet => {
+                                write_state_status_line(&mut uart).await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::StateSet { .. }
+                            | SerialCommand::StateDiag { .. }
+                            | SerialCommand::NetStart
+                            | SerialCommand::NetStop => {
+                                let command = app_state_command_for_serial(cmd)
+                                    .expect("state commands must map to app-state updates");
+                                let (ok_response, busy_response, timeout_response) = match cmd {
+                                    SerialCommand::NetStart => (
+                                        b"NET OK op=start\r\n".as_slice(),
+                                        b"NET ERR reason=busy\r\n".as_slice(),
+                                        b"NET ERR reason=timeout\r\n".as_slice(),
+                                    ),
+                                    SerialCommand::NetStop => (
+                                        b"NET OK op=stop\r\n".as_slice(),
+                                        b"NET ERR reason=busy\r\n".as_slice(),
+                                        b"NET ERR reason=timeout\r\n".as_slice(),
+                                    ),
+                                    _ => (
+                                        b"STATE OK\r\n".as_slice(),
+                                        b"STATE BUSY\r\n".as_slice(),
+                                        b"STATE ERR reason=timeout\r\n".as_slice(),
+                                    ),
                                 };
-                                sd_request_meta = Some((request_id, command));
-                                enqueue_sd_request_with_retry(request).await
-                            } else {
-                                unreachable!("serial command must map to app or sd dispatch");
-                            };
-                            if queued {
-                                let _ = uart.write_async(ok_response).await;
-                                if let Some((request_id, command)) = sd_request_meta {
-                                    last_sd_request_id = Some(request_id);
-                                    write_sd_request_queued(&mut uart, request_id, command).await;
+                                drain_app_state_apply_acks();
+                                let request_id = next_state_request_id;
+                                next_state_request_id = next_state_request_id.wrapping_add(1);
+                                let queued =
+                                    enqueue_app_event_with_retry(AppEvent::ApplyAppStateCommand {
+                                        command,
+                                        ack_request_id: Some(request_id),
+                                    })
+                                    .await;
+                                if !queued {
+                                    let _ = uart.write_async(busy_response).await;
+                                    continue;
                                 }
-                            } else {
-                                let _ = uart.write_async(busy_response).await;
+                                if let Some(ack) = wait_app_state_apply_ack(
+                                    request_id,
+                                    APP_STATE_APPLY_ACK_TIMEOUT_MS,
+                                )
+                                .await
+                                {
+                                    if ack.status == 2 {
+                                        match cmd {
+                                            SerialCommand::NetStart | SerialCommand::NetStop => {
+                                                let _ = uart
+                                                    .write_async(
+                                                        b"NET ERR reason=invalid_transition\r\n",
+                                                    )
+                                                    .await;
+                                            }
+                                            _ => {
+                                                let _ = uart
+                                                    .write_async(
+                                                        b"STATE ERR reason=invalid_transition\r\n",
+                                                    )
+                                                    .await;
+                                            }
+                                        }
+                                    } else {
+                                        let _ = uart.write_async(ok_response).await;
+                                    }
+                                } else {
+                                    let _ = uart.write_async(timeout_response).await;
+                                }
+                            }
+                            #[cfg(not(feature = "asset-upload-http"))]
+                            SerialCommand::StateSet { .. } | SerialCommand::StateDiag { .. } => {
+                                let command = app_state_command_for_serial(cmd)
+                                    .expect("state commands must map to app-state updates");
+                                let ok_response = b"STATE OK\r\n".as_slice();
+                                let busy_response = b"STATE BUSY\r\n".as_slice();
+                                let timeout_response = b"STATE ERR reason=timeout\r\n".as_slice();
+                                drain_app_state_apply_acks();
+                                let request_id = next_state_request_id;
+                                next_state_request_id = next_state_request_id.wrapping_add(1);
+                                let queued =
+                                    enqueue_app_event_with_retry(AppEvent::ApplyAppStateCommand {
+                                        command,
+                                        ack_request_id: Some(request_id),
+                                    })
+                                    .await;
+                                if !queued {
+                                    let _ = uart.write_async(busy_response).await;
+                                    continue;
+                                }
+                                if let Some(ack) = wait_app_state_apply_ack(
+                                    request_id,
+                                    APP_STATE_APPLY_ACK_TIMEOUT_MS,
+                                )
+                                .await
+                                {
+                                    if ack.status == 2 {
+                                        let _ = uart
+                                            .write_async(b"STATE ERR reason=invalid_transition\r\n")
+                                            .await;
+                                    } else {
+                                        let _ = uart.write_async(ok_response).await;
+                                    }
+                                } else {
+                                    let _ = uart.write_async(timeout_response).await;
+                                }
+                            }
+                            SerialCommand::AllocatorAllocProbe { bytes } => {
+                                run_allocator_alloc_probe(&mut uart, bytes as usize).await;
+                            }
+                            SerialCommand::SdWait { target, timeout_ms } => {
+                                run_sdwait_command(
+                                    &mut uart,
+                                    &mut sd_result_cache,
+                                    last_sd_request_id,
+                                    target,
+                                    timeout_ms,
+                                )
+                                .await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::NetCfgSet { config } => {
+                                run_netcfg_set_command(&mut uart, config).await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::NetCfgGet => {
+                                run_netcfg_get_command(&mut uart).await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::NetStatus => {
+                                let status = wifi::net_status_snapshot();
+                                let mut line = heapless::String::<320>::new();
+                                let _ = write!(
+                                &mut line,
+                                "NET_STATUS {{\"state\":\"{}\",\"link\":{},\"ipv4\":\"{}.{}.{}.{}\",\"listener\":{},\"failure_class\":\"{}\",\"failure_code\":{},\"ladder_step\":\"{}\",\"attempt\":{},\"uptime_ms\":{}}}\r\n",
+                                status.state,
+                                if status.link { "true" } else { "false" },
+                                status.ipv4[0],
+                                status.ipv4[1],
+                                status.ipv4[2],
+                                status.ipv4[3],
+                                if status.listener { "true" } else { "false" },
+                                status.failure_class,
+                                status.failure_code,
+                                status.ladder_step,
+                                status.attempt,
+                                status.uptime_ms,
+                            );
+                                let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::NetRecover => {
+                                // Replace any queued stale recover requests so host-triggered
+                                // recovery remains edge-triggered instead of queue-backpressured.
+                                while NET_CONTROL_COMMANDS.try_receive().is_ok() {}
+                                if NET_CONTROL_COMMANDS
+                                    .try_send(NetControlCommand::Recover)
+                                    .is_ok()
+                                {
+                                    let _ =
+                                        uart_write_all(&mut uart, b"NET OK op=recover\r\n").await;
+                                } else {
+                                    let _ =
+                                        uart_write_all(&mut uart, b"NET ERR reason=busy\r\n").await;
+                                }
+                            }
+                            _ => {
+                                let (app_event, sd_command, ok_response, busy_response) =
+                                    serial_command_event_and_responses(cmd);
+                                let mut sd_request_meta: Option<(u32, SdCommand)> = None;
+                                let queued = if let Some(event) = app_event {
+                                    enqueue_app_event_with_retry(event).await
+                                } else if let Some(command) = sd_command {
+                                    let request_id = next_sd_request_id;
+                                    next_sd_request_id = next_sd_request_id.wrapping_add(1);
+                                    let request = SdRequest {
+                                        id: request_id,
+                                        command,
+                                    };
+                                    sd_request_meta = Some((request_id, command));
+                                    enqueue_sd_request_with_retry(request).await
+                                } else {
+                                    unreachable!("serial command must map to app or sd dispatch");
+                                };
+                                if queued {
+                                    let _ = uart.write_async(ok_response).await;
+                                    if let Some((request_id, command)) = sd_request_meta {
+                                        last_sd_request_id = Some(request_id);
+                                        write_sd_request_queued(&mut uart, request_id, command)
+                                            .await;
+                                    }
+                                } else {
+                                    let _ = uart.write_async(busy_response).await;
+                                }
                             }
                         }
+                    } else {
+                        let _ = uart_write_all(&mut uart, b"CMD ERR\r\n").await;
                     }
-                } else {
-                    let _ = uart_write_all(&mut uart, b"CMD ERR\r\n").await;
                 }
-                line_len = 0;
-            } else if line_len < line_buf.len() {
-                line_buf[line_len] = byte;
-                line_len += 1;
-            } else {
-                line_len = 0;
             }
         }
     }

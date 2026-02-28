@@ -1,9 +1,9 @@
-#[cfg(feature = "asset-upload-http")]
-use crate::firmware::types::WifiCredentials;
-use crate::firmware::types::{
-    AppEvent, RuntimeMode, RuntimeServicesUpdate, SdCommand, TimeSyncCommand, SD_PATH_MAX,
-    SD_WRITE_MAX,
+use crate::firmware::app_state::{
+    AppStateCommand, BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode,
 };
+#[cfg(feature = "asset-upload-http")]
+use crate::firmware::types::NetConfigSet;
+use crate::firmware::types::{AppEvent, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(super) enum SerialCommand {
@@ -74,21 +74,36 @@ pub(super) enum SerialCommand {
         target: SdWaitTarget,
         timeout_ms: u32,
     },
-    ModeStatus,
-    ModeSet {
-        operation: ModeSetOperation,
+    DiagGet,
+    StateGet,
+    StateSet {
+        operation: StateSetOperation,
     },
-    RunMode {
-        mode: RuntimeMode,
+    StateDiag {
+        kind: DiagKind,
+        targets: DiagTargets,
     },
     #[cfg(feature = "asset-upload-http")]
-    WifiSet {
-        credentials: WifiCredentials,
+    NetCfgSet {
+        config: NetConfigSet,
     },
+    #[cfg(feature = "asset-upload-http")]
+    NetCfgGet,
+    #[cfg(feature = "asset-upload-http")]
+    NetStart,
+    #[cfg(feature = "asset-upload-http")]
+    NetStop,
+    #[cfg(feature = "asset-upload-http")]
+    NetStatus,
+    #[cfg(feature = "asset-upload-http")]
+    NetRecover,
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum ModeSetOperation {
+pub(super) enum StateSetOperation {
+    Base(BaseMode),
+    DayBackground(DayBackground),
+    Overlay(OverlayMode),
     Upload(bool),
     AssetReads(bool),
 }
@@ -114,11 +129,14 @@ pub(super) enum TelemetrySetOperation {
     Default,
 }
 
-impl ModeSetOperation {
-    pub(super) fn as_update(self) -> RuntimeServicesUpdate {
+impl StateSetOperation {
+    pub(super) fn as_state_command(self) -> AppStateCommand {
         match self {
-            Self::Upload(enabled) => RuntimeServicesUpdate::Upload(enabled),
-            Self::AssetReads(enabled) => RuntimeServicesUpdate::AssetReads(enabled),
+            Self::Base(mode) => AppStateCommand::SetBase(mode),
+            Self::DayBackground(day_bg) => AppStateCommand::SetDayBackground(day_bg),
+            Self::Overlay(overlay) => AppStateCommand::SetOverlay(overlay),
+            Self::Upload(enabled) => AppStateCommand::SetUpload(enabled),
+            Self::AssetReads(enabled) => AppStateCommand::SetAssets(enabled),
         }
     }
 }
@@ -130,12 +148,16 @@ pub(super) enum SdWaitTarget {
     Id(u32),
 }
 
-pub(super) fn runtime_services_update_for_command(
-    cmd: SerialCommand,
-) -> Option<RuntimeServicesUpdate> {
+pub(super) fn app_state_command_for_serial(cmd: SerialCommand) -> Option<AppStateCommand> {
     match cmd {
-        SerialCommand::ModeSet { operation } => Some(operation.as_update()),
-        SerialCommand::RunMode { mode } => Some(RuntimeServicesUpdate::Replace(mode.as_services())),
+        SerialCommand::StateSet { operation } => Some(operation.as_state_command()),
+        SerialCommand::StateDiag { kind, targets } => {
+            Some(AppStateCommand::SetDiag { kind, targets })
+        }
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetStart => Some(AppStateCommand::SetUpload(true)),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetStop => Some(AppStateCommand::SetUpload(false)),
         _ => None,
     }
 }
@@ -292,10 +314,21 @@ pub(super) fn serial_command_event_and_responses(
             unreachable!("allocator allocation probe command is handled inline")
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
-        SerialCommand::ModeStatus => unreachable!("mode status command is handled inline"),
-        SerialCommand::ModeSet { .. } => unreachable!("mode set command is handled inline"),
-        SerialCommand::RunMode { .. } => unreachable!("runmode command is handled inline"),
+        SerialCommand::DiagGet => unreachable!("diag get command is handled inline"),
+        SerialCommand::StateGet => unreachable!("state get command is handled inline"),
+        SerialCommand::StateSet { .. } => unreachable!("state set command is handled inline"),
+        SerialCommand::StateDiag { .. } => unreachable!("state diag command is handled inline"),
         #[cfg(feature = "asset-upload-http")]
-        SerialCommand::WifiSet { .. } => unreachable!("wifiset command is handled inline"),
+        SerialCommand::NetCfgSet { .. } => unreachable!("netcfg command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetCfgGet => unreachable!("netcfg command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetStart => unreachable!("net command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetStop => unreachable!("net command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetStatus => unreachable!("net command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetRecover => unreachable!("net command is handled inline"),
     }
 }

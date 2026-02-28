@@ -1,8 +1,12 @@
 use super::{commands::SdWaitTarget, parser::SDWAIT_DEFAULT_TIMEOUT_MS, *};
 
-use super::super::types::RuntimeMode;
-use super::super::types::{AppEvent, RuntimeServicesUpdate, SD_PATH_MAX, SD_WRITE_MAX};
-use super::commands::{ModeSetOperation, TelemetryDomain, TelemetrySetOperation};
+use super::super::super::app_state::{
+    AppStateCommand, BaseMode, DayBackground, DiagKind, OverlayMode,
+};
+use super::super::types::{AppEvent, SD_PATH_MAX, SD_WRITE_MAX};
+use super::commands::{
+    app_state_command_for_serial, StateSetOperation, TelemetryDomain, TelemetrySetOperation,
+};
 
 fn path_from(buf: &[u8; SD_PATH_MAX], len: u8) -> &str {
     core::str::from_utf8(&buf[..len as usize]).unwrap()
@@ -107,31 +111,21 @@ fn rejects_psram_alloc_probe_without_size() {
 }
 
 #[test]
-fn parses_runmode_upload() {
-    let cmd = parse_serial_command(b"RUNMODE UPLOAD");
-    match cmd {
-        Some(SerialCommand::RunMode { mode }) => {
-            assert!(matches!(mode, RuntimeMode::Upload));
-        }
-        _ => panic!("unexpected command"),
-    }
+fn parses_state_get() {
+    let cmd = parse_serial_command(b"STATE GET");
+    assert!(matches!(cmd, Some(SerialCommand::StateGet)));
 }
 
 #[test]
-fn parses_runmode_normal_case_insensitive() {
-    let cmd = parse_serial_command(b"runmode normal");
-    match cmd {
-        Some(SerialCommand::RunMode { mode }) => {
-            assert!(matches!(mode, RuntimeMode::Normal));
-        }
-        _ => panic!("unexpected command"),
-    }
+fn parses_state_status_alias() {
+    let cmd = parse_serial_command(b"STATE STATUS");
+    assert!(matches!(cmd, Some(SerialCommand::StateGet)));
 }
 
 #[test]
-fn parses_mode_status() {
-    let cmd = parse_serial_command(b"MODE STATUS");
-    assert!(matches!(cmd, Some(SerialCommand::ModeStatus)));
+fn parses_diag_get() {
+    let cmd = parse_serial_command(b"DIAG GET");
+    assert!(matches!(cmd, Some(SerialCommand::DiagGet)));
 }
 
 #[test]
@@ -172,38 +166,102 @@ fn parses_telemetry_set_all_off() {
 }
 
 #[test]
-fn parses_mode_set_upload_on() {
-    let cmd = parse_serial_command(b"MODE UPLOAD ON");
+fn parses_state_set_upload_on() {
+    let cmd = parse_serial_command(b"STATE SET upload=on");
     match cmd {
-        Some(SerialCommand::ModeSet { operation }) => {
-            assert!(matches!(operation, ModeSetOperation::Upload(true)));
+        Some(SerialCommand::StateSet { operation }) => {
+            assert!(matches!(operation, StateSetOperation::Upload(true)));
         }
         _ => panic!("unexpected command"),
     }
 }
 
 #[test]
-fn parses_mode_set_assets_off() {
-    let cmd = parse_serial_command(b"MODE ASSETS OFF");
+fn parses_state_set_assets_off() {
+    let cmd = parse_serial_command(b"STATE SET assets=off");
     match cmd {
-        Some(SerialCommand::ModeSet { operation }) => {
-            assert!(matches!(operation, ModeSetOperation::AssetReads(false)));
+        Some(SerialCommand::StateSet { operation }) => {
+            assert!(matches!(operation, StateSetOperation::AssetReads(false)));
         }
         _ => panic!("unexpected command"),
     }
+}
+
+#[test]
+fn parses_state_set_base_touch_wizard() {
+    let cmd = parse_serial_command(b"STATE SET base=TOUCH_WIZARD");
+    match cmd {
+        Some(SerialCommand::StateSet { operation }) => {
+            assert!(matches!(
+                operation,
+                StateSetOperation::Base(BaseMode::TouchWizard)
+            ));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_state_set_day_background() {
+    let cmd = parse_serial_command(b"STATE SET day_bg=SUMINAGASHI");
+    match cmd {
+        Some(SerialCommand::StateSet { operation }) => {
+            assert!(matches!(
+                operation,
+                StateSetOperation::DayBackground(DayBackground::Suminagashi)
+            ));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_state_set_overlay_clock() {
+    let cmd = parse_serial_command(b"STATE SET overlay=CLOCK");
+    match cmd {
+        Some(SerialCommand::StateSet { operation }) => {
+            assert!(matches!(
+                operation,
+                StateSetOperation::Overlay(OverlayMode::Clock)
+            ));
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_state_diag() {
+    let cmd = parse_serial_command(b"STATE DIAG kind=TEST targets=SD|WIFI|TOUCH");
+    match cmd {
+        Some(SerialCommand::StateDiag { kind, targets }) => {
+            assert!(matches!(kind, DiagKind::Test));
+            assert_eq!(targets.as_persisted(), 0b01011);
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn rejects_invalid_state_commands() {
+    assert!(parse_serial_command(b"STATE SET base=INVALID").is_none());
+    assert!(parse_serial_command(b"STATE DIAG kind=TEST targets=GPS").is_none());
 }
 
 #[cfg(feature = "asset-upload-http")]
 #[test]
-fn parses_wifiset_with_password() {
-    let cmd = parse_serial_command(b"WIFISET MyNet pass1234");
+fn parses_netcfg_set_with_password() {
+    let cmd = parse_serial_command(
+        br#"NETCFG SET {"ssid":"MyNet","password":"pass1234","dhcp_timeout_ms":25000}"#,
+    );
     match cmd {
-        Some(SerialCommand::WifiSet { credentials }) => {
+        Some(SerialCommand::NetCfgSet { config }) => {
+            let credentials = config.credentials.expect("credentials");
             assert_eq!(&credentials.ssid[..credentials.ssid_len as usize], b"MyNet");
             assert_eq!(
                 &credentials.password[..credentials.password_len as usize],
                 b"pass1234"
             );
+            assert_eq!(config.policy.dhcp_timeout_ms, 25_000);
         }
         _ => panic!("unexpected command"),
     }
@@ -211,10 +269,11 @@ fn parses_wifiset_with_password() {
 
 #[cfg(feature = "asset-upload-http")]
 #[test]
-fn parses_wifiset_open_network() {
-    let cmd = parse_serial_command(b"WIFISET CafeWiFi");
+fn parses_netcfg_set_open_network() {
+    let cmd = parse_serial_command(br#"NETCFG SET {"ssid":"CafeWiFi"}"#);
     match cmd {
-        Some(SerialCommand::WifiSet { credentials }) => {
+        Some(SerialCommand::NetCfgSet { config }) => {
+            let credentials = config.credentials.expect("credentials");
             assert_eq!(
                 &credentials.ssid[..credentials.ssid_len as usize],
                 b"CafeWiFi"
@@ -223,6 +282,31 @@ fn parses_wifiset_open_network() {
         }
         _ => panic!("unexpected command"),
     }
+}
+
+#[cfg(feature = "asset-upload-http")]
+#[test]
+fn parses_net_control_commands() {
+    assert!(matches!(
+        parse_serial_command(b"NET START"),
+        Some(SerialCommand::NetStart)
+    ));
+    assert!(matches!(
+        parse_serial_command(b"NET STOP"),
+        Some(SerialCommand::NetStop)
+    ));
+    assert!(matches!(
+        parse_serial_command(b"NET STATUS"),
+        Some(SerialCommand::NetStatus)
+    ));
+    assert!(matches!(
+        parse_serial_command(b"NET RECOVER"),
+        Some(SerialCommand::NetRecover)
+    ));
+    assert!(matches!(
+        parse_serial_command(b"NETCFG GET"),
+        Some(SerialCommand::NetCfgGet)
+    ));
 }
 
 #[test]
@@ -357,21 +441,21 @@ fn maps_sdfatren_to_event_and_responses() {
 }
 
 #[test]
-fn maps_modeset_to_delta_update_event() {
-    let cmd = parse_serial_command(b"MODE UPLOAD ON").expect("command");
-    let update = runtime_services_update_for_command(cmd).expect("mode update");
-    assert!(matches!(update, RuntimeServicesUpdate::Upload(true)));
+fn maps_state_set_to_app_state_command() {
+    let cmd = parse_serial_command(b"STATE SET upload=on").expect("command");
+    let state_cmd = app_state_command_for_serial(cmd).expect("app-state command");
+    assert!(matches!(state_cmd, AppStateCommand::SetUpload(true)));
 }
 
 #[test]
-fn maps_runmode_to_replace_update_event() {
-    let cmd = parse_serial_command(b"RUNMODE NORMAL").expect("command");
-    let update = runtime_services_update_for_command(cmd).expect("mode update");
-    match update {
-        RuntimeServicesUpdate::Replace(services) => {
-            assert!(!services.upload_enabled_flag());
-            assert!(services.asset_reads_enabled_flag());
+fn maps_state_diag_to_app_state_command() {
+    let cmd = parse_serial_command(b"STATE DIAG kind=DEBUG targets=IMU").expect("command");
+    let state_cmd = app_state_command_for_serial(cmd).expect("app-state command");
+    match state_cmd {
+        AppStateCommand::SetDiag { kind, targets } => {
+            assert!(matches!(kind, DiagKind::Debug));
+            assert_eq!(targets.as_persisted(), 1 << 4);
         }
-        _ => panic!("expected replace update"),
+        _ => panic!("expected state diag command"),
     }
 }

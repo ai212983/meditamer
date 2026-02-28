@@ -38,18 +38,41 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if let Some(bytes) = basic::parse_allocator_alloc_probe_command(line) {
         return Some(SerialCommand::AllocatorAllocProbe { bytes });
     }
-    if basic::parse_mode_status_command(line) {
-        return Some(SerialCommand::ModeStatus);
+    if basic::parse_diag_get_command(line) {
+        return Some(SerialCommand::DiagGet);
     }
-    if let Some(operation) = basic::parse_modeset_command(line) {
-        return Some(SerialCommand::ModeSet { operation });
+    if basic::parse_state_get_command(line) {
+        return Some(SerialCommand::StateGet);
     }
-    if let Some(mode) = basic::parse_runmode_command(line) {
-        return Some(SerialCommand::RunMode { mode });
+    if let Some(operation) = basic::parse_state_set_command(line) {
+        return Some(SerialCommand::StateSet { operation });
+    }
+    if let Some((kind, targets)) = basic::parse_state_diag_command(line) {
+        return Some(SerialCommand::StateDiag { kind, targets });
     }
     #[cfg(feature = "asset-upload-http")]
-    if let Some(credentials) = basic::parse_wifiset_command(line) {
-        return Some(SerialCommand::WifiSet { credentials });
+    if let Some(config) = basic::parse_netcfg_set_command(line) {
+        return Some(SerialCommand::NetCfgSet { config });
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_netcfg_get_command(line) {
+        return Some(SerialCommand::NetCfgGet);
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_net_start_command(line) {
+        return Some(SerialCommand::NetStart);
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_net_stop_command(line) {
+        return Some(SerialCommand::NetStop);
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_net_status_command(line) {
+        return Some(SerialCommand::NetStatus);
+    }
+    #[cfg(feature = "asset-upload-http")]
+    if basic::parse_net_recover_command(line) {
+        return Some(SerialCommand::NetRecover);
     }
     if basic::parse_allocator_status_command(line) {
         return Some(SerialCommand::AllocatorStatus);

@@ -1,5 +1,3 @@
-#[cfg(feature = "asset-upload-http")]
-use crate::firmware::types::WifiConfigResultCode;
 use crate::firmware::types::{SdCommand, SdCommandKind, SdResultCode};
 
 use super::commands::SdWaitTarget;
@@ -55,18 +53,5 @@ pub(super) fn sd_result_code_label(code: SdResultCode) -> &'static str {
         SdResultCode::PowerOffFailed => "power_off_failed",
         SdResultCode::OperationFailed => "operation_failed",
         SdResultCode::RefusedLba0 => "refused_lba0",
-    }
-}
-
-#[cfg(feature = "asset-upload-http")]
-pub(super) fn wifi_config_result_code_label(code: WifiConfigResultCode) -> &'static str {
-    match code {
-        WifiConfigResultCode::Ok => "ok",
-        WifiConfigResultCode::Busy => "busy",
-        WifiConfigResultCode::NotFound => "not_found",
-        WifiConfigResultCode::InvalidData => "invalid_data",
-        WifiConfigResultCode::PowerOnFailed => "power_on_failed",
-        WifiConfigResultCode::InitFailed => "init_failed",
-        WifiConfigResultCode::OperationFailed => "operation_failed",
     }
 }
