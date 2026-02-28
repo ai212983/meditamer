@@ -68,24 +68,24 @@ command = "cargo"
 args = ["+stable", "fmt", "--all", "--", "--check", "--color", "always"]
 
 [[checks]]
-label = "scripts/test_event_config_host.sh"
-command = "scripts/test_event_config_host.sh"
+label = "scripts/tests/host/test_event_config_host.sh"
+command = "scripts/tests/host/test_event_config_host.sh"
 
 [[checks]]
-label = "scripts/test_event_engine_host.sh"
-command = "scripts/test_event_engine_host.sh"
+label = "scripts/tests/host/test_event_engine_host.sh"
+command = "scripts/tests/host/test_event_engine_host.sh"
 
 [[checks]]
-label = "scripts/test_touch_core_host.sh"
-command = "scripts/test_touch_core_host.sh"
+label = "scripts/tests/host/test_touch_core_host.sh"
+command = "scripts/tests/host/test_touch_core_host.sh"
 
 [[checks]]
-label = "scripts/test_touch_replay_host.sh"
-command = "scripts/test_touch_replay_host.sh"
+label = "scripts/tests/host/test_touch_replay_host.sh"
+command = "scripts/tests/host/test_touch_replay_host.sh"
 
 [[checks]]
-label = "scripts/lint_host_tools.sh"
-command = "scripts/lint_host_tools.sh"
+label = "scripts/ci/lint_host_tools.sh"
+command = "scripts/ci/lint_host_tools.sh"
 
 [copilot]
 # Copilot loop controls. Prefer configuring these in TOML (instead of env vars).
