@@ -102,4 +102,57 @@ mod tests {
         assert_eq!(clusters_for_size(1024, 1024), 1);
         assert_eq!(clusters_for_size(1025, 1024), 2);
     }
+
+    #[test]
+    fn classify_directory_slot_respects_end_marker_tail() {
+        let (is_free, reached_end) = classify_directory_slot(0x00, false);
+        assert!(is_free);
+        assert!(reached_end);
+
+        // After 0x00, all following slots are treated as free tail.
+        let (is_free_after, reached_end_after) = classify_directory_slot(0x7F, reached_end);
+        assert!(is_free_after);
+        assert!(reached_end_after);
+    }
+
+    #[test]
+    fn record_free_slot_selects_required_run() {
+        let mut run = [DirLocation::ZERO; MAX_LFN_SLOTS + 1];
+        let mut run_len = 0usize;
+        let mut selected = None;
+        let needed = 3usize;
+
+        record_free_slot(
+            &mut run,
+            &mut run_len,
+            needed,
+            &mut selected,
+            DirLocation { lba: 10, slot: 1 },
+        );
+        assert!(selected.is_none());
+
+        record_free_slot(
+            &mut run,
+            &mut run_len,
+            needed,
+            &mut selected,
+            DirLocation { lba: 10, slot: 2 },
+        );
+        assert!(selected.is_none());
+
+        record_free_slot(
+            &mut run,
+            &mut run_len,
+            needed,
+            &mut selected,
+            DirLocation { lba: 10, slot: 3 },
+        );
+        let selected = selected.expect("selected slots");
+        assert_eq!(selected[0].lba, 10);
+        assert_eq!(selected[0].slot, 1);
+        assert_eq!(selected[1].lba, 10);
+        assert_eq!(selected[1].slot, 2);
+        assert_eq!(selected[2].lba, 10);
+        assert_eq!(selected[2].slot, 3);
+    }
 }

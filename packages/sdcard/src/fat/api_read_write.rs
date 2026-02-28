@@ -222,8 +222,7 @@ pub async fn write_file(
     } else {
         ((lfn_len + 12) / 13) + 1
     };
-    let free_lookup = scan_directory(sd, &volume, parent_cluster, None, needed_slots).await?;
-    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let free_slots = reserve_directory_slots(sd, &volume, parent_cluster, needed_slots).await?;
     write_new_entry(
         sd,
         &free_slots[..needed_slots],

@@ -9,6 +9,7 @@ async fn scan_directory(
     let mut free_slots = None;
     let mut free_run = [DirLocation::ZERO; MAX_LFN_SLOTS + 1];
     let mut free_run_len = 0usize;
+    let mut reached_directory_end = false;
     let mut visited = 0u32;
     let mut lfn = LfnState::new();
 
@@ -26,37 +27,28 @@ async fn scan_directory(
             for slot in 0..DIR_ENTRIES_PER_SECTOR {
                 let base = slot * DIR_ENTRY_SIZE;
                 let first = sector[base];
-                if first == 0x00 || first == 0xE5 {
+                let (is_free_slot, next_reached_directory_end) =
+                    classify_directory_slot(first, reached_directory_end);
+                reached_directory_end = next_reached_directory_end;
+                if is_free_slot {
                     lfn.clear();
                     if needed_free_slots > 0 {
-                        if free_run_len < free_run.len() {
-                            free_run[free_run_len] = DirLocation {
+                        record_free_slot(
+                            &mut free_run,
+                            &mut free_run_len,
+                            needed_free_slots,
+                            &mut free_slots,
+                            DirLocation {
                                 lba,
                                 slot: slot as u8,
-                            };
-                            free_run_len += 1;
-                        } else {
-                            free_run.copy_within(1.., 0);
-                            free_run[free_run.len() - 1] = DirLocation {
-                                lba,
-                                slot: slot as u8,
-                            };
-                            free_run_len = free_run.len();
+                            },
+                        );
+                        if free_slots.is_some() && target_name.is_none() {
+                            return Ok(DirLookup {
+                                found: None,
+                                free: free_slots,
+                            });
                         }
-
-                        if free_slots.is_none() && free_run_len >= needed_free_slots {
-                            let start = free_run_len - needed_free_slots;
-                            let mut selected = [DirLocation::ZERO; MAX_LFN_SLOTS + 1];
-                            selected[..needed_free_slots]
-                                .copy_from_slice(&free_run[start..start + needed_free_slots]);
-                            free_slots = Some(selected);
-                        }
-                    }
-                    if first == 0x00 {
-                        return Ok(DirLookup {
-                            found: None,
-                            free: free_slots,
-                        });
                     }
                     continue;
                 }
@@ -125,6 +117,85 @@ async fn scan_directory(
             }
         }
     }
+}
+
+fn classify_directory_slot(first: u8, reached_directory_end: bool) -> (bool, bool) {
+    if reached_directory_end {
+        return (true, true);
+    }
+    if first == 0x00 {
+        // FAT spec: 0x00 marks this entry free and all following entries free.
+        return (true, true);
+    }
+    if first == 0xE5 {
+        return (true, false);
+    }
+    (false, false)
+}
+
+fn record_free_slot(
+    free_run: &mut [DirLocation; MAX_LFN_SLOTS + 1],
+    free_run_len: &mut usize,
+    needed_free_slots: usize,
+    free_slots: &mut Option<[DirLocation; MAX_LFN_SLOTS + 1]>,
+    location: DirLocation,
+) {
+    if *free_run_len < free_run.len() {
+        free_run[*free_run_len] = location;
+        *free_run_len += 1;
+    } else {
+        free_run.copy_within(1.., 0);
+        free_run[free_run.len() - 1] = location;
+        *free_run_len = free_run.len();
+    }
+
+    if free_slots.is_none() && *free_run_len >= needed_free_slots {
+        let start = *free_run_len - needed_free_slots;
+        let mut selected = [DirLocation::ZERO; MAX_LFN_SLOTS + 1];
+        selected[..needed_free_slots].copy_from_slice(&free_run[start..start + needed_free_slots]);
+        *free_slots = Some(selected);
+    }
+}
+
+async fn reserve_directory_slots(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    dir_cluster: u32,
+    needed_slots: usize,
+) -> Result<[DirLocation; MAX_LFN_SLOTS + 1], SdFatError> {
+    loop {
+        let lookup = scan_directory(sd, volume, dir_cluster, None, needed_slots).await?;
+        if let Some(free) = lookup.free {
+            return Ok(free);
+        }
+        extend_directory_chain(sd, volume, dir_cluster).await?;
+    }
+}
+
+async fn extend_directory_chain(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    dir_cluster: u32,
+) -> Result<(), SdFatError> {
+    let mut tail = dir_cluster;
+    let mut visited = 0u32;
+    while let Some(next) = next_cluster(sd, volume, tail).await? {
+        if visited > volume.total_clusters.saturating_add(2) {
+            return Err(SdFatError::ClusterChainTooLong);
+        }
+        visited = visited.saturating_add(1);
+        tail = next;
+    }
+
+    let new_cluster = allocate_chain(sd, volume, 1).await?;
+    set_fat_entry(sd, volume, tail, new_cluster).await?;
+
+    let first_lba = cluster_to_lba(volume, new_cluster)?;
+    let zero = [0u8; SD_SECTOR_SIZE];
+    for offset in 0..volume.sectors_per_cluster as u32 {
+        sd.write_sector(first_lba + offset, &zero).await?;
+    }
+    Ok(())
 }
 
 async fn write_directory_entry(

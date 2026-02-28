@@ -20,8 +20,7 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
     } else {
         ((lfn_len + 12) / 13) + 1
     };
-    let free_lookup = scan_directory(sd, &volume, parent_cluster, None, needed_slots).await?;
-    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let free_slots = reserve_directory_slots(sd, &volume, parent_cluster, needed_slots).await?;
     let dir_cluster = allocate_chain(sd, &volume, 1).await?;
     initialize_directory_cluster(sd, &volume, dir_cluster, parent_cluster).await?;
 
@@ -106,8 +105,7 @@ pub async fn rename(sd: &mut SdCardProbe<'_>, src: &str, dst: &str) -> Result<()
     } else {
         ((lfn_len + 12) / 13) + 1
     };
-    let free_lookup = scan_directory(sd, &volume, dst_parent, None, needed_slots).await?;
-    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let free_slots = reserve_directory_slots(sd, &volume, dst_parent, needed_slots).await?;
 
     write_new_entry(
         sd,
@@ -204,8 +202,7 @@ pub async fn begin_append_session_create_or_open(
     } else {
         ((lfn_len + 12) / 13) + 1
     };
-    let free_lookup = scan_directory(sd, &volume, parent_cluster, None, needed_slots).await?;
-    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let free_slots = reserve_directory_slots(sd, &volume, parent_cluster, needed_slots).await?;
     let short_location = free_slots[needed_slots - 1];
     let record = DirRecord {
         short_name,
@@ -432,8 +429,7 @@ pub async fn rename_replace(
     } else {
         ((lfn_len + 12) / 13) + 1
     };
-    let free_lookup = scan_directory(sd, &volume, dst_parent, None, needed_slots).await?;
-    let free_slots = free_lookup.free.ok_or(SdFatError::DirFull)?;
+    let free_slots = reserve_directory_slots(sd, &volume, dst_parent, needed_slots).await?;
 
     write_new_entry(
         sd,
