@@ -298,11 +298,12 @@ Aliases: `HEAP`, `ALLOCATOR`.
 Response format:
 
 ```text
-PSRAM feature_enabled=<bool> state=<state> total_bytes=<n> used_bytes=<n> free_bytes=<n> peak_used_bytes=<n> internal_free_bytes=<n> external_free_bytes=<n> min_free_bytes=<n> min_internal_free_bytes=<n> min_external_free_bytes=<n>
+PSRAM feature_enabled=<bool> state=<state> total_bytes=<n> used_bytes=<n> free_bytes=<n> peak_used_bytes=<n> internal_free_bytes=<n> external_free_bytes=<n> min_free_bytes=<n> min_internal_free_bytes=<n> min_external_free_bytes=<n> large_alloc_external_ok=<n> large_alloc_internal_ok=<n> large_alloc_fail=<n>
 ```
 
 - `internal_free_bytes` tracks capability-constrained internal RAM available for Wi-Fi/radio allocations.
 - `min_*` values are boot-lifetime low-water marks to identify monotonic pressure during soak runs.
+- `large_alloc_*` counters show where `alloc_large_byte_buffer` requests landed (external vs internal fallback).
 
 Allocator probe command:
 

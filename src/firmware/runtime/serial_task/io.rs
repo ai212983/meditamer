@@ -56,10 +56,10 @@ pub(super) async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTra
 
 pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
     let snapshot = psram::allocator_memory_snapshot();
-    let mut line = heapless::String::<320>::new();
+    let mut line = heapless::String::<448>::new();
     let _ = write!(
         &mut line,
-        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={}\r\n",
+        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}\r\n",
         snapshot.feature_enabled,
         snapshot.state,
         snapshot.total_bytes,
@@ -70,7 +70,10 @@ pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
         snapshot.free_external_bytes,
         snapshot.min_free_bytes,
         snapshot.min_free_internal_bytes,
-        snapshot.min_free_external_bytes
+        snapshot.min_free_external_bytes,
+        snapshot.large_alloc_external_ok,
+        snapshot.large_alloc_internal_ok,
+        snapshot.large_alloc_fail
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }

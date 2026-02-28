@@ -39,6 +39,9 @@ pub(crate) struct AllocatorMemorySnapshot {
     pub(crate) min_free_bytes: usize,
     pub(crate) min_free_internal_bytes: usize,
     pub(crate) min_free_external_bytes: usize,
+    pub(crate) large_alloc_external_ok: usize,
+    pub(crate) large_alloc_internal_ok: usize,
+    pub(crate) large_alloc_fail: usize,
 }
 
 static ALLOCATOR_STATE: AtomicU8 = AtomicU8::new(initial_allocator_state());
@@ -47,6 +50,9 @@ static LAST_LOGGED_PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static MIN_FREE_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static MIN_FREE_INTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static MIN_FREE_EXTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
+static LARGE_ALLOC_EXTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
+static LARGE_ALLOC_INTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
+static LARGE_ALLOC_FAIL: AtomicUsize = AtomicUsize::new(0);
 const INTERNAL_HEAP_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,6 +238,9 @@ pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> Allocat
     MIN_FREE_BYTES.store(usize::MAX, Ordering::Relaxed);
     MIN_FREE_INTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
     MIN_FREE_EXTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
+    LARGE_ALLOC_EXTERNAL_OK.store(0, Ordering::Relaxed);
+    LARGE_ALLOC_INTERNAL_OK.store(0, Ordering::Relaxed);
+    LARGE_ALLOC_FAIL.store(0, Ordering::Relaxed);
     update_allocator_state(AllocatorState::Initialized);
     allocator_status()
 }
@@ -252,9 +261,24 @@ pub(crate) fn alloc_large_byte_buffer(
     let alloc_len = byte_len.max(1);
     let layout =
         Layout::from_size_align(alloc_len, 1).map_err(|_| BufferAllocError::OutOfMemory)?;
-    let ptr = unsafe { GlobalAlloc::alloc(&esp_alloc::HEAP, layout) };
-    let Some(ptr) = NonNull::new(ptr) else {
-        return Err(BufferAllocError::OutOfMemory);
+    // Prefer PSRAM for large buffers to preserve internal-capability RAM for
+    // Wi-Fi/radio allocations.
+    let external_ptr =
+        unsafe { esp_alloc::HEAP.alloc_caps(esp_alloc::MemoryCapability::External.into(), layout) };
+    let (ptr, placement) = if let Some(ptr) = NonNull::new(external_ptr) {
+        LARGE_ALLOC_EXTERNAL_OK.fetch_add(1, Ordering::Relaxed);
+        (ptr, BufferPlacement::Psram)
+    } else {
+        let internal_ptr = unsafe {
+            esp_alloc::HEAP.alloc_caps(esp_alloc::MemoryCapability::Internal.into(), layout)
+        };
+        if let Some(ptr) = NonNull::new(internal_ptr) {
+            LARGE_ALLOC_INTERNAL_OK.fetch_add(1, Ordering::Relaxed);
+            (ptr, BufferPlacement::InternalRam)
+        } else {
+            LARGE_ALLOC_FAIL.fetch_add(1, Ordering::Relaxed);
+            return Err(BufferAllocError::OutOfMemory);
+        }
     };
     unsafe {
         core::ptr::write_bytes(ptr.as_ptr(), 0, alloc_len);
@@ -262,7 +286,7 @@ pub(crate) fn alloc_large_byte_buffer(
     let _ = update_peak_used_bytes(esp_alloc::HEAP.used());
 
     Ok(LargeByteBuffer {
-        placement: BufferPlacement::Psram,
+        placement,
         ptr,
         len: byte_len,
         layout,
@@ -343,13 +367,16 @@ pub(crate) fn allocator_memory_snapshot() -> AllocatorMemorySnapshot {
         min_free_bytes: min_or_zero(min_free_bytes),
         min_free_internal_bytes: min_or_zero(min_free_internal_bytes),
         min_free_external_bytes: min_or_zero(min_free_external_bytes),
+        large_alloc_external_ok: LARGE_ALLOC_EXTERNAL_OK.load(Ordering::Relaxed),
+        large_alloc_internal_ok: LARGE_ALLOC_INTERNAL_OK.load(Ordering::Relaxed),
+        large_alloc_fail: LARGE_ALLOC_FAIL.load(Ordering::Relaxed),
     }
 }
 
 pub(crate) fn log_allocator_status() {
     let snapshot = allocator_memory_snapshot();
     esp_println::println!(
-        "psram: feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={}",
+        "psram: feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}",
         snapshot.feature_enabled,
         snapshot.state,
         snapshot.total_bytes,
@@ -360,7 +387,10 @@ pub(crate) fn log_allocator_status() {
         snapshot.free_external_bytes,
         snapshot.min_free_bytes,
         snapshot.min_free_internal_bytes,
-        snapshot.min_free_external_bytes
+        snapshot.min_free_external_bytes,
+        snapshot.large_alloc_external_ok,
+        snapshot.large_alloc_internal_ok,
+        snapshot.large_alloc_fail
     );
 }
 
