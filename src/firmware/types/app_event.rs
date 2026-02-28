@@ -1,5 +1,5 @@
-use super::RuntimeServicesUpdate;
 use super::TimeSyncCommand;
+use crate::firmware::app_state::AppStateCommand;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AppEvent {
@@ -12,8 +12,8 @@ pub(crate) enum AppEvent {
     StartTouchCalibrationWizard,
     ForceRepaint,
     ForceMarbleRepaint,
-    UpdateRuntimeServices {
-        update: RuntimeServicesUpdate,
+    ApplyAppStateCommand {
+        command: AppStateCommand,
         ack_request_id: Option<u16>,
     },
 }

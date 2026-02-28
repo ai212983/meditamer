@@ -14,9 +14,7 @@ pub(crate) use base::{
 };
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use base::{WIFI_CONFIG_FILE_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX};
-pub(crate) use modes::{
-    DisplayMode, RuntimeMode, RuntimeServices, RuntimeServicesApplyAck, RuntimeServicesUpdate,
-};
+pub(crate) use modes::AppStateApplyAck;
 pub(crate) use sd::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdCommand, SdCommandKind,
     SdPowerRequest, SdRequest, SdResult, SdResultCode, SdUploadCommand, SdUploadRequest,
@@ -26,7 +24,8 @@ pub(crate) use time_sync::{TimeSyncCommand, TimeSyncState};
 pub(crate) use trace::TapTraceSample;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use wifi::{
-    WifiConfigRequest, WifiConfigResponse, WifiConfigResultCode, WifiCredentials,
+    NetConfigSet, NetControlCommand, WifiConfigRequest, WifiConfigResponse, WifiConfigResultCode,
+    WifiCredentials, WifiRuntimePolicy, WIFI_DHCP_TIMEOUT_MAX_MS,
 };
 
 #[allow(unused_imports)]

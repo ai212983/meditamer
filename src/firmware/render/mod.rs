@@ -11,18 +11,41 @@ use super::{
 pub(crate) use clock::{render_clock_overlay, sample_battery_percent};
 pub(crate) use visual::{next_visual_seed, render_shanshui_update, render_suminagashi_update};
 
-pub(crate) type RenderTiming = (u32, Option<TimeSyncState>, Option<u8>);
+pub(crate) struct RenderActiveParams<'a> {
+    pub(crate) base_mode: BaseMode,
+    pub(crate) day_background: DayBackground,
+    pub(crate) overlay_mode: OverlayMode,
+    pub(crate) uptime_seconds: u32,
+    pub(crate) time_sync: Option<TimeSyncState>,
+    pub(crate) battery_percent: Option<u8>,
+    pub(crate) pattern_nonce: &'a mut u32,
+    pub(crate) first_visual_seed_pending: &'a mut bool,
+}
+
+pub(crate) struct RenderVisualParams<'a> {
+    pub(crate) day_background: DayBackground,
+    pub(crate) overlay_mode: OverlayMode,
+    pub(crate) uptime_seconds: u32,
+    pub(crate) time_sync: Option<TimeSyncState>,
+    pub(crate) battery_percent: Option<u8>,
+    pub(crate) pattern_nonce: &'a mut u32,
+    pub(crate) first_visual_seed_pending: &'a mut bool,
+}
 
 pub(crate) async fn render_active_mode(
     display: &mut InkplateDriver,
-    base_mode: BaseMode,
-    day_background: DayBackground,
-    overlay_mode: OverlayMode,
-    timing: RenderTiming,
-    seed_state: (&mut u32, &mut bool),
+    params: RenderActiveParams<'_>,
 ) {
-    let (uptime_seconds, time_sync, battery_percent) = timing;
-    let (pattern_nonce, first_visual_seed_pending) = seed_state;
+    let RenderActiveParams {
+        base_mode,
+        day_background,
+        overlay_mode,
+        uptime_seconds,
+        time_sync,
+        battery_percent,
+        pattern_nonce,
+        first_visual_seed_pending,
+    } = params;
     match base_mode {
         BaseMode::TouchWizard => {}
         BaseMode::Day => {
@@ -49,13 +72,17 @@ pub(crate) async fn render_active_mode(
 
 pub(crate) async fn render_visual_update(
     display: &mut InkplateDriver,
-    day_background: DayBackground,
-    overlay_mode: OverlayMode,
-    timing: RenderTiming,
-    seed_state: (&mut u32, &mut bool),
+    params: RenderVisualParams<'_>,
 ) {
-    let (uptime_seconds, time_sync, battery_percent) = timing;
-    let (pattern_nonce, first_visual_seed_pending) = seed_state;
+    let RenderVisualParams {
+        day_background,
+        overlay_mode,
+        uptime_seconds,
+        time_sync,
+        battery_percent,
+        pattern_nonce,
+        first_visual_seed_pending,
+    } = params;
     let seed = next_visual_seed(
         uptime_seconds,
         time_sync,

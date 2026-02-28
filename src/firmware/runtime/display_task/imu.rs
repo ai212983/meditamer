@@ -7,7 +7,7 @@ use super::super::super::{
         TAP_TRACE_SAMPLE_MS,
     },
     event_engine::SensorFrame,
-    render::render_active_mode,
+    render::{render_active_mode, RenderActiveParams},
     touch::config::TOUCH_IMU_QUIET_WINDOW_MS,
     types::{DisplayContext, TapTraceSample},
 };
@@ -78,14 +78,16 @@ pub(super) async fn process_imu_cycle(context: &mut DisplayContext, state: &mut 
                     let battery_percent = state.battery_percent;
                     render_active_mode(
                         &mut context.inkplate,
-                        state.base_mode(),
-                        state.day_background(),
-                        state.overlay_mode(),
-                        (last_uptime_seconds, time_sync, battery_percent),
-                        (
-                            &mut state.pattern_nonce,
-                            &mut state.first_visual_seed_pending,
-                        ),
+                        RenderActiveParams {
+                            base_mode: state.base_mode(),
+                            day_background: state.day_background(),
+                            overlay_mode: state.overlay_mode(),
+                            uptime_seconds: last_uptime_seconds,
+                            time_sync,
+                            battery_percent,
+                            pattern_nonce: &mut state.pattern_nonce,
+                            first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                        },
                     )
                     .await;
                     state.screen_initialized = true;

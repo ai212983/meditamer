@@ -123,6 +123,7 @@ pub(crate) enum SdUploadResultCode {
     SizeMismatch,
     PowerOnFailed,
     InitFailed,
+    DirectoryFull,
     OperationFailed,
 }
 

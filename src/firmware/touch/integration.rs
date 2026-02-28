@@ -1,7 +1,7 @@
 use embassy_time::Instant;
 
 use super::super::{
-    render::render_active_mode,
+    render::{render_active_mode, RenderActiveParams},
     runtime::trigger_backlight_cycle,
     types::{DisplayContext, TimeSyncState},
 };
@@ -60,13 +60,19 @@ pub(crate) async fn handle_touch_event(
         }
         TouchEventKind::LongPress => {
             *update_count = 0;
+            let (pattern_nonce, first_visual_seed_pending) = seed_state;
             render_active_mode(
                 &mut context.inkplate,
-                base_mode,
-                day_background,
-                overlay_mode,
-                (last_uptime_seconds, time_sync, battery_percent),
-                seed_state,
+                RenderActiveParams {
+                    base_mode,
+                    day_background,
+                    overlay_mode,
+                    uptime_seconds: last_uptime_seconds,
+                    time_sync,
+                    battery_percent,
+                    pattern_nonce,
+                    first_visual_seed_pending,
+                },
             )
             .await;
             *screen_initialized = true;

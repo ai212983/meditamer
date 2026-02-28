@@ -8,6 +8,7 @@ use super::super::super::{
     render::{
         next_visual_seed, render_active_mode, render_clock_overlay, render_shanshui_update,
         render_suminagashi_update, render_visual_update, sample_battery_percent,
+        RenderActiveParams, RenderVisualParams,
     },
     touch::{
         config::{TOUCH_IRQ_BURST_MS, TOUCH_IRQ_LOW, TOUCH_SAMPLE_IDLE_FALLBACK_MS},
@@ -46,26 +47,30 @@ pub(super) async fn handle_app_event(
             if do_full_refresh {
                 render_active_mode(
                     &mut context.inkplate,
-                    state.base_mode(),
-                    state.day_background(),
-                    state.overlay_mode(),
-                    (uptime_seconds, state.time_sync, state.battery_percent),
-                    (
-                        &mut state.pattern_nonce,
-                        &mut state.first_visual_seed_pending,
-                    ),
+                    RenderActiveParams {
+                        base_mode: state.base_mode(),
+                        day_background: state.day_background(),
+                        overlay_mode: state.overlay_mode(),
+                        uptime_seconds,
+                        time_sync: state.time_sync,
+                        battery_percent: state.battery_percent,
+                        pattern_nonce: &mut state.pattern_nonce,
+                        first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                    },
                 )
                 .await;
             } else {
                 render_visual_update(
                     &mut context.inkplate,
-                    state.day_background(),
-                    state.overlay_mode(),
-                    (uptime_seconds, state.time_sync, state.battery_percent),
-                    (
-                        &mut state.pattern_nonce,
-                        &mut state.first_visual_seed_pending,
-                    ),
+                    RenderVisualParams {
+                        day_background: state.day_background(),
+                        overlay_mode: state.overlay_mode(),
+                        uptime_seconds,
+                        time_sync: state.time_sync,
+                        battery_percent: state.battery_percent,
+                        pattern_nonce: &mut state.pattern_nonce,
+                        first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                    },
                 )
                 .await;
             }
@@ -96,18 +101,16 @@ pub(super) async fn handle_app_event(
             } else {
                 render_active_mode(
                     &mut context.inkplate,
-                    state.base_mode(),
-                    state.day_background(),
-                    state.overlay_mode(),
-                    (
-                        state.last_uptime_seconds,
-                        state.time_sync,
-                        state.battery_percent,
-                    ),
-                    (
-                        &mut state.pattern_nonce,
-                        &mut state.first_visual_seed_pending,
-                    ),
+                    RenderActiveParams {
+                        base_mode: state.base_mode(),
+                        day_background: state.day_background(),
+                        overlay_mode: state.overlay_mode(),
+                        uptime_seconds: state.last_uptime_seconds,
+                        time_sync: state.time_sync,
+                        battery_percent: state.battery_percent,
+                        pattern_nonce: &mut state.pattern_nonce,
+                        first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                    },
                 )
                 .await;
                 state.screen_initialized = true;
@@ -127,18 +130,16 @@ pub(super) async fn handle_app_event(
             }
             render_active_mode(
                 &mut context.inkplate,
-                state.base_mode(),
-                state.day_background(),
-                state.overlay_mode(),
-                (
-                    state.last_uptime_seconds,
-                    state.time_sync,
-                    state.battery_percent,
-                ),
-                (
-                    &mut state.pattern_nonce,
-                    &mut state.first_visual_seed_pending,
-                ),
+                RenderActiveParams {
+                    base_mode: state.base_mode(),
+                    day_background: state.day_background(),
+                    overlay_mode: state.overlay_mode(),
+                    uptime_seconds: state.last_uptime_seconds,
+                    time_sync: state.time_sync,
+                    battery_percent: state.battery_percent,
+                    pattern_nonce: &mut state.pattern_nonce,
+                    first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                },
             )
             .await;
             state.screen_initialized = true;
@@ -195,18 +196,16 @@ pub(super) async fn handle_app_event(
             state.update_count = 0;
             render_active_mode(
                 &mut context.inkplate,
-                state.base_mode(),
-                state.day_background(),
-                state.overlay_mode(),
-                (
-                    state.last_uptime_seconds,
-                    state.time_sync,
-                    state.battery_percent,
-                ),
-                (
-                    &mut state.pattern_nonce,
-                    &mut state.first_visual_seed_pending,
-                ),
+                RenderActiveParams {
+                    base_mode: state.base_mode(),
+                    day_background: state.day_background(),
+                    overlay_mode: state.overlay_mode(),
+                    uptime_seconds: state.last_uptime_seconds,
+                    time_sync: state.time_sync,
+                    battery_percent: state.battery_percent,
+                    pattern_nonce: &mut state.pattern_nonce,
+                    first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                },
             )
             .await;
             state.screen_initialized = true;
@@ -276,18 +275,16 @@ pub(super) async fn handle_app_event(
                 } else if !result.after.services.upload_enabled {
                     render_active_mode(
                         &mut context.inkplate,
-                        state.base_mode(),
-                        state.day_background(),
-                        state.overlay_mode(),
-                        (
-                            state.last_uptime_seconds,
-                            state.time_sync,
-                            state.battery_percent,
-                        ),
-                        (
-                            &mut state.pattern_nonce,
-                            &mut state.first_visual_seed_pending,
-                        ),
+                        RenderActiveParams {
+                            base_mode: state.base_mode(),
+                            day_background: state.day_background(),
+                            overlay_mode: state.overlay_mode(),
+                            uptime_seconds: state.last_uptime_seconds,
+                            time_sync: state.time_sync,
+                            battery_percent: state.battery_percent,
+                            pattern_nonce: &mut state.pattern_nonce,
+                            first_visual_seed_pending: &mut state.first_visual_seed_pending,
+                        },
                     )
                     .await;
                     state.screen_initialized = true;

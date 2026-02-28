@@ -60,15 +60,7 @@ pub fn run() -> ! {
 
     let mut app_state_store = AppStateStore::new(peripherals.FLASH);
     let mut persisted_state = app_state_store.load_state().unwrap_or_default();
-    let mut initial_snapshot = AppStateSnapshot {
-        base: persisted_state.base,
-        day_background: persisted_state.day_background,
-        overlay: persisted_state.overlay,
-        services: persisted_state.services,
-        diag_kind: persisted_state.diag_kind,
-        diag_targets: persisted_state.diag_targets,
-        ..AppStateSnapshot::default()
-    };
+    let mut initial_snapshot = AppStateSnapshot::from_persisted_sanitized(persisted_state);
 
     #[cfg(not(feature = "asset-upload-http"))]
     if initial_snapshot.services.upload_enabled {

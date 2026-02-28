@@ -5,7 +5,7 @@ use crate::{
 use esp_hal::{gpio::Output, uart::Uart, Async};
 use sdcard::probe;
 
-use super::super::storage::ModeStore;
+use super::super::app_state::AppStateStore;
 
 pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
 pub(crate) type SerialUart = Uart<'static, Async>;
@@ -30,7 +30,7 @@ pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 pub(crate) struct DisplayContext {
     pub(crate) inkplate: InkplateDriver,
-    pub(crate) mode_store: ModeStore<'static>,
+    pub(crate) app_state_store: AppStateStore<'static>,
     pub(crate) _panel_pins: PanelPinHold<'static>,
 }
 
