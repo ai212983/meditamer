@@ -6,7 +6,7 @@ use super::super::super::types::{
     SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX,
 };
 use super::super::transfer_buffers;
-use super::{SD_UPLOAD_PATH_BUF_MAX, SD_UPLOAD_TMP_SUFFIX};
+use super::{SD_UPLOAD_PATH_BUF_MAX, SD_UPLOAD_ROOT, SD_UPLOAD_TMP_BASENAME};
 
 mod helpers;
 
@@ -167,21 +167,25 @@ pub(super) async fn handle_begin(
         Ok(path) => path,
         Err(code) => return upload_result(false, code, 0),
     };
+    esp_println::println!(
+        "sd_upload: begin path={} expected_size={}",
+        final_path,
+        expected_size
+    );
     let final_path_bytes = final_path.as_bytes();
 
-    if final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len() > SD_UPLOAD_PATH_BUF_MAX {
-        return upload_result(false, SdUploadResultCode::InvalidPath, 0);
-    }
-
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        esp_println::println!(
+            "sd_upload: begin ensure_upload_ready failed code={:?}",
+            code
+        );
         return upload_result(false, code, 0);
     }
 
-    let mut temp_path = [0u8; SD_UPLOAD_PATH_BUF_MAX];
-    temp_path[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
-    temp_path[final_path_bytes.len()..final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len()]
-        .copy_from_slice(SD_UPLOAD_TMP_SUFFIX);
-    let temp_len = final_path_bytes.len() + SD_UPLOAD_TMP_SUFFIX.len();
+    let (temp_path, temp_len) = match build_temp_upload_path(final_path_bytes) {
+        Ok(path) => path,
+        Err(code) => return upload_result(false, code, 0),
+    };
     let temp_path_str = match core::str::from_utf8(&temp_path[..temp_len]) {
         Ok(path) => path,
         Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
@@ -191,6 +195,11 @@ pub(super) async fn handle_begin(
         match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await {
             Ok(session) => session,
             Err(err) => {
+                esp_println::println!(
+                    "sd_upload: begin append_session_create_or_open failed temp_path={} err={:?}",
+                    temp_path_str,
+                    err
+                );
                 return upload_result(false, map_fat_error_to_upload_code(&err), 0);
             }
         };
@@ -242,6 +251,12 @@ pub(super) async fn handle_chunk(
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        esp_println::println!(
+            "sd_upload: chunk ensure_upload_ready failed code={:?} bytes_written={} data_len={}",
+            code,
+            active.bytes_written,
+            data_len
+        );
         return upload_result(false, code, active.bytes_written);
     }
 
@@ -262,6 +277,12 @@ pub(super) async fn handle_chunk(
     )
     .await
     {
+        esp_println::println!(
+            "sd_upload: chunk append_session_write failed err={:?} bytes_written={} data_len={}",
+            err,
+            active.bytes_written,
+            data_len
+        );
         return upload_result(
             false,
             map_fat_error_to_upload_code(&err),
@@ -292,6 +313,12 @@ pub(super) async fn handle_commit(
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        esp_println::println!(
+            "sd_upload: commit ensure_upload_ready failed code={:?} bytes_written={} expected_size={}",
+            code,
+            active.bytes_written,
+            active.expected_size
+        );
         return upload_result(false, code, active.bytes_written);
     }
 
@@ -306,6 +333,11 @@ pub(super) async fn handle_commit(
             Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
         };
     if let Err(err) = fat::append_session_flush(sd_probe, &active.append_session).await {
+        esp_println::println!(
+            "sd_upload: commit append_session_flush failed temp_path={} err={:?}",
+            temp_path_str,
+            err
+        );
         return upload_result(
             false,
             map_fat_error_to_upload_code(&err),
@@ -314,6 +346,12 @@ pub(super) async fn handle_commit(
     }
 
     if let Err(err) = fat::rename_replace(sd_probe, temp_path_str, final_path_str).await {
+        esp_println::println!(
+            "sd_upload: commit rename_replace failed temp_path={} final_path={} err={:?}",
+            temp_path_str,
+            final_path_str,
+            err
+        );
         return upload_result(
             false,
             map_fat_error_to_upload_code(&err),
@@ -337,6 +375,11 @@ pub(super) async fn handle_abort(
     };
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        esp_println::println!(
+            "sd_upload: abort ensure_upload_ready failed code={:?} bytes_written={}",
+            code,
+            active.bytes_written
+        );
         return upload_result(false, code, active.bytes_written);
     }
 
@@ -349,11 +392,18 @@ pub(super) async fn handle_abort(
         Ok(()) | Err(fat::SdFatError::NotFound) => {
             upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
         }
-        Err(err) => upload_result(
-            false,
-            map_fat_error_to_upload_code(&err),
-            active.bytes_written,
-        ),
+        Err(err) => {
+            esp_println::println!(
+                "sd_upload: abort remove failed temp_path={} err={:?}",
+                temp_path_str,
+                err
+            );
+            upload_result(
+                false,
+                map_fat_error_to_upload_code(&err),
+                active.bytes_written,
+            )
+        }
     }
 }
 
@@ -439,6 +489,36 @@ pub(super) async fn ensure_upload_ready(
     upload_mounted: &mut bool,
 ) -> Result<(), SdUploadResultCode> {
     helpers::ensure_upload_ready(sd_probe, powered, upload_mounted).await
+}
+
+pub(super) fn build_temp_upload_path(
+    final_path: &[u8],
+) -> Result<([u8; SD_UPLOAD_PATH_BUF_MAX], usize), SdUploadResultCode> {
+    if final_path == SD_UPLOAD_ROOT.as_bytes() {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+    if final_path.ends_with(b"/") {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+
+    let Some(last_sep_idx) = final_path.iter().rposition(|byte| *byte == b'/') else {
+        return Err(SdUploadResultCode::InvalidPath);
+    };
+    if last_sep_idx + 1 >= final_path.len() {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+
+    let parent_len = if last_sep_idx == 0 { 1 } else { last_sep_idx };
+    let temp_len = parent_len + 1 + SD_UPLOAD_TMP_BASENAME.len();
+    if temp_len > SD_UPLOAD_PATH_BUF_MAX {
+        return Err(SdUploadResultCode::InvalidPath);
+    }
+
+    let mut temp_path = [0u8; SD_UPLOAD_PATH_BUF_MAX];
+    temp_path[..parent_len].copy_from_slice(&final_path[..parent_len]);
+    temp_path[parent_len] = b'/';
+    temp_path[parent_len + 1..temp_len].copy_from_slice(SD_UPLOAD_TMP_BASENAME);
+    Ok((temp_path, temp_len))
 }
 
 pub(super) fn parse_upload_path(path: &[u8], path_len: u8) -> Result<&str, SdUploadResultCode> {

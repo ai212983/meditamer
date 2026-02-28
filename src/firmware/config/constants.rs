@@ -10,32 +10,16 @@ pub(crate) const REFRESH_INTERVAL_SECONDS: u32 = 300;
 pub(crate) const BATTERY_INTERVAL_SECONDS: u32 = 300;
 pub(crate) const FULL_REFRESH_EVERY_N_UPDATES: u32 = 20;
 pub(crate) const UART_BAUD: u32 = 115_200;
-pub(crate) const TIMESET_CMD_BUF_LEN: usize = 320;
+// Shared UART command buffer for host instrumentation commands.
+// NETCFG SET JSON payloads can exceed 320 bytes in hard-cut network mode.
+pub(crate) const TIMESET_CMD_BUF_LEN: usize = 768;
 pub(crate) const TITLE_FONT: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_tf>();
 pub(crate) const META_FONT: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_tf>();
 pub(crate) const RENDER_TIME_FONT: FontRenderer =
     FontRenderer::new::<fonts::u8g2_font_helvB24_tf>();
 pub(crate) const BATTERY_FONT: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_tf>();
-pub(crate) const TITLE_Y: i32 = 44;
 pub(crate) const BATTERY_TEXT_Y: i32 = 44;
 pub(crate) const BATTERY_TEXT_RIGHT_X: i32 = SCREEN_WIDTH - 16;
-pub(crate) const DIVIDER_TOP_Y: i32 = 76;
-pub(crate) const DIVIDER_BOTTOM_Y: i32 = 466;
-pub(crate) const CLOCK_Y: i32 = 280;
-pub(crate) const SYNC_Y: i32 = 514;
-pub(crate) const UPTIME_Y: i32 = 552;
-pub(crate) const CLOCK_REGION_LEFT: i32 = 64;
-pub(crate) const CLOCK_REGION_TOP: i32 = 170;
-pub(crate) const CLOCK_REGION_WIDTH: u32 = 472;
-pub(crate) const CLOCK_REGION_HEIGHT: u32 = 220;
-pub(crate) const META_REGION_LEFT: i32 = 72;
-pub(crate) const META_REGION_TOP: i32 = 486;
-pub(crate) const META_REGION_WIDTH: u32 = 456;
-pub(crate) const META_REGION_HEIGHT: u32 = 98;
-pub(crate) const BATTERY_REGION_LEFT: i32 = 430;
-pub(crate) const BATTERY_REGION_TOP: i32 = 14;
-pub(crate) const BATTERY_REGION_WIDTH: u32 = 170;
-pub(crate) const BATTERY_REGION_HEIGHT: u32 = 54;
 pub(crate) const SUMINAGASHI_RGSS_MODE: RgssMode = RgssMode::X4;
 pub(crate) const SUMINAGASHI_CHUNK_ROWS: i32 = 8;
 pub(crate) const SUMINAGASHI_USE_GRAY4: bool = false;
@@ -61,15 +45,17 @@ pub(crate) const FACE_BASELINE_HOLD_MS: u64 = 500;
 pub(crate) const FACE_BASELINE_RECALIBRATE_MS: u64 = 1_200;
 pub(crate) const FACE_DOWN_HOLD_MS: u64 = 750;
 pub(crate) const FACE_DOWN_REARM_MS: u64 = 450;
-pub(crate) const MODE_STORE_MAGIC: u32 = 0x4544_4F4D;
-pub(crate) const MODE_STORE_VERSION: u8 = 3;
-pub(crate) const MODE_STORE_RECORD_LEN: usize = 16;
+pub(crate) const APP_STATE_STORE_MAGIC: u32 = 0x4150_5053;
+pub(crate) const APP_STATE_STORE_VERSION: u8 = 1;
+pub(crate) const APP_STATE_STORE_RECORD_LEN: usize = 16;
 pub(crate) const UI_TICK_MS: u64 = 50;
 pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
 pub(crate) const BACKLIGHT_MAX_BRIGHTNESS: u8 = 63;
 pub(crate) const BACKLIGHT_HOLD_MS: u64 = 3_000;
 pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
-pub(crate) const MODE_APPLY_ACK_TIMEOUT_MS: u64 = 1_500;
+// State transitions may trigger service teardown/allocation paths that can exceed
+// short UART command deadlines on real hardware.
+pub(crate) const APP_STATE_APPLY_ACK_TIMEOUT_MS: u64 = 6_000;
 pub(crate) const TAP_TRACE_ENABLED: bool = false;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;

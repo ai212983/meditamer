@@ -1,21 +1,11 @@
-use core::sync::atomic::{AtomicU8, Ordering};
-
-use crate::firmware::types::RuntimeServices;
-
-static RUNTIME_SERVICES: AtomicU8 = AtomicU8::new(RuntimeServices::normal().as_persisted());
-
-pub(crate) fn runtime_services() -> RuntimeServices {
-    RuntimeServices::from_persisted(RUNTIME_SERVICES.load(Ordering::Relaxed))
-}
-
-pub(crate) fn set_runtime_services(services: RuntimeServices) {
-    RUNTIME_SERVICES.store(services.as_persisted(), Ordering::Relaxed);
-}
+use crate::firmware::app_state::{self, Phase};
 
 pub(crate) fn upload_enabled() -> bool {
-    runtime_services().upload_enabled_flag()
+    app_state::snapshot::upload_enabled()
 }
 
-pub(crate) fn asset_reads_enabled() -> bool {
-    runtime_services().asset_reads_enabled_flag()
+#[cfg(feature = "asset-upload-http")]
+pub(crate) fn upload_transfers_enabled() -> bool {
+    let snapshot = app_state::snapshot::read_app_state_snapshot();
+    snapshot.services.upload_enabled && !matches!(snapshot.phase, Phase::DiagnosticsExclusive)
 }

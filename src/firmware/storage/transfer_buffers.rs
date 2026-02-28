@@ -118,20 +118,6 @@ impl AssetReadBuffer {
         }
     }
 
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        #[cfg(feature = "psram-alloc")]
-        {
-            self.data
-                .as_ref()
-                .expect("asset read buffer must be initialized")
-                .as_slice()
-        }
-        #[cfg(not(feature = "psram-alloc"))]
-        {
-            &self.data
-        }
-    }
-
     fn release(&mut self) {
         #[cfg(feature = "psram-alloc")]
         {

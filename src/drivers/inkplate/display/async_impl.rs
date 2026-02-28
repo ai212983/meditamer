@@ -96,71 +96,10 @@ where
             self.eink_off_async().await?;
         }
 
-        self.previous_bw.copy_from_slice(self.framebuffer_bw);
         Ok(())
     }
 
     pub async fn display_bw_partial_async(&mut self, leave_on: bool) -> Result<(), I2C::Error> {
-        if self.previous_bw == self.framebuffer_bw {
-            return Ok(());
-        }
-
-        self.eink_on_async().await?;
-        // Mirror Inkplate-Arduino partial waveforms: multiple diff passes before cleanup.
-        for _ in 0..5 {
-            let mut pos = FRAMEBUFFER_BYTES as isize - 1;
-            self.vscan_start()?;
-            for row in 0..E_INK_HEIGHT {
-                let new = self.framebuffer_bw[pos as usize];
-                let old = self.previous_bw[pos as usize];
-                pos -= 1;
-
-                let diffw = old & !new;
-                let diffb = !old & new;
-
-                let mut data = LUTW[(diffw >> 4) as usize] & LUTB[(diffb >> 4) as usize];
-                let mut send = self.pin_lut[data as usize];
-                self.hscan_start(send);
-
-                data = LUTW[(diffw & 0x0F) as usize] & LUTB[(diffb & 0x0F) as usize];
-                send = self.pin_lut[data as usize];
-                self.write_data_and_clock(send);
-
-                for _ in 0..(E_INK_WIDTH / 8 - 1) {
-                    let new = self.framebuffer_bw[pos as usize];
-                    let old = self.previous_bw[pos as usize];
-                    pos -= 1;
-
-                    let diffw = old & !new;
-                    let diffb = !old & new;
-
-                    data = LUTW[(diffw >> 4) as usize] & LUTB[(diffb >> 4) as usize];
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-
-                    data = LUTW[(diffw & 0x0F) as usize] & LUTB[(diffb & 0x0F) as usize];
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-                }
-
-                self.write_data_and_clock(send);
-                self.vscan_end();
-
-                if (row & 0x1F) == 0 {
-                    embassy_time::Timer::after_micros(0).await;
-                }
-            }
-            embassy_time::Timer::after_micros(230).await;
-        }
-        self.clean_async(2, 2).await?;
-        self.clean_async(3, 1).await?;
-        let _ = self.vscan_start();
-
-        if !leave_on {
-            self.eink_off_async().await?;
-        }
-
-        self.previous_bw.copy_from_slice(self.framebuffer_bw);
-        Ok(())
+        self.display_bw_async(leave_on).await
     }
 }

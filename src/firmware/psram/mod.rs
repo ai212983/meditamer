@@ -29,6 +29,7 @@ pub(crate) struct AllocatorStatus {
 static ALLOCATOR_STATE: AtomicU8 = AtomicU8::new(initial_allocator_state());
 static PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LAST_LOGGED_PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
+const INTERNAL_HEAP_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferPlacement {
@@ -177,6 +178,10 @@ pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> Allocat
     if matches!(current_allocator_state(), AllocatorState::Initialized) {
         return allocator_status();
     }
+
+    // Keep an internal-capability heap region for subsystems (Wi-Fi) that
+    // cannot allocate from external PSRAM.
+    esp_alloc::heap_allocator!(size: INTERNAL_HEAP_BYTES);
 
     let (_start, size) = esp_hal::psram::psram_raw_parts(psram);
     if size == 0 {

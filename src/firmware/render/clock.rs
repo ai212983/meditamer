@@ -5,62 +5,51 @@ mod text;
 use embedded_graphics::{
     pixelcolor::BinaryColor,
     prelude::*,
-    primitives::{Line, PrimitiveStyle, Rectangle},
+    primitives::{PrimitiveStyle, Rectangle},
 };
 use u8g2_fonts::{
     types::{FontColor, HorizontalAlignment, VerticalPosition},
     FontRenderer,
 };
 
-use super::super::assets::runtime as asset_runtime;
-
 use super::{
     super::{
         config::{
-            BATTERY_FONT, BATTERY_REGION_HEIGHT, BATTERY_REGION_LEFT, BATTERY_REGION_TOP,
-            BATTERY_REGION_WIDTH, BATTERY_TEXT_RIGHT_X, BATTERY_TEXT_Y, CLOCK_REGION_HEIGHT,
-            CLOCK_REGION_LEFT, CLOCK_REGION_TOP, CLOCK_REGION_WIDTH, CLOCK_Y, DIVIDER_BOTTOM_Y,
-            DIVIDER_TOP_Y, META_FONT, META_REGION_HEIGHT, META_REGION_LEFT, META_REGION_TOP,
-            META_REGION_WIDTH, RENDER_TIME_FONT, SCREEN_WIDTH, SYNC_Y, TITLE_FONT, TITLE_Y,
-            UPTIME_Y,
+            BATTERY_FONT, BATTERY_TEXT_RIGHT_X, BATTERY_TEXT_Y, RENDER_TIME_FONT, SCREEN_WIDTH,
         },
         psram,
         types::{InkplateDriver, TimeSyncState},
     },
     local_seconds_since_epoch,
 };
-use text::{format_battery_text, format_clock_text, format_sync_text, format_uptime_text};
+use text::format_battery_text;
 
-pub(crate) async fn render_clock_update(
+pub(crate) async fn render_clock_overlay(
     display: &mut InkplateDriver,
     uptime_seconds: u32,
     time_sync: Option<TimeSyncState>,
     battery_percent: Option<u8>,
-    full_refresh: bool,
 ) {
-    if full_refresh {
-        draw_clock_static(display);
-        draw_clock_dynamic(display, uptime_seconds, time_sync).await;
-        draw_battery_status(display, battery_percent);
-        let _ = display.display_bw_async(false).await;
-        psram::log_allocator_high_water("render_clock_full");
-        return;
-    }
-
-    erase_clock_dynamic_regions(display);
-    draw_clock_dynamic(display, uptime_seconds, time_sync).await;
-    let _ = display.display_bw_async(false).await;
-    psram::log_allocator_high_water("render_clock_partial");
-}
-
-pub(crate) async fn render_battery_update(
-    display: &mut InkplateDriver,
-    battery_percent: Option<u8>,
-) {
-    erase_battery_region(display);
-    draw_battery_status(display, battery_percent);
+    clear_region(display, 0, 0, SCREEN_WIDTH as u32, 68);
+    let clock_text = format_overlay_clock_text(uptime_seconds, time_sync);
+    let battery_text = format_battery_text(battery_percent);
+    let _ = BATTERY_FONT.render_aligned(
+        clock_text.as_str(),
+        Point::new(24, BATTERY_TEXT_Y),
+        VerticalPosition::Center,
+        HorizontalAlignment::Left,
+        FontColor::Transparent(BinaryColor::On),
+        display,
+    );
+    draw_right_aligned_bitmap_text(
+        display,
+        &BATTERY_FONT,
+        battery_text.as_str(),
+        BATTERY_TEXT_RIGHT_X,
+        BATTERY_TEXT_Y,
+    );
     let _ = display.display_bw_partial_async(false).await;
-    psram::log_allocator_high_water("render_battery_partial");
+    psram::log_allocator_high_water("render_clock_overlay_partial");
 }
 
 pub(crate) fn sample_battery_percent(display: &mut InkplateDriver) -> Option<u8> {
@@ -127,106 +116,6 @@ pub(crate) fn render_time_font() -> &'static FontRenderer {
     &RENDER_TIME_FONT
 }
 
-fn draw_clock_static<T>(display: &mut T)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    let _ = display.clear(BinaryColor::Off);
-    draw_divider(display, DIVIDER_TOP_Y);
-    draw_divider(display, DIVIDER_BOTTOM_Y);
-    draw_centered_bitmap_text(display, &TITLE_FONT, "MEDITAMER CLOCK", TITLE_Y);
-}
-
-fn erase_clock_dynamic_regions<T>(display: &mut T)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    clear_region(
-        display,
-        CLOCK_REGION_LEFT,
-        CLOCK_REGION_TOP,
-        CLOCK_REGION_WIDTH,
-        CLOCK_REGION_HEIGHT,
-    );
-    clear_region(
-        display,
-        META_REGION_LEFT,
-        META_REGION_TOP,
-        META_REGION_WIDTH,
-        META_REGION_HEIGHT,
-    );
-}
-
-fn erase_battery_region<T>(display: &mut T)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    clear_region(
-        display,
-        BATTERY_REGION_LEFT,
-        BATTERY_REGION_TOP,
-        BATTERY_REGION_WIDTH,
-        BATTERY_REGION_HEIGHT,
-    );
-}
-
-async fn draw_clock_dynamic(
-    display: &mut InkplateDriver,
-    uptime_seconds: u32,
-    time_sync: Option<TimeSyncState>,
-) {
-    let clock_text = format_clock_text(uptime_seconds, time_sync);
-    let uptime_text = format_uptime_text(uptime_seconds);
-    let sync_text = format_sync_text(time_sync);
-
-    if let Err(err) = asset_runtime::draw_pirata_time_centered(
-        display,
-        clock_text.as_str(),
-        Point::new(SCREEN_WIDTH / 2, CLOCK_Y),
-    )
-    .await
-    {
-        esp_println::println!("clock: sd_font_fallback error={:?}", err);
-        draw_centered_bitmap_text_with_white_rim(
-            display,
-            &RENDER_TIME_FONT,
-            clock_text.as_str(),
-            CLOCK_Y,
-            1,
-        );
-    }
-    draw_centered_bitmap_text(display, &META_FONT, sync_text.as_str(), SYNC_Y);
-    draw_centered_bitmap_text(display, &META_FONT, uptime_text.as_str(), UPTIME_Y);
-}
-
-fn draw_battery_status<T>(display: &mut T, battery_percent: Option<u8>)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    let battery_text = format_battery_text(battery_percent);
-    draw_right_aligned_bitmap_text(
-        display,
-        &BATTERY_FONT,
-        battery_text.as_str(),
-        BATTERY_TEXT_RIGHT_X,
-        BATTERY_TEXT_Y,
-    );
-}
-
-fn draw_centered_bitmap_text<T>(display: &mut T, renderer: &FontRenderer, text: &str, center_y: i32)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    let _ = renderer.render_aligned(
-        text,
-        Point::new(SCREEN_WIDTH / 2, center_y),
-        VerticalPosition::Center,
-        HorizontalAlignment::Center,
-        FontColor::Transparent(BinaryColor::On),
-        display,
-    );
-}
-
 fn draw_right_aligned_bitmap_text<T>(
     display: &mut T,
     renderer: &FontRenderer,
@@ -246,15 +135,6 @@ fn draw_right_aligned_bitmap_text<T>(
     );
 }
 
-fn draw_divider<T>(display: &mut T, y: i32)
-where
-    T: DrawTarget<Color = BinaryColor>,
-{
-    let _ = Line::new(Point::new(40, y), Point::new(SCREEN_WIDTH - 40, y))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
-}
-
 fn clear_region<T>(display: &mut T, x: i32, y: i32, width: u32, height: u32)
 where
     T: DrawTarget<Color = BinaryColor>,
@@ -263,4 +143,16 @@ where
     let _ = Rectangle::new(Point::new(x, y), Size::new(width, height))
         .into_styled(style)
         .draw(display);
+}
+
+fn format_overlay_clock_text(
+    uptime_seconds: u32,
+    time_sync: Option<TimeSyncState>,
+) -> heapless::String<16> {
+    let seconds_of_day = (local_seconds_since_epoch(uptime_seconds, time_sync) % 86_400) as u32;
+    let hours = seconds_of_day / 3_600;
+    let minutes = (seconds_of_day / 60) % 60;
+    let mut out = heapless::String::<16>::new();
+    let _ = write!(&mut out, "{hours:02}:{minutes:02}");
+    out
 }

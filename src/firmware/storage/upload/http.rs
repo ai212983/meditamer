@@ -107,7 +107,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     telemetry::set_upload_http_listener(false, None);
 
     loop {
-        if !service_mode::upload_enabled() {
+        if !service_mode::upload_transfers_enabled() {
             listening_logged = false;
             waiting_dhcp_logged = false;
             dhcp_wait_started_at = None;
@@ -215,7 +215,14 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             telemetry::record_upload_http_request_error();
             telemetry::record_upload_http_request_bucket(err);
             if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                esp_println::println!("upload_http: request err={}", err);
+                esp_println::println!(
+                    "upload_http: request err={} recv_queue={} send_queue={} state={:?} remote={:?}",
+                    err,
+                    socket.recv_queue(),
+                    socket.send_queue(),
+                    socket.state(),
+                    socket.remote_endpoint(),
+                );
             }
         }
 

@@ -33,6 +33,7 @@ pub(super) fn map_fat_error_to_upload_code(error: &fat::SdFatError) -> SdUploadR
         fat::SdFatError::InvalidPath => SdUploadResultCode::InvalidPath,
         fat::SdFatError::NotFound => SdUploadResultCode::NotFound,
         fat::SdFatError::NotEmpty => SdUploadResultCode::NotEmpty,
+        fat::SdFatError::DirFull => SdUploadResultCode::DirectoryFull,
         _ => SdUploadResultCode::OperationFailed,
     }
 }

@@ -1,5 +1,6 @@
 mod backlight;
 mod bootstrap;
+pub(crate) mod diagnostics;
 pub(crate) mod display_task;
 mod face_down;
 mod serial_task;

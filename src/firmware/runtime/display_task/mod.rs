@@ -1,6 +1,5 @@
 mod app_events;
 mod imu;
-mod runtime_services;
 mod sd_power;
 mod state;
 mod touch_loop;
@@ -16,7 +15,6 @@ use wait::next_loop_wait_ms;
 
 use super::super::{
     config::{APP_EVENTS, UI_TICK_MS},
-    runtime::service_mode,
     touch::{tasks::request_touch_pipeline_reset, wizard::render_touch_wizard_waiting_screen},
     types::DisplayContext,
 };
@@ -26,14 +24,14 @@ const SD_POWER_POLL_SLICE_MS: u64 = 5;
 
 #[embassy_executor::task]
 pub(crate) async fn display_task(mut context: DisplayContext) {
-    let mut state = DisplayLoopState::new(&mut context);
+    let mut state = DisplayLoopState::new(&mut context).await;
     // Service any early SD power requests before boot-time rendering paths.
     process_sd_power_requests(&mut context).await;
 
-    if state.touch_wizard.is_active() {
+    if state.in_touch_wizard_mode() && state.touch_wizard.is_active() {
         state.touch_wizard.render_full(&mut context.inkplate).await;
         state.screen_initialized = true;
-    } else if state.touch_wizard_requested {
+    } else if state.in_touch_wizard_mode() {
         render_touch_wizard_waiting_screen(&mut context.inkplate).await;
         state.screen_initialized = true;
     }
@@ -42,7 +40,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     request_touch_pipeline_reset();
 
     loop {
-        let app_wait_ms = if service_mode::upload_enabled() {
+        let app_wait_ms = if state.upload_enabled() {
             // In upload mode touch/IMU loops are skipped, so their deadlines can go stale.
             // Clamp to a fixed UI tick to avoid a zero-wait busy loop that starves other tasks.
             UI_TICK_MS
@@ -74,11 +72,11 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
             handle_app_event(event, &mut context, &mut state).await;
         }
 
-        if !service_mode::upload_enabled() {
+        if !state.upload_enabled() {
             process_imu_cycle(&mut context, &mut state).await;
             process_touch_cycle(&mut context, &mut state).await;
 
-            if !state.touch_wizard_requested {
+            if !state.in_touch_wizard_mode() {
                 run_backlight_timeline(
                     &mut context.inkplate,
                     &mut state.backlight_cycle_start,

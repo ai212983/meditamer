@@ -2,22 +2,31 @@ use core::sync::atomic::AtomicU32;
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 
+#[cfg(not(feature = "asset-upload-http"))]
+use super::super::types::SdAssetReadRequest;
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::WifiCredentials;
 use super::super::types::{
-    AppEvent, RuntimeServicesApplyAck, SdAssetReadRequest, SdAssetReadResponse, SdPowerRequest,
-    SdRequest, SdResult, SdUploadRequest, SdUploadResult, TapTraceSample,
+    AppEvent, AppStateApplyAck, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
+    SdUploadRequest, SdUploadResult, TapTraceSample,
 };
 #[cfg(feature = "asset-upload-http")]
-use super::super::types::{WifiConfigRequest, WifiConfigResponse};
+use super::super::types::{
+    NetConfigSet, NetControlCommand, WifiConfigRequest, WifiConfigResponse, WifiRuntimePolicy,
+};
+use crate::firmware::app_state::AppStateDiagControl;
 
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
 pub(crate) static SD_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 16> = Channel::new();
+pub(crate) static SD_DIAG_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 8> = Channel::new();
+pub(crate) static DIAG_CONTROL_EVENTS: Channel<CriticalSectionRawMutex, AppStateDiagControl, 4> =
+    Channel::new();
 pub(crate) static SD_UPLOAD_REQUESTS: Channel<CriticalSectionRawMutex, SdUploadRequest, 2> =
     Channel::new();
 pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadResult, 2> =
     Channel::new();
+#[cfg(not(feature = "asset-upload-http"))]
 pub(crate) static SD_ASSET_READ_REQUESTS: Channel<CriticalSectionRawMutex, SdAssetReadRequest, 2> =
     Channel::new();
 pub(crate) static SD_ASSET_READ_RESPONSES: Channel<
@@ -29,6 +38,18 @@ pub(crate) static SD_ASSET_READ_RESPONSES: Channel<
 pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
     Channel::new();
 #[cfg(feature = "asset-upload-http")]
+pub(crate) static WIFI_RUNTIME_POLICY_UPDATES: Channel<
+    CriticalSectionRawMutex,
+    WifiRuntimePolicy,
+    2,
+> = Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static NET_CONFIG_SET_UPDATES: Channel<CriticalSectionRawMutex, NetConfigSet, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
+pub(crate) static NET_CONTROL_COMMANDS: Channel<CriticalSectionRawMutex, NetControlCommand, 2> =
+    Channel::new();
+#[cfg(feature = "asset-upload-http")]
 pub(crate) static WIFI_CONFIG_REQUESTS: Channel<CriticalSectionRawMutex, WifiConfigRequest, 1> =
     Channel::new();
 #[cfg(feature = "asset-upload-http")]
@@ -37,11 +58,8 @@ pub(crate) static WIFI_CONFIG_RESPONSES: Channel<CriticalSectionRawMutex, WifiCo
 pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerRequest, 2> =
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
-pub(crate) static RUNTIME_SERVICES_APPLY_ACKS: Channel<
-    CriticalSectionRawMutex,
-    RuntimeServicesApplyAck,
-    2,
-> = Channel::new();
+pub(crate) static APP_STATE_APPLY_ACKS: Channel<CriticalSectionRawMutex, AppStateApplyAck, 2> =
+    Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();
 pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

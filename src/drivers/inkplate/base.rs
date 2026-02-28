@@ -24,11 +24,6 @@ where
             core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
             slot.assume_init_mut()
         };
-        let previous_bw = unsafe {
-            let slot = &mut *core::ptr::addr_of_mut!(PREVIOUS_BW);
-            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
-            slot.assume_init_mut()
-        };
 
         Ok(Self {
             i2c,
@@ -42,7 +37,6 @@ where
             panel_fast_ready: false,
             panel_on: false,
             framebuffer_bw,
-            previous_bw,
         })
     }
 

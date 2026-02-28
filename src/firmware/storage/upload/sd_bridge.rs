@@ -59,6 +59,7 @@ pub(crate) fn roundtrip_error_log(error: SdUploadRoundtripError) -> &'static str
             SdUploadResultCode::SizeMismatch => "size mismatch",
             SdUploadResultCode::PowerOnFailed => "sd power on failed",
             SdUploadResultCode::InitFailed => "sd init failed",
+            SdUploadResultCode::DirectoryFull => "sd directory entries full",
             SdUploadResultCode::OperationFailed => "sd operation failed",
         },
     }
@@ -77,6 +78,7 @@ pub(crate) fn roundtrip_error_status(error: SdUploadRoundtripError) -> &'static 
             SdUploadResultCode::SizeMismatch => b"400 Bad Request",
             SdUploadResultCode::PowerOnFailed => b"503 Service Unavailable",
             SdUploadResultCode::InitFailed => b"503 Service Unavailable",
+            SdUploadResultCode::DirectoryFull => b"507 Insufficient Storage",
             SdUploadResultCode::OperationFailed => b"500 Internal Server Error",
         },
     }
@@ -95,6 +97,7 @@ pub(crate) fn roundtrip_error_body(error: SdUploadRoundtripError) -> &'static [u
             SdUploadResultCode::SizeMismatch => b"size mismatch",
             SdUploadResultCode::PowerOnFailed => b"sd power on failed",
             SdUploadResultCode::InitFailed => b"sd init failed",
+            SdUploadResultCode::DirectoryFull => b"sd directory entries full",
             SdUploadResultCode::OperationFailed => b"sd operation failed",
         },
     }

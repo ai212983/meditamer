@@ -2,7 +2,7 @@ use super::{
     asset_read::parse_asset_path,
     dispatch::{sd_command_kind, sd_result_should_retry},
     failure_backoff_ms,
-    upload::parse_upload_path,
+    upload::{build_temp_upload_path, parse_upload_path},
     SD_BACKOFF_BASE_MS, SD_BACKOFF_MAX_MS,
 };
 use crate::firmware::types::{
@@ -84,6 +84,23 @@ fn upload_path_validation_rejects_outside_root_and_dot_segments() {
 fn upload_path_validation_rejects_control_characters() {
     assert_eq!(
         parse_upload_path_bytes("/assets/file\n.bin"),
+        Err(SdUploadResultCode::InvalidPath)
+    );
+}
+
+#[test]
+fn upload_temp_path_uses_fixed_short_name_in_target_directory() {
+    let (buf, len) = build_temp_upload_path(b"/assets/raw/fonts/digit_0.raw").unwrap();
+    assert_eq!(
+        core::str::from_utf8(&buf[..len]).unwrap(),
+        "/assets/raw/fonts/HCTLUPLD.TMP"
+    );
+}
+
+#[test]
+fn upload_temp_path_rejects_assets_root_as_destination() {
+    assert_eq!(
+        build_temp_upload_path(b"/assets"),
         Err(SdUploadResultCode::InvalidPath)
     );
 }

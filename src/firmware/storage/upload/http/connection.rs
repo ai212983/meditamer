@@ -1,6 +1,6 @@
 use core::cmp::min;
 
-use embassy_net::tcp::TcpSocket;
+use embassy_net::tcp::{Error as TcpError, TcpSocket};
 use embassy_time::{with_timeout, Duration, Instant};
 use esp_println::println;
 
@@ -23,6 +23,7 @@ pub(super) async fn handle_connection(
     header_buf: &mut [u8],
 ) -> Result<(), &'static str> {
     let mut filled = 0usize;
+    let mut header_read_ops = 0u32;
     let header_end = loop {
         if filled == header_buf.len() {
             write_response(socket, b"413 Payload Too Large", b"header too large").await;
@@ -36,15 +37,45 @@ pub(super) async fn handle_connection(
         .await
         {
             Ok(Ok(n)) => n,
-            Ok(Err(_)) => return Err("read"),
+            Ok(Err(err)) => {
+                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                    println!(
+                        "upload_http: header read err={:?} filled={} recv_queue={} send_queue={} state={:?} remote={:?}",
+                        err,
+                        filled,
+                        socket.recv_queue(),
+                        socket.send_queue(),
+                        socket.state(),
+                        socket.remote_endpoint(),
+                    );
+                }
+                return if matches!(err, TcpError::ConnectionReset) && filled == 0 {
+                    Err("read header reset empty")
+                } else if matches!(err, TcpError::ConnectionReset) {
+                    Err("read header reset")
+                } else {
+                    Err("read header")
+                };
+            }
             Err(_) => {
                 write_response(socket, b"408 Request Timeout", b"request header timeout").await;
                 return Err("request header timeout");
             }
         };
         if n == 0 {
-            return Err("eof");
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                println!(
+                    "upload_http: header eof filled={} reads={} recv_queue={} state={:?} remote={:?}",
+                    filled,
+                    header_read_ops,
+                    socket.recv_queue(),
+                    socket.state(),
+                    socket.remote_endpoint(),
+                );
+            }
+            return Err("eof header");
         }
+        header_read_ops = header_read_ops.saturating_add(1);
         filled += n;
 
         if let Some(end) = find_header_end(&header_buf[..filled]) {
@@ -171,19 +202,42 @@ pub(super) async fn handle_connection(
             let request_started_at = Instant::now();
             let prefetched_len = min(body_bytes_in_buffer, content_length);
             let prefetched = &header_buf[body_start..body_start + prefetched_len];
-            let stats =
-                match forward_upload_body(socket, chunk_buf, prefetched, content_length).await {
-                    Ok(stats) => stats,
-                    Err(UploadBodyError::ReadBody) => return Err("read body"),
-                    Err(UploadBodyError::IncompleteBody) => {
-                        write_response(socket, b"400 Bad Request", b"incomplete body").await;
-                        return Err("incomplete body");
+            let stats = match forward_upload_body(socket, chunk_buf, prefetched, content_length)
+                .await
+            {
+                Ok(stats) => stats,
+                Err(UploadBodyError::ReadBody {
+                    err,
+                    consumed,
+                    content_length,
+                    pending,
+                    want,
+                }) => {
+                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                        println!(
+                                "upload_http: body read err={:?} consumed={} of {} pending={} want={} recv_queue={} send_queue={} state={:?} remote={:?}",
+                                err,
+                                consumed,
+                                content_length,
+                                pending,
+                                want,
+                                socket.recv_queue(),
+                                socket.send_queue(),
+                                socket.state(),
+                                socket.remote_endpoint(),
+                            );
                     }
-                    Err(UploadBodyError::Roundtrip(err)) => {
-                        write_roundtrip_error_response(socket, err).await;
-                        return Err(roundtrip_error_log(err));
-                    }
-                };
+                    return Err("read body");
+                }
+                Err(UploadBodyError::IncompleteBody) => {
+                    write_response(socket, b"400 Bad Request", b"incomplete body").await;
+                    return Err("incomplete body");
+                }
+                Err(UploadBodyError::Roundtrip(err)) => {
+                    write_roundtrip_error_response(socket, err).await;
+                    return Err(roundtrip_error_log(err));
+                }
+            };
             telemetry::record_upload_http_upload_phase(
                 usize_to_u32_saturating(stats.sent_bytes),
                 stats.body_read_ms,
@@ -243,24 +297,45 @@ pub(super) async fn handle_connection(
 
             let prefetched_len = min(body_bytes_in_buffer, content_length);
             let prefetched = &header_buf[body_start..body_start + prefetched_len];
-            let stats =
-                match forward_upload_body(socket, chunk_buf, prefetched, content_length).await {
-                    Ok(stats) => stats,
-                    Err(UploadBodyError::ReadBody) => {
-                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                        return Err("read body");
+            let stats = match forward_upload_body(socket, chunk_buf, prefetched, content_length)
+                .await
+            {
+                Ok(stats) => stats,
+                Err(UploadBodyError::ReadBody {
+                    err,
+                    consumed,
+                    content_length,
+                    pending,
+                    want,
+                }) => {
+                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                        println!(
+                                "upload_http: body read err={:?} consumed={} of {} pending={} want={} recv_queue={} send_queue={} state={:?} remote={:?}",
+                                err,
+                                consumed,
+                                content_length,
+                                pending,
+                                want,
+                                socket.recv_queue(),
+                                socket.send_queue(),
+                                socket.state(),
+                                socket.remote_endpoint(),
+                            );
                     }
-                    Err(UploadBodyError::IncompleteBody) => {
-                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                        write_response(socket, b"400 Bad Request", b"incomplete body").await;
-                        return Err("incomplete body");
-                    }
-                    Err(UploadBodyError::Roundtrip(err)) => {
-                        let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
-                        write_roundtrip_error_response(socket, err).await;
-                        return Err(roundtrip_error_log(err));
-                    }
-                };
+                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                    return Err("read body");
+                }
+                Err(UploadBodyError::IncompleteBody) => {
+                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                    write_response(socket, b"400 Bad Request", b"incomplete body").await;
+                    return Err("incomplete body");
+                }
+                Err(UploadBodyError::Roundtrip(err)) => {
+                    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+                    write_roundtrip_error_response(socket, err).await;
+                    return Err(roundtrip_error_log(err));
+                }
+            };
 
             let commit_started_at = Instant::now();
             if let Err(err) = sd_upload_roundtrip(SdUploadCommand::Commit).await {
@@ -310,7 +385,13 @@ struct UploadBodyStats {
 }
 
 enum UploadBodyError {
-    ReadBody,
+    ReadBody {
+        err: TcpError,
+        consumed: usize,
+        content_length: usize,
+        pending: usize,
+        want: usize,
+    },
     IncompleteBody,
     Roundtrip(SdUploadRoundtripError),
 }
@@ -357,7 +438,13 @@ async fn forward_upload_body(
         let n = socket
             .read(&mut chunk_buf[pending..pending + want])
             .await
-            .map_err(|_| UploadBodyError::ReadBody)?;
+            .map_err(|err| UploadBodyError::ReadBody {
+                err,
+                consumed,
+                content_length,
+                pending,
+                want,
+            })?;
         body_read_ms = body_read_ms.saturating_add(elapsed_ms_u32(read_started_at));
         if n == 0 {
             return Err(UploadBodyError::IncompleteBody);

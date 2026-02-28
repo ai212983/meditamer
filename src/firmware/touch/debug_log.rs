@@ -7,9 +7,10 @@ use super::types::{
     TouchWizardSwipeTraceSample,
 };
 
-const TOUCH_WIZARD_SESSION_CAPACITY: usize = 128;
-const TOUCH_WIZARD_EVENT_CAPACITY: usize = 192;
-const TOUCH_WIZARD_TOUCH_SAMPLE_CAPACITY: usize = 768;
+// Keep wizard dump buffers small enough to preserve DRAM headroom for Wi-Fi init.
+const TOUCH_WIZARD_SESSION_CAPACITY: usize = 48;
+const TOUCH_WIZARD_EVENT_CAPACITY: usize = 64;
+const TOUCH_WIZARD_TOUCH_SAMPLE_CAPACITY: usize = 192;
 
 pub(crate) struct TouchWizardSessionLog {
     active: bool,

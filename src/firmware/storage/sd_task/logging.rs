@@ -4,7 +4,7 @@ use super::super::super::{
     types::{WifiConfigResponse, WifiConfigResultCode},
 };
 use super::super::super::{
-    config::{SD_ASSET_READ_RESPONSES, SD_RESULTS, SD_UPLOAD_RESULTS},
+    config::{SD_ASSET_READ_RESPONSES, SD_DIAG_RESULTS, SD_RESULTS, SD_UPLOAD_RESULTS},
     types::{
         SdAssetReadResponse, SdAssetReadResultCode, SdCommandKind, SdPowerRequest, SdResult,
         SdResultCode, SdUploadResult, SdUploadResultCode,
@@ -23,6 +23,7 @@ pub(super) fn publish_result(result: SdResult) {
             result.duration_ms
         );
     }
+    let _ = SD_DIAG_RESULTS.try_send(result);
 }
 
 pub(super) fn publish_upload_result(result: SdUploadResult) {
@@ -108,6 +109,7 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
         SdUploadResultCode::SizeMismatch => "size_mismatch",
         SdUploadResultCode::PowerOnFailed => "power_on_failed",
         SdUploadResultCode::InitFailed => "init_failed",
+        SdUploadResultCode::DirectoryFull => "directory_full",
         SdUploadResultCode::OperationFailed => "operation_failed",
     }
 }

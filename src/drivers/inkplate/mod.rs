@@ -91,9 +91,6 @@ const ENABLE_BUZZER_PITCH_CONTROL: bool = true;
 const LUT2: [u8; 16] = [
     0xAA, 0xA9, 0xA6, 0xA5, 0x9A, 0x99, 0x96, 0x95, 0x6A, 0x69, 0x66, 0x65, 0x5A, 0x59, 0x56, 0x55,
 ];
-const LUTW: [u8; 16] = [
-    0xFF, 0xFE, 0xFB, 0xFA, 0xEF, 0xEE, 0xEB, 0xEA, 0xBF, 0xBE, 0xBB, 0xBA, 0xAF, 0xAE, 0xAB, 0xAA,
-];
 const LUTB: [u8; 16] = [
     0xFF, 0xFD, 0xF7, 0xF5, 0xDF, 0xDD, 0xD7, 0xD5, 0x7F, 0x7D, 0x77, 0x75, 0x5F, 0x5D, 0x57, 0x55,
 ];
@@ -101,8 +98,6 @@ const LUTB: [u8; 16] = [
 static FRAMEBUFFER_TAKEN: AtomicBool = AtomicBool::new(false);
 #[unsafe(link_section = ".dram2_uninit")]
 static mut FRAMEBUFFER_BW: MaybeUninit<[u8; FRAMEBUFFER_BYTES]> = MaybeUninit::uninit();
-#[unsafe(link_section = ".dram2_uninit")]
-static mut PREVIOUS_BW: MaybeUninit<[u8; FRAMEBUFFER_BYTES]> = MaybeUninit::uninit();
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -186,7 +181,6 @@ pub struct InkplateHal<I2C, D> {
     panel_fast_ready: bool,
     panel_on: bool,
     framebuffer_bw: &'static mut [u8; FRAMEBUFFER_BYTES],
-    previous_bw: &'static mut [u8; FRAMEBUFFER_BYTES],
 }
 
 impl<I2C, D> Drop for InkplateHal<I2C, D> {
