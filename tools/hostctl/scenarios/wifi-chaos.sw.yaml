@@ -1,0 +1,29 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "wifi-chaos"
+  version: "1.0.0"
+do:
+  - prepare_payload:
+      call: "prepare_payload"
+      then: "start_run"
+  - start_run:
+      call: "start_run"
+      then: "net_apply_config"
+  - net_apply_config:
+      call: "net_apply_config"
+      then: "net_start"
+  - net_start:
+      call: "net_start"
+      then: "net_wait_ready"
+  - net_wait_ready:
+      call: "net_wait_ready"
+      then: "net_collect_diag"
+  - net_collect_diag:
+      call: "net_collect_diag"
+      then: "net_recover_once"
+  - net_recover_once:
+      call: "net_recover_once"
+      then: "print_summary"
+  - print_summary:
+      call: "print_summary"

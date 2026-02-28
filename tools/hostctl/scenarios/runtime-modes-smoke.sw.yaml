@@ -1,0 +1,89 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "runtime-modes-smoke"
+  version: "1.0.0"
+do:
+  - baseline_state:
+      call: "state_get"
+      then: "baseline_psram"
+  - baseline_psram:
+      call: "psram_snapshot"
+      with:
+        label: "baseline"
+      then: "upload_on"
+  - upload_on:
+      call: "apply_mode"
+      with:
+        command: "STATE SET upload=on"
+        expect_upload: "on"
+      then: "init_post_upload_checks"
+  - init_post_upload_checks:
+      call: "init_post_upload_checks"
+      then: "post_upload_status_gate"
+  - post_upload_status_gate:
+      call: "set_post_upload_status_gate"
+      then: "post_upload_status_switch"
+  - post_upload_status_switch:
+      switch:
+        - run_status_probe:
+            when: ".run_post_upload_status_probe == true"
+            then: "run_post_upload_status_probe"
+        - status_done:
+            then: "post_upload_timeset_gate"
+  - run_post_upload_status_probe:
+      call: "run_post_upload_status_probe"
+      then: "post_upload_status_gate"
+  - post_upload_timeset_gate:
+      call: "set_post_upload_timeset_gate"
+      then: "post_upload_timeset_switch"
+  - post_upload_timeset_switch:
+      switch:
+        - run_timeset_probe:
+            when: ".run_post_upload_timeset_probe == true"
+            then: "run_post_upload_timeset_probe"
+        - timeset_done:
+            then: "upload_on_psram"
+  - run_post_upload_timeset_probe:
+      call: "run_post_upload_timeset_probe"
+      then: "post_upload_timeset_gate"
+  - upload_on_psram:
+      call: "psram_snapshot"
+      with:
+        label: "upload_on"
+      then: "upload_off"
+  - upload_off:
+      call: "apply_mode"
+      with:
+        command: "STATE SET upload=off"
+        expect_upload: "off"
+      then: "upload_off_psram"
+  - upload_off_psram:
+      call: "psram_snapshot"
+      with:
+        label: "upload_off"
+      then: "assets_off"
+  - assets_off:
+      call: "apply_mode"
+      with:
+        command: "STATE SET assets=off"
+        expect_assets: "off"
+      then: "assets_off_psram"
+  - assets_off_psram:
+      call: "psram_snapshot"
+      with:
+        label: "assets_off"
+      then: "assets_on"
+  - assets_on:
+      call: "apply_mode"
+      with:
+        command: "STATE SET assets=on"
+        expect_assets: "on"
+      then: "assets_on_psram"
+  - assets_on_psram:
+      call: "psram_snapshot"
+      with:
+        label: "assets_on"
+      then: "print_summary"
+  - print_summary:
+      call: "print_summary"

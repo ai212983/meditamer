@@ -1,0 +1,326 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "sdcard-hw"
+  version: "1.0.0"
+do:
+  - probe:
+      call: "run_step"
+      with:
+        name: "probe"
+        command: "SDPROBE"
+        ack_tag: "SDPROBE"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "card_detected"
+      then: "baseline_gate"
+  - baseline_gate:
+      switch:
+        - run_baseline_all:
+            when: ".suite == \"all\""
+            then: "baseline_mkdir"
+        - run_baseline_only:
+            when: ".suite == \"baseline\""
+            then: "baseline_mkdir"
+        - skip_baseline:
+            then: "burst_gate"
+  - baseline_mkdir:
+      call: "run_step"
+      with:
+        name: "mkdir"
+        command: "SDFATMKDIR {base_path}"
+        ack_tag: "SDFATMKDIR"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "mkdir_ok path="
+      then: "baseline_write"
+  - baseline_write:
+      call: "run_step"
+      with:
+        name: "write"
+        command: "SDFATWRITE {test_file} hello"
+        ack_tag: "SDFATWRITE"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "write_ok .* verify=ok"
+      then: "baseline_read_hello"
+  - baseline_read_hello:
+      call: "run_step"
+      with:
+        name: "read_hello"
+        command: "SDFATREAD {test_file}"
+        ack_tag: "SDFATREAD"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "read_ok .* preview_hex=68656c6c6f"
+      then: "baseline_append"
+  - baseline_append:
+      call: "run_step"
+      with:
+        name: "append"
+        command: "SDFATAPPEND {test_file} _world"
+        ack_tag: "SDFATAPPEND"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "append_ok"
+      then: "baseline_stat"
+  - baseline_stat:
+      call: "run_step"
+      with:
+        name: "stat"
+        command: "SDFATSTAT {test_file}"
+        ack_tag: "SDFATSTAT"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "stat_ok .* kind=file"
+      then: "baseline_truncate"
+  - baseline_truncate:
+      call: "run_step"
+      with:
+        name: "truncate"
+        command: "SDFATTRUNC {test_file} 5"
+        ack_tag: "SDFATTRUNC"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "trunc_ok"
+      then: "baseline_rename"
+  - baseline_rename:
+      call: "run_step"
+      with:
+        name: "rename"
+        command: "SDFATREN {test_file} {test_file_renamed}"
+        ack_tag: "SDFATREN"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "ren_ok"
+      then: "baseline_remove_file"
+  - baseline_remove_file:
+      call: "run_step"
+      with:
+        name: "remove_file"
+        command: "SDFATRM {test_file_renamed}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "rm_ok"
+      then: "baseline_remove_dir"
+  - baseline_remove_dir:
+      call: "run_step"
+      with:
+        name: "remove_dir"
+        command: "SDFATRM {base_path}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "rm_ok"
+      then: "baseline_raw_rw_verify"
+  - baseline_raw_rw_verify:
+      call: "run_step"
+      with:
+        name: "raw_rw_verify"
+        command: "SDRWVERIFY {verify_lba}"
+        ack_tag: "SDRWVERIFY"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "verify_ok"
+      then: "burst_gate"
+  - burst_gate:
+      switch:
+        - run_burst_all:
+            when: ".suite == \"all\""
+            then: "burst_batch_start"
+        - run_burst_only:
+            when: ".suite == \"burst\""
+            then: "burst_batch_start"
+        - skip_burst:
+            then: "failure_gate"
+  - burst_batch_start:
+      call: "burst_batch_start"
+      with:
+        commands:
+          - "SDFATMKDIR {burst_root}"
+          - "SDFATWRITE {burst_file} A"
+          - "SDFATAPPEND {burst_file} BC"
+          - "SDFATSTAT {burst_file}"
+          - "SDFATREAD {burst_file}"
+      then: "burst_batch_assert"
+  - burst_batch_assert:
+      call: "burst_batch_assert"
+      with:
+        name: "burst_sequence"
+        expected_sdreq_count: 5
+        expected_status: "ok"
+        expected_code: "ok"
+        poll_timeout_ms: 30000
+        busy_pattern: "SDFAT(MKDIR|WRITE|APPEND|STAT|READ) BUSY"
+      then: "burst_cleanup_file"
+  - burst_cleanup_file:
+      call: "run_step"
+      with:
+        name: "burst_cleanup_file"
+        command: "SDFATRM {burst_file}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "rm_ok"
+      then: "burst_cleanup_dir"
+  - burst_cleanup_dir:
+      call: "run_step"
+      with:
+        name: "burst_cleanup_dir"
+        command: "SDFATRM {burst_root}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "rm_ok"
+      then: "failure_gate"
+  - failure_gate:
+      switch:
+        - run_failure_all:
+            when: ".suite == \"all\""
+            then: "fail_mkdir_nonempty"
+        - run_failure_only:
+            when: ".suite == \"failures\""
+            then: "fail_mkdir_nonempty"
+        - skip_failure:
+            then: "complete"
+  - fail_mkdir_nonempty:
+      call: "run_step"
+      with:
+        name: "fail_mkdir_nonempty"
+        command: "SDFATMKDIR {fail_root}"
+        ack_tag: "SDFATMKDIR"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_write_nonempty"
+  - fail_write_nonempty:
+      call: "run_step"
+      with:
+        name: "fail_write_nonempty"
+        command: "SDFATWRITE {fail_root}/child.txt x"
+        ack_tag: "SDFATWRITE"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_rm_non_empty_dir"
+  - fail_rm_non_empty_dir:
+      call: "run_step"
+      with:
+        name: "fail_rm_non_empty_dir"
+        command: "SDFATRM {fail_root}"
+        ack_tag: "SDFATRM"
+        expected_status: "error"
+        expected_code: "operation_failed"
+        expected_pattern: "rm_error .* (err=)?NotEmpty"
+      then: "fail_cleanup_child"
+  - fail_cleanup_child:
+      call: "run_step"
+      with:
+        name: "fail_cleanup_child"
+        command: "SDFATRM {fail_root}/child.txt"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_cleanup_dir"
+  - fail_cleanup_dir:
+      call: "run_step"
+      with:
+        name: "fail_cleanup_dir"
+        command: "SDFATRM {fail_root}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_mkdir_rename"
+  - fail_mkdir_rename:
+      call: "run_step"
+      with:
+        name: "fail_mkdir_rename"
+        command: "SDFATMKDIR {rename_root}"
+        ack_tag: "SDFATMKDIR"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_write_a"
+  - fail_write_a:
+      call: "run_step"
+      with:
+        name: "fail_write_a"
+        command: "SDFATWRITE {file_a} one"
+        ack_tag: "SDFATWRITE"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_write_b"
+  - fail_write_b:
+      call: "run_step"
+      with:
+        name: "fail_write_b"
+        command: "SDFATWRITE {file_b} two"
+        ack_tag: "SDFATWRITE"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_rename_collision"
+  - fail_rename_collision:
+      call: "run_step"
+      with:
+        name: "fail_rename_collision"
+        command: "SDFATREN {file_a} {file_b}"
+        ack_tag: "SDFATREN"
+        expected_status: "error"
+        expected_code: "operation_failed"
+        expected_pattern: "ren_error .* (err=)?AlreadyExists"
+      then: "fail_read_not_found"
+  - fail_read_not_found:
+      call: "run_step"
+      with:
+        name: "fail_read_not_found"
+        command: "SDFATREAD {rename_root}/missing.txt"
+        ack_tag: "SDFATREAD"
+        expected_status: "error"
+        expected_code: "not_found"
+        expected_pattern: "read_error .* (err=)?NotFound"
+      then: "fail_rw_refused_lba0"
+  - fail_rw_refused_lba0:
+      call: "run_step"
+      with:
+        name: "fail_rw_refused_lba0"
+        command: "SDRWVERIFY 0"
+        ack_tag: "SDRWVERIFY"
+        expected_status: "error"
+        expected_code: "refused_lba0"
+        expected_pattern: "refused_lba0"
+      then: "fail_cleanup_a"
+  - fail_cleanup_a:
+      call: "run_step"
+      with:
+        name: "fail_cleanup_a"
+        command: "SDFATRM {file_a}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_cleanup_b"
+  - fail_cleanup_b:
+      call: "run_step"
+      with:
+        name: "fail_cleanup_b"
+        command: "SDFATRM {file_b}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_cleanup_rename_dir"
+  - fail_cleanup_rename_dir:
+      call: "run_step"
+      with:
+        name: "fail_cleanup_rename_dir"
+        command: "SDFATRM {rename_root}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "fail_oversize_payload_cmd_err"
+  - fail_oversize_payload_cmd_err:
+      call: "raw_expect_pattern"
+      with:
+        name: "fail_oversize_payload_cmd_err"
+        command: "SDFATWRITE {base_path}/overflow.txt {long_payload}"
+        expected_pattern: "^CMD ERR"
+        timeout_ms: 20000
+      then: "complete"
+  - complete:
+      call: "complete"

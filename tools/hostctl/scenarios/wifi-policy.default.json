@@ -1,0 +1,16 @@
+{
+  "connect_timeout_ms": 30000,
+  "dhcp_timeout_ms": 20000,
+  "pinned_dhcp_timeout_ms": 45000,
+  "listener_timeout_ms": 25000,
+  "scan_active_min_ms": 600,
+  "scan_active_max_ms": 1500,
+  "scan_passive_ms": 1500,
+  "retry_same_max": 2,
+  "rotate_candidate_max": 2,
+  "rotate_auth_max": 5,
+  "full_scan_reset_max": 1,
+  "driver_restart_max": 1,
+  "cooldown_ms": 1200,
+  "driver_restart_backoff_ms": 2500
+}

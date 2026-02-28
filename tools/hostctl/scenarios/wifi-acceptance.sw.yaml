@@ -1,0 +1,73 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "wifi-acceptance"
+  version: "1.0.0"
+do:
+  - prepare_payload:
+      call: "prepare_payload"
+      then: "start_run"
+  - start_run:
+      call: "start_run"
+      then: "cycle_gate"
+  - cycle_gate:
+      switch:
+        - run_cycle:
+            when: ".cycle <= .cycles"
+            then: "net_apply_config"
+        - done:
+            then: "print_summary"
+  - net_apply_config:
+      call: "net_apply_config"
+      then: "net_start"
+  - net_start:
+      call: "net_start"
+      then: "net_wait_state"
+  - net_wait_state:
+      call: "net_wait_state"
+      then: "net_wait_ready"
+  - net_wait_ready:
+      call: "net_wait_ready"
+      then: "init_upload_attempt"
+  - init_upload_attempt:
+      call: "init_upload_attempt"
+      then: "upload_retry_gate"
+  - upload_retry_gate:
+      switch:
+        - upload_attempt_allowed:
+            when: ".upload_attempt <= .operation_retries"
+            then: "net_upload_once"
+        - upload_attempt_exhausted:
+            then: "fail_upload"
+  - net_upload_once:
+      call: "net_upload_once"
+      then: "upload_result_gate"
+  - upload_result_gate:
+      switch:
+        - upload_done:
+            when: ".upload_done == true"
+            then: "net_verify_once"
+        - upload_failed:
+            then: "net_collect_diag"
+  - net_collect_diag:
+      call: "net_collect_diag"
+      then: "net_recover_once"
+  - net_recover_once:
+      call: "net_recover_once"
+      then: "increment_upload_attempt"
+  - increment_upload_attempt:
+      call: "increment_upload_attempt"
+      then: "upload_retry_gate"
+  - fail_upload:
+      call: "net_fail"
+  - net_verify_once:
+      call: "net_verify_once"
+      then: "finalize_cycle"
+  - finalize_cycle:
+      call: "finalize_cycle"
+      then: "advance_cycle"
+  - advance_cycle:
+      call: "advance_cycle"
+      then: "cycle_gate"
+  - print_summary:
+      call: "print_summary"

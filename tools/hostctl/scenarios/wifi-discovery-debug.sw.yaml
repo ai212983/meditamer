@@ -1,0 +1,41 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "wifi-discovery-debug"
+  version: "1.0.0"
+do:
+  - start_run:
+      call: "start_run"
+      then: "net_apply_config"
+  - net_apply_config:
+      call: "net_apply_config"
+      then: "round_gate"
+  - round_gate:
+      switch:
+        - run_round:
+            when: ".round <= .rounds"
+            then: "probe_round"
+        - evaluate:
+            then: "evaluate_results"
+  - probe_round:
+      call: "probe_round"
+      then: "advance_round"
+  - advance_round:
+      call: "advance_round"
+      then: "round_gate"
+  - evaluate_results:
+      call: "evaluate_results"
+      then: "print_summary"
+  - print_summary:
+      call: "print_summary"
+      then: "result_gate"
+  # Keep `fail_run` before `result_gate`.
+  # The current workflow engine falls through to the next task when no switch
+  # branch matches; reordering these two tasks would make successful runs fail.
+  - fail_run:
+      call: "fail_run"
+  - result_gate:
+      switch:
+        - fail:
+            when: ".run_passed != true"
+            then: "fail_run"

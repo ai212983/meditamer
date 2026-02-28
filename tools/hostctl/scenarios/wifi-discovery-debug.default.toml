@@ -1,0 +1,30 @@
+# Diagnostic strategy profile for:
+#   hostctl test wifi-discovery-debug
+#
+# Keep this file declarative: thresholds and loop behavior live here,
+# while hostctl Rust actions remain primitive.
+
+rounds = 8
+# Baseline user-provided timeout; hostctl may lift effective timeout to match
+# firmware scan/watchdog budgets and avoid false "zero discovery" failures.
+# Firmware budget formula follows active/passive scan timeout shaping plus
+# post-recover watchdog slack (mirrored in hostctl runtime).
+# Scan dwell semantics reference (esp-radio, this stack):
+# https://docs.espressif.com/projects/rust/esp-radio/0.16.0/esp32s3/src/esp_radio/wifi/mod.rs.html
+round_timeout_ms = 60000
+# Serial transcript polling cadence: 250ms keeps UI/log latency low without
+# busy-looping host CPU or UART read buffers.
+poll_interval_ms = 250
+# NET STATUS polling cadence while waiting for readiness: 1s is frequent enough
+# to catch state transitions while avoiding command spam on busy links.
+status_poll_ms = 1000
+
+recover_before_round = true
+recover_after_round = false
+# Let firmware settle after NET RECOVER before sampling diagnostics.
+# 1200ms matches firmware reconnect settle windows used around disconnect paths.
+recover_settle_ms = 1200
+
+max_zero_discovery_rounds = 0
+min_ready_rounds = 1
+min_ssid_seen_rounds = 1
