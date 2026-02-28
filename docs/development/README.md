@@ -11,6 +11,8 @@ The firmware now targets `esp-hal` (`xtensa-esp32-none-elf`) as the primary and 
 - `sensors.md`: Sensor details and behavior.
 - `sound.md`: Sound functionality and behavior.
 - `hardware-test-matrix.md`: Hardware testing matrices.
+- `reliability-issues.md`: Current ranked reliability risks, evidence, and mitigation gates.
+- `troubleshoot-agent.md`: Agent-first runbook for the Serverless Workflow troubleshooting script.
 
 ## Git Hooks
 
@@ -19,7 +21,7 @@ This repo uses [`lefthook`](https://github.com/evilmartians/lefthook) to manage 
 Install dependencies:
 
 ```bash
-brew install lefthook lychee
+brew install lefthook lychee jq
 ```
 
 Or via Cargo:
@@ -27,6 +29,7 @@ Or via Cargo:
 ```bash
 cargo install --locked lefthook
 cargo install --locked lychee
+cargo install --locked rust-code-analysis-cli --version 0.0.25
 ```
 
 Install conventional commit linter:
@@ -56,6 +59,37 @@ Current commit-msg hook:
 Current pre-push hook:
 
 - Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
+- Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh` on Rust/workspace changes.
+
+Code analysis lint command (report mode by default):
+
+```bash
+scripts/lint_code_analysis.sh
+```
+
+Strict ratchet mode (used by pre-push and CI):
+
+```bash
+RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh
+```
+
+Refresh ratchet baseline after intentional refactors:
+
+```bash
+RCA_UPDATE_BASELINE=1 scripts/lint_code_analysis.sh
+```
+
+Rust-analyzer baseline lint:
+
+```bash
+scripts/lint_rust_analyzer.sh
+```
+
+Notes for this workspace:
+
+- The firmware is `no_std` with heavy feature/cfg gating; analyzer results can include inactive-code and unresolved-import noise outside active build paths.
+- The baseline script intentionally runs with `--disable-build-scripts --disable-proc-macros` for stable, fast CI signal.
+- Authoritative correctness gates remain `cargo check` and strict `cargo clippy` on `--bins --lib`.
 
 Formatting enforcement:
 
@@ -106,15 +140,15 @@ ESPFLASH_RUN_MONITOR=1 cargo run
 
 ## Flash
 
-Set the serial port and flash:
+Flash (auto-detects serial port when exactly one candidate is present):
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh [debug|release]
+scripts/flash.sh [debug|release]
 ```
 
 Default is `release` when no argument is provided.
 
-Recommended invocation (stable + deterministic):
+Recommended explicit invocation (best for multi-device setups):
 
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/flash.sh debug
@@ -132,7 +166,9 @@ Optional flash env vars:
 
 ### Port Selection
 
-Use an explicit port in non-interactive environments. A known-good port on this setup is:
+Hardware scripts now auto-detect a port when exactly one candidate is available.
+Use explicit `ESPFLASH_PORT` in multi-device or CI/non-interactive setups.
+A known-good port on this setup is:
 
 - `/dev/cu.usbserial-540`
 
@@ -148,7 +184,8 @@ Verify board connection on a specific port:
 espflash board-info -p /dev/cu.usbserial-540 -c esp32
 ```
 
-If `espflash` reports `IO error: not a terminal`, set `ESPFLASH_PORT` (or pass `-p`) to avoid interactive port selection.
+If autodetection is ambiguous, set `ESPFLASH_PORT` explicitly.
+You can also narrow autodetection with `ESPFLASH_PORT_HINT` (substring match).
 
 ### Flash Troubleshooting
 
@@ -174,7 +211,7 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_BAUD=115200 ESPFLASH_ENABLE_FALLBAC
 ## Monitor
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/monitor.sh
+scripts/monitor.sh
 ```
 
 Optional monitor env vars:
@@ -229,13 +266,13 @@ Examples:
 Recommended host helper:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/timeset.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/timeset.sh
 ```
 
 Optional explicit values:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/timeset.sh 1762531200 -300
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/timeset.sh 1762531200 -300
 ```
 
 If you prefer manual write:
@@ -281,51 +318,59 @@ PSRAMALLOC ERR bytes=<n> reason=<reason>
 Runtime mode controls are available over `UART0` (`115200` baud):
 
 ```text
-MODE STATUS
-MODE UPLOAD ON
-MODE UPLOAD OFF
-MODE ASSETS ON
-MODE ASSETS OFF
+STATE GET
+STATE SET upload=on
+STATE SET upload=off
+STATE SET assets=on
+STATE SET assets=off
+STATE SET base=day
+STATE SET base=touch_wizard
+STATE SET day_bg=suminagashi
+STATE SET day_bg=shanshui
+STATE SET overlay=none
+STATE SET overlay=clock
+STATE DIAG kind=debug targets=SD|WIFI
+DIAG GET
 ```
 
-Compatibility alias:
+Response format:
 
 ```text
-RUNMODE UPLOAD
-RUNMODE NORMAL
+STATE phase=<...> base=<...> day_bg=<...> overlay=<...> upload=<on|off> assets=<on|off> diag_kind=<...> targets=<NONE|SD|WIFI|DISPLAY|TOUCH|IMU>
+DIAG state=<idle|running|done|failed|canceled> targets=<...> step=<...> code=<...>
 ```
 
 Notes:
 
-- `MODE` state is persisted in flash and restored on boot.
-- `MODE` / `RUNMODE` return `OK` only after the mode update is applied by runtime tasks.
-- `MODE UPLOAD OFF` rejects upload operations and releases upload transfer buffers.
-- `MODE ASSETS OFF` disables SD asset reads, clears runtime graphics cache, and releases asset-read transfer buffers.
+- App state is persisted in flash and restored on boot.
+- `STATE SET` returns `OK` only after the state update is applied by runtime tasks.
+- `STATE SET upload=off` rejects upload operations and releases upload transfer buffers.
+- `STATE SET assets=off` disables SD asset reads, clears runtime graphics cache, and releases asset-read transfer buffers.
 - On `psram-alloc` builds, transfer buffers are allocated in PSRAM on-demand and released when the mode is disabled.
 
 Quick RAM check sequence:
 
 ```text
 PSRAM
-MODE UPLOAD ON
+STATE SET upload=on
 PSRAM
-MODE UPLOAD OFF
+STATE SET upload=off
 PSRAM
-MODE ASSETS OFF
+STATE SET assets=off
 PSRAM
-MODE ASSETS ON
+STATE SET assets=on
 PSRAM
 ```
 
 Automated smoke run (mode toggles + PSRAM snapshots):
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/runtime_modes_smoke.sh
+scripts/runtime_modes_smoke.sh
 ```
 
 Optional env var:
 
-- `MODE_SMOKE_SETTLE_MS` (default `0`; can be raised if extra post-command delay is desired)
+- `HOSTCTL_MODE_SMOKE_SETTLE_MS` (default `0`; can be raised if extra post-command delay is desired)
 
 ## Runtime Metrics
 
@@ -374,14 +419,14 @@ Agent-oriented contract and runbook:
 Automated UART-driven SD/FAT end-to-end validation:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
 ```
 
 Defaults:
 
 - uses current flashed firmware (does **not** flash by default)
 - captures monitor log under `logs/`
-- default suite (`SDCARD_TEST_SUITE=all`) verifies:
+- default suite (`HOSTCTL_SDCARD_SUITE=all`) verifies:
   - baseline flow: `SDPROBE`, FAT mkdir/write/read/append/stat/truncate/rename/remove, and `SDRWVERIFY`
   - burst/backpressure flow: burst command sequence without host pacing
   - failure-path flow: non-empty-dir remove rejection, rename collision rejection, not-found read, `SDRWVERIFY 0` refusal, parser `CMD ERR` for oversized payload
@@ -389,16 +434,16 @@ Defaults:
 
 Optional env vars:
 
-- `SDCARD_TEST_FLASH_FIRST=1` to flash first (mode arg defaults to `debug`)
-- `SDCARD_TEST_VERIFY_LBA` (default `2048`)
-- `SDCARD_TEST_BASE_PATH` to override test directory path on SD card
-- `SDCARD_TEST_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
-- `SDCARD_TEST_SDWAIT_TIMEOUT_MS` (default `300000`)
+- `HOSTCTL_SDCARD_FLASH_FIRST=1` to flash first (mode arg defaults to `debug`)
+- `HOSTCTL_SDCARD_VERIFY_LBA` (default `2048`)
+- `HOSTCTL_SDCARD_BASE_PATH` to override test directory path on SD card
+- `HOSTCTL_SDCARD_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
+- `HOSTCTL_SDCARD_SDWAIT_TIMEOUT_MS` (default `300000`)
 
 Burst/backpressure regression only:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
 ```
 
 ## SD Asset Upload Over Wi-Fi (STA, HTTP)
@@ -415,9 +460,9 @@ Notes:
 
 - optional compile-time credentials are still supported via `MEDITAMER_WIFI_SSID` / `MEDITAMER_WIFI_PASSWORD`
   (fallback `SSID` / `PASSWORD`).
-- upload service must be enabled at runtime (`MODE UPLOAD ON`).
-- if credentials are not compiled in, firmware waits for UART `WIFISET` command.
-- server listens on port `8080` after DHCP lease; scripts should poll `METRICS NET` and use `ip=<a.b.c.d>` when `http_listening=1` instead of parsing async logs.
+- upload service must be enabled at runtime (`STATE SET upload=on`).
+- hard-cut runtime network control now uses `NET*` UART commands only.
+- server listens on port `8080` after DHCP lease.
 - when an upload token is configured, all HTTP endpoints except `/health` require an `x-upload-token` header;
   requests without a valid token are rejected.
 - if neither `MEDITAMER_UPLOAD_HTTP_TOKEN` nor `UPLOAD_HTTP_TOKEN` is set at build time, authentication is
@@ -425,28 +470,43 @@ Notes:
 - configure the token at build time with `MEDITAMER_UPLOAD_HTTP_TOKEN` (fallback: `UPLOAD_HTTP_TOKEN`).
 - mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
 
-Runtime credential provisioning over UART:
+Runtime network policy/config provisioning over UART:
 
 ```text
-WIFISET <ssid> <password>
+NETCFG SET {"ssid":"<ssid>","password":"<password>","connect_timeout_ms":30000,"dhcp_timeout_ms":20000,"pinned_dhcp_timeout_ms":45000,"listener_timeout_ms":25000,"scan_active_min_ms":600,"scan_active_max_ms":1500,"scan_passive_ms":1500,"retry_same_max":2,"rotate_candidate_max":2,"rotate_auth_max":5,"full_scan_reset_max":1,"driver_restart_max":1,"cooldown_ms":1200,"driver_restart_backoff_ms":2500}
 ```
 
-Open network (no password):
+Read current runtime config:
 
 ```text
-WIFISET <ssid>
+NETCFG GET
+```
+
+Start/stop/recover/status:
+
+```text
+NET START
+NET STOP
+NET RECOVER
+NET STATUS
 ```
 
 Credential persistence:
 
-- `WIFISET` now persists credentials to SD file `/config/wifi.cfg`.
-- On boot, firmware attempts to load `/config/wifi.cfg` before waiting for UART `WIFISET`.
+- `NETCFG SET` with `ssid` persists credentials to SD file `/config/wifi.cfg`.
+- On boot, firmware attempts to load `/config/wifi.cfg` before waiting for runtime `NETCFG SET`.
 - This survives reboot and firmware reflashes (as long as SD card content is retained).
 
-Host helper:
+Wi-Fi acceptance helper (hard-cut):
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/wifiset.sh <ssid> <password>
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_SSID='<wifi-ssid>' \
+HOSTCTL_NET_PASSWORD='<wifi-password>' \
+HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_LOG_PATH=./logs/wifi_acceptance_manual.log \
+scripts/test_wifi_acceptance.sh
 ```
 
 Health check:
@@ -475,53 +535,103 @@ curl -X DELETE \
 Upload an assets directory:
 
 ```bash
-scripts/upload_assets_http.py --host <device-ip> --src assets --dst /assets
+scripts/upload_assets_http.sh --host <device-ip> --src assets --dst /assets
 ```
 
 Upload a single file:
 
 ```bash
-scripts/upload_assets_http.py --host <device-ip> --src ./path/to/file.bin --dst /assets
+scripts/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin --dst /assets
 ```
 
 Optional upload helper tuning:
 
-- `UPLOAD_CHUNK_SIZE` controls legacy fallback chunk size in bytes for `/upload_chunk` flow (default `8192`).
+- `HOSTCTL_UPLOAD_CHUNK_SIZE` controls chunk size in bytes for `/upload_chunk` fallback flow (default `8192`).
 
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
 ```bash
-scripts/upload_assets_http.py --host <device-ip> --dst /assets --rm old.bin --rm unused/
+scripts/upload_assets_http.sh --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
 
 Suggested runtime flow:
 
-1. `MODE UPLOAD ON`
-2. `WIFISET <ssid> <password>` (if needed)
+1. `STATE SET upload=on`
+2. `NETCFG SET {...}`
+3. `NET START`
+4. poll `NET STATUS` until `state="Ready"` and non-zero IPv4
 3. Upload files over HTTP
-4. `MODE UPLOAD OFF`
+4. `STATE SET upload=off`
 
-Wi-Fi upload regression helper:
+Wi-Fi acceptance workflow:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/test_wifi_upload_regression.sh
+scripts/test_wifi_acceptance.sh
 ```
 
-- now uses a direct UART request/response harness (`test_wifi_upload_regression_serial.py`) instead of monitor log parsing.
-- enforces single active run via a file lock (`WIFI_UPLOAD_LOCK_PATH`, default `/tmp/meditamer_wifi_upload_<test-name>.lock`).
-- on `SIGINT`/`SIGTERM` it force-cleans child uploader process groups to avoid orphaned uploads.
-- sends serial preflight `PING`/`PONG` before mode/upload steps.
-- uses `METRICS NET ip=` as the primary upload target, then probes any host-discovered MAC candidates as fallback.
-- waits for two consecutive `METRICS NET` ready samples and then `/health` success before starting uploads.
-- applies payload-aware upload timeout budgeting (tune via `WIFI_UPLOAD_MIN_KIB_PER_SEC`, `WIFI_UPLOAD_TIMEOUT_FLOOR_SEC`, `WIFI_UPLOAD_TIMEOUT_CEIL_SEC`).
-- supports run labeling via `--test-name <name>` or `WIFI_UPLOAD_TEST_NAME=<name>`; this is used in log file names and summary output.
-- set `WIFI_UPLOAD_USE_LEGACY_BASH=1` to use the old monitor-parse shell path for debugging.
-- `WIFI_UPLOAD_HEALTH_TIMEOUT_SEC` default is `45` seconds.
-- `WIFI_UPLOAD_OPERATION_RETRIES` controls full upload retries per cycle after subprocess failure (default `3`).
-- uploader-side transient network recovery is tunable via `UPLOAD_SD_BUSY_TOTAL_RETRY_SEC`, `UPLOAD_NET_RECOVERY_TIMEOUT_SEC`, and `UPLOAD_NET_RECOVERY_POLL_SEC`.
-- when health cannot be restored after an upload attempt failure, the serial harness auto-cycles `MODE UPLOAD OFF/ON` and retries after re-establishing Wi-Fi readiness.
-- if mode recovery does not ACK, the serial harness performs a device reset + UART preflight before the next upload retry.
-- throughput history and iteration comparisons are tracked in `docs/development/upload-throughput-history.md`.
+- runs via `hostctl test wifi-acceptance` behind the script wrapper.
+- strategy execution is declarative (`tools/hostctl/scenarios/wifi-acceptance.sw.yaml`) with primitive hostctl actions.
+- consumes only `HOSTCTL_NET_*` environment contract.
+- readiness uses structured firmware frames (`NET_STATUS {...}`), not monitor-tail text parsing.
+
+Wi-Fi zero-discovery diagnostic workflow:
+
+```bash
+HOSTCTL_NET_PORT=/dev/cu.usbserial-540 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_SSID='<wifi-ssid>' \
+HOSTCTL_NET_PASSWORD='***' \
+HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_DISCOVERY_PROFILE_PATH=./tools/hostctl/scenarios/wifi-discovery-debug.default.toml \
+HOSTCTL_NET_LOG_PATH=./logs/wifi_discovery_debug_manual.log \
+scripts/test_wifi_discovery_debug.sh
+```
+
+- runs via `hostctl test wifi-discovery-debug` behind the script wrapper.
+- strategy and pass/fail thresholds are declarative TOML in
+  `tools/hostctl/scenarios/wifi-discovery-debug.default.toml`.
+- workflow orchestration remains declarative in
+  `tools/hostctl/scenarios/wifi-discovery-debug.sw.yaml`.
+- reports round-level counters for:
+  - zero-result scan events
+  - non-zero scan events
+  - `no_ap_found` disconnect events
+  - target SSID visibility.
+
+## Hostctl Workflow Authoring
+
+- Authoring guide for declarative host workflows:
+  `docs/development/hostctl-workflow-authoring.md`
+- Scenario files live in `tools/hostctl/scenarios/*.sw.yaml`.
+- Keep retry/branch strategy in YAML; keep Rust runtime actions primitive.
+
+## Firmware Troubleshoot Workflow (Serverless Workflow DSL)
+
+Run a UART-centric troubleshooting sequence (flash, protocol probes, boot soak):
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_troubleshoot_hw.sh
+```
+
+- runs through `hostctl test troubleshoot` with declarative orchestration in
+  `tools/hostctl/scenarios/troubleshoot.sw.yaml`
+- uses `scripts/flash.sh` as the flash primitive (per project flash policy)
+- classifies failures into `build`, `flash`, `boot`, `runtime`,
+  `uart_protocol`, `uart_transport`, or `unknown`
+- emits summary plus persistent UART and soak logs under `logs/`
+
+Optional env vars:
+
+- `HOSTCTL_TROUBLESHOOT_FLASH_FIRST` (`1` default)
+- `HOSTCTL_TROUBLESHOOT_FLASH_RETRIES` (`2` default)
+- `HOSTCTL_TROUBLESHOOT_PROBE_RETRIES` (`6` default)
+- `HOSTCTL_TROUBLESHOOT_PROBE_DELAY_MS` (`700` default)
+- `HOSTCTL_TROUBLESHOOT_PROBE_TIMEOUT_MS` (`4000` default)
+- `HOSTCTL_TROUBLESHOOT_SOAK_CYCLES` (`4` default)
+
+Agent-oriented contract and runbook:
+
+- `docs/development/troubleshoot-agent.md`
 
 ## Soak Script
 

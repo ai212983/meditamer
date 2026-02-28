@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/serial_port.sh
+source "$script_dir/lib/serial_port.sh"
+
 baud="${ESPFLASH_BAUD:-115200}"
 before="${ESPFLASH_MONITOR_BEFORE:-default-reset}"
 after="${ESPFLASH_MONITOR_AFTER:-hard-reset}"
@@ -14,6 +18,8 @@ output_file="${ESPFLASH_MONITOR_OUTPUT_FILE:-}"
 child_pid=""
 child_pgid=""
 child_has_own_pgid=0
+
+ensure_espflash_port "monitor.sh" || exit 1
 
 # Prefer espflash non-interactive mode when supported.
 # Interactive input reader fails in some terminals; wrapper trap still handles Ctrl+C.
@@ -91,11 +97,6 @@ port_flag() {
 }
 
 if [[ "$mode" == "raw" ]]; then
-    if [[ -z "${ESPFLASH_PORT:-}" ]]; then
-        echo "ESPFLASH_PORT must be set when ESPFLASH_MONITOR_MODE=raw"
-        exit 1
-    fi
-
     backend="$raw_backend"
     if [[ "$backend" == "auto" ]]; then
         if command -v tio >/dev/null 2>&1; then

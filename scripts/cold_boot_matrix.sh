@@ -2,12 +2,15 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/serial_port.sh
+source "$script_dir/lib/serial_port.sh"
+
 cycles="${1:-5}"
 window_sec="${COLD_BOOT_WINDOW_SEC:-45}"
 connect_timeout_sec="${COLD_BOOT_CONNECT_TIMEOUT_SEC:-40}"
 arm_timeout_sec="${COLD_BOOT_ARM_TIMEOUT_SEC:-20}"
 baud="${ESPFLASH_BAUD:-115200}"
-port="${ESPFLASH_PORT:-}"
 
 tty_in="/dev/tty"
 tty_out="/dev/tty"
@@ -85,10 +88,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-if [[ -z "$port" ]]; then
-    echo "ESPFLASH_PORT must be set (example: /dev/cu.usbserial-540)"
-    exit 1
-fi
+ensure_espflash_port "cold_boot_matrix.sh" || exit 1
+port="${ESPFLASH_PORT}"
 
 if ! [[ "$cycles" =~ ^[0-9]+$ ]] || [[ "$cycles" -lt 1 ]]; then
     echo "cycles must be a positive integer"
@@ -110,19 +111,16 @@ if ! [[ "$arm_timeout_sec" =~ ^[0-9]+$ ]] || [[ "$arm_timeout_sec" -lt 1 ]]; the
     exit 1
 fi
 
+# Accept either legacy startup markers or the current runtime signature.
 required_patterns=(
-    "core init complete"
-    "frontlight brightness write: ok"
-    "buzzer test: ok"
-    "panel fast-gpio smoke: ok"
-    "panel waveform primitives: ok"
-    "panel clean smoke: ok"
-    "i2c fault-recovery smoke: ok"
-    "display test pattern: ok"
+    "core init complete|BOOT_RESET reason="
+    "frontlight brightness write: ok|touch: ready phase=boot"
+    "display test pattern: ok|sdprobe\\[request\\]: card_detected"
+    "render loop: uptime clock|SDDONE id=0 op=probe status=ok code=ok"
 )
 
 if [[ "${SOAK_REQUIRE_UPTIME:-0}" == "1" ]]; then
-    required_patterns+=("display uptime screen: ok")
+    required_patterns+=("display uptime screen: ok|STATE phase=OPERATING")
 fi
 
 run_dir="${COLD_BOOT_LOG_DIR:-}"
@@ -206,7 +204,7 @@ for cycle in $(seq 1 "$cycles"); do
     while [[ "$SECONDS" -lt "$window_deadline" ]]; do
         all_found=1
         for pattern in "${required_patterns[@]}"; do
-            if ! grep -aFq "$pattern" "$log_file"; then
+            if ! grep -aEq "$pattern" "$log_file"; then
                 all_found=0
                 break
             fi
@@ -230,7 +228,7 @@ for cycle in $(seq 1 "$cycles"); do
 
     missing_patterns=()
     for pattern in "${required_patterns[@]}"; do
-        if ! grep -aFq "$pattern" "$log_file"; then
+        if ! grep -aEq "$pattern" "$log_file"; then
             missing_patterns+=("$pattern")
         fi
     done

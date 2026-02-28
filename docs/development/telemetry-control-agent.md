@@ -135,7 +135,7 @@ TELEMSET SD ON
 1. Send `TELEMSET NONE`.
 2. Send only required domain toggles for current task.
 3. Send `TELEM` and assert expected on/off state.
-4. Run test sequence (`MODE`, `WIFISET`, upload, etc).
+4. Run test sequence (`STATE`, `NETCFG SET`, `NET START`, upload, etc).
 5. Always collect `METRICSNET` and `METRICS` snapshots, independent of log toggles.
 6. Restore default verbosity after debug:
 

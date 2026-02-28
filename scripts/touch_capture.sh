@@ -3,12 +3,11 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/serial_port.sh
+source "$script_dir/lib/serial_port.sh"
 output_path="${1:-$script_dir/../logs/touch_trace_$(date +%Y%m%d_%H%M%S).log}"
 
-if [[ -z "${ESPFLASH_PORT:-}" ]]; then
-    echo "ESPFLASH_PORT must be set (example: /dev/cu.usbserial-540)" >&2
-    exit 1
-fi
+ensure_espflash_port "touch_capture.sh" || exit 1
 
 mkdir -p "$(dirname "$output_path")"
 output_path="$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"

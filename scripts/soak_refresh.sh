@@ -2,18 +2,19 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/serial_port.sh
+source "$script_dir/lib/serial_port.sh"
+
 duration_sec="${1:-7200}"
 baud="${ESPFLASH_BAUD:-115200}"
-port="${ESPFLASH_PORT:-}"
 chip="${ESPFLASH_CHIP:-esp32}"
 before="${SOAK_MONITOR_BEFORE:-default-reset}"
 after="${SOAK_MONITOR_AFTER:-hard-reset}"
 pattern="display uptime screen: ok"
 
-if [[ -z "$port" ]]; then
-    echo "ESPFLASH_PORT must be set (example: /dev/cu.usbserial-540)"
-    exit 1
-fi
+ensure_espflash_port "soak_refresh.sh" || exit 1
+port="${ESPFLASH_PORT}"
 
 if ! [[ "$duration_sec" =~ ^[0-9]+$ ]] || [[ "$duration_sec" -lt 1 ]]; then
     echo "duration_sec must be a positive integer"

@@ -5,7 +5,7 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 ## Environment
 
 - Board: Inkplate 4 TEMPERA (ESP32)
-- Port: `ESPFLASH_PORT=/dev/cu.usbserial-540` (adjust for your host)
+- Port: hostctl wrappers use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
 - Firmware: current `debug` build from `scripts/flash.sh debug`
 
 ## 1. Reset-Cycle Soak (Automated)
@@ -27,7 +27,7 @@ Pass criteria:
 Command:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
 ```
 
 Pass criteria:
@@ -44,21 +44,21 @@ Pass criteria:
 Default behavior does not flash firmware before running. To include flash in the run:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_FLASH_FIRST=1 scripts/test_sdcard_hw.sh debug
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_FLASH_FIRST=1 scripts/test_sdcard_hw.sh debug
 ```
 
 Burst/backpressure regression only:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
 ```
 
 Suite selection:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=baseline scripts/test_sdcard_hw.sh
-ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=burst scripts/test_sdcard_hw.sh
-ESPFLASH_PORT=/dev/cu.usbserial-540 SDCARD_TEST_SUITE=failures scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=baseline scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/test_sdcard_hw.sh
 ```
 
 ## 3. Cold Boot Cycles (Manual)

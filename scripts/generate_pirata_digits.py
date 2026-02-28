@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 FONT_PATH = Path.home() / "Library/Fonts/PirataOne-Regular.ttf"
-OUT_RS = Path("/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/src/pirata_clock_font.rs")
+OUT_RS = Path(__file__).resolve().parents[1] / "src/pirata_clock_font.rs"
 TARGET_MAX_HEIGHT = 200
 CHARS = "0123456789:"
 PADDING_X = 6

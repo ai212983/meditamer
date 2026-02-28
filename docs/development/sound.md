@@ -112,10 +112,10 @@ This shape gives a softer rise-and-fall and avoids very high pitches.
 
 ## Local reference files in this workspace
 
-- `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/src/lib.rs`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/src/main.rs`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/Inkplate-Arduino-library/src/include/Buzzer.cpp`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/Inkplate-Arduino-library/src/include/Buzzer.h`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/Inkplate-Arduino-library/src/libs/MCP4018/src/MCP4018-SOLDERED.cpp`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/Inkplate-Arduino-library/src/boards/Inkplate4TEMPERA.h`
-- `/Users/dimitri/Documents/Code/personal/Inkplate/Inkplate-Arduino-library/examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino`
+- [src/lib.rs](../../src/lib.rs)
+- [src/main.rs](../../src/main.rs)
+- [Inkplate-Arduino-library/src/include/Buzzer.cpp](../../../Inkplate-Arduino-library/src/include/Buzzer.cpp)
+- [Inkplate-Arduino-library/src/include/Buzzer.h](../../../Inkplate-Arduino-library/src/include/Buzzer.h)
+- [Inkplate-Arduino-library/src/libs/MCP4018/src/MCP4018-SOLDERED.cpp](../../../Inkplate-Arduino-library/src/libs/MCP4018/src/MCP4018-SOLDERED.cpp)
+- [Inkplate-Arduino-library/src/boards/Inkplate4TEMPERA.h](../../../Inkplate-Arduino-library/src/boards/Inkplate4TEMPERA.h)
+- [Inkplate-Arduino-library/examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino](../../../Inkplate-Arduino-library/examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino)

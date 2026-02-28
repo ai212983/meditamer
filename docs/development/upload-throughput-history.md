@@ -3,19 +3,20 @@
 Regression command shape used for comparison:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-510 \
-WIFI_UPLOAD_CYCLES=1 \
-WIFI_UPLOAD_PAYLOAD_BYTES=65536 \
-WIFI_UPLOAD_SSID='<wifi-ssid>' \
-WIFI_UPLOAD_PASSWORD='<wifi-password>' \
-scripts/test_wifi_upload_regression.sh
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_SSID='<wifi-ssid>' \
+HOSTCTL_NET_PASSWORD='<wifi-password>' \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_LOG_PATH=logs/wifi_acceptance_baseline.log \
+scripts/test_wifi_acceptance.sh
 ```
 
 ## Baseline Before Persistent Append Session
 
 - Firmware commit: `b1d42bf`
 - Date: `2026-02-26`
-- Log: `logs/wifi_upload_regression_20260226_164205.log`
+- Log: `logs/wifi_acceptance_20260226_164205.log`
 - Result:
   - `payload_bytes=65536`
   - `upload_ms=45212`
@@ -27,7 +28,7 @@ scripts/test_wifi_upload_regression.sh
 
 - Firmware commit (working tree): `session-based append in sdcard::fat + sd_task upload integration`
 - Date: `2026-02-26`
-- Log: `logs/wifi_upload_regression_20260226_170758.log`
+- Log: `logs/wifi_acceptance_20260226_170758.log`
 - Result:
   - `payload_bytes=65536`
   - `upload_ms=42499`
@@ -45,11 +46,13 @@ Comparison vs baseline:
 Comparison command shape (same harness, 1 cycle each payload):
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-510 \
-WIFI_UPLOAD_CYCLES=1 \
-WIFI_UPLOAD_SSID='<wifi-ssid>' \
-WIFI_UPLOAD_PASSWORD='<wifi-password>' \
-scripts/test_wifi_upload_regression.sh
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_SSID='<wifi-ssid>' \
+HOSTCTL_NET_PASSWORD='<wifi-password>' \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_LOG_PATH=logs/wifi_acceptance_compare.log \
+scripts/test_wifi_acceptance.sh
 ```
 
 Pre-change reference commit:
