@@ -58,5 +58,5 @@ jobs:
         run: scripts/lint_host_tools.sh
       - name: Rust analyzer baseline
         run: scripts/lint_rust_analyzer.sh
-      - name: Code analysis baseline
-        run: scripts/lint_code_analysis.sh
+      - name: Code analysis ratchet
+        run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh

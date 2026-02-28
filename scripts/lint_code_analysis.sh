@@ -29,6 +29,7 @@ ratchet="${RCA_RATCHET:-0}"
 update_baseline="${RCA_UPDATE_BASELINE:-0}"
 baseline_path="${RCA_BASELINE_PATH:-config/rca-baseline.json}"
 max_file_sloc="${RCA_MAX_FILE_SLOC:-500}"
+warn_file_sloc="${RCA_WARN_FILE_SLOC:-420}"
 max_fn_cognitive="${RCA_MAX_FN_COGNITIVE:-40}"
 max_fn_cyclomatic="${RCA_MAX_FN_CYCLOMATIC:-32}"
 max_fn_nargs="${RCA_MAX_FN_NARGS:-8}"
@@ -158,8 +159,19 @@ echo "$offenders_json" | jq '{
   fn_nargs: (.fn_nargs | length)
 }'
 
+warn_file_sloc_json="$(jq -c -s --argjson warn "$warn_file_sloc" --argjson max "$max_file_sloc" '
+  [ .[]
+    | select((.metrics.loc.sloc // 0) >= $warn and (.metrics.loc.sloc // 0) <= $max)
+    | {name, sloc: (.metrics.loc.sloc // 0)}
+  ]
+' "$tmp_metrics")"
+echo
+echo "warning counts (thresholds: file_sloc>=$warn_file_sloc and <=$max_file_sloc)"
+echo "$warn_file_sloc_json" | jq '{file_sloc_warn: length}'
+
 baseline_json="$(jq -c -s \
   --argjson max_file_sloc "$max_file_sloc" \
+  --argjson warn_file_sloc "$warn_file_sloc" \
   --argjson max_fn_cognitive "$max_fn_cognitive" \
   --argjson max_fn_cyclomatic "$max_fn_cyclomatic" \
   --argjson max_fn_nargs "$max_fn_nargs" '
@@ -171,6 +183,7 @@ baseline_json="$(jq -c -s \
     version: 1,
     thresholds: {
       max_file_sloc: $max_file_sloc,
+      warn_file_sloc: $warn_file_sloc,
       max_fn_cognitive: $max_fn_cognitive,
       max_fn_cyclomatic: $max_fn_cyclomatic,
       max_fn_nargs: $max_fn_nargs

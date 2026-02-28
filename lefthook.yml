@@ -21,3 +21,6 @@ pre-push:
     firmware-clippy:
       glob: "{src/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
       run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
+    code-analysis:
+      glob: "{src/**,tools/**,packages/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh
