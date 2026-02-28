@@ -99,6 +99,96 @@ struct RoundSample {
     failure_class: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemDiagKind {
+    Radio,
+    Upload,
+}
+
+#[derive(Clone, Debug)]
+struct MemDiagSample {
+    kind: MemDiagKind,
+    stage: String,
+    free: u64,
+    internal_free: u64,
+    external_free: u64,
+    min_internal_free: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MemDiagSummary {
+    samples: u32,
+    radio_samples: u32,
+    upload_samples: u32,
+    nomem_stage_samples: u32,
+    min_free: Option<(u64, String)>,
+    min_internal_free: Option<(u64, String)>,
+    min_external_free: Option<(u64, String)>,
+    min_internal_low_water: Option<(u64, String)>,
+}
+
+impl MemDiagSummary {
+    fn record_line(&mut self, line: &str) {
+        let Some(sample) = parse_mem_diag_line(line) else {
+            return;
+        };
+        self.samples = self.samples.saturating_add(1);
+        match sample.kind {
+            MemDiagKind::Radio => self.radio_samples = self.radio_samples.saturating_add(1),
+            MemDiagKind::Upload => self.upload_samples = self.upload_samples.saturating_add(1),
+        }
+        if sample.stage.contains("nomem") {
+            self.nomem_stage_samples = self.nomem_stage_samples.saturating_add(1);
+        }
+        let label = match sample.kind {
+            MemDiagKind::Radio => format!("radio:{}", sample.stage),
+            MemDiagKind::Upload => format!("upload:{}", sample.stage),
+        };
+        update_min_sample(&mut self.min_free, sample.free, &label);
+        update_min_sample(&mut self.min_internal_free, sample.internal_free, &label);
+        update_min_sample(&mut self.min_external_free, sample.external_free, &label);
+        update_min_sample(
+            &mut self.min_internal_low_water,
+            sample.min_internal_free,
+            &label,
+        );
+    }
+}
+
+fn update_min_sample(slot: &mut Option<(u64, String)>, value: u64, label: &str) {
+    match slot {
+        Some((current, _)) if value >= *current => {}
+        _ => *slot = Some((value, label.to_string())),
+    }
+}
+
+fn token_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+}
+
+fn token_u64(line: &str, key: &str) -> Option<u64> {
+    token_value(line, key)?.parse::<u64>().ok()
+}
+
+fn parse_mem_diag_line(line: &str) -> Option<MemDiagSample> {
+    let kind = if line.starts_with("upload_http: radio_mem ") {
+        MemDiagKind::Radio
+    } else if line.starts_with("upload_http: upload_mem ") {
+        MemDiagKind::Upload
+    } else {
+        return None;
+    };
+    Some(MemDiagSample {
+        kind,
+        stage: token_value(line, "stage")?.to_string(),
+        free: token_u64(line, "free")?,
+        internal_free: token_u64(line, "internal_free")?,
+        external_free: token_u64(line, "external_free")?,
+        min_internal_free: token_u64(line, "min_internal_free")?,
+    })
+}
+
 struct WifiDiscoveryRuntime<'a> {
     logger: &'a mut Logger,
     console: SerialConsole,
@@ -113,6 +203,7 @@ struct WifiDiscoveryRuntime<'a> {
     total_scan_zero_events: u32,
     total_scan_nonzero_events: u32,
     total_no_ap_found_events: u32,
+    mem_diag: MemDiagSummary,
 }
 
 pub fn run_wifi_discovery_debug(
@@ -184,6 +275,7 @@ pub fn run_wifi_discovery_debug(
         total_scan_zero_events: 0,
         total_scan_nonzero_events: 0,
         total_no_ap_found_events: 0,
+        mem_diag: MemDiagSummary::default(),
     };
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())
@@ -263,6 +355,13 @@ fn parse_scan_done_count(line: &str) -> Option<u32> {
         return None;
     }
     digits.parse::<u32>().ok()
+}
+
+fn fmt_min(value: &Option<(u64, String)>) -> String {
+    match value {
+        Some((bytes, stage)) => format!("{bytes}@{stage}"),
+        None => "n/a".to_string(),
+    }
 }
 
 fn active_scan_timeout_ms(policy: &NetPolicy) -> u64 {
@@ -371,6 +470,7 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 let mut no_ap_found_events = 0u32;
                 let mut ssid_seen_events = 0u32;
                 let mut last_status: Option<NetStatus> = None;
+                let mut round_mem_diag = MemDiagSummary::default();
                 let mut read_mark = mark;
                 let mut next_status_poll = Instant::now();
                 let deadline = Instant::now()
@@ -379,6 +479,8 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                     self.console.poll_once()?;
                     for line in self.console.read_recent_lines(read_mark) {
                         read_mark = read_mark.saturating_add(1);
+                        self.mem_diag.record_line(&line);
+                        round_mem_diag.record_line(&line);
                         if let Some(count) = parse_scan_done_count(&line) {
                             if count == 0 {
                                 scan_zero_events = scan_zero_events.saturating_add(1);
@@ -453,7 +555,7 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 });
 
                 self.logger.info(format!(
-                    "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={}",
+                    "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={} min_internal_free={} min_total_free={} nomem_stage_samples={}",
                     round,
                     ready,
                     zero_discovery,
@@ -461,7 +563,10 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                     scan_nonzero_events,
                     no_ap_found_events,
                     ssid_seen_events,
-                    failure_class
+                    failure_class,
+                    fmt_min(&round_mem_diag.min_internal_free),
+                    fmt_min(&round_mem_diag.min_free),
+                    round_mem_diag.nomem_stage_samples
                 ));
 
                 if self.profile.recover_after_round {
@@ -532,6 +637,17 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                     self.total_scan_zero_events,
                     self.total_scan_nonzero_events,
                     self.total_no_ap_found_events
+                ));
+                self.logger.info(format!(
+                    "summary mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
+                    self.mem_diag.samples,
+                    self.mem_diag.radio_samples,
+                    self.mem_diag.upload_samples,
+                    self.mem_diag.nomem_stage_samples,
+                    fmt_min(&self.mem_diag.min_internal_free),
+                    fmt_min(&self.mem_diag.min_external_free),
+                    fmt_min(&self.mem_diag.min_free),
+                    fmt_min(&self.mem_diag.min_internal_low_water),
                 ));
                 for sample in &self.samples {
                     self.logger.info(format!(
@@ -612,7 +728,7 @@ fn ctx_set_string(context: &mut Value, key: &str, value: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_scan_done_count;
+    use super::{parse_mem_diag_line, parse_scan_done_count, MemDiagKind};
 
     #[test]
     fn scan_done_parser_extracts_count() {
@@ -625,5 +741,15 @@ mod tests {
             Some(0)
         );
         assert_eq!(parse_scan_done_count("NET_STATUS {\"state\":\"Ready\"}"), None);
+    }
+
+    #[test]
+    fn mem_diag_parser_extracts_radio_sample() {
+        let line = "upload_http: radio_mem stage=scan_active_before trigger=none feature=true state=Initialized total=4259840 used=110160 free=4149680 peak=110160 internal_free=59280 external_free=4090400 min_free=4149680 min_internal_free=59280 min_external_free=4090400";
+        let sample = parse_mem_diag_line(line).expect("radio sample parses");
+        assert_eq!(sample.kind, MemDiagKind::Radio);
+        assert_eq!(sample.stage, "scan_active_before");
+        assert_eq!(sample.internal_free, 59280);
+        assert_eq!(sample.min_internal_free, 59280);
     }
 }

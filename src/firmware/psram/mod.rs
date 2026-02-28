@@ -26,9 +26,27 @@ pub(crate) struct AllocatorStatus {
     pub(crate) peak_used_bytes: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AllocatorMemorySnapshot {
+    pub(crate) feature_enabled: bool,
+    pub(crate) state: AllocatorState,
+    pub(crate) total_bytes: usize,
+    pub(crate) used_bytes: usize,
+    pub(crate) free_bytes: usize,
+    pub(crate) peak_used_bytes: usize,
+    pub(crate) free_internal_bytes: usize,
+    pub(crate) free_external_bytes: usize,
+    pub(crate) min_free_bytes: usize,
+    pub(crate) min_free_internal_bytes: usize,
+    pub(crate) min_free_external_bytes: usize,
+}
+
 static ALLOCATOR_STATE: AtomicU8 = AtomicU8::new(initial_allocator_state());
 static PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LAST_LOGGED_PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
+static MIN_FREE_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
+static MIN_FREE_INTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
+static MIN_FREE_EXTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 const INTERNAL_HEAP_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +125,25 @@ fn update_peak_used_bytes(used: usize) -> usize {
         }
     }
     peak
+}
+
+fn update_min_observed(atom: &AtomicUsize, value: usize) -> usize {
+    let mut current = atom.load(Ordering::Relaxed);
+    while value < current {
+        match atom.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return value,
+            Err(observed) => current = observed,
+        }
+    }
+    current
+}
+
+fn min_or_zero(value: usize) -> usize {
+    if value == usize::MAX {
+        0
+    } else {
+        value
+    }
 }
 
 fn maybe_log_new_peak(tag: &str, peak_used_bytes: usize, total_bytes: usize, free_bytes: usize) {
@@ -192,6 +229,9 @@ pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> Allocat
     esp_alloc::psram_allocator!(psram, esp_hal::psram);
     PEAK_USED_BYTES.store(0, Ordering::Relaxed);
     LAST_LOGGED_PEAK_USED_BYTES.store(0, Ordering::Relaxed);
+    MIN_FREE_BYTES.store(usize::MAX, Ordering::Relaxed);
+    MIN_FREE_INTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
+    MIN_FREE_EXTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
     update_allocator_state(AllocatorState::Initialized);
     allocator_status()
 }
@@ -265,15 +305,62 @@ pub(crate) fn allocator_status() -> AllocatorStatus {
     }
 }
 
-pub(crate) fn log_allocator_status() {
+pub(crate) fn allocator_memory_snapshot() -> AllocatorMemorySnapshot {
     let status = allocator_status();
+    let used_bytes = used_bytes(status.total_bytes, status.free_bytes);
+    #[cfg(feature = "psram-alloc")]
+    let (free_internal_bytes, free_external_bytes) = (
+        esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into()),
+        esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::External.into()),
+    );
+    #[cfg(not(feature = "psram-alloc"))]
+    let (free_internal_bytes, free_external_bytes) = (0, 0);
+
+    let initialized = status.feature_enabled && matches!(status.state, AllocatorState::Initialized);
+    let (min_free_bytes, min_free_internal_bytes, min_free_external_bytes) = if initialized {
+        (
+            update_min_observed(&MIN_FREE_BYTES, status.free_bytes),
+            update_min_observed(&MIN_FREE_INTERNAL_BYTES, free_internal_bytes),
+            update_min_observed(&MIN_FREE_EXTERNAL_BYTES, free_external_bytes),
+        )
+    } else {
+        (
+            MIN_FREE_BYTES.load(Ordering::Relaxed),
+            MIN_FREE_INTERNAL_BYTES.load(Ordering::Relaxed),
+            MIN_FREE_EXTERNAL_BYTES.load(Ordering::Relaxed),
+        )
+    };
+
+    AllocatorMemorySnapshot {
+        feature_enabled: status.feature_enabled,
+        state: status.state,
+        total_bytes: status.total_bytes,
+        used_bytes,
+        free_bytes: status.free_bytes,
+        peak_used_bytes: status.peak_used_bytes,
+        free_internal_bytes,
+        free_external_bytes,
+        min_free_bytes: min_or_zero(min_free_bytes),
+        min_free_internal_bytes: min_or_zero(min_free_internal_bytes),
+        min_free_external_bytes: min_or_zero(min_free_external_bytes),
+    }
+}
+
+pub(crate) fn log_allocator_status() {
+    let snapshot = allocator_memory_snapshot();
     esp_println::println!(
-        "psram: feature_enabled={} state={:?} total_bytes={} free_bytes={} peak_used_bytes={}",
-        status.feature_enabled,
-        status.state,
-        status.total_bytes,
-        status.free_bytes,
-        status.peak_used_bytes
+        "psram: feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={}",
+        snapshot.feature_enabled,
+        snapshot.state,
+        snapshot.total_bytes,
+        snapshot.used_bytes,
+        snapshot.free_bytes,
+        snapshot.peak_used_bytes,
+        snapshot.free_internal_bytes,
+        snapshot.free_external_bytes,
+        snapshot.min_free_bytes,
+        snapshot.min_free_internal_bytes,
+        snapshot.min_free_external_bytes
     );
 }
 

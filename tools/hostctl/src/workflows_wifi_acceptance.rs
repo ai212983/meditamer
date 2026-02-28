@@ -76,6 +76,103 @@ struct NetStatus {
     uptime_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemDiagKind {
+    Radio,
+    Upload,
+}
+
+#[derive(Clone, Debug)]
+struct MemDiagSample {
+    kind: MemDiagKind,
+    stage: String,
+    free: u64,
+    internal_free: u64,
+    external_free: u64,
+    min_internal_free: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MemDiagSummary {
+    samples: u32,
+    radio_samples: u32,
+    upload_samples: u32,
+    nomem_stage_samples: u32,
+    min_free: Option<(u64, String)>,
+    min_internal_free: Option<(u64, String)>,
+    min_external_free: Option<(u64, String)>,
+    min_internal_low_water: Option<(u64, String)>,
+}
+
+impl MemDiagSummary {
+    fn record_line(&mut self, line: &str) {
+        let Some(sample) = parse_mem_diag_line(line) else {
+            return;
+        };
+        self.samples = self.samples.saturating_add(1);
+        match sample.kind {
+            MemDiagKind::Radio => self.radio_samples = self.radio_samples.saturating_add(1),
+            MemDiagKind::Upload => self.upload_samples = self.upload_samples.saturating_add(1),
+        }
+        if sample.stage.contains("nomem") {
+            self.nomem_stage_samples = self.nomem_stage_samples.saturating_add(1);
+        }
+        let label = match sample.kind {
+            MemDiagKind::Radio => format!("radio:{}", sample.stage),
+            MemDiagKind::Upload => format!("upload:{}", sample.stage),
+        };
+        update_min_sample(&mut self.min_free, sample.free, &label);
+        update_min_sample(&mut self.min_internal_free, sample.internal_free, &label);
+        update_min_sample(&mut self.min_external_free, sample.external_free, &label);
+        update_min_sample(
+            &mut self.min_internal_low_water,
+            sample.min_internal_free,
+            &label,
+        );
+    }
+}
+
+fn update_min_sample(slot: &mut Option<(u64, String)>, value: u64, label: &str) {
+    match slot {
+        Some((current, _)) if value >= *current => {}
+        _ => *slot = Some((value, label.to_string())),
+    }
+}
+
+fn token_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+}
+
+fn token_u64(line: &str, key: &str) -> Option<u64> {
+    token_value(line, key)?.parse::<u64>().ok()
+}
+
+fn parse_mem_diag_line(line: &str) -> Option<MemDiagSample> {
+    let kind = if line.starts_with("upload_http: radio_mem ") {
+        MemDiagKind::Radio
+    } else if line.starts_with("upload_http: upload_mem ") {
+        MemDiagKind::Upload
+    } else {
+        return None;
+    };
+    Some(MemDiagSample {
+        kind,
+        stage: token_value(line, "stage")?.to_string(),
+        free: token_u64(line, "free")?,
+        internal_free: token_u64(line, "internal_free")?,
+        external_free: token_u64(line, "external_free")?,
+        min_internal_free: token_u64(line, "min_internal_free")?,
+    })
+}
+
+fn fmt_min(value: &Option<(u64, String)>) -> String {
+    match value {
+        Some((bytes, stage)) => format!("{bytes}@{stage}"),
+        None => "n/a".to_string(),
+    }
+}
+
 struct WifiAcceptanceRuntime<'a> {
     logger: &'a mut Logger,
     console: SerialConsole,
@@ -92,6 +189,8 @@ struct WifiAcceptanceRuntime<'a> {
     upload_samples: Vec<f64>,
     throughput_samples: Vec<f64>,
     started: Instant,
+    mem_diag: MemDiagSummary,
+    mem_read_mark: usize,
 }
 
 pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> Result<()> {
@@ -157,6 +256,8 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         upload_samples: Vec::new(),
         throughput_samples: Vec::new(),
         started: Instant::now(),
+        mem_diag: MemDiagSummary::default(),
+        mem_read_mark: 0,
     };
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())
@@ -394,9 +495,21 @@ fn verify_remote_file(console: &mut SerialConsole, remote_path: &str) -> Result<
     Ok(false)
 }
 
+impl WifiAcceptanceRuntime<'_> {
+    fn capture_mem_diag_lines(&mut self) -> Result<()> {
+        self.console.poll_once()?;
+        for line in self.console.read_recent_lines(self.mem_read_mark) {
+            self.mem_read_mark = self.mem_read_mark.saturating_add(1);
+            self.mem_diag.record_line(&line);
+        }
+        Ok(())
+    }
+}
+
 impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
-        match action {
+        self.capture_mem_diag_lines()?;
+        let result = match action {
             "prepare_payload" => {
                 ensure_parent_dir(&self.payload_path)?;
                 let mut data = vec![0u8; 524_288];
@@ -410,6 +523,7 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 ctx_set_u32(context, "cycle", 1)?;
                 ctx_set_u32(context, "cycles", self.cycles)?;
                 ctx_set_u32(context, "operation_retries", self.operation_retries)?;
+                self.mem_read_mark = self.console.mark();
                 Ok(())
             }
             "net_apply_config" => {
@@ -577,10 +691,23 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                     avg_throughput,
                     self.started.elapsed().as_secs_f64(),
                 ));
+                self.logger.info(format!(
+                    "summary mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
+                    self.mem_diag.samples,
+                    self.mem_diag.radio_samples,
+                    self.mem_diag.upload_samples,
+                    self.mem_diag.nomem_stage_samples,
+                    fmt_min(&self.mem_diag.min_internal_free),
+                    fmt_min(&self.mem_diag.min_external_free),
+                    fmt_min(&self.mem_diag.min_free),
+                    fmt_min(&self.mem_diag.min_internal_low_water),
+                ));
                 Ok(())
             }
             _ => Err(anyhow!("unknown workflow action: {action}")),
-        }
+        };
+        self.capture_mem_diag_lines()?;
+        result
     }
 }
 

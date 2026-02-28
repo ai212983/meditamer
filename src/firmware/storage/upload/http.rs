@@ -7,7 +7,6 @@ mod helpers;
 
 #[cfg(feature = "psram-alloc")]
 use super::super::super::types::SD_UPLOAD_CHUNK_MAX;
-#[cfg(feature = "psram-alloc")]
 use crate::firmware::psram;
 use crate::firmware::runtime::service_mode;
 use crate::firmware::telemetry;
@@ -122,6 +121,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             dhcp_wait_started_at = None;
             dhcp_ready = false;
             telemetry::set_upload_http_listener(false, None);
+            log_http_mem_diag("listener_disabled_pause");
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -185,6 +185,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
         telemetry::set_upload_http_listener(true, Some(local_ipv4));
 
+        log_http_mem_diag("accept_before");
         let accept_started_at = Instant::now();
         let accepted = socket
             .accept(IpListenEndpoint {
@@ -205,15 +206,18 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
                 esp_println::println!("upload_http: accept err={:?}", err);
             }
+            log_http_mem_diag("accept_err");
             let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
             socket.abort();
             continue;
         }
         telemetry::record_upload_http_accept();
+        log_http_mem_diag("accept_ok");
         if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
             esp_println::println!("upload_http: accepted connection");
         }
 
+        log_http_mem_diag("request_begin");
         if let Err(err) = connection::handle_connection(
             &mut socket,
             chunk_buffer.as_mut_slice(),
@@ -223,6 +227,7 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         {
             telemetry::record_upload_http_request_error();
             telemetry::record_upload_http_request_bucket(err);
+            log_http_mem_diag("request_err");
             if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
                 esp_println::println!(
                     "upload_http: request err={} recv_queue={} send_queue={} state={:?} remote={:?}",
@@ -233,10 +238,13 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
                     socket.remote_endpoint(),
                 );
             }
+        } else {
+            log_http_mem_diag("request_ok");
         }
 
         let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
         socket.close();
+        log_http_mem_diag("request_close");
     }
 }
 
@@ -261,4 +269,28 @@ fn elapsed_ms_u32(started_at: Instant) -> u32 {
     } else {
         elapsed as u32
     }
+}
+
+fn log_http_mem_diag(stage: &str) {
+    if !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP)
+        && !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET)
+    {
+        return;
+    }
+    let snapshot = psram::allocator_memory_snapshot();
+    esp_println::println!(
+        "upload_http: upload_mem stage={} feature={} state={:?} total={} used={} free={} peak={} internal_free={} external_free={} min_free={} min_internal_free={} min_external_free={}",
+        stage,
+        snapshot.feature_enabled,
+        snapshot.state,
+        snapshot.total_bytes,
+        snapshot.used_bytes,
+        snapshot.free_bytes,
+        snapshot.peak_used_bytes,
+        snapshot.free_internal_bytes,
+        snapshot.free_external_bytes,
+        snapshot.min_free_bytes,
+        snapshot.min_free_internal_bytes,
+        snapshot.min_free_external_bytes
+    );
 }

@@ -1608,6 +1608,9 @@ fn transition_state(
         return;
     }
     task::emit_net_event(*current, next, trigger, started_at);
+    if let Some(stage) = state_mem_stage(next) {
+        log_radio_mem_diag_with_trigger(stage, trigger);
+    }
     *current = next;
     publish_state(
         *current,
@@ -1617,6 +1620,19 @@ fn transition_state(
         failure.1,
         started_at.elapsed().as_millis() as u32,
     );
+}
+
+fn state_mem_stage(state: NetState) -> Option<&'static str> {
+    match state {
+        NetState::Starting => Some("state_starting"),
+        NetState::Scanning => Some("state_scanning"),
+        NetState::Associating => Some("state_associating"),
+        NetState::DhcpWait => Some("state_dhcp_wait"),
+        NetState::ListenerWait => Some("state_listener_wait"),
+        NetState::Ready => Some("state_ready"),
+        NetState::Recovering => Some("state_recovering"),
+        NetState::Idle | NetState::Failed => None,
+    }
 }
 
 fn install_wifi_event_logger() {
@@ -1818,6 +1834,7 @@ fn post_recover_watchdog_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
 }
 
 async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'static>, context: &str) {
+    log_radio_mem_diag_with_trigger("recover_disconnect_before", context);
     match with_timeout(
         Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
         controller.disconnect_async(),
@@ -1836,6 +1853,8 @@ async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'stati
             );
         }
     }
+    log_radio_mem_diag_with_trigger("recover_disconnect_after", context);
+    log_radio_mem_diag_with_trigger("recover_stop_before", context);
     match with_timeout(
         Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
         controller.stop_async(),
@@ -1854,6 +1873,7 @@ async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'stati
             );
         }
     }
+    log_radio_mem_diag_with_trigger("recover_stop_after", context);
 }
 
 async fn scan_target_candidates(
@@ -2189,17 +2209,26 @@ fn is_no_mem_wifi_error(err: &WifiError) -> bool {
 }
 
 fn log_radio_mem_diag(stage: &str) {
-    let status = psram::allocator_status();
-    let used_bytes = status.total_bytes.saturating_sub(status.free_bytes);
+    log_radio_mem_diag_with_trigger(stage, "none");
+}
+
+fn log_radio_mem_diag_with_trigger(stage: &str, trigger: &str) {
+    let snapshot = psram::allocator_memory_snapshot();
     diag_reassoc!(
-        "upload_http: radio_mem stage={} feature={} state={:?} total={} used={} free={} peak={}",
+        "upload_http: radio_mem stage={} trigger={} feature={} state={:?} total={} used={} free={} peak={} internal_free={} external_free={} min_free={} min_internal_free={} min_external_free={}",
         stage,
-        status.feature_enabled,
-        status.state,
-        status.total_bytes,
-        used_bytes,
-        status.free_bytes,
-        status.peak_used_bytes
+        trigger,
+        snapshot.feature_enabled,
+        snapshot.state,
+        snapshot.total_bytes,
+        snapshot.used_bytes,
+        snapshot.free_bytes,
+        snapshot.peak_used_bytes,
+        snapshot.free_internal_bytes,
+        snapshot.free_external_bytes,
+        snapshot.min_free_bytes,
+        snapshot.min_free_internal_bytes,
+        snapshot.min_free_external_bytes
     );
 }
 
