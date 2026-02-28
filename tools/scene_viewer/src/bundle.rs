@@ -207,7 +207,7 @@ fn decode_strip(payload: &[u8], expected_len: usize, compression: u8) -> Result<
 }
 
 fn rle_decode(payload: &[u8], expected_len: usize) -> Result<Vec<u8>, String> {
-    if !payload.len().is_multiple_of(2) {
+    if payload.len() % 2 != 0 {
         return Err("rle payload must have even length".to_owned());
     }
 

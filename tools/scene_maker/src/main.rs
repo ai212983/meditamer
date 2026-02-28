@@ -1,5 +1,6 @@
 mod cli;
 mod format;
+mod inspect;
 mod pipeline;
 
 use std::env;

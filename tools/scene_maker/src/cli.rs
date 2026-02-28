@@ -162,43 +162,124 @@ where
     let mut it = args.into_iter();
 
     while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--input" => cfg.input_dir = PathBuf::from(next_value("--input", &mut it)?),
-            "--out" => {
-                cfg.out_bundle = PathBuf::from(next_value("--out", &mut it)?);
-                cfg.metadata_out = cfg.out_bundle.with_extension("scenebundle.json");
-            }
-            "--metadata" => cfg.metadata_out = PathBuf::from(next_value("--metadata", &mut it)?),
-            "--width" => cfg.width = parse_num(next_value("--width", &mut it)?, "--width")?,
-            "--height" => cfg.height = parse_num(next_value("--height", &mut it)?, "--height")?,
-            "--strip-height" => {
-                cfg.strip_height =
-                    parse_num(next_value("--strip-height", &mut it)?, "--strip-height")?
-            }
-            "--compression" => {
-                cfg.compression = Compression::from_str(&next_value("--compression", &mut it)?)?
-            }
-            "--derive-edge" => {
-                cfg.derive_edge = parse_bool(&next_value("--derive-edge", &mut it)?)?;
-            }
-            "--albedo" => cfg.albedo = Some(PathBuf::from(next_value("--albedo", &mut it)?)),
-            "--light" => cfg.light = Some(PathBuf::from(next_value("--light", &mut it)?)),
-            "--ao" => cfg.ao = Some(PathBuf::from(next_value("--ao", &mut it)?)),
-            "--depth" => cfg.depth = Some(PathBuf::from(next_value("--depth", &mut it)?)),
-            "--edge" => cfg.edge = Some(PathBuf::from(next_value("--edge", &mut it)?)),
-            "--mask" => cfg.mask = Some(PathBuf::from(next_value("--mask", &mut it)?)),
-            "--stroke" => cfg.stroke = Some(PathBuf::from(next_value("--stroke", &mut it)?)),
-            "--normal-x" => cfg.normal_x = Some(PathBuf::from(next_value("--normal-x", &mut it)?)),
-            "--normal-y" => cfg.normal_y = Some(PathBuf::from(next_value("--normal-y", &mut it)?)),
-            "-h" | "--help" => {
-                print_help();
-                std::process::exit(0);
-            }
-            _ => return Err(format!("unknown arg for build: {arg}")),
+        if handle_build_output_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
         }
+        if handle_build_dimension_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+        if handle_build_channel_override_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+        if handle_build_misc_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+
+        return Err(format!("unknown arg for build: {arg}"));
     }
 
     Ok(cfg)
+}
+
+fn handle_build_output_flags<I>(
+    cfg: &mut BuildConfig,
+    arg: &str,
+    it: &mut I,
+) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--input" => {
+            cfg.input_dir = PathBuf::from(next_value("--input", it)?);
+            Ok(true)
+        }
+        "--out" => {
+            cfg.out_bundle = PathBuf::from(next_value("--out", it)?);
+            cfg.metadata_out = cfg.out_bundle.with_extension("scenebundle.json");
+            Ok(true)
+        }
+        "--metadata" => {
+            cfg.metadata_out = PathBuf::from(next_value("--metadata", it)?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_build_dimension_flags<I>(
+    cfg: &mut BuildConfig,
+    arg: &str,
+    it: &mut I,
+) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--width" => {
+            cfg.width = parse_num(next_value("--width", it)?, "--width")?;
+            Ok(true)
+        }
+        "--height" => {
+            cfg.height = parse_num(next_value("--height", it)?, "--height")?;
+            Ok(true)
+        }
+        "--strip-height" => {
+            cfg.strip_height = parse_num(next_value("--strip-height", it)?, "--strip-height")?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_build_channel_override_flags<I>(
+    cfg: &mut BuildConfig,
+    arg: &str,
+    it: &mut I,
+) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    let path = match arg {
+        "--albedo" => Some((&mut cfg.albedo, "--albedo")),
+        "--light" => Some((&mut cfg.light, "--light")),
+        "--ao" => Some((&mut cfg.ao, "--ao")),
+        "--depth" => Some((&mut cfg.depth, "--depth")),
+        "--edge" => Some((&mut cfg.edge, "--edge")),
+        "--mask" => Some((&mut cfg.mask, "--mask")),
+        "--stroke" => Some((&mut cfg.stroke, "--stroke")),
+        "--normal-x" => Some((&mut cfg.normal_x, "--normal-x")),
+        "--normal-y" => Some((&mut cfg.normal_y, "--normal-y")),
+        _ => None,
+    };
+
+    if let Some((slot, flag)) = path {
+        *slot = Some(PathBuf::from(next_value(flag, it)?));
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn handle_build_misc_flags<I>(cfg: &mut BuildConfig, arg: &str, it: &mut I) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--compression" => {
+            cfg.compression = Compression::from_str(&next_value("--compression", it)?)?;
+            Ok(true)
+        }
+        "--derive-edge" => {
+            cfg.derive_edge = parse_bool(&next_value("--derive-edge", it)?)?;
+            Ok(true)
+        }
+        "-h" | "--help" => {
+            print_help();
+            std::process::exit(0);
+        }
+        _ => Ok(false),
+    }
 }
 
 pub(crate) struct ExplicitChannelPaths {
@@ -260,4 +341,51 @@ actions:\n  build   Pack pre-baked map images into a strip-major .scenebundle\n 
 action: build\n  --input DIR            Input directory (default: tools/scene_maker/input)\n  --out FILE             Output bundle path (default: tools/scene_maker/out/scene.scenebundle)\n  --metadata FILE        Output metadata json path\n  --width N              Target width (default: 600)\n  --height N             Target height (default: 600)\n  --strip-height N       Strip height in rows (default: 32)\n  --compression MODE     none|rle (default: rle)\n  --derive-edge BOOL     true|false (default: true)\n  --albedo FILE          Override albedo map path\n  --light FILE           Override light map path\n  --ao FILE              Override ao map path\n  --depth FILE           Override depth map path\n  --edge FILE            Override edge map path\n  --mask FILE            Override mask map path\n  --stroke FILE          Override stroke map path\n  --normal-x FILE        Override normal_x map path\n  --normal-y FILE        Override normal_y map path\n\n  If overrides are not set, files are discovered in --input using names:\n  albedo/light/ao/depth/edge/mask/stroke/normal_x/normal_y + extension .png\n\n
 action: inspect\n  --bundle FILE          Bundle to inspect (default: tools/scene_maker/out/scene.scenebundle)"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_build_args_uses_defaults() {
+        let cfg = parse_build_args(Vec::<String>::new()).expect("parse defaults");
+        assert_eq!(cfg.width, 600);
+        assert_eq!(cfg.height, 600);
+        assert_eq!(cfg.strip_height, 32);
+        assert!(matches!(cfg.compression, Compression::Rle));
+        assert!(cfg.derive_edge);
+    }
+
+    #[test]
+    fn parse_build_args_out_updates_default_metadata_path() {
+        let cfg = parse_build_args(vec![
+            "--out".to_owned(),
+            "tmp/test_bundle.scenebundle".to_owned(),
+        ])
+        .expect("parse --out");
+        assert_eq!(cfg.out_bundle, PathBuf::from("tmp/test_bundle.scenebundle"));
+        assert_eq!(
+            cfg.metadata_out,
+            PathBuf::from("tmp/test_bundle.scenebundle.json")
+        );
+    }
+
+    #[test]
+    fn parse_build_args_unknown_arg_fails() {
+        let err = match parse_build_args(vec!["--nope".to_owned()]) {
+            Ok(_) => panic!("unknown arg should fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("unknown arg for build"));
+    }
+
+    #[test]
+    fn parse_build_args_missing_value_fails() {
+        let err = match parse_build_args(vec!["--width".to_owned()]) {
+            Ok(_) => panic!("missing value should fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("missing value for --width"));
+    }
 }

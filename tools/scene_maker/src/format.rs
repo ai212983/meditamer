@@ -9,6 +9,15 @@ const CHANNEL_DESC_LEN: usize = 4;
 const STRIP_ENTRY_LEN: usize = 16;
 
 #[derive(Clone, Copy)]
+pub(crate) struct BundleHeader {
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    pub(crate) strip_height: u16,
+    pub(crate) strip_count: u16,
+    pub(crate) channel_count: u16,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct ChannelDescriptor {
     pub(crate) id: u8,
     pub(crate) bits_per_pixel: u8,
@@ -41,7 +50,7 @@ pub(crate) fn decode_len_hint(strip: &[u8], compression: Compression) -> Option<
     match compression {
         Compression::None => Some(strip.len()),
         Compression::Rle => {
-            if !strip.len().is_multiple_of(2) {
+            if strip.len() % 2 != 0 {
                 return None;
             }
             let mut len = 0usize;
@@ -85,33 +94,24 @@ fn rle_encode(raw: &[u8]) -> Vec<u8> {
     out
 }
 
-pub(crate) fn write_header<W: Write>(
-    mut out: W,
-    width: u16,
-    height: u16,
-    strip_height: u16,
-    strip_count: u16,
-    channel_count: u16,
-) -> Result<(), String> {
-    out.write_all(MAGIC)
-        .map_err(|e| format!("write header magic: {e}"))?;
-    out.write_all(&VERSION.to_le_bytes())
-        .map_err(|e| format!("write header version: {e}"))?;
-    out.write_all(&HEADER_LEN.to_le_bytes())
-        .map_err(|e| format!("write header len: {e}"))?;
-    out.write_all(&width.to_le_bytes())
-        .map_err(|e| format!("write header width: {e}"))?;
-    out.write_all(&height.to_le_bytes())
-        .map_err(|e| format!("write header height: {e}"))?;
-    out.write_all(&strip_height.to_le_bytes())
-        .map_err(|e| format!("write header strip height: {e}"))?;
-    out.write_all(&strip_count.to_le_bytes())
-        .map_err(|e| format!("write header strip count: {e}"))?;
-    out.write_all(&channel_count.to_le_bytes())
-        .map_err(|e| format!("write header channel count: {e}"))?;
-    out.write_all(&0u16.to_le_bytes())
-        .map_err(|e| format!("write header flags: {e}"))?;
-    Ok(())
+pub(crate) fn write_header<W: Write>(mut out: W, header: BundleHeader) -> Result<(), String> {
+    let encoded = encode_header_bytes(header);
+    out.write_all(&encoded)
+        .map_err(|e| format!("write header: {e}"))
+}
+
+fn encode_header_bytes(header: BundleHeader) -> [u8; HEADER_LEN as usize] {
+    let mut out = [0u8; HEADER_LEN as usize];
+    out[0..8].copy_from_slice(MAGIC);
+    out[8..10].copy_from_slice(&VERSION.to_le_bytes());
+    out[10..12].copy_from_slice(&HEADER_LEN.to_le_bytes());
+    out[12..14].copy_from_slice(&header.width.to_le_bytes());
+    out[14..16].copy_from_slice(&header.height.to_le_bytes());
+    out[16..18].copy_from_slice(&header.strip_height.to_le_bytes());
+    out[18..20].copy_from_slice(&header.strip_count.to_le_bytes());
+    out[20..22].copy_from_slice(&header.channel_count.to_le_bytes());
+    out[22..24].copy_from_slice(&0u16.to_le_bytes());
+    out
 }
 
 pub(crate) fn read_header<R: Read>(mut r: R) -> Result<(u16, u16, u16, u16, u16), String> {
@@ -154,5 +154,38 @@ pub(crate) fn compression_name(code: u8) -> &'static str {
         0 => "none",
         1 => "rle",
         _ => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn header_roundtrip_via_reader() {
+        let header = BundleHeader {
+            width: 37,
+            height: 19,
+            strip_height: 8,
+            strip_count: 3,
+            channel_count: 9,
+        };
+        let mut buf = Vec::new();
+        write_header(&mut buf, header).expect("write header");
+        assert_eq!(buf.len(), HEADER_LEN as usize);
+
+        let decoded = read_header(Cursor::new(&buf)).expect("read header");
+        assert_eq!(
+            decoded,
+            (
+                header.width,
+                header.height,
+                header.strip_height,
+                header.strip_count,
+                header.channel_count
+            )
+        );
     }
 }

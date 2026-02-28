@@ -1,10 +1,8 @@
-use std::{collections::HashMap, fs};
+use std::collections::HashMap;
 
-use crate::{
-    bundle::load_bundle,
-    cli::{mode_name, parse_render_args, Config, DitherMode, OutputMode, ToneCurve},
-    io::{load_grayscale_resize, save_gray},
-};
+use crate::cli::{parse_render_args, DitherMode, OutputMode, ToneCurve};
+
+mod flow;
 
 const CH_ALBEDO: u8 = 1;
 const CH_LIGHT: u8 = 2;
@@ -21,188 +19,7 @@ where
     I: IntoIterator<Item = String>,
 {
     let cfg = parse_render_args(args)?;
-    let bundle = load_bundle(&cfg.bundle)?;
-    let width = bundle.width as usize;
-    let height = bundle.height as usize;
-    let total = width * height;
-
-    let albedo = get_channel_or_default(&bundle.channels, CH_ALBEDO, total, 255)?;
-    let light = get_channel_or_default(&bundle.channels, CH_LIGHT, total, 255)?;
-    let ao = get_channel_or_default(&bundle.channels, CH_AO, total, 255)?;
-    let depth = get_channel_or_default(&bundle.channels, CH_DEPTH, total, 0)?;
-    let edge = get_channel_or_default(&bundle.channels, CH_EDGE, total, 0)?;
-    let mask = get_channel_or_default(&bundle.channels, CH_MASK, total, 255)?;
-    let stroke = get_channel_or_default(&bundle.channels, CH_STROKE, total, 128)?;
-    let normal_x_raw = bundle.channels.get(&CH_NORMAL_X);
-    let normal_y_raw = bundle.channels.get(&CH_NORMAL_Y);
-    let normal_xy = match (normal_x_raw, normal_y_raw) {
-        (Some(nx), Some(ny)) if nx.len() == total && ny.len() == total => {
-            let has_detail = nx.iter().zip(ny.iter()).any(|(&x, &y)| x != 128 || y != 128);
-            if has_detail {
-                Some((nx.as_slice(), ny.as_slice()))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-
-    if let Some(ref out_dir) = cfg.dump_channels {
-        fs::create_dir_all(out_dir)
-            .map_err(|e| format!("create dump channels dir {}: {e}", out_dir.display()))?;
-        save_gray(
-            &out_dir.join("albedo.png"),
-            bundle.width,
-            bundle.height,
-            albedo,
-        )?;
-        save_gray(
-            &out_dir.join("light.png"),
-            bundle.width,
-            bundle.height,
-            light,
-        )?;
-        save_gray(&out_dir.join("ao.png"), bundle.width, bundle.height, ao)?;
-        save_gray(&out_dir.join("depth.png"), bundle.width, bundle.height, depth)?;
-        save_gray(&out_dir.join("edge.png"), bundle.width, bundle.height, edge)?;
-        save_gray(&out_dir.join("mask.png"), bundle.width, bundle.height, mask)?;
-        save_gray(
-            &out_dir.join("stroke.png"),
-            bundle.width,
-            bundle.height,
-            stroke,
-        )?;
-        if let Some((nx, ny)) = normal_xy {
-            save_gray(&out_dir.join("normal_x.png"), bundle.width, bundle.height, nx)?;
-            save_gray(&out_dir.join("normal_y.png"), bundle.width, bundle.height, ny)?;
-        }
-    }
-
-    let tone_lut = build_tone_lut(cfg.tone_curve);
-    let mut tone_base = vec![0u8; total];
-    let mut stylized = vec![0u8; total];
-    let mut quantized = vec![0u8; total];
-    let sun_light = if cfg.sun_strength > 0 {
-        Some(build_depth_relit_map(
-            depth,
-            normal_xy,
-            width,
-            height,
-            cfg.sun_azimuth_deg,
-            cfg.sun_elevation_deg,
-        ))
-    } else {
-        None
-    };
-
-    let ghost_prev = if let Some(path) = cfg.ghost_from.as_ref() {
-        Some(load_grayscale_resize(path, bundle.width, bundle.height)?)
-    } else {
-        None
-    };
-
-    for y in 0..height {
-        for x in 0..width {
-            let i = y * width + x;
-            let light_shaded = if let Some(sun_map) = sun_light.as_ref() {
-                mix_u8(light[i], sun_map[i], cfg.sun_strength)
-            } else {
-                light[i]
-            };
-            let base = mul8(mul8(albedo[i], light_shaded), ao[i]);
-            tone_base[i] = base;
-
-            let fog = mul8(depth[i], cfg.fog_strength);
-            let fogged = mix_u8(base, 255, fog);
-
-            let dark = mul8(edge[i], cfg.edge_strength);
-            let edged = fogged.saturating_sub(dark);
-
-            let stroke_delta = ink_brush_delta(
-                i,
-                x,
-                y,
-                stroke[i],
-                edge[i],
-                depth[i],
-                normal_xy,
-                cfg.stroke_strength,
-            );
-            let stroked = clamp_i16_to_u8((edged as i16) + stroke_delta);
-
-            let paper_delta = ((paper_noise_u8(x as i32, y as i32) as i16) - 128)
-                * (cfg.paper_strength as i16)
-                / 255;
-            let papered = clamp_i16_to_u8((stroked as i16) + paper_delta);
-
-            let curved = tone_lut[papered as usize];
-            let masked = mix_u8(255, curved, mask[i]);
-
-            let ghosted = if let Some(prev) = ghost_prev.as_ref() {
-                mix_u8(masked, prev[i], cfg.ghost_alpha)
-            } else {
-                masked
-            };
-
-            stylized[i] = ghosted;
-            quantized[i] = quantize_u8(ghosted, x as i32, y as i32, cfg.mode, cfg.dither);
-        }
-    }
-
-    if let Some(parent) = cfg.out.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create output dir {}: {e}", parent.display()))?;
-    }
-    save_gray(&cfg.out, bundle.width, bundle.height, &quantized)?;
-    println!("wrote {}", cfg.out.display());
-
-    if let Some(ref debug_dir) = cfg.save_debug {
-        fs::create_dir_all(debug_dir)
-            .map_err(|e| format!("create debug dir {}: {e}", debug_dir.display()))?;
-        save_gray(
-            &debug_dir.join("01_tone_base.png"),
-            bundle.width,
-            bundle.height,
-            &tone_base,
-        )?;
-        save_gray(
-            &debug_dir.join("02_stylized.png"),
-            bundle.width,
-            bundle.height,
-            &stylized,
-        )?;
-        save_gray(
-            &debug_dir.join("03_quantized.png"),
-            bundle.width,
-            bundle.height,
-            &quantized,
-        )?;
-        if let Some(sun_map) = sun_light.as_ref() {
-            save_gray(
-                &debug_dir.join("00_sun_relight.png"),
-                bundle.width,
-                bundle.height,
-                sun_map,
-            )?;
-        }
-    }
-
-    println!(
-        "render mode={} levels={} dither={:?} edge_strength={} fog_strength={} stroke_strength={} paper_strength={} tone_curve={:?} sun_strength={} sun_azimuth_deg={} sun_elevation_deg={}",
-        mode_name(cfg.mode),
-        cfg.mode.levels(),
-        cfg.dither,
-        cfg.edge_strength,
-        cfg.fog_strength,
-        cfg.stroke_strength,
-        cfg.paper_strength,
-        cfg.tone_curve,
-        cfg.sun_strength,
-        cfg.sun_azimuth_deg,
-        cfg.sun_elevation_deg
-    );
-
-    Ok(())
+    flow::run_render_with_config(cfg)
 }
 
 fn get_channel_or_default<'a>(
@@ -472,8 +289,7 @@ fn brush_basis(idx: usize, normal_xy: Option<(&[u8], &[u8])>) -> (f32, f32, f32,
 }
 
 fn hash01(x: i32, y: i32, seed: u32) -> f32 {
-    let mut v =
-        (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ seed;
+    let mut v = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77) ^ seed;
     v ^= v >> 16;
     v = v.wrapping_mul(0x7FEB_352D);
     v ^= v >> 15;
@@ -489,3 +305,6 @@ fn paper_noise_u8(x: i32, y: i32) -> u8 {
     v ^= v >> 13;
     (v & 0xFF) as u8
 }
+
+#[cfg(test)]
+mod tests;

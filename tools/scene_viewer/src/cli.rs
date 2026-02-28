@@ -134,73 +134,140 @@ where
     let mut it = args.into_iter();
 
     while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--preset" => apply_preset(
-                &mut cfg,
-                RenderPreset::from_str(&next_value("--preset", &mut it)?)?,
-            ),
-            "--bundle" => cfg.bundle = PathBuf::from(next_value("--bundle", &mut it)?),
-            "--out" => cfg.out = PathBuf::from(next_value("--out", &mut it)?),
-            "--mode" => cfg.mode = OutputMode::from_str(&next_value("--mode", &mut it)?)?,
-            "--dither" => cfg.dither = DitherMode::from_str(&next_value("--dither", &mut it)?)?,
-            "--edge-strength" => {
-                cfg.edge_strength =
-                    parse_num(next_value("--edge-strength", &mut it)?, "--edge-strength")?
-            }
-            "--fog-strength" => {
-                cfg.fog_strength =
-                    parse_num(next_value("--fog-strength", &mut it)?, "--fog-strength")?
-            }
-            "--stroke-strength" => {
-                cfg.stroke_strength = parse_num(
-                    next_value("--stroke-strength", &mut it)?,
-                    "--stroke-strength",
-                )?
-            }
-            "--paper-strength" => {
-                cfg.paper_strength =
-                    parse_num(next_value("--paper-strength", &mut it)?, "--paper-strength")?
-            }
-            "--tone-curve" => {
-                cfg.tone_curve = ToneCurve::from_str(&next_value("--tone-curve", &mut it)?)?
-            }
-            "--sun-strength" => {
-                cfg.sun_strength =
-                    parse_num(next_value("--sun-strength", &mut it)?, "--sun-strength")?
-            }
-            "--sun-azimuth-deg" => {
-                cfg.sun_azimuth_deg = parse_num(
-                    next_value("--sun-azimuth-deg", &mut it)?,
-                    "--sun-azimuth-deg",
-                )?
-            }
-            "--sun-elevation-deg" => {
-                cfg.sun_elevation_deg = parse_num(
-                    next_value("--sun-elevation-deg", &mut it)?,
-                    "--sun-elevation-deg",
-                )?
-            }
-            "--save-debug" => {
-                cfg.save_debug = Some(PathBuf::from(next_value("--save-debug", &mut it)?))
-            }
-            "--dump-channels" => {
-                cfg.dump_channels = Some(PathBuf::from(next_value("--dump-channels", &mut it)?))
-            }
-            "--ghost-from" => {
-                cfg.ghost_from = Some(PathBuf::from(next_value("--ghost-from", &mut it)?))
-            }
-            "--ghost-alpha" => {
-                cfg.ghost_alpha = parse_num(next_value("--ghost-alpha", &mut it)?, "--ghost-alpha")?
-            }
-            "--help" | "-h" => {
-                print_help();
-                std::process::exit(0);
-            }
-            _ => return Err(format!("unknown render arg '{arg}'")),
+        if handle_render_io_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
         }
+        if handle_render_style_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+        if handle_render_sun_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+        if handle_render_debug_ghost_flags(&mut cfg, arg.as_str(), &mut it)? {
+            continue;
+        }
+        return Err(format!("unknown render arg '{arg}'"));
     }
 
     Ok(cfg)
+}
+
+fn handle_render_io_flags<I>(cfg: &mut Config, arg: &str, it: &mut I) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--bundle" => {
+            cfg.bundle = PathBuf::from(next_value("--bundle", it)?);
+            Ok(true)
+        }
+        "--out" => {
+            cfg.out = PathBuf::from(next_value("--out", it)?);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_render_style_flags<I>(cfg: &mut Config, arg: &str, it: &mut I) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--preset" => {
+            apply_preset(cfg, RenderPreset::from_str(&next_value("--preset", it)?)?);
+            Ok(true)
+        }
+        "--mode" => {
+            cfg.mode = OutputMode::from_str(&next_value("--mode", it)?)?;
+            Ok(true)
+        }
+        "--dither" => {
+            cfg.dither = DitherMode::from_str(&next_value("--dither", it)?)?;
+            Ok(true)
+        }
+        "--edge-strength" => {
+            cfg.edge_strength = parse_num(next_value("--edge-strength", it)?, "--edge-strength")?;
+            Ok(true)
+        }
+        "--fog-strength" => {
+            cfg.fog_strength = parse_num(next_value("--fog-strength", it)?, "--fog-strength")?;
+            Ok(true)
+        }
+        "--stroke-strength" => {
+            cfg.stroke_strength =
+                parse_num(next_value("--stroke-strength", it)?, "--stroke-strength")?;
+            Ok(true)
+        }
+        "--paper-strength" => {
+            cfg.paper_strength =
+                parse_num(next_value("--paper-strength", it)?, "--paper-strength")?;
+            Ok(true)
+        }
+        "--tone-curve" => {
+            cfg.tone_curve = ToneCurve::from_str(&next_value("--tone-curve", it)?)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_render_sun_flags<I>(cfg: &mut Config, arg: &str, it: &mut I) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--sun-strength" => {
+            cfg.sun_strength = parse_num(next_value("--sun-strength", it)?, "--sun-strength")?;
+            Ok(true)
+        }
+        "--sun-azimuth-deg" => {
+            cfg.sun_azimuth_deg =
+                parse_num(next_value("--sun-azimuth-deg", it)?, "--sun-azimuth-deg")?;
+            Ok(true)
+        }
+        "--sun-elevation-deg" => {
+            cfg.sun_elevation_deg = parse_num(
+                next_value("--sun-elevation-deg", it)?,
+                "--sun-elevation-deg",
+            )?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_render_debug_ghost_flags<I>(
+    cfg: &mut Config,
+    arg: &str,
+    it: &mut I,
+) -> Result<bool, String>
+where
+    I: Iterator<Item = String>,
+{
+    match arg {
+        "--save-debug" => {
+            cfg.save_debug = Some(PathBuf::from(next_value("--save-debug", it)?));
+            Ok(true)
+        }
+        "--dump-channels" => {
+            cfg.dump_channels = Some(PathBuf::from(next_value("--dump-channels", it)?));
+            Ok(true)
+        }
+        "--ghost-from" => {
+            cfg.ghost_from = Some(PathBuf::from(next_value("--ghost-from", it)?));
+            Ok(true)
+        }
+        "--ghost-alpha" => {
+            cfg.ghost_alpha = parse_num(next_value("--ghost-alpha", it)?, "--ghost-alpha")?;
+            Ok(true)
+        }
+        "--help" | "-h" => {
+            print_help();
+            std::process::exit(0);
+        }
+        _ => Ok(false),
+    }
 }
 
 pub(crate) fn mode_name(mode: OutputMode) -> &'static str {
@@ -251,4 +318,50 @@ actions:\n  render   Render a .scenebundle into a grayscale PNG using device-lik
 action: render\n  --bundle FILE           Input bundle (default: tools/scene_maker/out/scene.scenebundle)\n  --out FILE              Output PNG (default: tools/scene_viewer/out/render.png)\n  --mode MODE             mono1|gray3|gray4|gray8 (default: gray3)\n  --dither MODE           none|bayer4 (default: bayer4)\n  --edge-strength N       0..255 (default: 96)\n  --fog-strength N        0..255 (default: 72)\n  --stroke-strength N     0..255 (default: 24)\n  --tone-curve MODE       linear|wash|filmic (default: wash)\n  --save-debug DIR        Save intermediates (tone base / stylized / quantized)\n  --dump-channels DIR     Save decoded source channels\n  --ghost-from FILE       Prior rendered frame for ghosting simulation\n  --ghost-alpha N         0..255 blend amount from prior frame (default: 0)\n\n
 action: inspect\n  --bundle FILE           Bundle path"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_render_args_uses_defaults() {
+        let cfg = parse_render_args(Vec::<String>::new()).expect("parse defaults");
+        assert_eq!(cfg.edge_strength, 96);
+        assert_eq!(cfg.fog_strength, 72);
+        assert_eq!(cfg.stroke_strength, 24);
+        assert!(matches!(cfg.mode, OutputMode::Gray3));
+        assert!(matches!(cfg.dither, DitherMode::Bayer4));
+    }
+
+    #[test]
+    fn parse_render_args_sumi_e_preset_applies_defaults() {
+        let cfg = parse_render_args(vec!["--preset".to_owned(), "sumi-e".to_owned()])
+            .expect("parse preset");
+        assert!(matches!(cfg.mode, OutputMode::Gray3));
+        assert!(matches!(cfg.dither, DitherMode::Bayer4));
+        assert_eq!(cfg.edge_strength, 148);
+        assert_eq!(cfg.fog_strength, 98);
+        assert_eq!(cfg.stroke_strength, 54);
+        assert_eq!(cfg.paper_strength, 38);
+        assert_eq!(cfg.sun_strength, 136);
+    }
+
+    #[test]
+    fn parse_render_args_unknown_arg_fails() {
+        let err = match parse_render_args(vec!["--wat".to_owned()]) {
+            Ok(_) => panic!("unknown arg should fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("unknown render arg"));
+    }
+
+    #[test]
+    fn parse_render_args_missing_value_fails() {
+        let err = match parse_render_args(vec!["--mode".to_owned()]) {
+            Ok(_) => panic!("missing value should fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("missing value for --mode"));
+    }
 }
