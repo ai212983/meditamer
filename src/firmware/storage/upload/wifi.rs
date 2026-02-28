@@ -75,6 +75,10 @@ const WIFI_REASON_SCAN_NOMEM: u8 = 254;
 // Chosen so stop/disconnect can complete under transient RF contention while
 // still bounding host-observed NET_STATUS staleness.
 const WIFI_DRIVER_CONTROL_TIMEOUT_MS: u64 = 5_000;
+// Stop can transiently report timeout while the driver is unwinding
+// internal work; retry with short backoff before declaring failure.
+const WIFI_DRIVER_STOP_RETRIES: u8 = 2;
+const WIFI_DRIVER_STOP_RETRY_BACKOFF_MS: u64 = 300;
 // Poll cadence while connected to detect disconnect/lease/listener transitions
 // without creating hot-loop UART noise.
 const WIFI_CONNECTED_WATCHDOG_MS: u64 = 2_000;
@@ -856,7 +860,7 @@ pub(super) async fn run_wifi_connection_task(
                     if reconnect_due_to_credentials {
                         diag_wifi!("upload_http: wifi credentials changed, reconnecting");
                         telemetry::record_wifi_reassoc_credentials_changed();
-                        let _ = controller.disconnect_async().await;
+                        disconnect_with_timeout(&mut controller, "credentials_changed").await;
                         dhcp_lease_reacquire_attempts = 0;
                         other_disconnect_streak = 0;
                         hard_recover_watchdog_started_at = None;
@@ -877,8 +881,7 @@ pub(super) async fn run_wifi_connection_task(
                         dhcp_lease_reacquire_attempts = 0;
                         telemetry::set_wifi_link_connected(false);
                         telemetry::set_upload_http_listener(false, None);
-                        let _ = controller.disconnect_async().await;
-                        let _ = controller.stop_async().await;
+                        disconnect_with_timeout(&mut controller, "connected_watchdog").await;
                         config_applied = false;
                         if disconnect_reason == WIFI_REASON_OTHER
                             && other_disconnect_streak >= WIFI_REASON_OTHER_HARD_RECOVER_STREAK
@@ -995,8 +998,11 @@ pub(super) async fn run_wifi_connection_task(
                                         channel_hint,
                                         format_bssid_opt(bssid_hint),
                                     );
-                                    let _ = controller.disconnect_async().await;
-                                    let _ = controller.stop_async().await;
+                                    disconnect_with_timeout(
+                                        &mut controller,
+                                        "dhcp_lease_reacquire",
+                                    )
+                                    .await;
                                     telemetry::set_wifi_link_connected(false);
                                     telemetry::set_upload_http_listener(false, None);
                                     Timer::after(Duration::from_millis(
@@ -1158,8 +1164,7 @@ pub(super) async fn run_wifi_connection_task(
                                 failure_code,
                                 started_at.elapsed().as_millis() as u32,
                             );
-                            let _ = controller.disconnect_async().await;
-                            let _ = controller.stop_async().await;
+                            disconnect_with_timeout(&mut controller, "listener_timeout").await;
                             telemetry::set_wifi_link_connected(false);
                             telemetry::set_upload_http_listener(false, None);
                             break;
@@ -1209,6 +1214,9 @@ pub(super) async fn run_wifi_connection_task(
                     started_at.elapsed().as_millis() as u32,
                 );
                 telemetry::set_upload_http_listener(false, None);
+                // ESP-IDF warns scan requests are ineffective while connect is in
+                // progress. Force a bounded disconnect before any diagnostics scan.
+                disconnect_with_timeout(&mut controller, "connect_err_presolve").await;
                 let discovery_reason = is_discovery_disconnect_reason(disconnect_reason);
                 let auth_reason = is_auth_disconnect_reason(disconnect_reason);
                 let escalated_scan_active = escalated_auth_sweep_attempts_left > 0;
@@ -1288,7 +1296,6 @@ pub(super) async fn run_wifi_connection_task(
                     Timer::after(Duration::from_millis(WIFI_NOMEM_RECOVERY_BACKOFF_MS)).await;
                     continue;
                 }
-                disconnect_and_stop_with_timeout(&mut controller, "connect_err").await;
                 if escalated_scan_active {
                     channel_probe_idx = 0;
                     channel_hint = None;
@@ -1835,7 +1842,7 @@ fn post_recover_watchdog_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
         .max((policy.connect_timeout_ms as u64).saturating_mul(2))
 }
 
-async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'static>, context: &str) {
+async fn disconnect_with_timeout(controller: &mut WifiController<'static>, context: &str) {
     log_radio_mem_diag_with_trigger("recover_disconnect_before", context);
     match with_timeout(
         Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
@@ -1856,26 +1863,61 @@ async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'stati
         }
     }
     log_radio_mem_diag_with_trigger("recover_disconnect_after", context);
-    log_radio_mem_diag_with_trigger("recover_stop_before", context);
-    match with_timeout(
-        Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
-        controller.stop_async(),
-    )
-    .await
-    {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            diag_reassoc!("upload_http: {} stop err={:?}", context, err);
+}
+
+async fn disconnect_and_stop_with_timeout(controller: &mut WifiController<'static>, context: &str) {
+    disconnect_with_timeout(controller, context).await;
+    let mut stop_attempt = 0u8;
+    loop {
+        log_radio_mem_diag_with_trigger("recover_stop_before", context);
+        match with_timeout(
+            Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
+            controller.stop_async(),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                diag_reassoc!(
+                    "upload_http: {} stop err={:?} attempt={}",
+                    context,
+                    err,
+                    stop_attempt + 1
+                );
+            }
+            Err(_) => {
+                diag_reassoc!(
+                    "upload_http: {} stop timeout={}ms attempt={}",
+                    context,
+                    WIFI_DRIVER_CONTROL_TIMEOUT_MS,
+                    stop_attempt + 1
+                );
+            }
         }
-        Err(_) => {
-            diag_reassoc!(
-                "upload_http: {} stop timeout={}ms",
-                context,
-                WIFI_DRIVER_CONTROL_TIMEOUT_MS
-            );
+        log_radio_mem_diag_with_trigger("recover_stop_after", context);
+        match controller.is_started() {
+            Ok(false) => break,
+            Ok(true) => {
+                if stop_attempt >= WIFI_DRIVER_STOP_RETRIES {
+                    diag_reassoc!(
+                        "upload_http: {} stop retries exhausted; controller still started",
+                        context
+                    );
+                    break;
+                }
+            }
+            Err(err) => {
+                diag_reassoc!(
+                    "upload_http: {} is_started check err={:?} after stop",
+                    context,
+                    err
+                );
+                break;
+            }
         }
+        stop_attempt = stop_attempt.saturating_add(1);
+        Timer::after(Duration::from_millis(WIFI_DRIVER_STOP_RETRY_BACKOFF_MS)).await;
     }
-    log_radio_mem_diag_with_trigger("recover_stop_after", context);
 }
 
 async fn scan_target_candidates(

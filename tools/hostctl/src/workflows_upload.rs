@@ -151,12 +151,15 @@ fn request_sd_busy_aware(
             Ok(data) => return Ok(data),
             Err(err) => {
                 let msg = err.to_string();
+                let msg_lower = msg.to_lowercase();
                 let can_retry = Instant::now() < deadline;
-                let is_sd_busy = msg.contains("409") && msg.to_lowercase().contains("sd busy");
-                let is_timeout = msg.contains("408") || msg.contains("timed out");
-                let is_transient = msg.contains("Connection")
-                    || msg.contains("connect")
-                    || msg.contains("timeout");
+                let is_sd_busy = msg.contains("409") && msg_lower.contains("sd busy");
+                let is_timeout = msg.contains("408") || msg_lower.contains("timed out");
+                let is_transient = msg_lower.contains("connection")
+                    || msg_lower.contains("connect")
+                    || msg_lower.contains("timeout")
+                    || msg_lower.contains("send failed")
+                    || msg_lower.contains("error sending request");
 
                 if !(can_retry && (is_sd_busy || is_timeout || is_transient)) {
                     return Err(err);
@@ -340,6 +343,7 @@ pub fn run_upload(logger: &mut Logger, opts: UploadOptions) -> Result<()> {
     }
 
     let health_url = format!("http://{}:{}/health", opts.host, opts.port);
+    let mut health_ok = false;
     for _ in 0..20 {
         if request_raw(
             &client,
@@ -351,19 +355,14 @@ pub fn run_upload(logger: &mut Logger, opts: UploadOptions) -> Result<()> {
         )
         .is_ok()
         {
+            health_ok = true;
             break;
         }
         thread::sleep(Duration::from_millis(300));
     }
-    let _ = request_raw(
-        &client,
-        Method::GET,
-        &health_url,
-        None,
-        None,
-        health_timeout_s(opts.timeout_sec),
-    )
-    .with_context(|| "health check failed")?;
+    if !health_ok {
+        return Err(anyhow!("health check failed"));
+    }
 
     for rm in &opts.rm {
         let remote = if rm.starts_with('/') {
