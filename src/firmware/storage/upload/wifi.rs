@@ -43,6 +43,8 @@ const WIFI_AP_CANDIDATE_MAX: usize = 8;
 // by `wifi_country_t.schann/nchan` in Espressif Wi-Fi API.
 // Source: https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32/api-reference/network/esp_wifi.html
 const WIFI_CHANNEL_PROBE_SEQUENCE: [u8; 13] = [8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13];
+// Bounded fallback for repeated all-channel zero-result scans.
+const WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS: [u8; 4] = [8, 1, 6, 11];
 const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::WpaWpa2Personal,
     AuthMethod::Wpa2Personal,
@@ -1883,18 +1885,23 @@ async fn scan_target_candidates(
 ) -> ScanOutcome {
     let mut candidates = heapless::Vec::<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>::new();
     let active_timeout_ms = active_scan_timeout_ms(runtime_policy);
+    let directed_timeout_ms = active_timeout_ms.min(8_000).max(3_000);
     let passive_timeout_ms = passive_scan_timeout_ms(runtime_policy);
     let active_timeout = Duration::from_millis(active_timeout_ms);
+    let directed_timeout = Duration::from_millis(directed_timeout_ms);
     let passive_timeout = Duration::from_millis(passive_timeout_ms);
+    let probe_timeout_ms = active_timeout_ms.min(6_000).max(2_500);
+    let probe_timeout = Duration::from_millis(probe_timeout_ms);
+    let mut any_nonzero_results = false;
 
-    let active =
-        driver::active_scan_config(target_ssid, runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS);
-    log_radio_mem_diag("scan_active_before");
+    let active = driver::active_scan_config(runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS);
+    log_radio_mem_diag("scan_active_broad_before");
     let active_started_at = Instant::now();
     match with_timeout(active_timeout, controller.scan_with_config_async(active)).await {
         Ok(Ok(results)) => {
-            log_radio_mem_diag("scan_active_ok");
-            collect_scan_results("active", target_ssid, &results, &mut candidates);
+            log_radio_mem_diag("scan_active_broad_ok");
+            any_nonzero_results |= !results.is_empty();
+            collect_scan_results("active_broad", target_ssid, &results, &mut candidates);
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Active,
                 results.len(),
@@ -1905,13 +1912,16 @@ async fn scan_target_candidates(
         }
         Ok(Err(err)) => {
             diag_reassoc!(
-                "upload_http: scan active err={:?} target_ssid={}",
+                "upload_http: scan active_broad err={:?} target_ssid={}",
                 err,
                 target_ssid
             );
             if is_no_mem_wifi_error(&err) {
-                diag_reassoc!("upload_http: scan active NoMem target_ssid={}", target_ssid);
-                log_radio_mem_diag("scan_active_nomem");
+                diag_reassoc!(
+                    "upload_http: scan active_broad NoMem target_ssid={}",
+                    target_ssid
+                );
+                log_radio_mem_diag("scan_active_broad_nomem");
                 return ScanOutcome {
                     candidates,
                     hit_nomem: true,
@@ -1927,7 +1937,7 @@ async fn scan_target_candidates(
         }
         Err(_) => {
             diag_reassoc!(
-                "upload_http: scan active timeout={}ms target_ssid={}",
+                "upload_http: scan active_broad timeout={}ms target_ssid={}",
                 active_timeout_ms,
                 target_ssid
             );
@@ -1936,6 +1946,83 @@ async fn scan_target_candidates(
                 0,
                 false,
                 elapsed_ms_u32(active_started_at),
+                None,
+            );
+        }
+    }
+
+    if !candidates.is_empty() {
+        diag_reassoc!(
+            "upload_http: scan target_ssid={} candidate_count={} top_channel={} top_bssid={}",
+            target_ssid,
+            candidates.len(),
+            candidates.first().map(|ap| ap.hint.channel).unwrap_or(0),
+            format_bssid_opt(candidates.first().map(|ap| ap.hint.bssid)),
+        );
+        return ScanOutcome {
+            candidates,
+            hit_nomem: false,
+        };
+    }
+
+    let directed = driver::directed_active_scan_config(target_ssid, runtime_policy)
+        .with_max(WIFI_SCAN_DIAG_MAX_APS);
+    log_radio_mem_diag("scan_active_directed_before");
+    let directed_started_at = Instant::now();
+    match with_timeout(
+        directed_timeout,
+        controller.scan_with_config_async(directed),
+    )
+    .await
+    {
+        Ok(Ok(results)) => {
+            log_radio_mem_diag("scan_active_directed_ok");
+            any_nonzero_results |= !results.is_empty();
+            collect_scan_results("active_directed", target_ssid, &results, &mut candidates);
+            telemetry::record_wifi_reassoc_scan(
+                telemetry::WifiScanPhase::Active,
+                results.len(),
+                !candidates.is_empty(),
+                elapsed_ms_u32(directed_started_at),
+                candidates.first().map(|ap| ap.hint.channel),
+            );
+        }
+        Ok(Err(err)) => {
+            diag_reassoc!(
+                "upload_http: scan active_directed err={:?} target_ssid={}",
+                err,
+                target_ssid
+            );
+            if is_no_mem_wifi_error(&err) {
+                diag_reassoc!(
+                    "upload_http: scan active_directed NoMem target_ssid={}",
+                    target_ssid
+                );
+                log_radio_mem_diag("scan_active_directed_nomem");
+                return ScanOutcome {
+                    candidates,
+                    hit_nomem: true,
+                };
+            }
+            telemetry::record_wifi_reassoc_scan(
+                telemetry::WifiScanPhase::Active,
+                0,
+                false,
+                elapsed_ms_u32(directed_started_at),
+                None,
+            );
+        }
+        Err(_) => {
+            diag_reassoc!(
+                "upload_http: scan active_directed timeout={}ms target_ssid={}",
+                directed_timeout_ms,
+                target_ssid
+            );
+            telemetry::record_wifi_reassoc_scan(
+                telemetry::WifiScanPhase::Active,
+                0,
+                false,
+                elapsed_ms_u32(directed_started_at),
                 None,
             );
         }
@@ -1960,6 +2047,7 @@ async fn scan_target_candidates(
     match with_timeout(passive_timeout, controller.scan_with_config_async(passive)).await {
         Ok(Ok(results)) => {
             log_radio_mem_diag("scan_passive_ok");
+            any_nonzero_results |= !results.is_empty();
             collect_scan_results("passive", target_ssid, &results, &mut candidates);
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Passive,
@@ -2007,6 +2095,99 @@ async fn scan_target_candidates(
                 elapsed_ms_u32(passive_started_at),
                 None,
             );
+        }
+    }
+
+    if !candidates.is_empty() {
+        diag_reassoc!(
+            "upload_http: scan target_ssid={} candidate_count={} top_channel={} top_bssid={}",
+            target_ssid,
+            candidates.len(),
+            candidates.first().map(|ap| ap.hint.channel).unwrap_or(0),
+            format_bssid_opt(candidates.first().map(|ap| ap.hint.bssid)),
+        );
+        return ScanOutcome {
+            candidates,
+            hit_nomem: false,
+        };
+    }
+
+    if !any_nonzero_results {
+        diag_reassoc!(
+            "upload_http: scan zero_result_fallback start channels={:?} target_ssid={} probe_timeout_ms={}",
+            WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS,
+            target_ssid,
+            probe_timeout_ms,
+        );
+        for channel in WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS {
+            let probe = driver::channel_active_scan_config(channel, runtime_policy)
+                .with_max(WIFI_SCAN_DIAG_MAX_APS);
+            log_radio_mem_diag("scan_probe_before");
+            let probe_started_at = Instant::now();
+            match with_timeout(probe_timeout, controller.scan_with_config_async(probe)).await {
+                Ok(Ok(results)) => {
+                    log_radio_mem_diag("scan_probe_ok");
+                    diag_reassoc!(
+                        "upload_http: scan probe channel={} found={} target_ssid={}",
+                        channel,
+                        results.len(),
+                        target_ssid
+                    );
+                    collect_scan_results("probe", target_ssid, &results, &mut candidates);
+                    telemetry::record_wifi_reassoc_scan(
+                        telemetry::WifiScanPhase::Active,
+                        results.len(),
+                        !candidates.is_empty(),
+                        elapsed_ms_u32(probe_started_at),
+                        candidates.first().map(|ap| ap.hint.channel),
+                    );
+                }
+                Ok(Err(err)) => {
+                    diag_reassoc!(
+                        "upload_http: scan probe err={:?} channel={} target_ssid={}",
+                        err,
+                        channel,
+                        target_ssid
+                    );
+                    if is_no_mem_wifi_error(&err) {
+                        diag_reassoc!(
+                            "upload_http: scan probe NoMem channel={} target_ssid={}",
+                            channel,
+                            target_ssid
+                        );
+                        log_radio_mem_diag("scan_probe_nomem");
+                        return ScanOutcome {
+                            candidates,
+                            hit_nomem: true,
+                        };
+                    }
+                    telemetry::record_wifi_reassoc_scan(
+                        telemetry::WifiScanPhase::Active,
+                        0,
+                        false,
+                        elapsed_ms_u32(probe_started_at),
+                        None,
+                    );
+                }
+                Err(_) => {
+                    diag_reassoc!(
+                        "upload_http: scan probe timeout={}ms channel={} target_ssid={}",
+                        probe_timeout_ms,
+                        channel,
+                        target_ssid
+                    );
+                    telemetry::record_wifi_reassoc_scan(
+                        telemetry::WifiScanPhase::Active,
+                        0,
+                        false,
+                        elapsed_ms_u32(probe_started_at),
+                        None,
+                    );
+                }
+            }
+            if !candidates.is_empty() {
+                break;
+            }
         }
     }
 

@@ -94,10 +94,10 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
     static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
     static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
 
-    let mut rx_buffer = init_http_buffer(&RX_BUFFER, HTTP_RW_BUF_TARGET, "http_rx");
-    let mut tx_buffer = init_http_buffer(&TX_BUFFER, HTTP_RW_BUF_TARGET, "http_tx");
-    let mut header_buffer = init_http_buffer(&HEADER_BUFFER, HTTP_HEADER_MAX, "http_header");
-    let mut chunk_buffer = init_http_buffer(&CHUNK_BUFFER, HTTP_CHUNK_BUF_TARGET, "http_chunk");
+    let mut rx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
+    let mut tx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
+    let mut header_buffer: Option<HttpBuffer<HTTP_HEADER_MAX>> = None;
+    let mut chunk_buffer: Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>> = None;
 
     let mut listening_logged = false;
     let mut waiting_dhcp_logged = false;
@@ -180,6 +180,33 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             }
             listening_logged = true;
         }
+
+        if rx_buffer.is_none() {
+            rx_buffer = Some(init_http_buffer(&RX_BUFFER, HTTP_RW_BUF_TARGET, "http_rx"));
+            tx_buffer = Some(init_http_buffer(&TX_BUFFER, HTTP_RW_BUF_TARGET, "http_tx"));
+            header_buffer = Some(init_http_buffer(
+                &HEADER_BUFFER,
+                HTTP_HEADER_MAX,
+                "http_header",
+            ));
+            chunk_buffer = Some(init_http_buffer(
+                &CHUNK_BUFFER,
+                HTTP_CHUNK_BUF_TARGET,
+                "http_chunk",
+            ));
+            log_http_mem_diag("buffers_init");
+        }
+
+        let (Some(rx_buffer), Some(tx_buffer), Some(header_buffer), Some(chunk_buffer)) = (
+            rx_buffer.as_mut(),
+            tx_buffer.as_mut(),
+            header_buffer.as_mut(),
+            chunk_buffer.as_mut(),
+        ) else {
+            telemetry::set_upload_http_listener(false, Some(local_ipv4));
+            Timer::after(Duration::from_millis(250)).await;
+            continue;
+        };
 
         let mut socket = TcpSocket::new(stack, rx_buffer.as_mut_slice(), tx_buffer.as_mut_slice());
         socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
