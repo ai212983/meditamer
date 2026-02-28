@@ -10,17 +10,14 @@
   "offenders": {
     "file_sloc": {
       "src/firmware/runtime/serial_task.rs": 688.0,
-      "src/firmware/storage/sd_task/upload.rs": 526.0,
       "src/firmware/runtime/serial_task/parser/basic.rs": 653.0,
-      "tools/hostctl/src/workflows_sdcard.rs": 546.0,
+      "src/firmware/storage/sd_task/upload.rs": 526.0,
       "src/firmware/storage/upload/wifi.rs": 2033.0,
       "tools/hostctl/src/workflows_wifi_discovery.rs": 593.0,
-      "tools/scene_maker/src/main.rs": 867.0,
-      "tools/scene_viewer/src/main.rs": 1061.0,
-      "tools/hostctl/src/workflows_troubleshoot.rs": 746.0,
-      "tools/hostctl/src/workflows_wifi_acceptance.rs": 701.0,
+      "tools/hostctl/src/workflows_sdcard.rs": 546.0,
       "tools/hostctl/src/workflows_upload.rs": 530.0,
-      "packages/sdcard/src/probe/core.rs": 533.0
+      "tools/hostctl/src/workflows_wifi_acceptance.rs": 701.0,
+      "tools/hostctl/src/workflows_troubleshoot.rs": 746.0
     },
     "fn_cognitive": {
       "src/firmware/touch/normalize/prod/selection.rs::select_primary": 48.0,
@@ -36,29 +33,29 @@
     "fn_cyclomatic": {
       "src/firmware/touch/normalize/prod/selection.rs::select_primary": 38.0,
       "src/firmware/runtime/display_task/touch_loop.rs::process_touch_cycle": 49.0,
-      "src/firmware/runtime/serial_task/parser/mod.rs::parse_serial_command": 34.0,
       "src/firmware/runtime/display_task/app_events.rs::handle_app_event": 35.0,
+      "src/firmware/runtime/serial_task/parser/mod.rs::parse_serial_command": 34.0,
       "src/firmware/runtime/serial_task.rs::time_sync_task": 68.0,
       "src/firmware/storage/upload/http/connection.rs::handle_connection": 73.0,
       "src/firmware/event_engine/features.rs::assess_tap_candidate": 34.0,
+      "tools/scene_viewer/src/cli.rs::parse_render_args": 50.0,
       "src/firmware/storage/upload/wifi.rs::run_wifi_connection_task": 99.0,
+      "tools/scene_maker/src/cli.rs::parse_build_args": 43.0,
+      "tools/scene_viewer/src/render.rs::run_render": 44.0,
       "tools/hostctl/src/workflows_wifi_discovery.rs::invoke": 52.0,
-      "tools/scene_maker/src/main.rs::run_build": 38.0,
-      "tools/scene_maker/src/main.rs::parse_build_args": 43.0,
-      "tools/scene_viewer/src/main.rs::run_render": 44.0,
-      "tools/scene_viewer/src/main.rs::parse_render_args": 50.0,
+      "tools/scene_maker/src/pipeline.rs::run_build": 38.0,
       "packages/sdcard/src/runtime/probe_rw.rs::run_sd_probe": 33.0,
       "tools/hostctl/src/workflows_wifi_acceptance.rs::invoke": 59.0
     },
     "fn_nargs": {
       "src/firmware/render/visual/mod.rs::render_suminagashi_direct": 12.0,
       "src/firmware/render/visual/mod.rs::render_suminagashi_with_staging": 12.0,
+      "tools/scene_maker/src/format.rs::write_header": 15.0,
+      "tools/scene_maker/src/pipeline.rs::run_build": 15.0,
+      "tools/hostctl/src/workflows_runtime_modes.rs::invoke": 10.0,
       "tools/hostctl/src/workflows_sdcard.rs::wait_for_sd_result": 13.0,
       "tools/hostctl/src/workflows_sdcard.rs::run_step": 9.0,
-      "tools/scene_maker/src/main.rs::run_build": 15.0,
-      "tools/scene_maker/src/main.rs::write_header": 15.0,
-      "tools/hostctl/src/scenarios.rs::eval_condition": 10.0,
-      "tools/hostctl/src/workflows_runtime_modes.rs::invoke": 10.0
+      "tools/hostctl/src/scenarios.rs::eval_condition": 10.0
     }
   }
 }
