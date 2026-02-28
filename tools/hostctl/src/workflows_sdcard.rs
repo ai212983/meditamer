@@ -69,14 +69,14 @@ fn maybe_flash_first(logger: &mut Logger, build_mode: &str) -> Result<()> {
     ));
     let port = env_utils::require_port()?;
     let repo_dir = repo_root();
-    let status = Command::new(repo_root().join("scripts/flash.sh"))
+    let status = Command::new(repo_root().join("scripts/device/flash.sh"))
         .arg(build_mode)
         .current_dir(&repo_dir)
         .env_remove("RUSTUP_TOOLCHAIN")
         .env("ESPFLASH_PORT", port)
         .env("FLASH_SET_TIME_AFTER_FLASH", "0")
         .status()
-        .context("failed to execute scripts/flash.sh")?;
+        .context("failed to execute scripts/device/flash.sh")?;
 
     if !status.success() {
         return Err(anyhow!("flash.sh failed with status: {status}"));

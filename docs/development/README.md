@@ -41,20 +41,20 @@ go install github.com/conventionalcommit/commitlint@latest
 Install hooks:
 
 ```bash
-scripts/setup_hooks.sh
+scripts/ci/setup_hooks.sh
 ```
 
 Current pre-commit hook:
 
 - Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
 - Auto-stages formatter edits (`stage_fixed: true`) so commits include rustfmt output.
-- Validates links in staged Markdown files via `scripts/check_markdown_links.sh`.
+- Validates links in staged Markdown files via `scripts/ci/check_markdown_links.sh`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
-- Runs host-tooling clippy via `scripts/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
+- Runs host-tooling clippy via `scripts/ci/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
 
 Current commit-msg hook:
 
-- Validates commit messages against Conventional Commits via `scripts/check_commit_message.sh` and `commitlint`.
+- Validates commit messages against Conventional Commits via `scripts/ci/check_commit_message.sh` and `commitlint`.
 - Requires a scope in `type(scope): subject` format.
 - Enforces allowed scopes: `runtime`, `touch`, `event-engine`, `storage`, `upload`, `wifi`, `telemetry`, `graphics`, `drivers`, `tooling`, `ci`, `docs`.
 - Exempts Git-generated/autosquash subjects (`Merge ...`, `Revert ...`, `fixup! ...`, `squash! ...`) from custom scope checks.
@@ -62,30 +62,30 @@ Current commit-msg hook:
 Current pre-push hook:
 
 - Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
-- Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh` on Rust/workspace changes.
+- Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
 
 Code analysis lint command (report mode by default):
 
 ```bash
-scripts/lint_code_analysis.sh
+scripts/ci/lint_code_analysis.sh
 ```
 
 Strict ratchet mode (used by pre-push and CI):
 
 ```bash
-RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh
+RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh
 ```
 
 Refresh ratchet baseline after intentional refactors:
 
 ```bash
-RCA_UPDATE_BASELINE=1 scripts/lint_code_analysis.sh
+RCA_UPDATE_BASELINE=1 scripts/ci/lint_code_analysis.sh
 ```
 
 Rust-analyzer baseline lint:
 
 ```bash
-scripts/lint_rust_analyzer.sh
+scripts/ci/lint_rust_analyzer.sh
 ```
 
 Notes for this workspace:
@@ -101,7 +101,7 @@ Formatting enforcement:
 Optional full (online) validation:
 
 ```bash
-git ls-files -z '*.md' | xargs -0 env MARKDOWN_LINKS_ONLINE=1 scripts/check_markdown_links.sh
+git ls-files -z '*.md' | xargs -0 env MARKDOWN_LINKS_ONLINE=1 scripts/ci/check_markdown_links.sh
 ```
 
 ## File Size Guidelines (Rewrite Phase)
@@ -129,12 +129,12 @@ Suggested PR checklist line:
 ## Build
 
 ```bash
-scripts/build.sh [debug|release]
+scripts/build/build.sh [debug|release]
 ```
 
 Default is `release` when no argument is provided.
 
-The default Xtensa runner (`scripts/xtensa_runner.sh`) flashes firmware without opening
+The default Xtensa runner (`scripts/build/xtensa_runner.sh`) flashes firmware without opening
 an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
 
 ```bash
@@ -146,7 +146,7 @@ ESPFLASH_RUN_MONITOR=1 cargo run
 Flash (auto-detects serial port when exactly one candidate is present):
 
 ```bash
-scripts/flash.sh [debug|release]
+scripts/device/flash.sh [debug|release]
 ```
 
 Default is `release` when no argument is provided.
@@ -154,12 +154,12 @@ Default is `release` when no argument is provided.
 Recommended explicit invocation (best for multi-device setups):
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/device/flash.sh debug
 ```
 
 Optional flash env vars:
 
-- `ESPFLASH_BAUD` (default `460800` in `scripts/flash.sh`)
+- `ESPFLASH_BAUD` (default `460800` in `scripts/device/flash.sh`)
 - `FLASH_TIMEOUT_SEC` (default `360`; watchdog timeout per primary flash attempt)
 - `FLASH_STATUS_INTERVAL_SEC` (default `15`; heartbeat interval while flashing)
 - `ESPFLASH_ENABLE_FALLBACK` (`1` default; retries with `--no-stub` on failure/timeout)
@@ -194,7 +194,7 @@ You can also narrow autodetection with `ESPFLASH_PORT_HINT` (substring match).
 
 If flashing appears "stuck":
 
-- `scripts/flash.sh` now prints `Flashing in progress...` every `FLASH_STATUS_INTERVAL_SEC` seconds.
+- `scripts/device/flash.sh` now prints `Flashing in progress...` every `FLASH_STATUS_INTERVAL_SEC` seconds.
 - A flash watchdog aborts after `FLASH_TIMEOUT_SEC`; with fallback enabled, it retries automatically using `--no-stub`.
 
 If serial port is busy:
@@ -208,13 +208,13 @@ Stop monitor/holder processes, then re-run flash.
 Force slow fallback path directly:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_BAUD=115200 ESPFLASH_ENABLE_FALLBACK=0 scripts/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_BAUD=115200 ESPFLASH_ENABLE_FALLBACK=0 scripts/device/flash.sh debug
 ```
 
 ## Monitor
 
 ```bash
-scripts/monitor.sh
+scripts/device/monitor.sh
 ```
 
 Optional monitor env vars:
@@ -232,7 +232,7 @@ When raw backend is `tio`, exit the monitor with `Ctrl+T` then `q`.
 For boards without reset wiring/button, prefer raw mode:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=raw scripts/monitor.sh
+ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=raw scripts/device/monitor.sh
 ```
 
 ### Defmt Telemetry
@@ -242,13 +242,13 @@ Firmware supports optional `defmt` telemetry via feature `telemetry-defmt`.
 Build/flash with defmt telemetry enabled:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 CARGO_FEATURES=telemetry-defmt scripts/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 CARGO_FEATURES=telemetry-defmt scripts/device/flash.sh debug
 ```
 
 Use espflash monitor mode (not raw cat/tio) to decode defmt frames:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=espflash scripts/monitor.sh
+ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=espflash scripts/device/monitor.sh
 ```
 
 Raw monitor mode (`ESPFLASH_MONITOR_MODE=raw`) does not decode defmt frames.
@@ -269,13 +269,13 @@ Examples:
 Recommended host helper:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/timeset.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/device/timeset.sh
 ```
 
 Optional explicit values:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/timeset.sh 1762531200 -300
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/device/timeset.sh 1762531200 -300
 ```
 
 If you prefer manual write:
@@ -368,7 +368,7 @@ PSRAM
 Automated smoke run (mode toggles + PSRAM snapshots):
 
 ```bash
-scripts/runtime_modes_smoke.sh
+scripts/device/runtime_modes_smoke.sh
 ```
 
 Optional env var:
@@ -422,7 +422,7 @@ Agent-oriented contract and runbook:
 Automated UART-driven SD/FAT end-to-end validation:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_hw.sh
 ```
 
 Defaults:
@@ -446,7 +446,7 @@ Optional env vars:
 Burst/backpressure regression only:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_burst_regression.sh
 ```
 
 ## SD Asset Upload Over Wi-Fi (STA, HTTP)
@@ -456,7 +456,7 @@ Upload server for pushing assets to SD card without removing it.
 Build/flash:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh debug
 ```
 
 Notes:
@@ -509,7 +509,7 @@ HOSTCTL_NET_SSID='<wifi-ssid>' \
 HOSTCTL_NET_PASSWORD='<wifi-password>' \
 HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_LOG_PATH=./logs/wifi_acceptance_manual.log \
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 Health check:
@@ -538,13 +538,13 @@ curl -X DELETE \
 Upload an assets directory:
 
 ```bash
-scripts/upload_assets_http.sh --host <device-ip> --src assets --dst /assets
+scripts/assets/upload_assets_http.sh --host <device-ip> --src assets --dst /assets
 ```
 
 Upload a single file:
 
 ```bash
-scripts/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin --dst /assets
+scripts/assets/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin --dst /assets
 ```
 
 Optional upload helper tuning:
@@ -554,7 +554,7 @@ Optional upload helper tuning:
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
 ```bash
-scripts/upload_assets_http.sh --host <device-ip> --dst /assets --rm old.bin --rm unused/
+scripts/assets/upload_assets_http.sh --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
 
 Suggested runtime flow:
@@ -569,7 +569,7 @@ Suggested runtime flow:
 Wi-Fi acceptance workflow:
 
 ```bash
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 - runs via `hostctl test wifi-acceptance` behind the script wrapper.
@@ -587,7 +587,7 @@ HOSTCTL_NET_PASSWORD='***' \
 HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_DISCOVERY_PROFILE_PATH=./tools/hostctl/scenarios/wifi-discovery-debug.default.toml \
 HOSTCTL_NET_LOG_PATH=./logs/wifi_discovery_debug_manual.log \
-scripts/test_wifi_discovery_debug.sh
+scripts/tests/hw/test_wifi_discovery_debug.sh
 ```
 
 - runs via `hostctl test wifi-discovery-debug` behind the script wrapper.
@@ -613,12 +613,12 @@ scripts/test_wifi_discovery_debug.sh
 Run a UART-centric troubleshooting sequence (flash, protocol probes, boot soak):
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_troubleshoot_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_troubleshoot_hw.sh
 ```
 
 - runs through `hostctl test troubleshoot` with declarative orchestration in
   `tools/hostctl/scenarios/troubleshoot.sw.yaml`
-- uses `scripts/flash.sh` as the flash primitive (per project flash policy)
+- uses `scripts/device/flash.sh` as the flash primitive (per project flash policy)
 - classifies failures into `build`, `flash`, `boot`, `runtime`,
   `uart_protocol`, `uart_transport`, or `unknown`
 - emits summary plus persistent UART and soak logs under `logs/`
@@ -641,19 +641,19 @@ Agent-oriented contract and runbook:
 Reset-cycle soak validation:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/soak_boot.sh 10
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/soak_boot.sh 10
 ```
 
 Manual physical cold-boot matrix helper:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/cold_boot_matrix.sh 20
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/cold_boot_matrix.sh 20
 ```
 
 Long refresh soak validation:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/soak_refresh.sh 7200
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/soak_refresh.sh 7200
 ```
 
 Optional soak env vars:

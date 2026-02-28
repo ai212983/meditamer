@@ -3,13 +3,13 @@
 Run the repository baseline analyzer script:
 
 ```bash
-scripts/lint_rust_analyzer.sh
+scripts/ci/lint_rust_analyzer.sh
 ```
 
 By default this uses the `stable` Rust toolchain for analyzer execution. Override with:
 
 ```bash
-RUST_ANALYZER_TOOLCHAIN=<toolchain> scripts/lint_rust_analyzer.sh
+RUST_ANALYZER_TOOLCHAIN=<toolchain> scripts/ci/lint_rust_analyzer.sh
 ```
 
 ## Purpose

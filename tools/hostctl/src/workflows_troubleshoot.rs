@@ -177,7 +177,7 @@ impl<'a> TroubleshootRuntime<'a> {
 
         self.close_console();
 
-        let script = repo_root().join("scripts/flash.sh");
+        let script = repo_root().join("scripts/device/flash.sh");
         let repo_dir = repo_root();
         let mut last_detail = String::new();
 
@@ -267,7 +267,7 @@ impl<'a> TroubleshootRuntime<'a> {
 
         ensure_parent_dir(&self.soak_log_dir.join("placeholder"))?;
 
-        let script = repo_root().join("scripts/soak_boot.sh");
+        let script = repo_root().join("scripts/device/soak_boot.sh");
         let repo_dir = repo_root();
         self.logger.info(format!(
             "Running boot soak via {} cycles={}...",

@@ -27,13 +27,13 @@ Bundled fixtures cover tap, long-press, short-drag-no-swipe, all swipe direction
 1. Capture serial monitor output while interacting with the touch panel:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-XXXX scripts/touch_capture.sh
+ESPFLASH_PORT=/dev/cu.usbserial-XXXX scripts/touch/touch_capture.sh
 ```
 
 2. Build replay fixtures from that capture:
 
 ```bash
-scripts/make_touch_fixture.sh logs/touch_trace_YYYYMMDD_HHMMSS.log my_real_case
+scripts/touch/make_touch_fixture.sh logs/touch_trace_YYYYMMDD_HHMMSS.log my_real_case
 ```
 
 This produces:

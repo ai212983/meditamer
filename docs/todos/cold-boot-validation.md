@@ -18,4 +18,4 @@ Acceptance criteria:
 
 References:
 - docs.soldered.com Inkplate 4 TEMPERA quick start / FAQ / battery pages (power behavior)
-- scripts/cold_boot_matrix.sh
+- scripts/device/cold_boot_matrix.sh

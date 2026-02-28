@@ -240,8 +240,8 @@ Exit criteria:
 ### On-device protocol
 
 - Standard script flow:
-  - flash: `ESPFLASH_PORT=... ./scripts/flash.sh release`
-  - capture: `ESPFLASH_PORT=... ./scripts/tap_capture.sh logs/<name>.log`
+  - flash: `ESPFLASH_PORT=... ./scripts/device/flash.sh release`
+  - capture: `ESPFLASH_PORT=... ./scripts/touch/tap_capture.sh logs/<name>.log`
 - Scenario matrix per firmware:
   - 3x triple taps on each of 3 sides,
   - light touches/no taps,

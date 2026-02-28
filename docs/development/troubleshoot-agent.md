@@ -3,7 +3,7 @@
 This runbook defines how an automation/LLM agent should run and interpret:
 
 ```bash
-scripts/test_troubleshoot_hw.sh
+scripts/tests/hw/test_troubleshoot_hw.sh
 ```
 
 The script is a wrapper around:
@@ -26,9 +26,9 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 
 ## What It Runs
 
-1. Flash firmware using `scripts/flash.sh` (unless explicitly disabled).
+1. Flash firmware using `scripts/device/flash.sh` (unless explicitly disabled).
 2. Run UART protocol probes (`PING`, `STATE GET`, `TIMESET`, `PSRAM`).
-3. Run boot soak (`scripts/soak_boot.sh`) for repeated cold boot markers.
+3. Run boot soak (`scripts/device/soak_boot.sh`) for repeated cold boot markers.
 4. Emit summary with pass/fail stage and failure class.
 
 ## Preconditions
@@ -41,20 +41,20 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 ## Standard Invocation
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_troubleshoot_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_troubleshoot_hw.sh
 ```
 
 Optional arguments:
 
 ```bash
-scripts/test_troubleshoot_hw.sh [debug|release] [output_log_path]
+scripts/tests/hw/test_troubleshoot_hw.sh [debug|release] [output_log_path]
 ```
 
 Example:
 
 ```bash
 HOSTCTL_PORT=/dev/cu.usbserial-540 \
-  scripts/test_troubleshoot_hw.sh debug logs/troubleshoot_manual.log
+  scripts/tests/hw/test_troubleshoot_hw.sh debug logs/troubleshoot_manual.log
 ```
 
 ## Agent Control Knobs
@@ -69,7 +69,7 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 ## Deterministic Agent Procedure
 
 1. Set `HOSTCTL_PORT` explicitly.
-2. Run `scripts/test_troubleshoot_hw.sh` once with defaults.
+2. Run `scripts/tests/hw/test_troubleshoot_hw.sh` once with defaults.
 3. If it fails, read summary fields: `failure_stage`, `failure_class`, `failure_detail`.
 4. Attach artifacts in report:
    - `uart_log=...`
@@ -98,5 +98,5 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 
 ## Notes
 
-- This workflow intentionally uses `scripts/flash.sh` as the flash primitive per project policy.
+- This workflow intentionally uses `scripts/device/flash.sh` as the flash primitive per project policy.
 - Keep retries bounded; repeated failures without new evidence should escalate with collected logs.

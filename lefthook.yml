@@ -6,15 +6,15 @@ pre-commit:
       run: cargo fmt --all
       stage_fixed: true
     markdown-links:
-      run: scripts/check_markdown_links.sh
+      run: scripts/ci/check_markdown_links.sh
     host-tools-clippy:
       glob: "{tools/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
-      run: scripts/lint_host_tools.sh
+      run: scripts/ci/lint_host_tools.sh
 
 commit-msg:
   commands:
     conventional-commitlint:
-      run: scripts/check_commit_message.sh {1}
+      run: scripts/ci/check_commit_message.sh {1}
 
 pre-push:
   commands:
@@ -23,4 +23,4 @@ pre-push:
       run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
     code-analysis:
       glob: "{src/**,tools/**,packages/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
-      run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh
+      run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh

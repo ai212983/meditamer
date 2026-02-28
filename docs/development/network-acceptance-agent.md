@@ -3,7 +3,7 @@
 Hard-cut Wi-Fi/network acceptance runs are executed via:
 
 ```bash
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 which invokes:
@@ -48,7 +48,7 @@ Readiness and failure diagnosis must use structured lines:
 ## Deterministic Agent Procedure
 
 1. Set all required `HOSTCTL_NET_*` variables explicitly.
-2. Run `scripts/test_wifi_acceptance.sh`.
+2. Run `scripts/tests/hw/test_wifi_acceptance.sh`.
 3. On failure, attach the `HOSTCTL_NET_LOG_PATH` artifact.
 4. Classify from `NET_STATUS.failure_class` / `failure_code` first, then from HTTP upload errors.
 5. Apply one targeted fix, rerun, and compare cycle summaries.

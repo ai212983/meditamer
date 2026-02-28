@@ -6,14 +6,14 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 
 - Board: Inkplate 4 TEMPERA (ESP32)
 - Port: hostctl wrappers use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
-- Firmware: current `debug` build from `scripts/flash.sh debug`
+- Firmware: current `debug` build from `scripts/device/flash.sh debug`
 
 ## 1. Reset-Cycle Soak (Automated)
 
 Command:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 SOAK_WINDOW_SEC=8 scripts/soak_boot.sh 20
+ESPFLASH_PORT=/dev/cu.usbserial-540 SOAK_WINDOW_SEC=8 scripts/device/soak_boot.sh 20
 ```
 
 Pass criteria:
@@ -27,7 +27,7 @@ Pass criteria:
 Command:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_hw.sh
 ```
 
 Pass criteria:
@@ -44,21 +44,21 @@ Pass criteria:
 Default behavior does not flash firmware before running. To include flash in the run:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_FLASH_FIRST=1 scripts/test_sdcard_hw.sh debug
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_FLASH_FIRST=1 scripts/tests/hw/test_sdcard_hw.sh debug
 ```
 
 Burst/backpressure regression only:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/test_sdcard_burst_regression.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_burst_regression.sh
 ```
 
 Suite selection:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=baseline scripts/test_sdcard_hw.sh
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/test_sdcard_hw.sh
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=baseline scripts/tests/hw/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/tests/hw/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/tests/hw/test_sdcard_hw.sh
 ```
 
 ## 3. Cold Boot Cycles (Manual)
@@ -68,7 +68,7 @@ Procedure:
 1. Run helper:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/cold_boot_matrix.sh 20
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/cold_boot_matrix.sh 20
 ```
 
 For slow boot/display bring-up paths, increase timing guards:
@@ -77,7 +77,7 @@ For slow boot/display bring-up paths, increase timing guards:
 ESPFLASH_PORT=/dev/cu.usbserial-540 \
 COLD_BOOT_CONNECT_TIMEOUT_SEC=50 \
 COLD_BOOT_WINDOW_SEC=60 \
-scripts/cold_boot_matrix.sh 20
+scripts/device/cold_boot_matrix.sh 20
 ```
 
 2. For each prompted cycle:
@@ -101,7 +101,7 @@ Procedure:
 2. Run:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/soak_refresh.sh 7200
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/soak_refresh.sh 7200
 ```
 
 3. Verify summary output and saved log path.

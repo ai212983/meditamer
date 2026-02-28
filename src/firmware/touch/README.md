@@ -66,12 +66,12 @@ implementation details.
 ## How To Reproduce / Debug
 
 1. Flash:
-- `ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/flash.sh release`
+- `ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/device/flash.sh release`
 
 2. Run wizard on device.
 
 3. Dump logs:
-- `ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/touch_wizard_dump.sh`
+- `ESPFLASH_PORT=/dev/cu.usbserial-510 scripts/touch/touch_wizard_dump.sh`
 
 4. Quick parse:
 - `awk -F',' '/^touch_wizard_swipe,[0-9]/{print $7}' logs/<dump>.log | sort | uniq -c`

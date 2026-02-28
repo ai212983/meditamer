@@ -75,7 +75,7 @@ Unsupported DSL task kinds currently fail fast.
 Use host-only validation path (avoids embedded default target/toolchain issues):
 
 ```bash
-scripts/test_hostctl_host.sh
+scripts/tests/host/test_hostctl_host.sh
 ```
 
 ## Running
@@ -83,7 +83,7 @@ scripts/test_hostctl_host.sh
 Example:
 
 ```bash
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 This executes:

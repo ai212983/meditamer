@@ -129,26 +129,26 @@ cargo check
 Host-side config regression tests:
 
 ```bash
-scripts/test_event_config_host.sh
+scripts/tests/host/test_event_config_host.sh
 ```
 
 Host-side event engine state-machine tests:
 
 ```bash
-scripts/test_event_engine_host.sh
+scripts/tests/host/test_event_engine_host.sh
 ```
 
 Host-side tooling lint (clippy):
 
 ```bash
-scripts/lint_host_tools.sh
+scripts/ci/lint_host_tools.sh
 ```
 
 Flash and capture:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/flash.sh release
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/tap_capture.sh logs/tap_trace_test.log
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh release
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/touch/tap_capture.sh logs/tap_trace_test.log
 ```
 
 Quick trace filtering:

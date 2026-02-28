@@ -47,16 +47,16 @@ jobs:
       - name: Install rust-analyzer component
         run: rustup component add rust-analyzer
       - name: Run host config regression suite
-        run: scripts/test_event_config_host.sh
+        run: scripts/tests/host/test_event_config_host.sh
       - name: Run host event engine suite
-        run: scripts/test_event_engine_host.sh
+        run: scripts/tests/host/test_event_engine_host.sh
       - name: Run host touch core unit suite
-        run: scripts/test_touch_core_host.sh
+        run: scripts/tests/host/test_touch_core_host.sh
       - name: Run host touch replay suite
-        run: scripts/test_touch_replay_host.sh
+        run: scripts/tests/host/test_touch_replay_host.sh
       - name: Host tooling clippy
-        run: scripts/lint_host_tools.sh
+        run: scripts/ci/lint_host_tools.sh
       - name: Rust analyzer baseline
-        run: scripts/lint_rust_analyzer.sh
+        run: scripts/ci/lint_rust_analyzer.sh
       - name: Code analysis ratchet
-        run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/lint_code_analysis.sh
+        run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh

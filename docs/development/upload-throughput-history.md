@@ -9,7 +9,7 @@ HOSTCTL_NET_SSID='<wifi-ssid>' \
 HOSTCTL_NET_PASSWORD='<wifi-password>' \
 HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_LOG_PATH=logs/wifi_acceptance_baseline.log \
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 ## Baseline Before Persistent Append Session
@@ -52,7 +52,7 @@ HOSTCTL_NET_SSID='<wifi-ssid>' \
 HOSTCTL_NET_PASSWORD='<wifi-password>' \
 HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_LOG_PATH=logs/wifi_acceptance_compare.log \
-scripts/test_wifi_acceptance.sh
+scripts/tests/hw/test_wifi_acceptance.sh
 ```
 
 Pre-change reference commit:
