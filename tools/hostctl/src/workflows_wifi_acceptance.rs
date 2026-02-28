@@ -504,6 +504,20 @@ impl WifiAcceptanceRuntime<'_> {
         }
         Ok(())
     }
+
+    fn log_mem_summary(&mut self, prefix: &str) {
+        self.logger.info(format!(
+            "{prefix} mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
+            self.mem_diag.samples,
+            self.mem_diag.radio_samples,
+            self.mem_diag.upload_samples,
+            self.mem_diag.nomem_stage_samples,
+            fmt_min(&self.mem_diag.min_internal_free),
+            fmt_min(&self.mem_diag.min_external_free),
+            fmt_min(&self.mem_diag.min_free),
+            fmt_min(&self.mem_diag.min_internal_low_water),
+        ));
+    }
 }
 
 impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
@@ -652,6 +666,7 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 Ok(())
             }
             "fail_upload" | "net_fail" => {
+                self.log_mem_summary("failure summary");
                 let detail = ctx_get_string(context, "upload_error")
                     .unwrap_or_else(|_| "network/upload workflow failed".to_string());
                 Err(anyhow!("{detail}"))
@@ -691,17 +706,7 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                     avg_throughput,
                     self.started.elapsed().as_secs_f64(),
                 ));
-                self.logger.info(format!(
-                    "summary mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
-                    self.mem_diag.samples,
-                    self.mem_diag.radio_samples,
-                    self.mem_diag.upload_samples,
-                    self.mem_diag.nomem_stage_samples,
-                    fmt_min(&self.mem_diag.min_internal_free),
-                    fmt_min(&self.mem_diag.min_external_free),
-                    fmt_min(&self.mem_diag.min_free),
-                    fmt_min(&self.mem_diag.min_internal_low_water),
-                ));
+                self.log_mem_summary("summary");
                 Ok(())
             }
             _ => Err(anyhow!("unknown workflow action: {action}")),
