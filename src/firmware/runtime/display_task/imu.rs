@@ -1,6 +1,7 @@
 use embassy_time::{Duration, Instant};
 
 use super::super::super::{
+    app_state::AppStateCommand,
     config::{
         IMU_INIT_RETRY_MS, TAP_TRACE_AUX_SAMPLE_MS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES,
         TAP_TRACE_SAMPLE_MS,
@@ -59,7 +60,7 @@ pub(super) async fn process_imu_cycle(context: &mut DisplayContext, state: &mut 
                 });
                 state.last_engine_trace = output.trace;
 
-                if output.actions.contains_backlight_trigger() && !state.touch_wizard_requested {
+                if output.actions.contains_backlight_trigger() && !state.in_touch_wizard_mode() {
                     trigger_backlight_cycle(
                         &mut context.inkplate,
                         &mut state.backlight_cycle_start,
@@ -68,24 +69,23 @@ pub(super) async fn process_imu_cycle(context: &mut DisplayContext, state: &mut 
                 }
 
                 if update_face_down_toggle(&mut state.face_down_toggle, now, ax, ay, az) {
-                    state.display_mode = state.display_mode.toggled();
-                    context.mode_store.save_mode(state.display_mode);
+                    let _ = state
+                        .apply_state_command(context, AppStateCommand::ToggleDayBackground)
+                        .await;
                     state.update_count = 0;
-                    let display_mode = state.display_mode;
                     let last_uptime_seconds = state.last_uptime_seconds;
                     let time_sync = state.time_sync;
                     let battery_percent = state.battery_percent;
                     render_active_mode(
                         &mut context.inkplate,
-                        display_mode,
-                        last_uptime_seconds,
-                        time_sync,
-                        battery_percent,
+                        state.base_mode(),
+                        state.day_background(),
+                        state.overlay_mode(),
+                        (last_uptime_seconds, time_sync, battery_percent),
                         (
                             &mut state.pattern_nonce,
                             &mut state.first_visual_seed_pending,
                         ),
-                        true,
                     )
                     .await;
                     state.screen_initialized = true;

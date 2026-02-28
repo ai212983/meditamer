@@ -58,7 +58,7 @@ const SD_POWER_OFF_RESPONSE_TIMEOUT_MS: u64 = 4_000;
 const SD_POWER_REQUEST_ENQUEUE_TIMEOUT_MS: u64 = 1_500;
 const SD_POWER_REQUEST_MAX_ATTEMPTS: u8 = 4;
 const SD_POWER_REQUEST_RETRY_DELAY_MS: u64 = 120;
-const SD_UPLOAD_TMP_SUFFIX: &[u8] = b".part";
+const SD_UPLOAD_TMP_BASENAME: &[u8] = b"HCTLUPLD.TMP";
 const SD_UPLOAD_PATH_BUF_MAX: usize = 72;
 const SD_UPLOAD_ROOT: &str = "/assets";
 #[cfg(feature = "asset-upload-http")]
@@ -101,7 +101,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
 
         #[cfg(feature = "asset-upload-http")]
         if upload_session.is_some() {
-            if !service_mode::upload_enabled() {
+            if !service_mode::upload_transfers_enabled() {
                 telemetry::record_sd_upload_session_mode_off_abort();
                 let result = abort_active_upload_session(
                     &mut upload_session,
@@ -149,7 +149,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             .await
             {
                 Either3::First(config_request) => {
-                    if !service_mode::upload_enabled() {
+                    if !service_mode::upload_transfers_enabled() {
                         publish_wifi_config_response(disabled_wifi_config_response());
                         continue;
                     }
@@ -175,7 +175,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     continue;
                 }
                 Either3::Second(upload_request) => {
-                    if !service_mode::upload_enabled() {
+                    if !service_mode::upload_transfers_enabled() {
                         publish_upload_result(disabled_upload_result());
                         continue;
                     }
@@ -215,7 +215,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             .await
             {
                 Either3::First(config_request) => {
-                    if !service_mode::upload_enabled() {
+                    if !service_mode::upload_transfers_enabled() {
                         publish_wifi_config_response(disabled_wifi_config_response());
                         continue;
                     }
@@ -241,7 +241,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     continue;
                 }
                 Either3::Second(upload_request) => {
-                    if !service_mode::upload_enabled() {
+                    if !service_mode::upload_transfers_enabled() {
                         publish_upload_result(disabled_upload_result());
                         continue;
                     }
@@ -369,10 +369,8 @@ async fn ensure_upload_storage_ready(
     }
 
     if !*upload_mounted {
-        if !sd_probe.is_initialized() {
-            if sd_probe.init().await.is_err() {
-                return Err(SdUploadResultCode::InitFailed);
-            }
+        if !sd_probe.is_initialized() && sd_probe.init().await.is_err() {
+            return Err(SdUploadResultCode::InitFailed);
         }
         *upload_mounted = true;
     }

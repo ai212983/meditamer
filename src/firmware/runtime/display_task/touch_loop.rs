@@ -3,6 +3,7 @@ use core::sync::atomic::Ordering;
 use embassy_time::{Duration, Instant, Timer};
 
 use super::super::super::{
+    app_state::{AppStateCommand, BaseMode},
     render::render_active_mode,
     touch::{
         config::{
@@ -38,7 +39,7 @@ pub(super) async fn process_touch_cycle(
             state.touch_next_sample_at = Instant::now();
             state.touch_idle_fallback_at =
                 Instant::now() + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
-            if state.touch_wizard_requested && !state.touch_wizard.is_active() {
+            if state.in_touch_wizard_mode() && !state.touch_wizard.is_active() {
                 state.touch_wizard = TouchCalibrationWizard::new(true);
                 state.touch_wizard.render_full(&mut context.inkplate).await;
                 state.screen_initialized = true;
@@ -126,7 +127,7 @@ pub(super) async fn process_touch_cycle(
                 state.touch_retry_at = sample_instant + Duration::from_millis(TOUCH_INIT_RETRY_MS);
                 esp_println::println!("touch: read_error; retrying");
                 request_touch_pipeline_reset();
-                if state.touch_wizard_requested {
+                if state.in_touch_wizard_mode() {
                     state.touch_wizard = TouchCalibrationWizard::new(false);
                     render_touch_wizard_waiting_screen(&mut context.inkplate).await;
                     state.screen_initialized = true;
@@ -192,23 +193,23 @@ pub(super) async fn process_touch_cycle(
                 WizardDispatch::Inactive => {}
                 WizardDispatch::Consumed => continue,
                 WizardDispatch::Finished => {
-                    state.touch_wizard_requested = false;
+                    let _ = state
+                        .apply_state_command(context, AppStateCommand::SetBase(BaseMode::Day))
+                        .await;
                     state.update_count = 0;
-                    let display_mode = state.display_mode;
                     let last_uptime_seconds = state.last_uptime_seconds;
                     let time_sync = state.time_sync;
                     let battery_percent = state.battery_percent;
                     render_active_mode(
                         &mut context.inkplate,
-                        display_mode,
-                        last_uptime_seconds,
-                        time_sync,
-                        battery_percent,
+                        state.base_mode(),
+                        state.day_background(),
+                        state.overlay_mode(),
+                        (last_uptime_seconds, time_sync, battery_percent),
                         (
                             &mut state.pattern_nonce,
                             &mut state.first_visual_seed_pending,
                         ),
-                        true,
                     )
                     .await;
                     state.screen_initialized = true;
@@ -220,7 +221,10 @@ pub(super) async fn process_touch_cycle(
         let last_uptime_seconds = state.last_uptime_seconds;
         let time_sync = state.time_sync;
         let battery_percent = state.battery_percent;
-        handle_touch_event(
+        let base_mode = state.base_mode();
+        let day_background = state.day_background();
+        let overlay_mode = state.overlay_mode();
+        if let Some(command) = handle_touch_event(
             touch_event,
             context,
             TouchEventContext {
@@ -228,7 +232,9 @@ pub(super) async fn process_touch_cycle(
                 backlight_cycle_start: &mut state.backlight_cycle_start,
                 backlight_level: &mut state.backlight_level,
                 update_count: &mut state.update_count,
-                display_mode: &mut state.display_mode,
+                base_mode,
+                day_background,
+                overlay_mode,
                 last_uptime_seconds,
                 time_sync,
                 battery_percent,
@@ -239,7 +245,29 @@ pub(super) async fn process_touch_cycle(
                 screen_initialized: &mut state.screen_initialized,
             },
         )
-        .await;
+        .await
+        {
+            let result = state.apply_state_command(context, command).await;
+            if result.changed() && !state.in_touch_wizard_mode() {
+                render_active_mode(
+                    &mut context.inkplate,
+                    state.base_mode(),
+                    state.day_background(),
+                    state.overlay_mode(),
+                    (
+                        state.last_uptime_seconds,
+                        state.time_sync,
+                        state.battery_percent,
+                    ),
+                    (
+                        &mut state.pattern_nonce,
+                        &mut state.first_visual_seed_pending,
+                    ),
+                )
+                .await;
+                state.screen_initialized = true;
+            }
+        }
     }
 
     // Flush feedback after sampling and event handling so rendering never blocks

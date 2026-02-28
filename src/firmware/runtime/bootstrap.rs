@@ -15,10 +15,11 @@ use esp_hal::{
 use super::super::config::{
     APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, UART_BAUD,
 };
-use super::super::storage::ModeStore;
-use super::super::types::{AppEvent, DisplayContext, PanelPinHold, RuntimeServices};
-use super::super::{psram, storage, telemetry, touch};
-use super::service_mode;
+use super::super::types::{AppEvent, DisplayContext, PanelPinHold};
+use super::super::{
+    app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
+    psram, storage, telemetry, touch,
+};
 use sdcard::probe;
 
 pub fn run() -> ! {
@@ -57,21 +58,28 @@ pub fn run() -> ! {
         .with_tx(peripherals.GPIO1)
         .into_async();
 
-    let mut mode_store = ModeStore::new(peripherals.FLASH);
-    let mut runtime_services = mode_store
-        .load_runtime_services()
-        .unwrap_or(RuntimeServices::normal());
-    service_mode::set_runtime_services(runtime_services);
+    let mut app_state_store = AppStateStore::new(peripherals.FLASH);
+    let mut persisted_state = app_state_store.load_state().unwrap_or_default();
+    let mut initial_snapshot = AppStateSnapshot {
+        base: persisted_state.base,
+        day_background: persisted_state.day_background,
+        overlay: persisted_state.overlay,
+        services: persisted_state.services,
+        diag_kind: persisted_state.diag_kind,
+        diag_targets: persisted_state.diag_targets,
+        ..AppStateSnapshot::default()
+    };
 
     #[cfg(not(feature = "asset-upload-http"))]
-    if runtime_services.upload_enabled_flag() {
-        runtime_services = runtime_services.with_upload_enabled(false);
-        mode_store.save_runtime_services(runtime_services);
-        service_mode::set_runtime_services(runtime_services);
+    if initial_snapshot.services.upload_enabled {
+        initial_snapshot.services.upload_enabled = false;
+        persisted_state.services.upload_enabled = false;
+        app_state_store.save_state(persisted_state);
         esp_println::println!(
             "runtime_mode: upload requested but asset-upload-http is disabled; starting normal mode"
         );
     }
+    publish_app_state_snapshot(initial_snapshot);
 
     let sd_spi_cfg = SpiConfig::default()
         .with_frequency(Rate::from_khz(400))
@@ -89,10 +97,11 @@ pub fn run() -> ! {
         Ok(runtime) => Some(runtime),
         Err(reason) => {
             esp_println::println!("{}", reason);
-            if runtime_services.upload_enabled_flag() {
-                runtime_services = runtime_services.with_upload_enabled(false);
-                mode_store.save_runtime_services(runtime_services);
-                service_mode::set_runtime_services(runtime_services);
+            if initial_snapshot.services.upload_enabled {
+                initial_snapshot.services.upload_enabled = false;
+                persisted_state.services.upload_enabled = false;
+                app_state_store.save_state(persisted_state);
+                publish_app_state_snapshot(initial_snapshot);
             }
             None
         }
@@ -139,7 +148,7 @@ pub fn run() -> ! {
 
     let display_context = DisplayContext {
         inkplate,
-        mode_store,
+        app_state_store,
         _panel_pins: panel_pins,
     };
 
@@ -160,6 +169,7 @@ pub fn run() -> ! {
         spawner.must_spawn(touch::tasks::touch_pipeline_task());
         spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
         spawner.must_spawn(super::display_task::display_task(display_context));
+        spawner.must_spawn(super::diagnostics::diagnostics_task());
         spawner.must_spawn(clock_task());
         spawner.must_spawn(battery_task());
 

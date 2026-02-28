@@ -3,75 +3,75 @@ mod visual;
 
 use embassy_time::Instant;
 
-use super::types::{DisplayMode, InkplateDriver, TimeSyncState};
+use super::{
+    app_state::{BaseMode, DayBackground, OverlayMode},
+    types::{InkplateDriver, TimeSyncState},
+};
 
-pub(crate) use clock::{render_battery_update, render_clock_update, sample_battery_percent};
+pub(crate) use clock::{render_clock_overlay, sample_battery_percent};
 pub(crate) use visual::{next_visual_seed, render_shanshui_update, render_suminagashi_update};
+
+pub(crate) type RenderTiming = (u32, Option<TimeSyncState>, Option<u8>);
 
 pub(crate) async fn render_active_mode(
     display: &mut InkplateDriver,
-    mode: DisplayMode,
-    uptime_seconds: u32,
-    time_sync: Option<TimeSyncState>,
-    battery_percent: Option<u8>,
+    base_mode: BaseMode,
+    day_background: DayBackground,
+    overlay_mode: OverlayMode,
+    timing: RenderTiming,
     seed_state: (&mut u32, &mut bool),
-    force_full: bool,
 ) {
+    let (uptime_seconds, time_sync, battery_percent) = timing;
     let (pattern_nonce, first_visual_seed_pending) = seed_state;
-    match mode {
-        DisplayMode::Clock => {
-            render_clock_update(
-                display,
-                uptime_seconds,
-                time_sync,
-                battery_percent,
-                force_full,
-            )
-            .await
-        }
-        DisplayMode::Suminagashi => {
+    match base_mode {
+        BaseMode::TouchWizard => {}
+        BaseMode::Day => {
             let seed = next_visual_seed(
                 uptime_seconds,
                 time_sync,
                 pattern_nonce,
                 first_visual_seed_pending,
             );
-            render_suminagashi_update(display, seed, uptime_seconds, time_sync).await;
-        }
-        DisplayMode::Shanshui => {
-            let seed = next_visual_seed(
-                uptime_seconds,
-                time_sync,
-                pattern_nonce,
-                first_visual_seed_pending,
-            );
-            render_shanshui_update(display, seed, uptime_seconds, time_sync).await;
+            match day_background {
+                DayBackground::Suminagashi => {
+                    render_suminagashi_update(display, seed, uptime_seconds, time_sync).await;
+                }
+                DayBackground::Shanshui => {
+                    render_shanshui_update(display, seed, uptime_seconds, time_sync).await;
+                }
+            }
+            if matches!(overlay_mode, OverlayMode::Clock) {
+                render_clock_overlay(display, uptime_seconds, time_sync, battery_percent).await;
+            }
         }
     }
 }
 
 pub(crate) async fn render_visual_update(
     display: &mut InkplateDriver,
-    mode: DisplayMode,
-    uptime_seconds: u32,
-    time_sync: Option<TimeSyncState>,
-    pattern_nonce: &mut u32,
-    first_visual_seed_pending: &mut bool,
+    day_background: DayBackground,
+    overlay_mode: OverlayMode,
+    timing: RenderTiming,
+    seed_state: (&mut u32, &mut bool),
 ) {
+    let (uptime_seconds, time_sync, battery_percent) = timing;
+    let (pattern_nonce, first_visual_seed_pending) = seed_state;
     let seed = next_visual_seed(
         uptime_seconds,
         time_sync,
         pattern_nonce,
         first_visual_seed_pending,
     );
-    match mode {
-        DisplayMode::Clock => {}
-        DisplayMode::Suminagashi => {
+    match day_background {
+        DayBackground::Suminagashi => {
             render_suminagashi_update(display, seed, uptime_seconds, time_sync).await
         }
-        DisplayMode::Shanshui => {
+        DayBackground::Shanshui => {
             render_shanshui_update(display, seed, uptime_seconds, time_sync).await
         }
+    }
+    if matches!(overlay_mode, OverlayMode::Clock) {
+        render_clock_overlay(display, uptime_seconds, time_sync, battery_percent).await;
     }
 }
 

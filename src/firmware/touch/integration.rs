@@ -3,12 +3,13 @@ use embassy_time::Instant;
 use super::super::{
     render::render_active_mode,
     runtime::trigger_backlight_cycle,
-    types::{DisplayContext, DisplayMode, TimeSyncState},
+    types::{DisplayContext, TimeSyncState},
 };
 use super::{
+    super::app_state::{AppStateCommand, BaseMode, DayBackground, OverlayMode},
     config::TOUCH_FEEDBACK_ENABLED,
     tasks::draw_touch_feedback_dot,
-    types::{TouchEvent, TouchEventKind, TouchSwipeDirection},
+    types::{TouchEvent, TouchEventKind},
 };
 
 pub(crate) struct TouchEventContext<'a> {
@@ -16,7 +17,9 @@ pub(crate) struct TouchEventContext<'a> {
     pub(crate) backlight_cycle_start: &'a mut Option<Instant>,
     pub(crate) backlight_level: &'a mut u8,
     pub(crate) update_count: &'a mut u32,
-    pub(crate) display_mode: &'a mut DisplayMode,
+    pub(crate) base_mode: BaseMode,
+    pub(crate) day_background: DayBackground,
+    pub(crate) overlay_mode: OverlayMode,
     pub(crate) last_uptime_seconds: u32,
     pub(crate) time_sync: Option<TimeSyncState>,
     pub(crate) battery_percent: Option<u8>,
@@ -28,13 +31,15 @@ pub(crate) async fn handle_touch_event(
     event: TouchEvent,
     context: &mut DisplayContext,
     event_context: TouchEventContext<'_>,
-) {
+) -> Option<AppStateCommand> {
     let TouchEventContext {
         touch_feedback_dirty,
         backlight_cycle_start,
         backlight_level,
         update_count,
-        display_mode,
+        base_mode,
+        day_background,
+        overlay_mode,
         last_uptime_seconds,
         time_sync,
         battery_percent,
@@ -57,37 +62,19 @@ pub(crate) async fn handle_touch_event(
             *update_count = 0;
             render_active_mode(
                 &mut context.inkplate,
-                *display_mode,
-                last_uptime_seconds,
-                time_sync,
-                battery_percent,
+                base_mode,
+                day_background,
+                overlay_mode,
+                (last_uptime_seconds, time_sync, battery_percent),
                 seed_state,
-                true,
             )
             .await;
             *screen_initialized = true;
         }
-        TouchEventKind::Swipe(direction) => {
-            *display_mode = match direction {
-                TouchSwipeDirection::Right | TouchSwipeDirection::Down => display_mode.toggled(),
-                TouchSwipeDirection::Left | TouchSwipeDirection::Up => {
-                    display_mode.toggled_reverse()
-                }
-            };
-            context.mode_store.save_mode(*display_mode);
-            *update_count = 0;
-            render_active_mode(
-                &mut context.inkplate,
-                *display_mode,
-                last_uptime_seconds,
-                time_sync,
-                battery_percent,
-                seed_state,
-                true,
-            )
-            .await;
-            *screen_initialized = true;
+        TouchEventKind::Swipe(_) => {
+            return Some(AppStateCommand::ToggleDayBackground);
         }
         _ => {}
     }
+    None
 }
