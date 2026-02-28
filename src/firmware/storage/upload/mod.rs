@@ -1,6 +1,6 @@
 mod http;
 mod sd_bridge;
-mod wifi;
+pub(crate) mod wifi;
 
 use embassy_net::{Runner, Stack, StackResources};
 use esp_hal::rng::Rng;
