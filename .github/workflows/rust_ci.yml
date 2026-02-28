@@ -42,6 +42,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+      - name: Install rust-code-analysis-cli
+        run: cargo install --locked rust-code-analysis-cli --version 0.0.25
+      - name: Install rust-analyzer component
+        run: rustup component add rust-analyzer
       - name: Run host config regression suite
         run: scripts/test_event_config_host.sh
       - name: Run host event engine suite
@@ -52,3 +56,7 @@ jobs:
         run: scripts/test_touch_replay_host.sh
       - name: Host tooling clippy
         run: scripts/lint_host_tools.sh
+      - name: Rust analyzer baseline
+        run: scripts/lint_rust_analyzer.sh
+      - name: Code analysis baseline
+        run: scripts/lint_code_analysis.sh
