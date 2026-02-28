@@ -116,6 +116,15 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
+        if !service_mode::upload_http_listener_enabled() {
+            listening_logged = false;
+            waiting_dhcp_logged = false;
+            dhcp_wait_started_at = None;
+            dhcp_ready = false;
+            telemetry::set_upload_http_listener(false, None);
+            Timer::after(Duration::from_millis(500)).await;
+            continue;
+        }
 
         // Gate HTTP on active link + DHCP lease to avoid advertising an unusable listener.
         let local_ipv4 = match dhcp_ipv4_status(&stack) {

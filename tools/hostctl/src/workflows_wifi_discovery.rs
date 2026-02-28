@@ -58,6 +58,7 @@ struct DiscoveryProfile {
     recover_before_round: bool,
     recover_after_round: bool,
     recover_settle_ms: u32,
+    disable_listener_during_probe_rounds: bool,
     max_zero_discovery_rounds: u32,
     min_ready_rounds: u32,
     min_ssid_seen_rounds: u32,
@@ -78,6 +79,7 @@ impl Default for DiscoveryProfile {
             recover_after_round: false,
             // Allow firmware NET RECOVER path to settle before judging readiness.
             recover_settle_ms: 1_200,
+            disable_listener_during_probe_rounds: true,
             max_zero_discovery_rounds: 0,
             min_ready_rounds: 1,
             min_ssid_seen_rounds: 1,
@@ -230,14 +232,25 @@ fn parse_net_status_line(line: &str) -> Result<NetStatus> {
     serde_json::from_str::<NetStatus>(payload).context("invalid NET_STATUS json payload")
 }
 
-fn is_ready(status: &NetStatus) -> bool {
-    matches!(status.state.as_deref(), Some("Ready"))
-        && status.link.unwrap_or(false)
-        && status.listener.unwrap_or(false)
-        && status
-            .ipv4
-            .as_deref()
-            .is_some_and(|ipv4| ipv4 != "0.0.0.0")
+fn is_ready(status: &NetStatus, require_listener: bool) -> bool {
+    if !matches!(status.state.as_deref(), Some("Ready")) {
+        return false;
+    }
+    if !status.link.unwrap_or(false) {
+        return false;
+    }
+    let ipv4_ready = status
+        .ipv4
+        .as_deref()
+        .is_some_and(|ipv4| ipv4 != "0.0.0.0");
+    if !ipv4_ready {
+        return false;
+    }
+    if require_listener {
+        status.listener.unwrap_or(false)
+    } else {
+        true
+    }
 }
 
 fn parse_scan_done_count(line: &str) -> Option<u32> {
@@ -296,6 +309,9 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 ctx_set_u32(context, "rounds", self.profile.rounds)?;
                 ctx_set_bool(context, "run_passed", false)?;
                 ctx_set_string(context, "run_error", "")?;
+                if self.profile.disable_listener_during_probe_rounds {
+                    wait_net_ack(&mut self.console, "NET LISTENER OFF")?;
+                }
                 self.logger.info(format!(
                     "wifi-discovery-debug: effective_round_timeout_ms={} (profile_round_timeout_ms={})",
                     recommended_round_timeout_ms(&self.policy, &self.profile),
@@ -336,6 +352,12 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                         .settle(self.profile.recover_settle_ms as u64)
                         .ok();
                 }
+                if self.profile.disable_listener_during_probe_rounds {
+                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER OFF") {
+                        self.logger
+                            .info(format!("round {round}: NET LISTENER OFF failed ({err})"));
+                    }
+                }
 
                 let mark = self.console.mark();
                 if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
@@ -374,7 +396,9 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                         }
                         if line.starts_with("NET_STATUS ") {
                             if let Ok(status) = parse_net_status_line(&line) {
-                                if is_ready(&status) {
+                                let require_listener =
+                                    !self.profile.disable_listener_during_probe_rounds;
+                                if is_ready(&status, require_listener) {
                                     ready = true;
                                 }
                                 last_status = Some(status);
@@ -522,9 +546,21 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                         sample.failure_class
                     ));
                 }
+                if self.profile.disable_listener_during_probe_rounds {
+                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+                        self.logger
+                            .info(format!("summary: NET LISTENER ON restore failed ({err})"));
+                    }
+                }
                 Ok(())
             }
             "fail_run" => {
+                if self.profile.disable_listener_during_probe_rounds {
+                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+                        self.logger
+                            .info(format!("fail_run: NET LISTENER ON restore failed ({err})"));
+                    }
+                }
                 let detail = ctx_get_string(context, "run_error")
                     .unwrap_or_else(|_| "wifi discovery debug failed".to_string());
                 Err(anyhow!("{detail}"))

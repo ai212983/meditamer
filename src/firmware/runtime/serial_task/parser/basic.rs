@@ -488,6 +488,33 @@ pub(super) fn parse_net_recover_command(line: &[u8]) -> bool {
 }
 
 #[cfg(feature = "asset-upload-http")]
+pub(super) fn parse_net_listener_command(line: &[u8]) -> Option<bool> {
+    let trimmed = trim_ascii_whitespace(line);
+    let cmd = b"NET LISTENER";
+    if !trimmed
+        .get(..cmd.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(cmd))
+    {
+        return None;
+    }
+    let mut i = cmd.len();
+    while i < trimmed.len() && trimmed[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i == trimmed.len() {
+        return None;
+    }
+    let value = &trimmed[i..];
+    if value.eq_ignore_ascii_case(b"ON") {
+        return Some(true);
+    }
+    if value.eq_ignore_ascii_case(b"OFF") {
+        return Some(false);
+    }
+    None
+}
+
+#[cfg(feature = "asset-upload-http")]
 fn json_key_start<'a>(json: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
     if json.is_empty() {
         return None;
@@ -649,5 +676,13 @@ mod tests {
         assert!(parsed.credentials.is_none());
         assert_eq!(parsed.policy.connect_timeout_ms, 31_000);
         assert_eq!(parsed.policy.rotate_auth_max, 7);
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    #[test]
+    fn parses_net_listener_command() {
+        assert_eq!(parse_net_listener_command(b"NET LISTENER ON"), Some(true));
+        assert_eq!(parse_net_listener_command(b"NET LISTENER OFF"), Some(false));
+        assert_eq!(parse_net_listener_command(b"NET LISTENER maybe"), None);
     }
 }

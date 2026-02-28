@@ -24,6 +24,9 @@ recover_after_round = false
 # Let firmware settle after NET RECOVER before sampling diagnostics.
 # 1200ms matches firmware reconnect settle windows used around disconnect paths.
 recover_settle_ms = 1200
+# Temporary pressure-reduction mode for zero-discovery diagnosis:
+# keep Wi-Fi discovery active while gating the upload HTTP listener.
+disable_listener_during_probe_rounds = true
 
 max_zero_discovery_rounds = 0
 min_ready_rounds = 1

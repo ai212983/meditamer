@@ -3,6 +3,7 @@ use super::super::super::{
         NET_CONFIG_SET_UPDATES, NET_CONTROL_COMMANDS, WIFI_CREDENTIALS_UPDATES,
         WIFI_RUNTIME_POLICY_UPDATES,
     },
+    psram,
     runtime::service_mode,
     telemetry,
     types::{
@@ -65,6 +66,8 @@ const WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD: u8 = 212;
 const WIFI_REASON_DHCP_NO_IPV4_STALL: u8 = 250;
 const WIFI_REASON_POST_HARD_RECOVER_CONNECT_STALL: u8 = 251;
 const WIFI_REASON_CONNECT_ATTEMPT_TIMEOUT: u8 = 252;
+const WIFI_REASON_START_NOMEM: u8 = 253;
+const WIFI_REASON_SCAN_NOMEM: u8 = 254;
 // Upper bound for driver control calls in recovery paths; prevents indefinite
 // task stalls if the radio stack stops responding.
 // Chosen so stop/disconnect can complete under transient RF contention while
@@ -133,6 +136,11 @@ struct TargetApCandidate {
     rssi: i8,
 }
 
+struct ScanOutcome {
+    candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
+    hit_nomem: bool,
+}
+
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     wifi_credentials().and_then(|(ssid, password)| {
         wifi_credentials_from_parts(ssid.as_bytes(), password.as_bytes()).ok()
@@ -171,6 +179,7 @@ pub(crate) fn net_status_snapshot() -> NetStatusSnapshot {
         link: telemetry.wifi_link_connected,
         ipv4: telemetry.upload_http_ipv4.unwrap_or([0, 0, 0, 0]),
         listener: telemetry.upload_http_listening,
+        listener_enabled: service_mode::upload_http_listener_enabled(),
         failure_class: failure_class.as_str(),
         failure_code,
         ladder_step: ladder_step.as_str(),
@@ -546,8 +555,10 @@ pub(super) async fn run_wifi_connection_task(
                     net_attempt,
                     (failure_class, failure_code),
                 );
+                log_radio_mem_diag("start_before");
                 if let Err(err) = controller.start_async().await {
                     diag_wifi!("upload_http: wifi start err={:?}", err);
+                    log_radio_mem_diag("start_err");
                     telemetry::record_wifi_reassoc_start_err();
                     config_applied = false;
                     failure_class = NetFailureClass::Transport;
@@ -573,9 +584,8 @@ pub(super) async fn run_wifi_connection_task(
                     if hard_recover_watchdog_started_at.is_none() {
                         hard_recover_watchdog_started_at = Some(Instant::now());
                     }
-                    if matches!(err, WifiError::InternalError(InternalWifiError::NoMem)) {
-                        let _ = controller.disconnect_async().await;
-                        let _ = controller.stop_async().await;
+                    if is_no_mem_wifi_error(&err) {
+                        disconnect_and_stop_with_timeout(&mut controller, "start_nomem").await;
                         channel_hint = None;
                         bssid_hint = None;
                         ap_candidates.clear();
@@ -588,9 +598,10 @@ pub(super) async fn run_wifi_connection_task(
                         diag_reassoc!(
                             "upload_http: wifi start NoMem; forcing full wifi reset and hint clear"
                         );
+                        log_radio_mem_diag("start_nomem");
                         ladder_step = RecoveryLadderStep::DriverRestart;
                         failure_class = NetFailureClass::Transport;
-                        failure_code = WIFI_REASON_OTHER;
+                        failure_code = WIFI_REASON_START_NOMEM;
                         transition_state(
                             &mut net_state,
                             NetState::Recovering,
@@ -611,14 +622,14 @@ pub(super) async fn run_wifi_connection_task(
                         Timer::after(Duration::from_millis(WIFI_NOMEM_RECOVERY_BACKOFF_MS)).await;
                         continue;
                     }
-                    let _ = controller.disconnect_async().await;
-                    let _ = controller.stop_async().await;
+                    disconnect_and_stop_with_timeout(&mut controller, "start_err").await;
                     Timer::after(Duration::from_millis(
                         runtime_policy.driver_restart_backoff_ms as u64,
                     ))
                     .await;
                     continue;
                 }
+                log_radio_mem_diag("start_ok");
                 if let Err(err) = controller.set_power_saving(PowerSaveMode::None) {
                     diag_wifi!("upload_http: wifi set power save none err={:?}", err);
                 }
@@ -678,8 +689,49 @@ pub(super) async fn run_wifi_connection_task(
                 (failure_class, failure_code),
             );
             if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
-                let scanned_candidates =
+                let scan_outcome =
                     scan_target_candidates(&mut controller, ssid, runtime_policy).await;
+                if scan_outcome.hit_nomem {
+                    failure_class = NetFailureClass::Transport;
+                    failure_code = WIFI_REASON_SCAN_NOMEM;
+                    ladder_step = RecoveryLadderStep::DriverRestart;
+                    transition_state(
+                        &mut net_state,
+                        NetState::Recovering,
+                        "scan_nomem",
+                        started_at,
+                        ladder_step,
+                        net_attempt,
+                        (failure_class, failure_code),
+                    );
+                    publish_state(
+                        net_state,
+                        ladder_step,
+                        net_attempt,
+                        failure_class,
+                        failure_code,
+                        started_at.elapsed().as_millis() as u32,
+                    );
+                    disconnect_and_stop_with_timeout(&mut controller, "scan_nomem").await;
+                    telemetry::set_wifi_link_connected(false);
+                    telemetry::set_upload_http_listener(false, None);
+                    config_applied = false;
+                    channel_hint = None;
+                    bssid_hint = None;
+                    ap_candidates.clear();
+                    ap_candidate_idx = 0;
+                    channel_probe_idx = 0;
+                    auth_method_idx = 0;
+                    dhcp_same_candidate_timeout_streak = 0;
+                    dhcp_lease_reacquire_attempts = 0;
+                    other_disconnect_streak = 0;
+                    if hard_recover_watchdog_started_at.is_none() {
+                        hard_recover_watchdog_started_at = Some(Instant::now());
+                    }
+                    Timer::after(Duration::from_millis(WIFI_NOMEM_RECOVERY_BACKOFF_MS)).await;
+                    continue;
+                }
+                let scanned_candidates = scan_outcome.candidates;
                 if let Some(candidate) = scanned_candidates.first().copied() {
                     ap_candidates = scanned_candidates;
                     ap_candidate_idx = 0;
@@ -1028,8 +1080,37 @@ pub(super) async fn run_wifi_connection_task(
                     }
 
                     if dhcp_lease_observed {
+                        let listener_enabled = service_mode::upload_http_listener_enabled();
                         let snapshot = telemetry::snapshot();
-                        if snapshot.upload_http_listening && snapshot.upload_http_ipv4.is_some() {
+                        let lease_ipv4 = stack_ipv4_lease(&stack);
+                        if !listener_enabled {
+                            telemetry::set_upload_http_listener(false, lease_ipv4);
+                        }
+                        if !listener_enabled && lease_ipv4.is_some() {
+                            transition_state(
+                                &mut net_state,
+                                NetState::Ready,
+                                "listener_bypass_ready",
+                                started_at,
+                                ladder_step,
+                                net_attempt,
+                                (failure_class, failure_code),
+                            );
+                            net_attempt = 0;
+                            ladder_step = RecoveryLadderStep::RetrySame;
+                            failure_class = NetFailureClass::None;
+                            failure_code = 0;
+                            publish_state(
+                                net_state,
+                                ladder_step,
+                                net_attempt,
+                                failure_class,
+                                failure_code,
+                                started_at.elapsed().as_millis() as u32,
+                            );
+                        } else if snapshot.upload_http_listening
+                            && snapshot.upload_http_ipv4.is_some()
+                        {
                             transition_state(
                                 &mut net_state,
                                 NetState::Ready,
@@ -1051,8 +1132,9 @@ pub(super) async fn run_wifi_connection_task(
                                 failure_code,
                                 started_at.elapsed().as_millis() as u32,
                             );
-                        } else if dhcp_wait_started_at.elapsed().as_millis()
-                            >= runtime_policy.listener_timeout_ms as u64
+                        } else if listener_enabled
+                            && dhcp_wait_started_at.elapsed().as_millis()
+                                >= runtime_policy.listener_timeout_ms as u64
                         {
                             failure_class = NetFailureClass::ListenerNotReady;
                             failure_code = 1;
@@ -1135,17 +1217,20 @@ pub(super) async fn run_wifi_connection_task(
                 let mut observed_candidates =
                     heapless::Vec::<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>::new();
                 let mut observed_ap = None;
+                let mut observed_scan_nomem = false;
                 if should_scan {
                     if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize])
                     {
-                        observed_candidates =
+                        let scan_outcome =
                             scan_target_candidates(&mut controller, ssid, runtime_policy).await;
+                        observed_scan_nomem = scan_outcome.hit_nomem;
+                        observed_candidates = scan_outcome.candidates;
                         observed_ap = observed_candidates.first().copied();
                     }
                 }
                 let auth_method = WIFI_AUTH_METHODS[auth_method_idx];
                 diag_reassoc!(
-                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} bssid_hint={} observed_channel={:?} observed_bssid={} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} probe_idx={}",
+                    "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} bssid_hint={} observed_channel={:?} observed_bssid={} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} scan_nomem={} probe_idx={}",
                     err,
                     auth_method,
                     channel_hint,
@@ -1157,10 +1242,51 @@ pub(super) async fn run_wifi_connection_task(
                     disconnect_reason_label(disconnect_reason),
                     discovery_reason,
                     should_scan,
+                    observed_scan_nomem,
                     channel_probe_idx,
                 );
-                let _ = controller.disconnect_async().await;
-                let _ = controller.stop_async().await;
+                if observed_scan_nomem {
+                    failure_class = NetFailureClass::Transport;
+                    failure_code = WIFI_REASON_SCAN_NOMEM;
+                    ladder_step = RecoveryLadderStep::DriverRestart;
+                    transition_state(
+                        &mut net_state,
+                        NetState::Recovering,
+                        "connect_err_scan_nomem",
+                        started_at,
+                        ladder_step,
+                        net_attempt,
+                        (failure_class, failure_code),
+                    );
+                    publish_state(
+                        net_state,
+                        ladder_step,
+                        net_attempt,
+                        failure_class,
+                        failure_code,
+                        started_at.elapsed().as_millis() as u32,
+                    );
+                    disconnect_and_stop_with_timeout(&mut controller, "connect_err_scan_nomem")
+                        .await;
+                    telemetry::set_wifi_link_connected(false);
+                    telemetry::set_upload_http_listener(false, None);
+                    channel_probe_idx = 0;
+                    channel_hint = None;
+                    bssid_hint = None;
+                    ap_candidates.clear();
+                    ap_candidate_idx = 0;
+                    auth_method_idx = 0;
+                    config_applied = false;
+                    dhcp_same_candidate_timeout_streak = 0;
+                    dhcp_lease_reacquire_attempts = 0;
+                    other_disconnect_streak = 0;
+                    if hard_recover_watchdog_started_at.is_none() {
+                        hard_recover_watchdog_started_at = Some(Instant::now());
+                    }
+                    Timer::after(Duration::from_millis(WIFI_NOMEM_RECOVERY_BACKOFF_MS)).await;
+                    continue;
+                }
+                disconnect_and_stop_with_timeout(&mut controller, "connect_err").await;
                 if escalated_scan_active {
                     channel_probe_idx = 0;
                     channel_hint = None;
@@ -1566,6 +1692,8 @@ fn disconnect_reason_label(reason: u8) -> &'static str {
         WIFI_REASON_DHCP_NO_IPV4_STALL => "dhcp_no_ipv4_stall",
         WIFI_REASON_POST_HARD_RECOVER_CONNECT_STALL => "post_hard_recover_connect_stall",
         WIFI_REASON_CONNECT_ATTEMPT_TIMEOUT => "connect_attempt_timeout",
+        WIFI_REASON_START_NOMEM => "start_nomem",
+        WIFI_REASON_SCAN_NOMEM => "scan_nomem",
         _ => "other",
     }
 }
@@ -1732,7 +1860,7 @@ async fn scan_target_candidates(
     controller: &mut WifiController<'static>,
     target_ssid: &str,
     runtime_policy: WifiRuntimePolicy,
-) -> heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX> {
+) -> ScanOutcome {
     let mut candidates = heapless::Vec::<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>::new();
     let active_timeout_ms = active_scan_timeout_ms(runtime_policy);
     let passive_timeout_ms = passive_scan_timeout_ms(runtime_policy);
@@ -1741,9 +1869,11 @@ async fn scan_target_candidates(
 
     let active =
         driver::active_scan_config(target_ssid, runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS);
+    log_radio_mem_diag("scan_active_before");
     let active_started_at = Instant::now();
     match with_timeout(active_timeout, controller.scan_with_config_async(active)).await {
         Ok(Ok(results)) => {
+            log_radio_mem_diag("scan_active_ok");
             collect_scan_results("active", target_ssid, &results, &mut candidates);
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Active,
@@ -1759,6 +1889,14 @@ async fn scan_target_candidates(
                 err,
                 target_ssid
             );
+            if is_no_mem_wifi_error(&err) {
+                diag_reassoc!("upload_http: scan active NoMem target_ssid={}", target_ssid);
+                log_radio_mem_diag("scan_active_nomem");
+                return ScanOutcome {
+                    candidates,
+                    hit_nomem: true,
+                };
+            }
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Active,
                 0,
@@ -1790,13 +1928,18 @@ async fn scan_target_candidates(
             candidates.first().map(|ap| ap.hint.channel).unwrap_or(0),
             format_bssid_opt(candidates.first().map(|ap| ap.hint.bssid)),
         );
-        return candidates;
+        return ScanOutcome {
+            candidates,
+            hit_nomem: false,
+        };
     }
 
     let passive = driver::passive_scan_config(runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS);
+    log_radio_mem_diag("scan_passive_before");
     let passive_started_at = Instant::now();
     match with_timeout(passive_timeout, controller.scan_with_config_async(passive)).await {
         Ok(Ok(results)) => {
+            log_radio_mem_diag("scan_passive_ok");
             collect_scan_results("passive", target_ssid, &results, &mut candidates);
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Passive,
@@ -1812,6 +1955,17 @@ async fn scan_target_candidates(
                 err,
                 target_ssid
             );
+            if is_no_mem_wifi_error(&err) {
+                diag_reassoc!(
+                    "upload_http: scan passive NoMem target_ssid={}",
+                    target_ssid
+                );
+                log_radio_mem_diag("scan_passive_nomem");
+                return ScanOutcome {
+                    candidates,
+                    hit_nomem: true,
+                };
+            }
             telemetry::record_wifi_reassoc_scan(
                 telemetry::WifiScanPhase::Passive,
                 0,
@@ -1844,11 +1998,17 @@ async fn scan_target_candidates(
             candidates.first().map(|ap| ap.hint.channel).unwrap_or(0),
             format_bssid_opt(candidates.first().map(|ap| ap.hint.bssid)),
         );
-        return candidates;
+        return ScanOutcome {
+            candidates,
+            hit_nomem: false,
+        };
     }
 
     diag_reassoc!("upload_http: scan target_ssid={} found=0", target_ssid);
-    candidates
+    ScanOutcome {
+        candidates,
+        hit_nomem: false,
+    }
 }
 
 fn collect_scan_results(
@@ -2024,10 +2184,32 @@ fn elapsed_ms_u32(started_at: Instant) -> u32 {
     }
 }
 
-fn has_ipv4_lease(stack: &Stack<'static>) -> bool {
+fn is_no_mem_wifi_error(err: &WifiError) -> bool {
+    matches!(err, WifiError::InternalError(InternalWifiError::NoMem))
+}
+
+fn log_radio_mem_diag(stage: &str) {
+    let status = psram::allocator_status();
+    let used_bytes = status.total_bytes.saturating_sub(status.free_bytes);
+    diag_reassoc!(
+        "upload_http: radio_mem stage={} feature={} state={:?} total={} used={} free={} peak={}",
+        stage,
+        status.feature_enabled,
+        status.state,
+        status.total_bytes,
+        used_bytes,
+        status.free_bytes,
+        status.peak_used_bytes
+    );
+}
+
+fn stack_ipv4_lease(stack: &Stack<'static>) -> Option<[u8; 4]> {
     stack
         .config_v4()
         .map(|cfg| cfg.address.address().octets())
         .filter(|ip| *ip != [0, 0, 0, 0])
-        .is_some()
+}
+
+fn has_ipv4_lease(stack: &Stack<'static>) -> bool {
+    stack_ipv4_lease(stack).is_some()
 }

@@ -85,6 +85,7 @@ pub(crate) struct NetStatusSnapshot {
     pub(crate) link: bool,
     pub(crate) ipv4: [u8; 4],
     pub(crate) listener: bool,
+    pub(crate) listener_enabled: bool,
     pub(crate) failure_class: &'static str,
     pub(crate) failure_code: u8,
     pub(crate) ladder_step: &'static str,

@@ -304,6 +304,14 @@ fn parses_net_control_commands() {
         Some(SerialCommand::NetRecover)
     ));
     assert!(matches!(
+        parse_serial_command(b"NET LISTENER ON"),
+        Some(SerialCommand::NetListenerSet { enabled: true })
+    ));
+    assert!(matches!(
+        parse_serial_command(b"NET LISTENER OFF"),
+        Some(SerialCommand::NetListenerSet { enabled: false })
+    ));
+    assert!(matches!(
         parse_serial_command(b"NETCFG GET"),
         Some(SerialCommand::NetCfgGet)
     ));

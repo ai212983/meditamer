@@ -14,6 +14,7 @@ use super::super::{
         APP_STATE_APPLY_ACK_TIMEOUT_MS, LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS,
         NET_CONTROL_COMMANDS, SD_RESULTS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES,
     },
+    runtime::service_mode,
     storage::upload::wifi,
     telemetry,
     touch::{
@@ -579,7 +580,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 let mut line = heapless::String::<320>::new();
                                 let _ = write!(
                                 &mut line,
-                                "NET_STATUS {{\"state\":\"{}\",\"link\":{},\"ipv4\":\"{}.{}.{}.{}\",\"listener\":{},\"failure_class\":\"{}\",\"failure_code\":{},\"ladder_step\":\"{}\",\"attempt\":{},\"uptime_ms\":{}}}\r\n",
+                                "NET_STATUS {{\"state\":\"{}\",\"link\":{},\"ipv4\":\"{}.{}.{}.{}\",\"listener\":{},\"listener_enabled\":{},\"failure_class\":\"{}\",\"failure_code\":{},\"ladder_step\":\"{}\",\"attempt\":{},\"uptime_ms\":{}}}\r\n",
                                 status.state,
                                 if status.link { "true" } else { "false" },
                                 status.ipv4[0],
@@ -587,6 +588,7 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 status.ipv4[2],
                                 status.ipv4[3],
                                 if status.listener { "true" } else { "false" },
+                                if status.listener_enabled { "true" } else { "false" },
                                 status.failure_class,
                                 status.failure_code,
                                 status.ladder_step,
@@ -594,6 +596,16 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
                                 status.uptime_ms,
                             );
                                 let _ = uart_write_all(&mut uart, line.as_bytes()).await;
+                            }
+                            #[cfg(feature = "asset-upload-http")]
+                            SerialCommand::NetListenerSet { enabled } => {
+                                service_mode::set_upload_http_listener_enabled(enabled);
+                                let response = if enabled {
+                                    b"NET OK op=listener_on\r\n".as_slice()
+                                } else {
+                                    b"NET OK op=listener_off\r\n".as_slice()
+                                };
+                                let _ = uart.write_async(response).await;
                             }
                             #[cfg(feature = "asset-upload-http")]
                             SerialCommand::NetRecover => {

@@ -74,6 +74,10 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     if basic::parse_net_recover_command(line) {
         return Some(SerialCommand::NetRecover);
     }
+    #[cfg(feature = "asset-upload-http")]
+    if let Some(enabled) = basic::parse_net_listener_command(line) {
+        return Some(SerialCommand::NetListenerSet { enabled });
+    }
     if basic::parse_allocator_status_command(line) {
         return Some(SerialCommand::AllocatorStatus);
     }

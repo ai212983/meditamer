@@ -97,6 +97,10 @@ pub(super) enum SerialCommand {
     NetStatus,
     #[cfg(feature = "asset-upload-http")]
     NetRecover,
+    #[cfg(feature = "asset-upload-http")]
+    NetListenerSet {
+        enabled: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -330,5 +334,7 @@ pub(super) fn serial_command_event_and_responses(
         SerialCommand::NetStatus => unreachable!("net command is handled inline"),
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetRecover => unreachable!("net command is handled inline"),
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetListenerSet { .. } => unreachable!("net command is handled inline"),
     }
 }

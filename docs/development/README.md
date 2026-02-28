@@ -492,6 +492,8 @@ NET START
 NET STOP
 NET RECOVER
 NET STATUS
+NET LISTENER ON
+NET LISTENER OFF
 ```
 
 Credential persistence:
@@ -593,6 +595,9 @@ scripts/tests/hw/test_wifi_discovery_debug.sh
 - runs via `hostctl test wifi-discovery-debug` behind the script wrapper.
 - strategy and pass/fail thresholds are declarative TOML in
   `tools/hostctl/scenarios/wifi-discovery-debug.default.toml`.
+- default discovery profile temporarily disables HTTP listener during probe rounds
+  (`disable_listener_during_probe_rounds=true`) to reduce radio/memory pressure
+  while preserving Wi-Fi discovery.
 - workflow orchestration remains declarative in
   `tools/hostctl/scenarios/wifi-discovery-debug.sw.yaml`.
 - reports round-level counters for:
