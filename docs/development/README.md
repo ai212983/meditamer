@@ -55,6 +55,9 @@ Current pre-commit hook:
 Current commit-msg hook:
 
 - Validates commit messages against Conventional Commits via `scripts/check_commit_message.sh` and `commitlint`.
+- Requires a scope in `type(scope): subject` format.
+- Enforces allowed scopes: `runtime`, `touch`, `event-engine`, `storage`, `upload`, `wifi`, `telemetry`, `graphics`, `drivers`, `tooling`, `ci`, `docs`.
+- Exempts Git-generated/autosquash subjects (`Merge ...`, `Revert ...`, `fixup! ...`, `squash! ...`) from custom scope checks.
 
 Current pre-push hook:
 
