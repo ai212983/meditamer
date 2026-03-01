@@ -8,81 +8,15 @@ impl<'d> SdCardProbe<'d> {
         self.apply_init_clock().await?;
         self.cs.set_high();
         self.send_dummy_clocks(10).await?;
+        self.enter_idle_state().await?;
 
-        let mut cmd0_r1 = 0xFFu8;
-        for _ in 0..16 {
-            cmd0_r1 = self.send_command(SD_CMD0, 0, 0x95, &mut []).await?;
-            if cmd0_r1 == 0x01 {
-                break;
-            }
-        }
-        if cmd0_r1 != 0x01 {
-            return Err(SdProbeError::Cmd0Failed(cmd0_r1));
-        }
-
-        let mut r7 = [0u8; 4];
-        let cmd8_r1 = self
-            .send_command(SD_CMD8, 0x0000_01AA, 0x87, &mut r7)
-            .await?;
-        let card_version = if cmd8_r1 == 0x01 {
-            if r7[2] != 0x01 || r7[3] != 0xAA {
-                return Err(SdProbeError::Cmd8EchoMismatch(r7));
-            }
-            SdCardVersion::V2
-        } else if (cmd8_r1 & 0x04) != 0 {
-            SdCardVersion::V1
-        } else {
-            return Err(SdProbeError::Cmd8Unexpected(cmd8_r1));
-        };
-
-        let acmd41_arg = if card_version == SdCardVersion::V2 {
-            0x4000_0000
-        } else {
-            0
-        };
-        let mut acmd41_r1 = 0xFFu8;
-        let mut acmd41_ok = false;
-        for _ in 0..200 {
-            let _ = self.send_command(SD_CMD55, 0, 0x65, &mut []).await?;
-            acmd41_r1 = self
-                .send_command(SD_ACMD41, acmd41_arg, 0x77, &mut [])
-                .await?;
-            if acmd41_r1 == 0x00 {
-                acmd41_ok = true;
-                break;
-            }
-            self.retry_delay().await;
-        }
-        if !acmd41_ok {
-            return Err(SdProbeError::Acmd41Timeout(acmd41_r1));
-        }
-
-        if card_version == SdCardVersion::V1 {
-            let cmd16_r1 = self
-                .send_command(SD_CMD16, SD_SECTOR_SIZE as u32, 0xFF, &mut [])
-                .await?;
-            if cmd16_r1 != 0x00 {
-                return Err(SdProbeError::Cmd16Unexpected(cmd16_r1));
-            }
-        }
+        let card_version = self.detect_card_version().await?;
+        self.wait_acmd41_ready(card_version).await?;
+        self.configure_legacy_block_len(card_version).await?;
 
         self.apply_data_clock().await?;
-
-        let mut ocr = [0u8; 4];
-        let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr).await?;
-        if cmd58_r1 != 0x00 {
-            return Err(SdProbeError::Cmd58Unexpected(cmd58_r1));
-        }
-
-        let cmd9_r1 = self.send_command_hold_cs(SD_CMD9, 0, 0xAF, &mut []).await?;
-        if cmd9_r1 != 0x00 {
-            self.end_transaction().await;
-            return Err(SdProbeError::Cmd9Unexpected(cmd9_r1));
-        }
-        let csd = self.read_data_block().await?;
-        self.end_transaction().await;
-        let capacity_bytes =
-            decode_capacity_bytes(&csd).ok_or(SdProbeError::CapacityDecodeFailed)?;
+        let ocr = self.read_ocr().await?;
+        let capacity_bytes = self.read_capacity_bytes().await?;
         let high_capacity = (ocr[0] & 0x40) != 0;
         let filesystem = self.detect_filesystem(high_capacity).await?;
 
@@ -94,6 +28,93 @@ impl<'d> SdCardProbe<'d> {
         };
         self.high_capacity = Some(high_capacity);
         Ok(status)
+    }
+
+    async fn enter_idle_state(&mut self) -> Result<(), SdProbeError> {
+        let mut cmd0_r1 = 0xFFu8;
+        for _ in 0..16 {
+            cmd0_r1 = self.send_command(SD_CMD0, 0, 0x95, &mut []).await?;
+            if cmd0_r1 == 0x01 {
+                return Ok(());
+            }
+        }
+        Err(SdProbeError::Cmd0Failed(cmd0_r1))
+    }
+
+    async fn detect_card_version(&mut self) -> Result<SdCardVersion, SdProbeError> {
+        let mut r7 = [0u8; 4];
+        let cmd8_r1 = self
+            .send_command(SD_CMD8, 0x0000_01AA, 0x87, &mut r7)
+            .await?;
+
+        if cmd8_r1 == 0x01 {
+            if r7[2] != 0x01 || r7[3] != 0xAA {
+                return Err(SdProbeError::Cmd8EchoMismatch(r7));
+            }
+            return Ok(SdCardVersion::V2);
+        }
+        if (cmd8_r1 & 0x04) != 0 {
+            return Ok(SdCardVersion::V1);
+        }
+        Err(SdProbeError::Cmd8Unexpected(cmd8_r1))
+    }
+
+    async fn wait_acmd41_ready(&mut self, card_version: SdCardVersion) -> Result<(), SdProbeError> {
+        let acmd41_arg = if card_version == SdCardVersion::V2 {
+            0x4000_0000
+        } else {
+            0
+        };
+
+        let mut acmd41_r1 = 0xFFu8;
+        for _ in 0..200 {
+            let _ = self.send_command(SD_CMD55, 0, 0x65, &mut []).await?;
+            acmd41_r1 = self
+                .send_command(SD_ACMD41, acmd41_arg, 0x77, &mut [])
+                .await?;
+            if acmd41_r1 == 0x00 {
+                return Ok(());
+            }
+            self.retry_delay().await;
+        }
+        Err(SdProbeError::Acmd41Timeout(acmd41_r1))
+    }
+
+    async fn configure_legacy_block_len(
+        &mut self,
+        card_version: SdCardVersion,
+    ) -> Result<(), SdProbeError> {
+        if card_version != SdCardVersion::V1 {
+            return Ok(());
+        }
+
+        let cmd16_r1 = self
+            .send_command(SD_CMD16, SD_SECTOR_SIZE as u32, 0xFF, &mut [])
+            .await?;
+        if cmd16_r1 != 0x00 {
+            return Err(SdProbeError::Cmd16Unexpected(cmd16_r1));
+        }
+        Ok(())
+    }
+
+    async fn read_ocr(&mut self) -> Result<[u8; 4], SdProbeError> {
+        let mut ocr = [0u8; 4];
+        let cmd58_r1 = self.send_command(SD_CMD58, 0, 0xFD, &mut ocr).await?;
+        if cmd58_r1 != 0x00 {
+            return Err(SdProbeError::Cmd58Unexpected(cmd58_r1));
+        }
+        Ok(ocr)
+    }
+
+    async fn read_capacity_bytes(&mut self) -> Result<u64, SdProbeError> {
+        let cmd9_r1 = self.send_command_hold_cs(SD_CMD9, 0, 0xAF, &mut []).await?;
+        if cmd9_r1 != 0x00 {
+            self.end_transaction().await;
+            return Err(SdProbeError::Cmd9Unexpected(cmd9_r1));
+        }
+        let csd = self.read_data_block().await?;
+        self.end_transaction().await;
+        decode_capacity_bytes(&csd).ok_or(SdProbeError::CapacityDecodeFailed)
     }
 
     async fn apply_init_clock(&mut self) -> Result<(), SdProbeError> {
