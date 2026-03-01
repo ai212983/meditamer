@@ -53,6 +53,7 @@ impl<'d> SdCardProbe<'d> {
         if !released {
             return Err(SdProbeError::WriteBusyTimeout);
         }
+        self.record_cmd24_sector_write();
         self.cached_sector.copy_from_slice(data);
         self.cached_sector_lba = Some(lba);
         Ok(())

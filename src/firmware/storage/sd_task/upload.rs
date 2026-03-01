@@ -1,5 +1,5 @@
 use embassy_time::Instant;
-use sdcard::fat;
+use sdcard::{fat, probe::SdWriteMetrics};
 
 use super::super::super::types::{
     SdProbeDriver, SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode,
@@ -21,6 +21,7 @@ pub(super) struct SdUploadSession {
     pub(super) expected_size: u32,
     pub(super) bytes_written: u32,
     pub(super) last_activity_at: Instant,
+    pub(super) write_metrics_start: SdWriteMetrics,
 }
 
 pub(super) async fn process_upload_request(
@@ -191,7 +192,7 @@ pub(super) async fn handle_begin(
         Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
     };
 
-    let append_session =
+    let mut append_session =
         match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await {
             Ok(session) => session,
             Err(err) => {
@@ -203,6 +204,21 @@ pub(super) async fn handle_begin(
                 return upload_result(false, map_fat_error_to_upload_code(&err), 0);
             }
         };
+    if expected_size > 0 {
+        // Reserve FAT chain capacity upfront so chunk writes stay on the hot
+        // data path without intermittent allocation/link updates.
+        if let Err(err) =
+            fat::append_session_reserve(sd_probe, &mut append_session, expected_size as usize).await
+        {
+            esp_println::println!(
+                "sd_upload: begin append_session_reserve failed temp_path={} expected_size={} err={:?}",
+                temp_path_str,
+                expected_size,
+                err
+            );
+            return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+        }
+    }
 
     let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
     final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
@@ -215,6 +231,7 @@ pub(super) async fn handle_begin(
         expected_size,
         bytes_written: 0,
         last_activity_at: Instant::now(),
+        write_metrics_start: sd_probe.write_metrics_snapshot(),
     });
     upload_result(true, SdUploadResultCode::Ok, 0)
 }
@@ -358,6 +375,21 @@ pub(super) async fn handle_commit(
             active.bytes_written,
         );
     }
+    let write_metrics_delta = write_metrics_delta(
+        active.write_metrics_start,
+        sd_probe.write_metrics_snapshot(),
+    );
+    esp_println::println!(
+        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={}",
+        final_path_str,
+        active.bytes_written,
+        write_metrics_delta.cmd24_sectors,
+        write_metrics_delta.cmd25_attempt_bursts,
+        write_metrics_delta.cmd25_success_bursts,
+        write_metrics_delta.cmd25_fallback_bursts,
+        write_metrics_delta.cmd25_attempt_sectors,
+        write_metrics_delta.cmd25_success_sectors,
+    );
     let bytes_written = active.bytes_written;
     *session = None;
     upload_result(true, SdUploadResultCode::Ok, bytes_written)
@@ -489,6 +521,27 @@ pub(super) async fn ensure_upload_ready(
     upload_mounted: &mut bool,
 ) -> Result<(), SdUploadResultCode> {
     helpers::ensure_upload_ready(sd_probe, powered, upload_mounted).await
+}
+
+fn write_metrics_delta(start: SdWriteMetrics, end: SdWriteMetrics) -> SdWriteMetrics {
+    SdWriteMetrics {
+        cmd24_sectors: end.cmd24_sectors.saturating_sub(start.cmd24_sectors),
+        cmd25_attempt_bursts: end
+            .cmd25_attempt_bursts
+            .saturating_sub(start.cmd25_attempt_bursts),
+        cmd25_attempt_sectors: end
+            .cmd25_attempt_sectors
+            .saturating_sub(start.cmd25_attempt_sectors),
+        cmd25_success_bursts: end
+            .cmd25_success_bursts
+            .saturating_sub(start.cmd25_success_bursts),
+        cmd25_success_sectors: end
+            .cmd25_success_sectors
+            .saturating_sub(start.cmd25_success_sectors),
+        cmd25_fallback_bursts: end
+            .cmd25_fallback_bursts
+            .saturating_sub(start.cmd25_fallback_bursts),
+    }
 }
 
 pub(super) fn build_temp_upload_path(

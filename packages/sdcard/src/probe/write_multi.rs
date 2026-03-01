@@ -25,12 +25,15 @@ impl<'d> SdCardProbe<'d> {
             let burst = &data[byte_offset..byte_offset + burst_bytes];
 
             if burst_sectors >= 2 {
+                self.record_cmd25_attempt(burst_sectors);
                 // Keep CMD25 strictly opportunistic. Any anomaly drops to proven
                 // CMD24-per-sector writes to preserve correctness and avoid
                 // reintroducing storage-side instability while tuning throughput.
                 if self.write_sectors_cmd25_burst(current_lba, burst).await.is_err() {
+                    self.record_cmd25_fallback();
                     self.write_sectors_cmd24_fallback(current_lba, burst).await?;
                 } else {
+                    self.record_cmd25_success(burst_sectors);
                     let last_lba = current_lba
                         .saturating_add((burst_sectors as u32).saturating_sub(1));
                     let last_sector = &burst[burst.len() - SD_SECTOR_SIZE..];

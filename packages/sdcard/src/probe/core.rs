@@ -26,6 +26,16 @@ const SD_INIT_SPI_RATE_KHZ: u32 = 400;
 const SD_DATA_SPI_RATE_MHZ: u32 = 24;
 pub const SD_SECTOR_SIZE: usize = 512;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SdWriteMetrics {
+    pub cmd24_sectors: u32,
+    pub cmd25_attempt_bursts: u32,
+    pub cmd25_attempt_sectors: u32,
+    pub cmd25_success_bursts: u32,
+    pub cmd25_success_sectors: u32,
+    pub cmd25_fallback_bursts: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SdCardVersion {
     V1,
@@ -94,6 +104,7 @@ pub struct SdCardProbe<'d> {
     cached_sector_lba: Option<u32>,
     cached_sector: [u8; SD_SECTOR_SIZE],
     next_free_cluster_hint: Option<u32>,
+    write_metrics: SdWriteMetrics,
 }
 
 impl<'d> SdCardProbe<'d> {
@@ -106,6 +117,7 @@ impl<'d> SdCardProbe<'d> {
             cached_sector_lba: None,
             cached_sector: [0; SD_SECTOR_SIZE],
             next_free_cluster_hint: None,
+            write_metrics: SdWriteMetrics::default(),
         }
     }
 
@@ -137,5 +149,36 @@ impl<'d> SdCardProbe<'d> {
             }
         }
         self.next_free_cluster_hint = Some(cluster);
+    }
+
+    pub fn write_metrics_snapshot(&self) -> SdWriteMetrics {
+        self.write_metrics
+    }
+
+    pub(crate) fn record_cmd24_sector_write(&mut self) {
+        self.write_metrics.cmd24_sectors = self.write_metrics.cmd24_sectors.saturating_add(1);
+    }
+
+    pub(crate) fn record_cmd25_attempt(&mut self, sectors: usize) {
+        self.write_metrics.cmd25_attempt_bursts =
+            self.write_metrics.cmd25_attempt_bursts.saturating_add(1);
+        self.write_metrics.cmd25_attempt_sectors = self
+            .write_metrics
+            .cmd25_attempt_sectors
+            .saturating_add(sectors.min(u32::MAX as usize) as u32);
+    }
+
+    pub(crate) fn record_cmd25_success(&mut self, sectors: usize) {
+        self.write_metrics.cmd25_success_bursts =
+            self.write_metrics.cmd25_success_bursts.saturating_add(1);
+        self.write_metrics.cmd25_success_sectors = self
+            .write_metrics
+            .cmd25_success_sectors
+            .saturating_add(sectors.min(u32::MAX as usize) as u32);
+    }
+
+    pub(crate) fn record_cmd25_fallback(&mut self) {
+        self.write_metrics.cmd25_fallback_bursts =
+            self.write_metrics.cmd25_fallback_bursts.saturating_add(1);
     }
 }

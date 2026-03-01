@@ -160,3 +160,34 @@ Next bottleneck indicated by telemetry:
 
 - `sd_ms` is now the dominant component (`~1.2-1.3s` per 512 KiB upload),
   so further gains likely require SD write-path improvements (not HTTP buffering).
+
+## 2026-03-01: SD write-path diagnostics (CMD24/CMD25 counters)
+
+Instrumentation added in firmware:
+
+- `sd_upload: write_metrics ...`
+  - `cmd24_sectors`
+  - `cmd25_attempt_bursts`
+  - `cmd25_success_bursts`
+  - `cmd25_fallback_bursts`
+  - `cmd25_attempt_sectors`
+  - `cmd25_success_sectors`
+
+Representative run (after boot, no boot-gate for pure upload diagnostics):
+
+- artifact: `/tmp/final6_acceptance_3cycle_nogate`
+- per-upload metrics:
+  - `cmd24_sectors=40`
+  - `cmd25_attempt_bursts=21`
+  - `cmd25_success_bursts=21`
+  - `cmd25_fallback_bursts=0`
+  - `cmd25_attempt_sectors=1024`
+  - `cmd25_success_sectors=1024`
+
+Interpretation:
+
+- payload data path is already fully `CMD25` (no fallback),
+- `CMD24` traffic is metadata/management overhead (likely FAT + directory updates),
+- remaining speed ceiling is mostly:
+  - SD-side write latency (`sd_ms`), and
+  - host/network body-feed jitter (`body_ms`) variance.
