@@ -24,6 +24,13 @@ pub struct WifiAcceptanceOptions {
     pub output_path: Option<PathBuf>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct BootDiscoveryGateConfig {
+    max_boot_uptime_ms: u32,
+    timeout_ms: u32,
+    settle_ms: u32,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct NetPolicy {
     connect_timeout_ms: u32,
@@ -211,14 +218,12 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         ensure_host_wifi_association(&ssid)?;
     }
     let log_path = opts.output_path.unwrap_or_else(|| {
-        PathBuf::from(
-            std::env::var("HOSTCTL_NET_LOG_PATH").unwrap_or_else(|_| {
-                format!(
-                    "logs/wifi_acceptance_{}.log",
-                    chrono::Local::now().format("%Y%m%d_%H%M%S")
-                )
-            }),
-        )
+        PathBuf::from(std::env::var("HOSTCTL_NET_LOG_PATH").unwrap_or_else(|_| {
+            format!(
+                "logs/wifi_acceptance_{}.log",
+                chrono::Local::now().format("%Y%m%d_%H%M%S")
+            )
+        }))
     });
 
     ensure_parent_dir(&log_path)?;
@@ -231,6 +236,27 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
     let cycles = env_utils::parse_env_u32("HOSTCTL_NET_CYCLES", 3)?.max(1);
     let operation_retries = env_utils::parse_env_u32("HOSTCTL_NET_OPERATION_RETRIES", 3)?.max(1);
+    let require_boot_discovery_gate =
+        env_utils::parse_env_bool01("HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE", true)?;
+    let boot_discovery_cfg = BootDiscoveryGateConfig {
+        max_boot_uptime_ms: env_utils::parse_env_u32(
+            "HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS",
+            120_000,
+        )?,
+        timeout_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS", 180_000)?,
+        settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 1_200)?,
+    };
+
+    if require_boot_discovery_gate {
+        run_boot_discovery_gate(
+            logger,
+            &mut console,
+            &ssid,
+            &password,
+            policy,
+            boot_discovery_cfg,
+        )?;
+    }
 
     let workflow = load_workflow(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-acceptance.sw.yaml"),
@@ -319,6 +345,191 @@ fn query_net_status(console: &mut SerialConsole) -> Result<Option<NetStatus>> {
     Ok(Some(status))
 }
 
+fn parse_scan_done_count(line: &str) -> Option<u32> {
+    if !line.starts_with("upload_http: event scan_done ") {
+        return None;
+    }
+    let (_, after) = line.split_once("count=")?;
+    let digits: String = after.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<u32>().ok()
+}
+
+fn is_ready(status: &NetStatus, require_listener: bool) -> bool {
+    if status.state.as_deref() != Some("Ready") {
+        return false;
+    }
+    if !status.link.unwrap_or(false) {
+        return false;
+    }
+    let ipv4_ready = status.ipv4.as_deref().is_some_and(|ipv4| ipv4 != "0.0.0.0");
+    if !ipv4_ready {
+        return false;
+    }
+    if require_listener {
+        status.listener.unwrap_or(false)
+    } else {
+        true
+    }
+}
+
+fn netcfg_set_payload(ssid: &str, password: &str, policy: NetPolicy) -> String {
+    json!({
+        "ssid": ssid,
+        "password": password,
+        "connect_timeout_ms": policy.connect_timeout_ms,
+        "dhcp_timeout_ms": policy.dhcp_timeout_ms,
+        "pinned_dhcp_timeout_ms": policy.pinned_dhcp_timeout_ms,
+        "listener_timeout_ms": policy.listener_timeout_ms,
+        "scan_active_min_ms": policy.scan_active_min_ms,
+        "scan_active_max_ms": policy.scan_active_max_ms,
+        "scan_passive_ms": policy.scan_passive_ms,
+        "retry_same_max": policy.retry_same_max,
+        "rotate_candidate_max": policy.rotate_candidate_max,
+        "rotate_auth_max": policy.rotate_auth_max,
+        "full_scan_reset_max": policy.full_scan_reset_max,
+        "driver_restart_max": policy.driver_restart_max,
+        "cooldown_ms": policy.cooldown_ms,
+        "driver_restart_backoff_ms": policy.driver_restart_backoff_ms,
+    })
+    .to_string()
+}
+
+fn run_boot_discovery_gate(
+    logger: &mut Logger,
+    console: &mut SerialConsole,
+    ssid: &str,
+    password: &str,
+    policy: NetPolicy,
+    cfg: BootDiscoveryGateConfig,
+) -> Result<()> {
+    let mut boot_status = None;
+    for _ in 0..8 {
+        if let Some(status) = query_net_status(console)? {
+            boot_status = Some(status);
+            break;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    let boot_status =
+        boot_status.ok_or_else(|| anyhow!("boot discovery gate: unable to read NET STATUS"))?;
+    let uptime_ms = boot_status.uptime_ms.unwrap_or(u64::MAX);
+    if uptime_ms > cfg.max_boot_uptime_ms as u64 {
+        // Gate is meant for immediate post-boot regression checks. For longer
+        // acceptance runs that begin later, skip instead of hard-failing.
+        logger.info(format!(
+            "boot discovery gate: skipped (uptime_ms={} exceeds max_boot_uptime_ms={})",
+            uptime_ms, cfg.max_boot_uptime_ms
+        ));
+        return Ok(());
+    }
+
+    logger.info(format!(
+        "boot discovery gate: uptime_ms={} max_boot_uptime_ms={} timeout_ms={}",
+        uptime_ms, cfg.max_boot_uptime_ms, cfg.timeout_ms
+    ));
+
+    let gate = (|| -> Result<()> {
+        wait_net_ack(console, "NET LISTENER OFF")?;
+        // Apply the exact runtime policy under test before probe rounds so gate
+        // behavior and acceptance behavior evaluate the same connect/scan budget.
+        let payload = netcfg_set_payload(ssid, password, policy);
+        wait_net_ack(console, &format!("NETCFG SET {payload}"))?;
+        if let Err(err) = wait_net_ack(console, "NET RECOVER") {
+            logger.info(format!(
+                "boot discovery gate: NET RECOVER ack not obtained ({err}); continuing"
+            ));
+        }
+        console.settle(cfg.settle_ms as u64)?;
+        if let Err(err) = wait_net_ack(console, "NET START") {
+            logger.info(format!(
+                "boot discovery gate: NET START ack not obtained ({err}); continuing with status polling"
+            ));
+        }
+
+        let mut read_mark = console.mark();
+        let mut scan_nonzero_events = 0u32;
+        let mut ssid_seen_events = 0u32;
+        let mut ready = false;
+        let gate_started = Instant::now();
+        let ready_only_fallback_after = Duration::from_millis(8_000);
+        let mut next_status_poll = Instant::now();
+        let deadline = Instant::now() + Duration::from_millis(cfg.timeout_ms as u64);
+
+        while Instant::now() < deadline {
+            console.poll_once()?;
+            for line in console.read_recent_lines(read_mark) {
+                read_mark = read_mark.saturating_add(1);
+                if let Some(count) = parse_scan_done_count(&line) {
+                    if count > 0 {
+                        scan_nonzero_events = scan_nonzero_events.saturating_add(1);
+                    }
+                }
+                if line.starts_with("upload_http: scan ap ssid=")
+                    && line.contains(&format!("scan ap ssid={ssid}"))
+                {
+                    ssid_seen_events = ssid_seen_events.saturating_add(1);
+                }
+                if line.starts_with("NET_STATUS ") {
+                    if let Ok(status) = parse_net_status_line(&line) {
+                        if is_ready(&status, false) {
+                            ready = true;
+                        }
+                    }
+                }
+            }
+            if ready && scan_nonzero_events > 0 && ssid_seen_events > 0 {
+                logger.info(format!(
+                    "boot discovery gate: pass ready={} scan_nonzero_events={} ssid_seen_events={}",
+                    ready, scan_nonzero_events, ssid_seen_events
+                ));
+                return Ok(());
+            }
+            if ready
+                && scan_nonzero_events == 0
+                && ssid_seen_events == 0
+                && gate_started.elapsed() >= ready_only_fallback_after
+            {
+                // Acceptance should not spend the full gate timeout when firmware
+                // is already healthy and no fresh scan events are emitted after
+                // idempotent recover/start commands. Strict scan-evidence
+                // regression checks are enforced in wifi-discovery-debug.
+                logger.info(
+                    "boot discovery gate: pass via ready-only fallback (no fresh scan evidence)",
+                );
+                return Ok(());
+            }
+            if Instant::now() >= next_status_poll {
+                let _ = console.send_line("NET STATUS");
+                next_status_poll = Instant::now() + Duration::from_millis(1_000);
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+
+        Err(anyhow!(
+            "boot discovery gate failed: ready={} scan_nonzero_events={} ssid_seen_events={} timeout_ms={}",
+            ready,
+            scan_nonzero_events,
+            ssid_seen_events,
+            cfg.timeout_ms
+        ))
+    })();
+
+    let restore_listener = wait_net_ack(console, "NET LISTENER ON");
+    match (gate, restore_listener) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(gate_err), Ok(())) => Err(gate_err),
+        (Ok(()), Err(restore_err)) => Err(anyhow!(
+            "boot discovery gate passed but listener restore failed: {restore_err}"
+        )),
+        (Err(gate_err), Err(restore_err)) => Err(anyhow!(
+            "boot discovery gate failed ({gate_err}); listener restore also failed ({restore_err})"
+        )),
+    }
+}
+
 fn format_failure(status: &NetStatus) -> String {
     format!(
         "network failure class={} code={} state={:?} ladder={:?} attempt={:?} uptime_ms={:?}",
@@ -338,23 +549,14 @@ fn wait_state_progress(console: &mut SerialConsole, timeout_ms: u32) -> Result<(
             let already_ready = matches!(status.state.as_deref(), Some("Ready"))
                 && status.link.unwrap_or(false)
                 && status.listener.unwrap_or(false)
-                && status
-                    .ipv4
-                    .as_deref()
-                    .is_some_and(|ip| ip != "0.0.0.0");
+                && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0");
             if already_ready {
                 return Ok(());
             }
             if let Some(
-                "Recovering"
-                | "Starting"
-                | "Scanning"
-                | "Associating"
-                | "DhcpWait"
-                | "ListenerWait"
-                | "Ready",
-            ) =
-                status.state.as_deref()
+                "Recovering" | "Starting" | "Scanning" | "Associating" | "DhcpWait"
+                | "ListenerWait" | "Ready",
+            ) = status.state.as_deref()
             {
                 return Ok(());
             }
@@ -364,10 +566,7 @@ fn wait_state_progress(console: &mut SerialConsole, timeout_ms: u32) -> Result<(
     Err(anyhow!("net_wait_state: did not leave idle state"))
 }
 
-fn wait_ready(
-    console: &mut SerialConsole,
-    policy: NetPolicy,
-) -> Result<(u32, u32, String)> {
+fn wait_ready(console: &mut SerialConsole, policy: NetPolicy) -> Result<(u32, u32, String)> {
     let started = Instant::now();
     let post_connect_window_ms = policy
         .dhcp_timeout_ms
@@ -389,7 +588,10 @@ fn wait_ready(
                     post_connect_deadline =
                         Some(Instant::now() + Duration::from_millis(post_connect_window_ms as u64));
                 }
-            } else if matches!(state, "Recovering" | "Starting" | "Scanning" | "Associating") {
+            } else if matches!(
+                state,
+                "Recovering" | "Starting" | "Scanning" | "Associating"
+            ) {
                 // Link dropped and firmware is re-entering connect path; clear the listener-phase
                 // deadline so host does not fail a valid reconnect attempt.
                 post_connect_deadline = None;
@@ -450,8 +652,7 @@ fn overall_ready_timeout_ms(policy: NetPolicy) -> u64 {
     let scan_budget_ms = (policy.scan_active_max_ms.max(policy.scan_passive_ms) as u64)
         .saturating_mul(3)
         .saturating_add(policy.scan_passive_ms as u64);
-    let per_attempt_ms = policy
-        .connect_timeout_ms as u64
+    let per_attempt_ms = policy.connect_timeout_ms as u64
         + max_dhcp_ms
         + policy.listener_timeout_ms as u64
         + scan_budget_ms
@@ -463,7 +664,9 @@ fn overall_ready_timeout_ms(policy: NetPolicy) -> u64 {
         + policy.rotate_auth_max as u64
         + policy.full_scan_reset_max as u64
         + policy.driver_restart_max as u64;
-    per_attempt_ms.saturating_mul(ladder_attempts).clamp(90_000, 420_000)
+    per_attempt_ms
+        .saturating_mul(ladder_attempts)
+        .clamp(90_000, 420_000)
 }
 
 fn verify_remote_file(console: &mut SerialConsole, remote_path: &str) -> Result<bool> {
@@ -485,9 +688,7 @@ fn verify_remote_file(console: &mut SerialConsole, remote_path: &str) -> Result<
         let req_id = console
             .wait_for_sdreq_id_since(mark, Some("fat_stat"), Duration::from_secs(8))?
             .ok_or_else(|| anyhow!("missing SDREQ id for fat_stat"))?;
-        let done = console
-            .sdwait_for_id(req_id, 30_000)?
-            .unwrap_or_default();
+        let done = console.sdwait_for_id(req_id, 30_000)?.unwrap_or_default();
         if done.contains("SDWAIT DONE") && done.contains("status=ok") && done.contains("code=ok") {
             return Ok(true);
         }
@@ -541,39 +742,32 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 Ok(())
             }
             "net_apply_config" => {
-                let payload = json!({
-                    "ssid": self.ssid,
-                    "password": self.password,
-                    "connect_timeout_ms": self.policy.connect_timeout_ms,
-                    "dhcp_timeout_ms": self.policy.dhcp_timeout_ms,
-                    "pinned_dhcp_timeout_ms": self.policy.pinned_dhcp_timeout_ms,
-                    "listener_timeout_ms": self.policy.listener_timeout_ms,
-                    "scan_active_min_ms": self.policy.scan_active_min_ms,
-                    "scan_active_max_ms": self.policy.scan_active_max_ms,
-                    "scan_passive_ms": self.policy.scan_passive_ms,
-                    "retry_same_max": self.policy.retry_same_max,
-                    "rotate_candidate_max": self.policy.rotate_candidate_max,
-                    "rotate_auth_max": self.policy.rotate_auth_max,
-                    "full_scan_reset_max": self.policy.full_scan_reset_max,
-                    "driver_restart_max": self.policy.driver_restart_max,
-                    "cooldown_ms": self.policy.cooldown_ms,
-                    "driver_restart_backoff_ms": self.policy.driver_restart_backoff_ms,
-                })
-                .to_string();
+                let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
                 wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
             }
             "net_start" => {
-                if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
-                    let ready_now = query_net_status(&mut self.console)?
-                        .is_some_and(|status| {
+                if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+                    let listener_ready_now =
+                        query_net_status(&mut self.console)?.is_some_and(|status| {
                             matches!(status.state.as_deref(), Some("Ready"))
                                 && status.link.unwrap_or(false)
                                 && status.listener.unwrap_or(false)
-                                && status
-                                    .ipv4
-                                    .as_deref()
-                                    .is_some_and(|ip| ip != "0.0.0.0")
+                                && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
                         });
+                    if !listener_ready_now {
+                        return Err(anyhow!("net_start: listener enable failed ({err})"));
+                    }
+                    self.logger.info(format!(
+                        "net_start: listener enable ack not obtained ({err}); continuing because listener is already ready"
+                    ));
+                }
+                if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
+                    let ready_now = query_net_status(&mut self.console)?.is_some_and(|status| {
+                        matches!(status.state.as_deref(), Some("Ready"))
+                            && status.link.unwrap_or(false)
+                            && status.listener.unwrap_or(false)
+                            && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
+                    });
                     if !ready_now {
                         return Err(err);
                     }
@@ -655,8 +849,9 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             }
             "net_recover_once" => {
                 if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                    self.logger
-                        .info(format!("net_recover_once: recover ack not obtained ({err}); continuing"));
+                    self.logger.info(format!(
+                        "net_recover_once: recover ack not obtained ({err}); continuing"
+                    ));
                 }
                 Ok(())
             }
@@ -750,7 +945,9 @@ fn ensure_host_wifi_association(expected_ssid: &str) -> Result<()> {
         }
     }
     let Some(device) = wifi_device else {
-        return Err(anyhow!("unable to determine host Wi-Fi interface via networksetup"));
+        return Err(anyhow!(
+            "unable to determine host Wi-Fi interface via networksetup"
+        ));
     };
 
     let assoc_out = Command::new("networksetup")
@@ -763,7 +960,9 @@ fn ensure_host_wifi_association(expected_ssid: &str) -> Result<()> {
         // authoritative for host<->device reachability.
         return Ok(());
     }
-    let assoc_text = String::from_utf8_lossy(&assoc_out.stdout).trim().to_string();
+    let assoc_text = String::from_utf8_lossy(&assoc_out.stdout)
+        .trim()
+        .to_string();
     let assoc_lower = assoc_text.to_ascii_lowercase();
     if assoc_lower.contains("not associated") {
         // Deprecated "AirPort" messaging can appear even when host routing is

@@ -45,6 +45,13 @@ const WIFI_AP_CANDIDATE_MAX: usize = 8;
 const WIFI_CHANNEL_PROBE_SEQUENCE: [u8; 13] = [8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13];
 // Bounded fallback for repeated all-channel zero-result scans.
 const WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS: [u8; 4] = [8, 1, 6, 11];
+// Hard guard against zero-discovery loops: after two consecutive full-sweep
+// zero-result cycles, force hard restart and full-channel probe escalation.
+// Keep this separate from policy knobs so refactors/tuning cannot accidentally
+// disable the safety path.
+const WIFI_ZERO_DISCOVERY_HARD_GUARD_STREAK: u8 = 2;
+// Bound hard-restart escalations before declaring terminal discovery failure.
+const WIFI_ZERO_DISCOVERY_HARD_GUARD_MAX_RESTARTS: u8 = 2;
 const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::WpaWpa2Personal,
     AuthMethod::Wpa2Personal,
@@ -145,6 +152,7 @@ struct TargetApCandidate {
 struct ScanOutcome {
     candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
     hit_nomem: bool,
+    saw_nonzero_results: bool,
 }
 
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
@@ -216,6 +224,9 @@ pub(super) async fn run_wifi_connection_task(
     let mut dhcp_same_candidate_timeout_streak = 0u8;
     let mut dhcp_lease_reacquire_attempts = 0u8;
     let mut other_disconnect_streak = 0u8;
+    let mut discovery_sweep_exhausted_streak = 0u8;
+    let mut zero_discovery_hard_guard_restarts = 0u8;
+    let mut force_full_channel_probe_next_scan = false;
     let mut channel_probe_idx = 0usize;
     let mut hard_recover_watchdog_started_at: Option<Instant> = None;
     let mut escalated_auth_sweep_attempts_left = 0u8;
@@ -266,7 +277,12 @@ pub(super) async fn run_wifi_connection_task(
                 dhcp_same_candidate_timeout_streak = 0;
                 dhcp_lease_reacquire_attempts = 0;
                 other_disconnect_streak = 0;
-                hard_recover_watchdog_started_at = Some(Instant::now());
+                if hard_recover_watchdog_started_at.is_none() {
+                    hard_recover_watchdog_started_at = Some(Instant::now());
+                }
+                // Preserve zero-discovery guard counters across soft recover:
+                // repeated NET RECOVER calls must not mask a persistent
+                // zero-discovery regression.
                 escalated_auth_sweep_attempts_left = 0;
                 terminal_fail_latched = false;
                 net_attempt = 0;
@@ -312,6 +328,9 @@ pub(super) async fn run_wifi_connection_task(
                 channel_probe_idx = 0;
                 dhcp_lease_reacquire_attempts = 0;
                 other_disconnect_streak = 0;
+                discovery_sweep_exhausted_streak = 0;
+                zero_discovery_hard_guard_restarts = 0;
+                force_full_channel_probe_next_scan = false;
                 hard_recover_watchdog_started_at = None;
                 escalated_auth_sweep_attempts_left = 0;
                 terminal_fail_latched = false;
@@ -391,6 +410,9 @@ pub(super) async fn run_wifi_connection_task(
                 dhcp_same_candidate_timeout_streak = 0;
                 dhcp_lease_reacquire_attempts = 0;
                 other_disconnect_streak = 0;
+                discovery_sweep_exhausted_streak = 0;
+                zero_discovery_hard_guard_restarts = 0;
+                force_full_channel_probe_next_scan = false;
                 hard_recover_watchdog_started_at = Some(Instant::now());
                 escalated_auth_sweep_attempts_left = WIFI_ESCALATED_AUTH_SWEEP_ATTEMPTS;
                 ladder_step = RecoveryLadderStep::DriverRestart;
@@ -442,6 +464,9 @@ pub(super) async fn run_wifi_connection_task(
             channel_probe_idx = 0;
             dhcp_lease_reacquire_attempts = 0;
             other_disconnect_streak = 0;
+            discovery_sweep_exhausted_streak = 0;
+            zero_discovery_hard_guard_restarts = 0;
+            force_full_channel_probe_next_scan = false;
             hard_recover_watchdog_started_at = None;
             escalated_auth_sweep_attempts_left = 0;
             net_attempt = 0;
@@ -469,6 +494,9 @@ pub(super) async fn run_wifi_connection_task(
                     channel_probe_idx = 0;
                     dhcp_lease_reacquire_attempts = 0;
                     other_disconnect_streak = 0;
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
                     hard_recover_watchdog_started_at = None;
                     escalated_auth_sweep_attempts_left = 0;
                     net_attempt = 0;
@@ -695,8 +723,18 @@ pub(super) async fn run_wifi_connection_task(
                 (failure_class, failure_code),
             );
             if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize]) {
-                let scan_outcome =
-                    scan_target_candidates(&mut controller, ssid, runtime_policy).await;
+                let force_full_channel_probe = force_full_channel_probe_next_scan;
+                let scan_outcome = scan_target_candidates(
+                    &mut controller,
+                    ssid,
+                    runtime_policy,
+                    force_full_channel_probe,
+                )
+                .await;
+                // One-shot latch: forced full-channel probe is consumed by the
+                // first subsequent scan cycle and re-enabled only by the
+                // zero-discovery hard guard.
+                force_full_channel_probe_next_scan = false;
                 if scan_outcome.hit_nomem {
                     failure_class = NetFailureClass::Transport;
                     failure_code = WIFI_REASON_SCAN_NOMEM;
@@ -731,6 +769,9 @@ pub(super) async fn run_wifi_connection_task(
                     dhcp_same_candidate_timeout_streak = 0;
                     dhcp_lease_reacquire_attempts = 0;
                     other_disconnect_streak = 0;
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
                     if hard_recover_watchdog_started_at.is_none() {
                         hard_recover_watchdog_started_at = Some(Instant::now());
                     }
@@ -738,6 +779,12 @@ pub(super) async fn run_wifi_connection_task(
                     continue;
                 }
                 let scanned_candidates = scan_outcome.candidates;
+                if scan_outcome.saw_nonzero_results {
+                    // Any non-zero discovery result means radio scan path is
+                    // alive; clear zero-discovery guard streak.
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                }
                 if let Some(candidate) = scanned_candidates.first().copied() {
                     ap_candidates = scanned_candidates;
                     ap_candidate_idx = 0;
@@ -746,6 +793,8 @@ pub(super) async fn run_wifi_connection_task(
                     auth_method_idx = 0;
                     config_applied = false;
                     channel_probe_idx = 0;
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
                     diag_reassoc!(
                         "upload_http: pre-connect selected candidate idx={} channel_hint={} bssid_hint={} candidate_count={}",
                         ap_candidate_idx,
@@ -798,6 +847,9 @@ pub(super) async fn run_wifi_connection_task(
                 telemetry::record_wifi_connect_success();
                 telemetry::record_wifi_reassoc_connect_success(elapsed_ms_u32(connect_started_at));
                 hard_recover_watchdog_started_at = None;
+                discovery_sweep_exhausted_streak = 0;
+                zero_discovery_hard_guard_restarts = 0;
+                force_full_channel_probe_next_scan = false;
                 escalated_auth_sweep_attempts_left = 0;
                 failure_class = NetFailureClass::None;
                 failure_code = 0;
@@ -1228,12 +1280,21 @@ pub(super) async fn run_wifi_connection_task(
                     heapless::Vec::<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>::new();
                 let mut observed_ap = None;
                 let mut observed_scan_nomem = false;
+                let mut observed_scan_nonzero = false;
                 if should_scan {
                     if let Ok(ssid) = core::str::from_utf8(&active.ssid[..active.ssid_len as usize])
                     {
-                        let scan_outcome =
-                            scan_target_candidates(&mut controller, ssid, runtime_policy).await;
+                        let force_full_channel_probe = force_full_channel_probe_next_scan;
+                        let scan_outcome = scan_target_candidates(
+                            &mut controller,
+                            ssid,
+                            runtime_policy,
+                            force_full_channel_probe,
+                        )
+                        .await;
+                        force_full_channel_probe_next_scan = false;
                         observed_scan_nomem = scan_outcome.hit_nomem;
+                        observed_scan_nonzero = scan_outcome.saw_nonzero_results;
                         observed_candidates = scan_outcome.candidates;
                         observed_ap = observed_candidates.first().copied();
                     }
@@ -1255,6 +1316,12 @@ pub(super) async fn run_wifi_connection_task(
                     observed_scan_nomem,
                     channel_probe_idx,
                 );
+                if observed_scan_nonzero {
+                    // Preserve only true zero-discovery sequences in the guard.
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
+                }
                 if observed_scan_nomem {
                     failure_class = NetFailureClass::Transport;
                     failure_code = WIFI_REASON_SCAN_NOMEM;
@@ -1290,6 +1357,9 @@ pub(super) async fn run_wifi_connection_task(
                     dhcp_same_candidate_timeout_streak = 0;
                     dhcp_lease_reacquire_attempts = 0;
                     other_disconnect_streak = 0;
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
                     if hard_recover_watchdog_started_at.is_none() {
                         hard_recover_watchdog_started_at = Some(Instant::now());
                     }
@@ -1333,6 +1403,9 @@ pub(super) async fn run_wifi_connection_task(
                     config_applied = false;
                     dhcp_same_candidate_timeout_streak = 0;
                     other_disconnect_streak = 0;
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
                     hard_recover_watchdog_started_at = Some(Instant::now());
                     diag_reassoc!(
                         "upload_http: connect reason=other streak reached {}; forcing hard wifi recovery (stop/start + full discovery reset)",
@@ -1345,6 +1418,9 @@ pub(super) async fn run_wifi_connection_task(
                     continue;
                 }
                 if let Some(ap) = observed_ap {
+                    discovery_sweep_exhausted_streak = 0;
+                    zero_discovery_hard_guard_restarts = 0;
+                    force_full_channel_probe_next_scan = false;
                     let mut selected_ap = ap;
                     let mut forced_rotation = false;
                     if disconnect_reason == WIFI_REASON_OTHER && observed_candidates.len() > 1 {
@@ -1391,6 +1467,9 @@ pub(super) async fn run_wifi_connection_task(
                         }
                         config_applied = false;
                         dhcp_same_candidate_timeout_streak = 0;
+                        discovery_sweep_exhausted_streak = 0;
+                        zero_discovery_hard_guard_restarts = 0;
+                        force_full_channel_probe_next_scan = false;
                         telemetry::record_wifi_reassoc_hint_retry(
                             channel_hint.unwrap_or(selected_ap.hint.channel),
                             auth_method_idx,
@@ -1414,6 +1493,9 @@ pub(super) async fn run_wifi_connection_task(
                         auth_method_idx = 0;
                         config_applied = false;
                         dhcp_same_candidate_timeout_streak = 0;
+                        discovery_sweep_exhausted_streak = 0;
+                        zero_discovery_hard_guard_restarts = 0;
+                        force_full_channel_probe_next_scan = false;
                         telemetry::record_wifi_reassoc_hint_retry(
                             selected_ap.hint.channel,
                             auth_method_idx,
@@ -1457,6 +1539,12 @@ pub(super) async fn run_wifi_connection_task(
                         Timer::after(Duration::from_millis(WIFI_RECOVERY_RETRY_BACKOFF_MS)).await;
                         continue;
                     }
+                    if !observed_scan_nonzero {
+                        discovery_sweep_exhausted_streak =
+                            discovery_sweep_exhausted_streak.saturating_add(1);
+                    } else {
+                        discovery_sweep_exhausted_streak = 0;
+                    }
                     channel_probe_idx = 0;
                     channel_hint = None;
                     bssid_hint = None;
@@ -1465,12 +1553,111 @@ pub(super) async fn run_wifi_connection_task(
                     auth_method_idx = 0;
                     config_applied = false;
                     dhcp_same_candidate_timeout_streak = 0;
+                    if discovery_sweep_exhausted_streak >= runtime_policy.full_scan_reset_max {
+                        let hard_guard_trip = discovery_sweep_exhausted_streak
+                            >= WIFI_ZERO_DISCOVERY_HARD_GUARD_STREAK;
+                        if hard_guard_trip {
+                            if zero_discovery_hard_guard_restarts
+                                >= WIFI_ZERO_DISCOVERY_HARD_GUARD_MAX_RESTARTS
+                            {
+                                ladder_step = RecoveryLadderStep::TerminalFail;
+                                failure_class = NetFailureClass::DiscoveryEmpty;
+                                failure_code = WIFI_REASON_NO_AP_FOUND;
+                                terminal_fail_latched = true;
+                                transition_state(
+                                    &mut net_state,
+                                    NetState::Failed,
+                                    "zero_discovery_guard_terminal",
+                                    started_at,
+                                    ladder_step,
+                                    net_attempt,
+                                    (failure_class, failure_code),
+                                );
+                                publish_state(
+                                    net_state,
+                                    ladder_step,
+                                    net_attempt,
+                                    failure_class,
+                                    failure_code,
+                                    started_at.elapsed().as_millis() as u32,
+                                );
+                                diag_reassoc!(
+                                    "upload_http: zero-discovery hard guard terminal: sweep_streak={} restart_retries={} max_retries={}",
+                                    discovery_sweep_exhausted_streak,
+                                    zero_discovery_hard_guard_restarts,
+                                    WIFI_ZERO_DISCOVERY_HARD_GUARD_MAX_RESTARTS,
+                                );
+                                disconnect_and_stop_with_timeout(
+                                    &mut controller,
+                                    "zero_discovery_guard_terminal",
+                                )
+                                .await;
+                                telemetry::set_wifi_link_connected(false);
+                                telemetry::set_upload_http_listener(false, None);
+                                hard_recover_watchdog_started_at = None;
+                                continue;
+                            }
+                            zero_discovery_hard_guard_restarts =
+                                zero_discovery_hard_guard_restarts.saturating_add(1);
+                            // Enforce at least one full-channel probe on the
+                            // next scan cycle. This avoids regressing into the
+                            // short [8,1,6,11] probe loop under refactors.
+                            force_full_channel_probe_next_scan = true;
+                        }
+                        ladder_step = RecoveryLadderStep::DriverRestart;
+                        failure_class = NetFailureClass::DiscoveryEmpty;
+                        failure_code = disconnect_reason.max(WIFI_REASON_NO_AP_FOUND);
+                        transition_state(
+                            &mut net_state,
+                            NetState::Recovering,
+                            "discovery_sweep_exhausted_driver_restart",
+                            started_at,
+                            ladder_step,
+                            net_attempt,
+                            (failure_class, failure_code),
+                        );
+                        publish_state(
+                            net_state,
+                            ladder_step,
+                            net_attempt,
+                            failure_class,
+                            failure_code,
+                            started_at.elapsed().as_millis() as u32,
+                        );
+                        diag_reassoc!(
+                            "upload_http: discovery sweep exhausted streak={} max={} hard_guard_trip={} hard_guard_restarts={} forcing hard wifi recovery (stop/start)",
+                            discovery_sweep_exhausted_streak,
+                            runtime_policy.full_scan_reset_max,
+                            hard_guard_trip,
+                            zero_discovery_hard_guard_restarts,
+                        );
+                        disconnect_and_stop_with_timeout(
+                            &mut controller,
+                            "discovery_sweep_exhausted_driver_restart",
+                        )
+                        .await;
+                        telemetry::set_wifi_link_connected(false);
+                        telemetry::set_upload_http_listener(false, None);
+                        if hard_recover_watchdog_started_at.is_none() {
+                            hard_recover_watchdog_started_at = Some(Instant::now());
+                        }
+                        Timer::after(Duration::from_millis(
+                            runtime_policy.driver_restart_backoff_ms as u64,
+                        ))
+                        .await;
+                        continue;
+                    }
                     diag_reassoc!(
-                        "upload_http: discovery sweep exhausted; clearing hints for full rescan"
+                        "upload_http: discovery sweep exhausted streak={} max={} hard_guard_restarts={}; clearing hints for full rescan",
+                        discovery_sweep_exhausted_streak,
+                        runtime_policy.full_scan_reset_max,
+                        zero_discovery_hard_guard_restarts,
                     );
                     Timer::after(Duration::from_millis(WIFI_RECOVERY_RETRY_BACKOFF_MS)).await;
                     continue;
                 }
+                discovery_sweep_exhausted_streak = 0;
+                zero_discovery_hard_guard_restarts = 0;
 
                 if auth_reason {
                     auth_method_idx = (auth_method_idx + 1) % WIFI_AUTH_METHODS.len();
@@ -1815,6 +2002,10 @@ fn active_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
         .clamp(8_000, 25_000)
 }
 
+fn directed_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
+    active_scan_timeout_ms(policy).min(8_000).max(3_000)
+}
+
 fn passive_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
     // Passive scanning walks all channels; timeout must scale with per-channel
     // dwell. A short fixed timeout causes false "zero discovery" even when APs exist.
@@ -1827,15 +2018,32 @@ fn passive_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
         .clamp(15_000, 90_000)
 }
 
+fn zero_discovery_probe_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
+    active_scan_timeout_ms(policy).min(6_000).max(2_500)
+}
+
+fn zero_discovery_probe_budget_ms(policy: WifiRuntimePolicy, full_channel: bool) -> u64 {
+    let probe_channels = if full_channel {
+        WIFI_CHANNEL_PROBE_SEQUENCE.len() as u64
+    } else {
+        WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS.len() as u64
+    };
+    zero_discovery_probe_timeout_ms(policy).saturating_mul(probe_channels)
+}
+
 fn post_recover_watchdog_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
     // Watchdog budget intentionally covers at least one full discovery cycle
-    // (active + passive + reconnect overhead) to avoid resetting recovery
-    // state before channel/auth rotation can progress.
+    // (active + directed + passive + zero-result probes + reconnect overhead)
+    // to avoid resetting recovery state before channel/auth rotation can progress.
     // Keep this larger than one connect timeout so the connect API one-shot
     // semantics can be retried through the recovery ladder without premature reset.
     // Source (`esp_wifi_connect` single-attempt behavior): https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32/api-reference/network/esp_wifi.html#_CPPv416esp_wifi_connectv
     let scan_budget_ms = active_scan_timeout_ms(policy)
+        .saturating_add(directed_scan_timeout_ms(policy))
         .saturating_add(passive_scan_timeout_ms(policy))
+        // Budget for forced full-channel probe path; this prevents watchdog
+        // reset from preempting the hard-guard scan escalation.
+        .saturating_add(zero_discovery_probe_budget_ms(policy, true))
         .saturating_add(6_000);
     (policy.connect_timeout_ms as u64)
         .saturating_add(scan_budget_ms)
@@ -1924,15 +2132,16 @@ async fn scan_target_candidates(
     controller: &mut WifiController<'static>,
     target_ssid: &str,
     runtime_policy: WifiRuntimePolicy,
+    force_full_channel_probe: bool,
 ) -> ScanOutcome {
     let mut candidates = heapless::Vec::<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>::new();
     let active_timeout_ms = active_scan_timeout_ms(runtime_policy);
-    let directed_timeout_ms = active_timeout_ms.min(8_000).max(3_000);
+    let directed_timeout_ms = directed_scan_timeout_ms(runtime_policy);
     let passive_timeout_ms = passive_scan_timeout_ms(runtime_policy);
     let active_timeout = Duration::from_millis(active_timeout_ms);
     let directed_timeout = Duration::from_millis(directed_timeout_ms);
     let passive_timeout = Duration::from_millis(passive_timeout_ms);
-    let probe_timeout_ms = active_timeout_ms.min(6_000).max(2_500);
+    let probe_timeout_ms = zero_discovery_probe_timeout_ms(runtime_policy);
     let probe_timeout = Duration::from_millis(probe_timeout_ms);
     let mut any_nonzero_results = false;
 
@@ -1967,6 +2176,7 @@ async fn scan_target_candidates(
                 return ScanOutcome {
                     candidates,
                     hit_nomem: true,
+                    saw_nonzero_results: any_nonzero_results,
                 };
             }
             telemetry::record_wifi_reassoc_scan(
@@ -2004,6 +2214,7 @@ async fn scan_target_candidates(
         return ScanOutcome {
             candidates,
             hit_nomem: false,
+            saw_nonzero_results: any_nonzero_results,
         };
     }
 
@@ -2044,6 +2255,7 @@ async fn scan_target_candidates(
                 return ScanOutcome {
                     candidates,
                     hit_nomem: true,
+                    saw_nonzero_results: any_nonzero_results,
                 };
             }
             telemetry::record_wifi_reassoc_scan(
@@ -2080,6 +2292,7 @@ async fn scan_target_candidates(
         return ScanOutcome {
             candidates,
             hit_nomem: false,
+            saw_nonzero_results: any_nonzero_results,
         };
     }
 
@@ -2114,6 +2327,7 @@ async fn scan_target_candidates(
                 return ScanOutcome {
                     candidates,
                     hit_nomem: true,
+                    saw_nonzero_results: any_nonzero_results,
                 };
             }
             telemetry::record_wifi_reassoc_scan(
@@ -2151,17 +2365,24 @@ async fn scan_target_candidates(
         return ScanOutcome {
             candidates,
             hit_nomem: false,
+            saw_nonzero_results: any_nonzero_results,
         };
     }
 
     if !any_nonzero_results {
+        let probe_channels: &[u8] = if force_full_channel_probe {
+            &WIFI_CHANNEL_PROBE_SEQUENCE
+        } else {
+            &WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS
+        };
         diag_reassoc!(
-            "upload_http: scan zero_result_fallback start channels={:?} target_ssid={} probe_timeout_ms={}",
-            WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS,
+            "upload_http: scan zero_result_fallback start channels={:?} full_channel_probe={} target_ssid={} probe_timeout_ms={}",
+            probe_channels,
+            force_full_channel_probe,
             target_ssid,
             probe_timeout_ms,
         );
-        for channel in WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS {
+        for channel in probe_channels.iter().copied() {
             let probe = driver::channel_active_scan_config(channel, runtime_policy)
                 .with_max(WIFI_SCAN_DIAG_MAX_APS);
             log_radio_mem_diag("scan_probe_before");
@@ -2201,6 +2422,7 @@ async fn scan_target_candidates(
                         return ScanOutcome {
                             candidates,
                             hit_nomem: true,
+                            saw_nonzero_results: any_nonzero_results,
                         };
                     }
                     telemetry::record_wifi_reassoc_scan(
@@ -2244,6 +2466,7 @@ async fn scan_target_candidates(
         return ScanOutcome {
             candidates,
             hit_nomem: false,
+            saw_nonzero_results: any_nonzero_results,
         };
     }
 
@@ -2251,6 +2474,7 @@ async fn scan_target_candidates(
     ScanOutcome {
         candidates,
         hit_nomem: false,
+        saw_nonzero_results: any_nonzero_results,
     }
 }
 

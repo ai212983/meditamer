@@ -229,14 +229,12 @@ pub fn run_wifi_discovery_debug(
     });
 
     let log_path = opts.output_path.unwrap_or_else(|| {
-        PathBuf::from(
-            std::env::var("HOSTCTL_NET_LOG_PATH").unwrap_or_else(|_| {
-                format!(
-                    "logs/wifi_discovery_debug_{}.log",
-                    chrono::Local::now().format("%Y%m%d_%H%M%S")
-                )
-            }),
-        )
+        PathBuf::from(std::env::var("HOSTCTL_NET_LOG_PATH").unwrap_or_else(|_| {
+            format!(
+                "logs/wifi_discovery_debug_{}.log",
+                chrono::Local::now().format("%Y%m%d_%H%M%S")
+            )
+        }))
     });
     ensure_parent_dir(&log_path)?;
 
@@ -248,10 +246,11 @@ pub fn run_wifi_discovery_debug(
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
         .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
 
-    let profile_raw = fs::read_to_string(&profile_path)
-        .with_context(|| format!("failed reading HOSTCTL_NET_DISCOVERY_PROFILE_PATH: {profile_path}"))?;
-    let profile =
-        toml::from_str::<DiscoveryProfile>(&profile_raw).context("invalid TOML discovery profile")?;
+    let profile_raw = fs::read_to_string(&profile_path).with_context(|| {
+        format!("failed reading HOSTCTL_NET_DISCOVERY_PROFILE_PATH: {profile_path}")
+    })?;
+    let profile = toml::from_str::<DiscoveryProfile>(&profile_raw)
+        .context("invalid TOML discovery profile")?;
 
     if profile.rounds == 0 {
         return Err(anyhow!("discovery profile must set rounds >= 1"));
@@ -331,10 +330,7 @@ fn is_ready(status: &NetStatus, require_listener: bool) -> bool {
     if !status.link.unwrap_or(false) {
         return false;
     }
-    let ipv4_ready = status
-        .ipv4
-        .as_deref()
-        .is_some_and(|ipv4| ipv4 != "0.0.0.0");
+    let ipv4_ready = status.ipv4.as_deref().is_some_and(|ipv4| ipv4 != "0.0.0.0");
     if !ipv4_ready {
         return false;
     }
@@ -373,6 +369,10 @@ fn active_scan_timeout_ms(policy: &NetPolicy) -> u64 {
         .clamp(8_000, 25_000)
 }
 
+fn directed_scan_timeout_ms(policy: &NetPolicy) -> u64 {
+    active_scan_timeout_ms(policy).clamp(3_000, 8_000)
+}
+
 fn passive_scan_timeout_ms(policy: &NetPolicy) -> u64 {
     // Mirror firmware timeout shaping; otherwise host may label in-progress
     // passive scans as "zero discovery" too early.
@@ -383,17 +383,32 @@ fn passive_scan_timeout_ms(policy: &NetPolicy) -> u64 {
         .clamp(15_000, 90_000)
 }
 
+fn zero_discovery_probe_timeout_ms(policy: &NetPolicy) -> u64 {
+    active_scan_timeout_ms(policy).clamp(2_500, 6_000)
+}
+
+fn zero_discovery_probe_budget_ms(policy: &NetPolicy) -> u64 {
+    // Mirror firmware watchdog budgeting for forced full-channel probe path.
+    // Firmware may escalate from [8,1,6,11] into full 2.4 GHz channel sweep
+    // under zero-discovery hard-guard conditions.
+    const ZERO_DISCOVERY_PROBE_CHANNELS: u64 = 13;
+    zero_discovery_probe_timeout_ms(policy).saturating_mul(ZERO_DISCOVERY_PROBE_CHANNELS)
+}
+
 fn recommended_round_timeout_ms(policy: &NetPolicy, profile: &DiscoveryProfile) -> u64 {
     // Keep host round timeout aligned with firmware discovery/recovery budgets.
     // If this is shorter than firmware's scan/watchdog windows, host will
     // misclassify healthy in-progress recovery as "zero discovery".
     let scan_budget_ms = active_scan_timeout_ms(policy)
+        .saturating_add(directed_scan_timeout_ms(policy))
         .saturating_add(passive_scan_timeout_ms(policy))
+        .saturating_add(zero_discovery_probe_budget_ms(policy))
         .saturating_add(6_000);
     let watchdog_timeout_ms = (policy.connect_timeout_ms as u64)
         .saturating_add(scan_budget_ms)
         .max((policy.connect_timeout_ms as u64).saturating_mul(2));
-    let recover_budget_ms = policy.driver_restart_backoff_ms as u64 + profile.recover_settle_ms as u64;
+    let recover_budget_ms =
+        policy.driver_restart_backoff_ms as u64 + profile.recover_settle_ms as u64;
     let recommended = watchdog_timeout_ms
         .saturating_add(recover_budget_ms)
         .saturating_add(5_000);
@@ -444,8 +459,9 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 let round = ctx_get_u32(context, "round")?;
                 if self.profile.recover_before_round {
                     if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                        self.logger
-                            .info(format!("round {round}: NET RECOVER before probe failed ({err})"));
+                        self.logger.info(format!(
+                            "round {round}: NET RECOVER before probe failed ({err})"
+                        ));
                     }
                     self.console
                         .settle(self.profile.recover_settle_ms as u64)
@@ -474,7 +490,10 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 let mut read_mark = mark;
                 let mut next_status_poll = Instant::now();
                 let deadline = Instant::now()
-                    + Duration::from_millis(recommended_round_timeout_ms(&self.policy, &self.profile));
+                    + Duration::from_millis(recommended_round_timeout_ms(
+                        &self.policy,
+                        &self.profile,
+                    ));
                 while Instant::now() < deadline {
                     self.console.poll_once()?;
                     for line in self.console.read_recent_lines(read_mark) {
@@ -528,9 +547,8 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 if ssid_seen_events > 0 {
                     self.ssid_seen_rounds = self.ssid_seen_rounds.saturating_add(1);
                 }
-                self.total_scan_zero_events = self
-                    .total_scan_zero_events
-                    .saturating_add(scan_zero_events);
+                self.total_scan_zero_events =
+                    self.total_scan_zero_events.saturating_add(scan_zero_events);
                 self.total_scan_nonzero_events = self
                     .total_scan_nonzero_events
                     .saturating_add(scan_nonzero_events);
@@ -571,8 +589,9 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
 
                 if self.profile.recover_after_round {
                     if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                        self.logger
-                            .info(format!("round {round}: NET RECOVER after probe failed ({err})"));
+                        self.logger.info(format!(
+                            "round {round}: NET RECOVER after probe failed ({err})"
+                        ));
                     }
                     self.console
                         .settle(self.profile.recover_settle_ms as u64)
@@ -588,7 +607,8 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 ctx_set_u32(context, "round", round.saturating_add(1))
             }
             "evaluate_results" => {
-                let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
+                let pass_zero =
+                    self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
                 let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
                 let observed_scan_activity =
                     self.total_scan_zero_events > 0 || self.total_scan_nonzero_events > 0;
@@ -598,8 +618,8 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 // Invariant: "ready" is authoritative for this diagnostic. SSID
                 // evidence is only required when a discovery cycle actually ran.
                 let require_ssid_evidence = observed_scan_activity || self.ready_rounds == 0;
-                let pass_ssid =
-                    !require_ssid_evidence || self.ssid_seen_rounds >= self.profile.min_ssid_seen_rounds;
+                let pass_ssid = !require_ssid_evidence
+                    || self.ssid_seen_rounds >= self.profile.min_ssid_seen_rounds;
                 let passed = pass_zero && pass_ready && pass_ssid;
 
                 let mut failures = Vec::new();
@@ -740,7 +760,10 @@ mod tests {
             parse_scan_done_count("upload_http: event scan_done status=0 count=0 scan_id=42"),
             Some(0)
         );
-        assert_eq!(parse_scan_done_count("NET_STATUS {\"state\":\"Ready\"}"), None);
+        assert_eq!(
+            parse_scan_done_count("NET_STATUS {\"state\":\"Ready\"}"),
+            None
+        );
     }
 
     #[test]
