@@ -7,6 +7,8 @@ pre-commit:
       stage_fixed: true
     markdown-links:
       run: scripts/ci/check_markdown_links.sh
+    secrets:
+      run: scripts/ci/check_secrets.sh --staged
     host-tools-clippy:
       glob: "{tools/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
       run: scripts/ci/lint_host_tools.sh
