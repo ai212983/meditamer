@@ -187,68 +187,108 @@ where
         return;
     }
 
-    let mut err_row0 = [0i16; MAX_ATKINSON_WIDTH + 4];
-    let mut err_row1 = [0i16; MAX_ATKINSON_WIDTH + 4];
-    let mut err_row2 = [0i16; MAX_ATKINSON_WIDTH + 4];
+    let mut dither = AtkinsonDither::new(width, height, seed, w);
 
     for y in 0..height {
         if (y & 1) == 0 {
-            let mut x = 0usize;
-            while x < w {
-                let xi = x + 2;
-                let base = sample_shanshui_ink_u8(x as i32, y, width, height, seed) as i16;
-                let ink = (base + err_row0[xi]).clamp(0, 255);
-                let quantized = if ink >= 142 { 255i16 } else { 0i16 };
-
-                if quantized != 0 {
-                    put_black_pixel(x as i32, y);
-                }
-
-                let error = ink - quantized;
-                if error != 0 {
-                    let e = error >> 4;
-                    atkinson_add(&mut err_row0[xi + 1], e);
-                    atkinson_add(&mut err_row0[xi + 2], e);
-                    atkinson_add(&mut err_row1[xi - 1], e);
-                    atkinson_add(&mut err_row1[xi], e);
-                    atkinson_add(&mut err_row1[xi + 1], e);
-                    atkinson_add(&mut err_row2[xi], e);
-                }
-
-                x += 1;
-            }
+            dither.scan_row_forward(y, &mut put_black_pixel);
         } else {
-            let mut x = w;
-            while x > 0 {
-                x -= 1;
-                let xi = x + 2;
-                let base = sample_shanshui_ink_u8(x as i32, y, width, height, seed) as i16;
-                let ink = (base + err_row0[xi]).clamp(0, 255);
-                let quantized = if ink >= 142 { 255i16 } else { 0i16 };
+            dither.scan_row_reverse(y, &mut put_black_pixel);
+        }
+        dither.advance_rows();
+    }
+}
 
-                if quantized != 0 {
-                    put_black_pixel(x as i32, y);
-                }
+struct AtkinsonDither {
+    width: i32,
+    height: i32,
+    seed: u32,
+    row_width: usize,
+    err_row0: [i16; MAX_ATKINSON_WIDTH + 4],
+    err_row1: [i16; MAX_ATKINSON_WIDTH + 4],
+    err_row2: [i16; MAX_ATKINSON_WIDTH + 4],
+}
 
-                let error = ink - quantized;
-                if error != 0 {
-                    let e = error >> 4;
-                    atkinson_add(&mut err_row0[xi - 1], e);
-                    atkinson_add(&mut err_row0[xi - 2], e);
-                    atkinson_add(&mut err_row1[xi + 1], e);
-                    atkinson_add(&mut err_row1[xi], e);
-                    atkinson_add(&mut err_row1[xi - 1], e);
-                    atkinson_add(&mut err_row2[xi], e);
-                }
+impl AtkinsonDither {
+    fn new(width: i32, height: i32, seed: u32, row_width: usize) -> Self {
+        Self {
+            width,
+            height,
+            seed,
+            row_width,
+            err_row0: [0; MAX_ATKINSON_WIDTH + 4],
+            err_row1: [0; MAX_ATKINSON_WIDTH + 4],
+            err_row2: [0; MAX_ATKINSON_WIDTH + 4],
+        }
+    }
+
+    fn scan_row_forward<F>(&mut self, y: i32, put_black_pixel: &mut F)
+    where
+        F: FnMut(i32, i32),
+    {
+        let mut x = 0usize;
+        while x < self.row_width {
+            let xi = x + 2;
+            let (ink, quantized) = self.quantize_pixel(x as i32, y, self.err_row0[xi]);
+            if quantized != 0 {
+                put_black_pixel(x as i32, y);
+            }
+
+            let error = ink - quantized;
+            if error != 0 {
+                let e = error >> 4;
+                atkinson_add(&mut self.err_row0[xi + 1], e);
+                atkinson_add(&mut self.err_row0[xi + 2], e);
+                atkinson_add(&mut self.err_row1[xi - 1], e);
+                atkinson_add(&mut self.err_row1[xi], e);
+                atkinson_add(&mut self.err_row1[xi + 1], e);
+                atkinson_add(&mut self.err_row2[xi], e);
+            }
+            x += 1;
+        }
+    }
+
+    fn scan_row_reverse<F>(&mut self, y: i32, put_black_pixel: &mut F)
+    where
+        F: FnMut(i32, i32),
+    {
+        let mut x = self.row_width;
+        while x > 0 {
+            x -= 1;
+            let xi = x + 2;
+            let (ink, quantized) = self.quantize_pixel(x as i32, y, self.err_row0[xi]);
+            if quantized != 0 {
+                put_black_pixel(x as i32, y);
+            }
+
+            let error = ink - quantized;
+            if error != 0 {
+                let e = error >> 4;
+                atkinson_add(&mut self.err_row0[xi - 1], e);
+                atkinson_add(&mut self.err_row0[xi - 2], e);
+                atkinson_add(&mut self.err_row1[xi + 1], e);
+                atkinson_add(&mut self.err_row1[xi], e);
+                atkinson_add(&mut self.err_row1[xi - 1], e);
+                atkinson_add(&mut self.err_row2[xi], e);
             }
         }
+    }
 
+    #[inline]
+    fn quantize_pixel(&self, x: i32, y: i32, accumulated_error: i16) -> (i16, i16) {
+        let base = sample_shanshui_ink_u8(x, y, self.width, self.height, self.seed) as i16;
+        let ink = (base + accumulated_error).clamp(0, 255);
+        let quantized = if ink >= 142 { 255i16 } else { 0i16 };
+        (ink, quantized)
+    }
+
+    fn advance_rows(&mut self) {
         let mut i = 0usize;
-        let n = w + 4;
+        let n = self.row_width + 4;
         while i < n {
-            err_row0[i] = err_row1[i];
-            err_row1[i] = err_row2[i];
-            err_row2[i] = 0;
+            self.err_row0[i] = self.err_row1[i];
+            self.err_row1[i] = self.err_row2[i];
+            self.err_row2[i] = 0;
             i += 1;
         }
     }
