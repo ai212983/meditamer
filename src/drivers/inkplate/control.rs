@@ -138,5 +138,5 @@ fn touch_presence_count(bit_count: u8, coord_count: u8) -> u8 {
     bit_count.max(coord_count).min(2)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;

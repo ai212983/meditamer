@@ -148,15 +148,12 @@ async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<Sd
         .saturating_sub(started_at.elapsed().as_millis())
         .max(1);
 
-    match with_timeout(
+    with_timeout(
         Duration::from_millis(remaining_ms),
         SD_UPLOAD_RESULTS.receive(),
     )
     .await
-    {
-        Ok(result) => Some(result),
-        Err(_) => None,
-    }
+    .ok()
 }
 
 fn phase_for_command(command: &SdUploadCommand) -> telemetry::SdUploadRoundtripPhase {

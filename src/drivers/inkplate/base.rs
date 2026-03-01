@@ -153,13 +153,13 @@ where
     fn pattern_pixel_is_black(pattern: TestPattern, x: usize, y: usize) -> bool {
         match pattern {
             TestPattern::CheckerboardDiagonals => {
-                let checker = ((x / 24) + (y / 24)) % 2 == 0;
+                let checker = ((x / 24) + (y / 24)).is_multiple_of(2);
                 let diag_a = x == y;
                 let diag_b = x + y == E_INK_WIDTH - 1;
                 checker || diag_a || diag_b
             }
-            TestPattern::VerticalBars => (x / 50) % 2 == 0,
-            TestPattern::HorizontalBars => (y / 50) % 2 == 0,
+            TestPattern::VerticalBars => (x / 50).is_multiple_of(2),
+            TestPattern::HorizontalBars => (y / 50).is_multiple_of(2),
             TestPattern::SolidBlack => true,
             TestPattern::SolidWhite => false,
         }

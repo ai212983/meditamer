@@ -93,7 +93,7 @@ impl AppStateEngine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::super::{events::AppStateCommand, types::*};
     use super::*;

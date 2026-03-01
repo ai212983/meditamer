@@ -26,7 +26,7 @@ mod logging;
 mod power;
 #[cfg(not(feature = "asset-upload-http"))]
 mod receive;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;
 mod upload;
 #[cfg(feature = "asset-upload-http")]

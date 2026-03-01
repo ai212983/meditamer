@@ -2003,7 +2003,7 @@ fn active_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
 }
 
 fn directed_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
-    active_scan_timeout_ms(policy).min(8_000).max(3_000)
+    active_scan_timeout_ms(policy).clamp(3_000, 8_000)
 }
 
 fn passive_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
@@ -2019,7 +2019,7 @@ fn passive_scan_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
 }
 
 fn zero_discovery_probe_timeout_ms(policy: WifiRuntimePolicy) -> u64 {
-    active_scan_timeout_ms(policy).min(6_000).max(2_500)
+    active_scan_timeout_ms(policy).clamp(2_500, 6_000)
 }
 
 fn zero_discovery_probe_budget_ms(policy: WifiRuntimePolicy, full_channel: bool) -> u64 {

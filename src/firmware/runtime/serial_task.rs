@@ -696,5 +696,5 @@ async fn write_telemetry_status_line(uart: &mut SerialUart) {
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;

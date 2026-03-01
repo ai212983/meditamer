@@ -121,7 +121,7 @@ fn checksum8(bytes: &[u8]) -> u8 {
     acc
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::*;
 

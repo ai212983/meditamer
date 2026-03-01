@@ -1,4 +1,4 @@
-use super::super::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
+use super::super::super::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
 use super::events::pending_release_matches_swipe;
 use super::{PendingSwipeRelease, SwipePoint};
 

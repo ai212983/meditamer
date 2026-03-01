@@ -6,7 +6,7 @@ mod flow;
 mod render;
 mod swipe;
 mod swipe_event;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;
 
 pub(crate) use render::render_touch_wizard_waiting_screen;

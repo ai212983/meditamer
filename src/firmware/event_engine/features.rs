@@ -293,5 +293,5 @@ fn build_candidate_assessment(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;

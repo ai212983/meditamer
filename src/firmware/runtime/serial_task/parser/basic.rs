@@ -575,7 +575,7 @@ pub(super) fn parse_sdprobe_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"SDPROBE"
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::*;
 

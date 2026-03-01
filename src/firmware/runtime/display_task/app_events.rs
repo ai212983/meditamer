@@ -163,7 +163,7 @@ async fn handle_battery_tick_event(
 }
 
 async fn handle_time_sync_event(
-    cmd: crate::firmware::types::SetTimeSyncCommand,
+    cmd: crate::firmware::types::TimeSyncCommand,
     context: &mut DisplayContext,
     state: &mut DisplayLoopState,
     upload_enabled: bool,

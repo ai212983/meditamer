@@ -4,7 +4,7 @@ pub(crate) mod events;
 pub(crate) mod machine;
 pub(crate) mod snapshot;
 pub(crate) mod store;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;
 pub(crate) mod types;
 
