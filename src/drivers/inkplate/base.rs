@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    DelayOps, I2cOps, InkplateHal, InkplateHalError, Ordering, PinMode, ProbeStatus, Result,
+    TestPattern, BUZZ_EN, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BW, FRAMEBUFFER_BYTES,
+    FRAMEBUFFER_TAKEN, FRONTLIGHT_EN, GPIO0_ENABLE, INT1_LSM, INT2_LSM, INT_APDS, IO_EXT_ADDR,
+    IO_INT_ADDR, PWRUP, SD_PMOS_PIN, TOUCHSCREEN_EN, TOUCHSCREEN_RST, TPS65186_ADDR, VCOM, WAKEUP,
+};
 
 impl<I2C, D> InkplateHal<I2C, D>
 where
