@@ -1,4 +1,4 @@
-use super::*;
+use super::{sqrt_fx, Fx, FX_ZERO};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vec2Fx {

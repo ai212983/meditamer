@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    blue_noise_threshold_u8, Fx, Vec2Fx, FX_40, FX_EPSILON, FX_HALF, FX_HUNDRED, FX_ONE, FX_PI,
+    FX_SIX, FX_TAU, FX_THREE, FX_TWO, FX_ZERO, NOISE_ROT_COS, NOISE_ROT_SIN,
+};
 use fixed_sqrt::FixedSqrt;
 
 pub(super) fn blue_noise_fbm(mut p: Vec2Fx) -> Fx {

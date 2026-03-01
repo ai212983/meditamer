@@ -1,5 +1,13 @@
-use super::*;
 use embedded_graphics::pixelcolor::BinaryColor;
+
+use super::{
+    DitherMode, Fx, MarblingScene, RenderMode, RgssMode, Size, Vec2Fx, BAYER_4X4, BLUE_NOISE_32X32,
+    BLUE_NOISE_600, BLUE_NOISE_600_HEIGHT, BLUE_NOISE_600_WIDTH, BLUE_NOISE_SIDE,
+    DEFAULT_GEN_DENSITY, DEFAULT_GEN_ENTROPY, DEFAULT_GEN_FLOW, FX_0_05, FX_0_1, FX_0_15, FX_0_2,
+    FX_0_3, FX_0_45, FX_0_55, FX_0_9, FX_150, FX_20, FX_40, FX_EIGHT, FX_EPSILON, FX_FIFTEEN,
+    FX_HALF, FX_HUNDRED, FX_LUMA_B, FX_LUMA_G, FX_LUMA_R, FX_ONE, FX_PI, FX_SIX, FX_TAU, FX_THREE,
+    FX_TWO, FX_ZERO, NOISE_ROT_COS, NOISE_ROT_SIN,
+};
 
 mod noise;
 use noise::Mulberry32;
