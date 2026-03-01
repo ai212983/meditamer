@@ -220,53 +220,72 @@ impl MarblingScene {
         let mut gray = self.paper_luma;
 
         for op in self.ops.iter().rev() {
-            match *op {
-                Operator::Drop(drop) => {
-                    let center = Vec2Fx::new(drop.center.x * self.aspect, drop.center.y);
-                    let v = p - center;
-                    let dist_sq = v.norm2();
-                    let r_sq = drop.radius * drop.radius;
-
-                    if dist_sq < r_sq {
-                        if drop.ink_on {
-                            gray = shade_black_drop(self, p, center, drop.radius, dist_sq);
-                        } else {
-                            gray = self.paper_luma;
-                        }
-                        break;
-                    }
-
-                    if dist_sq > FX_EPSILON {
-                        let inner = (FX_ONE - (r_sq / dist_sq)).max(FX_ZERO);
-                        let factor = sqrt_fx(inner);
-                        p = center + v * factor;
-                    }
-                }
+            let should_break = match *op {
+                Operator::Drop(drop) => self.apply_drop_operator(drop, &mut p, &mut gray),
                 Operator::Swirl(swirl) => {
-                    let center = Vec2Fx::new(swirl.center.x * self.aspect, swirl.center.y);
-                    let v = p - center;
-                    let dist = v.norm();
-                    if dist < swirl.radius {
-                        let pct = (swirl.radius - dist) / swirl.radius;
-                        let angle = swirl.strength * pct * pct;
-                        p = center + rotate(v, -angle);
-                    }
+                    self.apply_swirl_operator(swirl, &mut p);
+                    false
                 }
                 Operator::FlowComb(comb) => {
-                    let center = Vec2Fx::new(comb.center.x * self.aspect, comb.center.y);
-                    let v = p - center;
-                    let perp = Vec2Fx::new(-comb.dir.y, comb.dir.x);
-                    let dist = v.dot(perp).abs();
-                    if dist < comb.radius {
-                        let pct = (comb.radius - dist) / comb.radius;
-                        let disp = comb.strength * pct * pct;
-                        p = p - comb.dir * disp;
-                    }
+                    self.apply_flow_comb_operator(comb, &mut p);
+                    false
                 }
+            };
+            if should_break {
+                break;
             }
         }
 
-        // Keep untouched paper fully white. Grain is only applied to inked regions.
+        self.finalize_inverse_luma(st, gray)
+    }
+
+    fn apply_drop_operator(&self, drop: DropOperator, p: &mut Vec2Fx, gray: &mut Fx) -> bool {
+        let center = Vec2Fx::new(drop.center.x * self.aspect, drop.center.y);
+        let v = *p - center;
+        let dist_sq = v.norm2();
+        let r_sq = drop.radius * drop.radius;
+
+        if dist_sq < r_sq {
+            *gray = if drop.ink_on {
+                shade_black_drop(self, *p, center, drop.radius, dist_sq)
+            } else {
+                self.paper_luma
+            };
+            return true;
+        }
+
+        if dist_sq > FX_EPSILON {
+            let inner = (FX_ONE - (r_sq / dist_sq)).max(FX_ZERO);
+            let factor = sqrt_fx(inner);
+            *p = center + v * factor;
+        }
+        false
+    }
+
+    fn apply_swirl_operator(&self, swirl: SwirlOperator, p: &mut Vec2Fx) {
+        let center = Vec2Fx::new(swirl.center.x * self.aspect, swirl.center.y);
+        let v = *p - center;
+        let dist = v.norm();
+        if dist < swirl.radius {
+            let pct = (swirl.radius - dist) / swirl.radius;
+            let angle = swirl.strength * pct * pct;
+            *p = center + rotate(v, -angle);
+        }
+    }
+
+    fn apply_flow_comb_operator(&self, comb: FlowCombOperator, p: &mut Vec2Fx) {
+        let center = Vec2Fx::new(comb.center.x * self.aspect, comb.center.y);
+        let v = *p - center;
+        let perp = Vec2Fx::new(-comb.dir.y, comb.dir.x);
+        let dist = v.dot(perp).abs();
+        if dist < comb.radius {
+            let pct = (comb.radius - dist) / comb.radius;
+            let disp = comb.strength * pct * pct;
+            *p = *p - comb.dir * disp;
+        }
+    }
+
+    fn finalize_inverse_luma(&self, st: Vec2Fx, gray: Fx) -> Fx {
         if gray < self.paper_luma - FX_EPSILON {
             let grain = random01(st * self.grain_scale) * self.grain_strength;
             (gray - grain).clamp(FX_ZERO, FX_ONE)
