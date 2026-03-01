@@ -92,6 +92,22 @@ Rust-analyzer baseline lint:
 scripts/ci/lint_rust_analyzer.sh
 ```
 
+SonarQube scan (local server):
+
+```bash
+scripts/ci/sonar_scan.sh
+```
+
+Optional SonarQube env vars:
+
+- `SONAR_TOKEN` (required; auto-loaded from `.env.local` when present)
+- `SONAR_HOST_URL` (default `http://localhost:9000`)
+- `SONAR_PROJECT_KEY` (default `Meditamer`)
+- `SONAR_POLL_CE` (`1` default; set `0` to skip waiting for CE completion)
+- `SONAR_CE_TIMEOUT_SEC` (default `300`)
+- `SONAR_CE_POLL_INTERVAL_SEC` (default `2`)
+- `SONAR_ENV_FILE` (optional override for env file path; default `.env.local`)
+
 Notes for this workspace:
 
 - The firmware is `no_std` with heavy feature/cfg gating; analyzer results can include inactive-code and unresolved-import noise outside active build paths.
