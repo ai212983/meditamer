@@ -1,6 +1,6 @@
 # Reliability Issues (Current)
 
-As of: 2026-02-27
+As of: 2026-03-01
 
 Primary audience: LLM agents and automated workflow runners.
 Secondary audience: human developers.
@@ -135,6 +135,26 @@ It is ordered by operational impact.
   - Add clear deployment profile guidance and optional credential-protection strategy.
 - Acceptance criteria:
   - Non-dev deployment path prevents unauthenticated mutating operations.
+
+## REL-008: Zero-Discovery Regressions from Scan/Orchestration Timing Drift
+
+- Severity: high
+- Status: partially mitigated
+- Impact:
+  - Discovery can regress to zero AP visibility and block acceptance/throughput runs.
+  - False negatives can be introduced by host workflow timing/command pressure.
+- Evidence:
+  - Dedicated root-cause and guardrails note:
+    - [docs/development/wifi-discovery-regression-guardrails.md](wifi-discovery-regression-guardrails.md)
+  - Discovery-debug and acceptance flow now explicitly separate discovery proof from throughput profiling:
+    - [docs/development/README.md](README.md)
+- Mitigation path:
+  - Keep `wifi-discovery-debug` first after boot and require non-zero scan + SSID visibility.
+  - Preserve timeout shaping aligned to scan dwell and recovery budgets.
+  - Enforce single-workflow-per-device and unique per-run logs.
+- Acceptance criteria:
+  - Repeated discovery-debug runs show zero zero-discovery rounds under normal AP conditions.
+  - Acceptance (1-cycle, 3-cycle, bounded soak) remains stable after discovery proof.
 
 ## Suggested Next Execution Order
 

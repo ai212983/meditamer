@@ -12,6 +12,7 @@ The firmware now targets `esp-hal` (`xtensa-esp32-none-elf`) as the primary and 
 - `sound.md`: Sound functionality and behavior.
 - `hardware-test-matrix.md`: Hardware testing matrices.
 - `reliability-issues.md`: Current ranked reliability risks, evidence, and mitigation gates.
+- `wifi-discovery-regression-guardrails.md`: Why zero-discovery can regress and how to prevent it.
 - `troubleshoot-agent.md`: Agent-first runbook for the Serverless Workflow troubleshooting script.
 
 ## Git Hooks
@@ -49,6 +50,7 @@ Current pre-commit hook:
 - Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
 - Auto-stages formatter edits (`stage_fixed: true`) so commits include rustfmt output.
 - Validates links in staged Markdown files via `scripts/ci/check_markdown_links.sh`.
+- Scans staged files for leaked Wi-Fi credentials via `scripts/ci/check_secrets.sh --staged`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
 - Runs host-tooling clippy via `scripts/ci/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
 
@@ -63,6 +65,8 @@ Current pre-push hook:
 
 - Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
 - Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
+
+CI includes a dedicated secret-scan workflow (`.github/workflows/secret_scan.yml`) that runs `scripts/ci/check_secrets.sh` on pull requests and pushes to `master`.
 
 Code analysis lint command (report mode by default):
 
@@ -506,7 +510,20 @@ Credential persistence:
 - On boot, firmware attempts to load `/config/wifi.cfg` before waiting for runtime `NETCFG SET`.
 - This survives reboot and firmware reflashes (as long as SD card content is retained).
 
-Wi-Fi acceptance helper (hard-cut):
+Local Wi-Fi credentials for hardware scripts:
+
+1. Copy `.env.example` to `.env.local`.
+2. Set `HOSTCTL_NET_SSID` and `HOSTCTL_NET_PASSWORD` in `.env.local`.
+3. Keep `.env.local` untracked (already gitignored).
+
+The Wi-Fi hardware wrappers auto-load `.env.local`:
+
+```bash
+cp .env.example .env.local
+scripts/tests/hw/test_wifi_acceptance.sh
+```
+
+Wi-Fi acceptance helper (hard-cut, explicit overrides):
 
 ```bash
 HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
@@ -555,7 +572,7 @@ scripts/assets/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin
 
 Optional upload helper tuning:
 
-- `HOSTCTL_UPLOAD_CHUNK_SIZE` controls chunk size in bytes for `/upload_chunk` fallback flow (default `8192`).
+- `HOSTCTL_UPLOAD_CHUNK_SIZE` controls chunk size in bytes for `/upload_chunk` fallback flow (default `49152`).
 
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
@@ -589,7 +606,7 @@ Wi-Fi zero-discovery diagnostic workflow:
 HOSTCTL_NET_PORT=/dev/cu.usbserial-540 \
 HOSTCTL_NET_BAUD=115200 \
 HOSTCTL_NET_SSID='<wifi-ssid>' \
-HOSTCTL_NET_PASSWORD='***' \
+HOSTCTL_NET_PASSWORD='<wifi-password>' \
 HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_DISCOVERY_PROFILE_PATH=./tools/hostctl/scenarios/wifi-discovery-debug.default.toml \
 HOSTCTL_NET_LOG_PATH=./logs/wifi_discovery_debug_manual.log \
@@ -609,6 +626,8 @@ scripts/tests/hw/test_wifi_discovery_debug.sh
   - non-zero scan events
   - `no_ap_found` disconnect events
   - target SSID visibility.
+- root-cause and guardrails reference:
+  `docs/development/wifi-discovery-regression-guardrails.md`.
 
 ## Hostctl Workflow Authoring
 
