@@ -16,6 +16,7 @@ use crate::{
     logging::{ensure_parent_dir, Logger},
     scenarios::{execute_workflow, load_workflow, WorkflowRuntime},
     serial_console::{AckStatus, SerialConsole},
+    workflows_common::repo_root,
 };
 
 #[derive(Clone, Debug)]
@@ -40,15 +41,6 @@ pub struct SdcardHwOptions {
     pub build_mode: String,
     pub output_path: Option<PathBuf>,
     pub suite: SdcardSuite,
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("tools dir")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
 }
 
 fn open_console(output_path: &Path) -> Result<SerialConsole> {

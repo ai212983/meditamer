@@ -3,6 +3,7 @@ mod logging;
 mod port_detect;
 mod scenarios;
 mod serial_console;
+mod workflows_common;
 mod workflows_runtime_modes;
 mod workflows_sdcard;
 #[cfg(test)]
