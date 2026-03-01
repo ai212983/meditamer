@@ -50,55 +50,27 @@ async fn write_data_at(
                 break;
             }
             let lba = cluster_to_lba(volume, cluster)? + sector_off as u32;
-            let remaining = data.len() - data_idx;
-            if byte_in_sector == 0 {
-                let full_sectors = remaining / SD_SECTOR_SIZE;
-                if full_sectors >= 2 {
-                    // Opportunistically extend full-sector bursts across
-                    // physically contiguous FAT clusters (n, n+1, ...). This
-                    // keeps correctness under fragmentation while unlocking
-                    // multi-block throughput on contiguous files.
-                    let contiguous_sectors = contiguous_full_sector_run(
-                        sd,
-                        volume,
-                        cluster,
-                        sector_off,
-                        full_sectors,
-                    )
-                    .await?;
-                    if contiguous_sectors >= 2 {
-                        let write_bytes = contiguous_sectors * SD_SECTOR_SIZE;
-                        sd.write_sectors_contiguous(lba, &data[data_idx..data_idx + write_bytes])
-                            .await?;
-                        data_idx += write_bytes;
-                        let (mut advanced_cluster, next_sector_off) = advance_cluster_sector_position(
-                            sd,
-                            volume,
-                            cluster,
-                            sector_off,
-                            contiguous_sectors,
-                        )
-                        .await?;
-                        if next_sector_off == 0 && data_idx < data.len() {
-                            advanced_cluster = next_cluster(sd, volume, advanced_cluster)
-                                .await?
-                                .ok_or(SdFatError::ClusterChainTooLong)?;
-                        }
-                        cluster = advanced_cluster;
-                        cluster_offset = next_sector_off * SD_SECTOR_SIZE;
-                        continue 'cluster_loop;
-                    }
-                }
+            if let Some((next_cluster_value, next_cluster_offset, next_data_idx)) =
+                try_write_contiguous_burst(
+                    sd,
+                    volume,
+                    cluster,
+                    sector_off,
+                    lba,
+                    byte_in_sector,
+                    data,
+                    data_idx,
+                )
+                .await?
+            {
+                cluster = next_cluster_value;
+                cluster_offset = next_cluster_offset;
+                data_idx = next_data_idx;
+                continue 'cluster_loop;
             }
 
-            let write_len = cmp::min(remaining, SD_SECTOR_SIZE - byte_in_sector);
-            let mut sector = [0u8; SD_SECTOR_SIZE];
-            if byte_in_sector != 0 || write_len < SD_SECTOR_SIZE {
-                sd.read_sector(lba, &mut sector).await?;
-            }
-            sector[byte_in_sector..byte_in_sector + write_len]
-                .copy_from_slice(&data[data_idx..data_idx + write_len]);
-            sd.write_sector(lba, &sector).await?;
+            let write_len =
+                write_data_sector_chunk(sd, lba, byte_in_sector, &data[data_idx..]).await?;
             data_idx += write_len;
             byte_in_sector = 0;
             sector_off += 1;
@@ -113,6 +85,72 @@ async fn write_data_at(
     }
 
     Ok(())
+}
+
+async fn try_write_contiguous_burst(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    cluster: u32,
+    sector_off: usize,
+    lba: u32,
+    byte_in_sector: usize,
+    data: &[u8],
+    data_idx: usize,
+) -> Result<Option<(u32, usize, usize)>, SdFatError> {
+    if byte_in_sector != 0 {
+        return Ok(None);
+    }
+
+    let remaining = data.len().saturating_sub(data_idx);
+    let full_sectors = remaining / SD_SECTOR_SIZE;
+    if full_sectors < 2 {
+        return Ok(None);
+    }
+
+    // Opportunistically extend full-sector bursts across physically contiguous
+    // FAT clusters (n, n+1, ...). This keeps correctness under fragmentation
+    // while unlocking multi-block throughput on contiguous files.
+    let contiguous_sectors =
+        contiguous_full_sector_run(sd, volume, cluster, sector_off, full_sectors).await?;
+    if contiguous_sectors < 2 {
+        return Ok(None);
+    }
+
+    let write_bytes = contiguous_sectors * SD_SECTOR_SIZE;
+    sd.write_sectors_contiguous(lba, &data[data_idx..data_idx + write_bytes])
+        .await?;
+
+    let next_data_idx = data_idx + write_bytes;
+    let (mut next_cluster_value, next_sector_off) =
+        advance_cluster_sector_position(sd, volume, cluster, sector_off, contiguous_sectors).await?;
+
+    if next_sector_off == 0 && next_data_idx < data.len() {
+        next_cluster_value = next_cluster(sd, volume, next_cluster_value)
+            .await?
+            .ok_or(SdFatError::ClusterChainTooLong)?;
+    }
+
+    Ok(Some((
+        next_cluster_value,
+        next_sector_off * SD_SECTOR_SIZE,
+        next_data_idx,
+    )))
+}
+
+async fn write_data_sector_chunk(
+    sd: &mut SdCardProbe<'_>,
+    lba: u32,
+    byte_in_sector: usize,
+    src: &[u8],
+) -> Result<usize, SdFatError> {
+    let write_len = cmp::min(src.len(), SD_SECTOR_SIZE - byte_in_sector);
+    let mut sector = [0u8; SD_SECTOR_SIZE];
+    if byte_in_sector != 0 || write_len < SD_SECTOR_SIZE {
+        sd.read_sector(lba, &mut sector).await?;
+    }
+    sector[byte_in_sector..byte_in_sector + write_len].copy_from_slice(&src[..write_len]);
+    sd.write_sector(lba, &sector).await?;
+    Ok(write_len)
 }
 
 async fn contiguous_full_sector_run(
@@ -210,16 +248,7 @@ async fn write_zeroes_at(
             }
             let lba = cluster_to_lba(volume, cluster)? + sector_off as u32;
             let chunk = cmp::min(remaining, SD_SECTOR_SIZE - byte_in_sector);
-            if byte_in_sector == 0 && chunk == SD_SECTOR_SIZE {
-                sd.write_sector(lba, &zero).await?;
-            } else {
-                let mut sector = [0u8; SD_SECTOR_SIZE];
-                sd.read_sector(lba, &mut sector).await?;
-                for byte in sector[byte_in_sector..byte_in_sector + chunk].iter_mut() {
-                    *byte = 0;
-                }
-                sd.write_sector(lba, &sector).await?;
-            }
+            zero_sector_chunk(sd, lba, byte_in_sector, chunk, &zero).await?;
             remaining -= chunk;
             byte_in_sector = 0;
         }
@@ -230,6 +259,27 @@ async fn write_zeroes_at(
                 .ok_or(SdFatError::ClusterChainTooLong)?;
         }
     }
+    Ok(())
+}
+
+async fn zero_sector_chunk(
+    sd: &mut SdCardProbe<'_>,
+    lba: u32,
+    byte_in_sector: usize,
+    chunk: usize,
+    zero: &[u8; SD_SECTOR_SIZE],
+) -> Result<(), SdFatError> {
+    if byte_in_sector == 0 && chunk == SD_SECTOR_SIZE {
+        sd.write_sector(lba, zero).await?;
+        return Ok(());
+    }
+
+    let mut sector = [0u8; SD_SECTOR_SIZE];
+    sd.read_sector(lba, &mut sector).await?;
+    for byte in sector[byte_in_sector..byte_in_sector + chunk].iter_mut() {
+        *byte = 0;
+    }
+    sd.write_sector(lba, &sector).await?;
     Ok(())
 }
 

@@ -44,6 +44,11 @@ const HTTP_CHUNK_BUF_TARGET: usize = HTTP_CHUNK_BUF_FALLBACK;
 const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
 const DHCP_POLL_MS: u64 = 250;
 
+static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
+static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
+static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
+static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
+
 enum HttpBuffer<const N: usize> {
     #[cfg(feature = "psram-alloc")]
     Psram(psram::LargeByteBuffer),
@@ -126,16 +131,62 @@ impl HttpServerLoopState {
     }
 }
 
-pub(super) async fn run_http_server(stack: Stack<'static>) {
-    static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
-    static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
-    static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
-    static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
+struct HttpServerBuffers {
+    rx: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
+    tx: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
+    header: Option<HttpBuffer<HTTP_HEADER_MAX>>,
+    chunk: Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>>,
+}
 
-    let mut rx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
-    let mut tx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
-    let mut header_buffer: Option<HttpBuffer<HTTP_HEADER_MAX>> = None;
-    let mut chunk_buffer: Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>> = None;
+impl HttpServerBuffers {
+    fn new() -> Self {
+        Self {
+            rx: None,
+            tx: None,
+            header: None,
+            chunk: None,
+        }
+    }
+
+    fn ensure_initialized(&mut self) {
+        if self.rx.is_some() {
+            return;
+        }
+
+        self.rx = Some(init_http_buffer(&RX_BUFFER, HTTP_RX_BUF_TARGET, "http_rx"));
+        self.tx = Some(init_http_buffer(&TX_BUFFER, HTTP_TX_BUF_TARGET, "http_tx"));
+        self.header = Some(init_http_buffer(
+            &HEADER_BUFFER,
+            HTTP_HEADER_MAX,
+            "http_header",
+        ));
+        self.chunk = Some(init_http_buffer(
+            &CHUNK_BUFFER,
+            HTTP_CHUNK_BUF_TARGET,
+            "http_chunk",
+        ));
+        log_http_mem_diag("buffers_init");
+    }
+
+    fn borrow_mut(&mut self) -> Option<HttpServerBuffersMut<'_>> {
+        Some(HttpServerBuffersMut {
+            rx: self.rx.as_mut()?,
+            tx: self.tx.as_mut()?,
+            header: self.header.as_mut()?,
+            chunk: self.chunk.as_mut()?,
+        })
+    }
+}
+
+struct HttpServerBuffersMut<'a> {
+    rx: &'a mut HttpBuffer<HTTP_RW_BUF_FALLBACK>,
+    tx: &'a mut HttpBuffer<HTTP_RW_BUF_FALLBACK>,
+    header: &'a mut HttpBuffer<HTTP_HEADER_MAX>,
+    chunk: &'a mut HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>,
+}
+
+pub(super) async fn run_http_server(stack: Stack<'static>) {
+    let mut buffers = HttpServerBuffers::new();
     let mut state = HttpServerLoopState::new();
     telemetry::set_upload_http_listener(false, None);
 
@@ -148,23 +199,9 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             continue;
         };
         log_listener_start(local_ipv4, &mut state);
-        ensure_http_buffers(
-            &mut rx_buffer,
-            &mut tx_buffer,
-            &mut header_buffer,
-            &mut chunk_buffer,
-            &RX_BUFFER,
-            &TX_BUFFER,
-            &HEADER_BUFFER,
-            &CHUNK_BUFFER,
-        );
+        buffers.ensure_initialized();
 
-        let (Some(rx_buffer), Some(tx_buffer), Some(header_buffer), Some(chunk_buffer)) = (
-            rx_buffer.as_mut(),
-            tx_buffer.as_mut(),
-            header_buffer.as_mut(),
-            chunk_buffer.as_mut(),
-        ) else {
+        let Some(buffers) = buffers.borrow_mut() else {
             telemetry::set_upload_http_listener(false, Some(local_ipv4));
             Timer::after(Duration::from_millis(250)).await;
             continue;
@@ -174,10 +211,10 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
             stack,
             &mut state,
             local_ipv4,
-            rx_buffer,
-            tx_buffer,
-            header_buffer,
-            chunk_buffer,
+            buffers.rx,
+            buffers.tx,
+            buffers.header,
+            buffers.chunk,
         )
         .await;
     }
@@ -270,35 +307,6 @@ fn log_listener_start(local_ipv4: [u8; 4], state: &mut HttpServerLoopState) {
         );
     }
     state.listening_logged = true;
-}
-
-fn ensure_http_buffers(
-    rx_buffer: &mut Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
-    tx_buffer: &mut Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
-    header_buffer: &mut Option<HttpBuffer<HTTP_HEADER_MAX>>,
-    chunk_buffer: &mut Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>>,
-    rx_cell: &'static StaticCell<[u8; HTTP_RW_BUF_FALLBACK]>,
-    tx_cell: &'static StaticCell<[u8; HTTP_RW_BUF_FALLBACK]>,
-    header_cell: &'static StaticCell<[u8; HTTP_HEADER_MAX]>,
-    chunk_cell: &'static StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]>,
-) {
-    if rx_buffer.is_some() {
-        return;
-    }
-
-    *rx_buffer = Some(init_http_buffer(rx_cell, HTTP_RX_BUF_TARGET, "http_rx"));
-    *tx_buffer = Some(init_http_buffer(tx_cell, HTTP_TX_BUF_TARGET, "http_tx"));
-    *header_buffer = Some(init_http_buffer(
-        header_cell,
-        HTTP_HEADER_MAX,
-        "http_header",
-    ));
-    *chunk_buffer = Some(init_http_buffer(
-        chunk_cell,
-        HTTP_CHUNK_BUF_TARGET,
-        "http_chunk",
-    ));
-    log_http_mem_diag("buffers_init");
 }
 
 async fn serve_connection_cycle(
