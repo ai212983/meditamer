@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    DelayOps, I2cOps, InkplateHal, PinMode, Result, BUZZ_EN, FRONTLIGHT_DIGIPOT_ADDR,
+    FRONTLIGHT_EN, IO_INT_ADDR, SD_PMOS_PIN, TPS65186_ADDR, WAKEUP,
+};
 
 mod sensors;
 mod touch;

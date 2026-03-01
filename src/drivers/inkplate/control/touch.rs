@@ -1,4 +1,13 @@
-use super::*;
+use super::super::{
+    DelayOps, I2cOps, InkplateHal, PinMode, Result, TouchInitStatus, TouchPoint, TouchSample,
+    E_INK_HEIGHT, E_INK_WIDTH, IO_EXT_ADDR, TOUCHSCREEN_ADDR, TOUCHSCREEN_EN, TOUCHSCREEN_RST,
+    TOUCH_GET_POWER_STATE_CMD, TOUCH_GET_X_RES_CMD, TOUCH_GET_Y_RES_CMD, TOUCH_HELLO_PACKET,
+    TOUCH_SOFT_RESET_CMD, TOUCH_SOFT_RESET_POLL_INTERVAL_MS, TOUCH_SOFT_RESET_TIMEOUT_MS,
+};
+use super::{
+    touch_presence_count, touch_raw_frame_has_contact, touch_raw_point_plausible,
+    TOUCH_RAW_EMPTY_RETRY_COUNT, TOUCH_RAW_EMPTY_RETRY_DELAY_MS,
+};
 
 impl<I2C, D> InkplateHal<I2C, D>
 where

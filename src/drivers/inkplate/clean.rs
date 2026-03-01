@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    DelayOps, GpioFast, I2cOps, InkplateHal, Result, CL_MASK, DATA_MASK, E_INK_HEIGHT, E_INK_WIDTH,
+};
 
 impl<I2C, D> InkplateHal<I2C, D>
 where
