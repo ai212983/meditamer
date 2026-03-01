@@ -1,4 +1,10 @@
-use super::*;
+use core::cmp::min;
+
+use super::{
+    assess_tap_candidate, compute_motion_features, CandidateAssessment, CandidateScore,
+    DispatchContext, EngineAction, EngineStateId, EngineTraceSample, EventDetected,
+    EventEngineConfig, EventKind, MotionFeatures, RejectReason, SensorFrame, TapHsm,
+};
 
 impl TapHsm {
     pub(super) fn new(config: &'static EventEngineConfig) -> Self {

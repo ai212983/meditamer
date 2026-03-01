@@ -1,5 +1,3 @@
-use core::cmp::min;
-
 use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
 use super::{
