@@ -198,86 +198,126 @@ async fn wait_for_start_request() -> (DiagKind, u8) {
 }
 
 async fn run_session(kind: DiagKind, targets: u8) -> SessionOutcome {
-    if let Some(interrupt) = poll_session_interrupt(kind, targets) {
-        return session_outcome_from_interrupt(interrupt);
+    if let Some(outcome) = session_interrupt_outcome(kind, targets) {
+        return outcome;
     }
-    if targets == 0 {
-        return SessionOutcome::Failed(CODE_INVALID_TARGETS);
-    }
-    if (targets & (TARGET_DISPLAY | TARGET_TOUCH | TARGET_IMU)) != 0 {
-        return SessionOutcome::Failed(CODE_UNSUPPORTED_TARGETS);
+    if let Err(code) = validate_targets(targets) {
+        return SessionOutcome::Failed(code);
     }
 
     set_status(STATE_RUNNING, STEP_START, CODE_OK, targets);
 
     if (targets & TARGET_SD) != 0 {
-        if let Some(interrupt) = poll_session_interrupt(kind, targets) {
-            return session_outcome_from_interrupt(interrupt);
-        }
-        set_status(STATE_RUNNING, STEP_SD_PROBE, CODE_OK, targets);
-        let probe = match send_sd_and_wait(SdCommand::Probe, kind, targets).await {
-            SdWaitOutcome::Result(result) => result,
-            SdWaitOutcome::Timeout => return SessionOutcome::Failed(CODE_SD_TIMEOUT),
-            SdWaitOutcome::Interrupted(interrupt) => {
-                return session_outcome_from_interrupt(interrupt);
-            }
-        };
-        if !probe.ok {
-            return SessionOutcome::Failed(CODE_SD_PROBE_FAILED);
-        }
-
-        if let Some(interrupt) = poll_session_interrupt(kind, targets) {
-            return session_outcome_from_interrupt(interrupt);
-        }
-        set_status(STATE_RUNNING, STEP_SD_RWVERIFY, CODE_OK, targets);
-        let verify = match send_sd_and_wait(
-            SdCommand::RwVerify {
-                lba: SD_DIAG_RWVERIFY_LBA,
-            },
-            kind,
-            targets,
-        )
-        .await
-        {
-            SdWaitOutcome::Result(result) => result,
-            SdWaitOutcome::Timeout => return SessionOutcome::Failed(CODE_SD_TIMEOUT),
-            SdWaitOutcome::Interrupted(interrupt) => {
-                return session_outcome_from_interrupt(interrupt);
-            }
-        };
-        if !verify.ok {
-            return SessionOutcome::Failed(CODE_SD_RWVERIFY_FAILED);
+        if let Some(outcome) = run_sd_checks(kind, targets).await {
+            return outcome;
         }
     }
 
     if (targets & TARGET_WIFI) != 0 {
-        if let Some(interrupt) = poll_session_interrupt(kind, targets) {
-            return session_outcome_from_interrupt(interrupt);
-        }
-        set_status(STATE_RUNNING, STEP_WIFI_READY, CODE_OK, targets);
-        let snapshot = crate::firmware::app_state::read_app_state_snapshot();
-        if !snapshot.services.upload_enabled {
-            return SessionOutcome::Failed(CODE_WIFI_DISABLED);
-        }
-
-        let mut elapsed_ms = 0u64;
-        while elapsed_ms < DIAG_WIFI_TIMEOUT_MS {
-            if let Some(interrupt) = poll_session_interrupt(kind, targets) {
-                return session_outcome_from_interrupt(interrupt);
-            }
-            if telemetry::snapshot().wifi_link_connected {
-                break;
-            }
-            let wait_ms = (DIAG_WIFI_TIMEOUT_MS - elapsed_ms).min(DIAG_POLL_MS);
-            Timer::after(Duration::from_millis(wait_ms)).await;
-            elapsed_ms = elapsed_ms.saturating_add(wait_ms);
-        }
-        if !telemetry::snapshot().wifi_link_connected {
-            return SessionOutcome::Failed(CODE_WIFI_NOT_READY);
+        if let Some(outcome) = run_wifi_check(kind, targets).await {
+            return outcome;
         }
     }
 
     SessionOutcome::Done(CODE_OK)
+}
+
+fn validate_targets(targets: u8) -> Result<(), u8> {
+    if targets == 0 {
+        return Err(CODE_INVALID_TARGETS);
+    }
+    if (targets & (TARGET_DISPLAY | TARGET_TOUCH | TARGET_IMU)) != 0 {
+        return Err(CODE_UNSUPPORTED_TARGETS);
+    }
+    Ok(())
+}
+
+fn session_interrupt_outcome(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+    poll_session_interrupt(kind, targets).map(session_outcome_from_interrupt)
+}
+
+async fn run_sd_checks(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+    if let Some(outcome) = session_interrupt_outcome(kind, targets) {
+        return Some(outcome);
+    }
+
+    set_status(STATE_RUNNING, STEP_SD_PROBE, CODE_OK, targets);
+    let probe = match sd_wait_result_or_outcome(SdCommand::Probe, kind, targets).await {
+        Ok(result) => result,
+        Err(outcome) => return Some(outcome),
+    };
+    if !probe.ok {
+        return Some(SessionOutcome::Failed(CODE_SD_PROBE_FAILED));
+    }
+
+    if let Some(outcome) = session_interrupt_outcome(kind, targets) {
+        return Some(outcome);
+    }
+
+    set_status(STATE_RUNNING, STEP_SD_RWVERIFY, CODE_OK, targets);
+    let verify = match sd_wait_result_or_outcome(
+        SdCommand::RwVerify {
+            lba: SD_DIAG_RWVERIFY_LBA,
+        },
+        kind,
+        targets,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(outcome) => return Some(outcome),
+    };
+    if !verify.ok {
+        return Some(SessionOutcome::Failed(CODE_SD_RWVERIFY_FAILED));
+    }
+
+    None
+}
+
+async fn sd_wait_result_or_outcome(
+    command: SdCommand,
+    kind: DiagKind,
+    targets: u8,
+) -> Result<SdResult, SessionOutcome> {
+    match send_sd_and_wait(command, kind, targets).await {
+        SdWaitOutcome::Result(result) => Ok(result),
+        SdWaitOutcome::Timeout => Err(SessionOutcome::Failed(CODE_SD_TIMEOUT)),
+        SdWaitOutcome::Interrupted(interrupt) => Err(session_outcome_from_interrupt(interrupt)),
+    }
+}
+
+async fn run_wifi_check(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+    if let Some(outcome) = session_interrupt_outcome(kind, targets) {
+        return Some(outcome);
+    }
+
+    set_status(STATE_RUNNING, STEP_WIFI_READY, CODE_OK, targets);
+    let snapshot = crate::firmware::app_state::read_app_state_snapshot();
+    if !snapshot.services.upload_enabled {
+        return Some(SessionOutcome::Failed(CODE_WIFI_DISABLED));
+    }
+
+    match wait_for_wifi_ready(kind, targets).await {
+        Ok(true) => None,
+        Ok(false) => Some(SessionOutcome::Failed(CODE_WIFI_NOT_READY)),
+        Err(outcome) => Some(outcome),
+    }
+}
+
+async fn wait_for_wifi_ready(kind: DiagKind, targets: u8) -> Result<bool, SessionOutcome> {
+    let mut elapsed_ms = 0u64;
+    while elapsed_ms < DIAG_WIFI_TIMEOUT_MS {
+        if let Some(outcome) = session_interrupt_outcome(kind, targets) {
+            return Err(outcome);
+        }
+        if telemetry::snapshot().wifi_link_connected {
+            return Ok(true);
+        }
+        let wait_ms = (DIAG_WIFI_TIMEOUT_MS - elapsed_ms).min(DIAG_POLL_MS);
+        Timer::after(Duration::from_millis(wait_ms)).await;
+        elapsed_ms = elapsed_ms.saturating_add(wait_ms);
+    }
+    Ok(telemetry::snapshot().wifi_link_connected)
 }
 
 async fn send_sd_and_wait(command: SdCommand, kind: DiagKind, targets: u8) -> SdWaitOutcome {
