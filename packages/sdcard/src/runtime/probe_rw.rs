@@ -114,6 +114,17 @@ where
             probe::SdProbeError::Cmd24Unexpected(r1) => {
                 esp_println::println!("sdprobe[{}]: not_detected cmd24_r1=0x{:02x}", reason, r1);
             }
+            probe::SdProbeError::Cmd25Unexpected(r1) => {
+                esp_println::println!("sdprobe[{}]: not_detected cmd25_r1=0x{:02x}", reason, r1);
+            }
+            probe::SdProbeError::Cmd13Unexpected(r1, status) => {
+                esp_println::println!(
+                    "sdprobe[{}]: not_detected cmd13_r1=0x{:02x} status=0x{:02x}",
+                    reason,
+                    r1,
+                    status
+                );
+            }
             probe::SdProbeError::NoResponse(cmd) => {
                 esp_println::println!("sdprobe[{}]: not_detected cmd{}_no_response", reason, cmd);
             }
@@ -141,6 +152,9 @@ where
             }
             probe::SdProbeError::WriteBusyTimeout => {
                 esp_println::println!("sdprobe[{}]: not_detected write_busy_timeout", reason);
+            }
+            probe::SdProbeError::WriteLengthInvalid(len) => {
+                esp_println::println!("sdprobe[{}]: not_detected write_len_invalid={}", reason, len);
             }
             probe::SdProbeError::NotInitialized => {
                 esp_println::println!("sdprobe[{}]: not_detected not_initialized", reason);

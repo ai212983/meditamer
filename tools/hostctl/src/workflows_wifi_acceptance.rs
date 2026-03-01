@@ -29,6 +29,7 @@ struct BootDiscoveryGateConfig {
     max_boot_uptime_ms: u32,
     timeout_ms: u32,
     settle_ms: u32,
+    allow_ready_only_fallback: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -241,10 +242,22 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     let boot_discovery_cfg = BootDiscoveryGateConfig {
         max_boot_uptime_ms: env_utils::parse_env_u32(
             "HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS",
-            120_000,
+            // Boot gate should guard immediate post-boot behavior only.
+            // A wider window can force scan-evidence checks long after boot,
+            // where healthy links may not emit fresh scan telemetry.
+            30_000,
         )?,
         timeout_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS", 180_000)?,
-        settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 1_200)?,
+        // Keep boot gate settle aligned with discovery-debug defaults so
+        // acceptance does not regress into immediate post-recover zero scans.
+        settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 6_000)?,
+        // Require explicit scan evidence by default before throughput attempts.
+        // This prevents ready-only false positives that can hide discovery/
+        // listener regressions. Set env to 1 only for late-session triage.
+        allow_ready_only_fallback: env_utils::parse_env_bool01(
+            "HOSTCTL_NET_BOOT_DISCOVERY_READY_ONLY_FALLBACK",
+            false,
+        )?,
     };
 
     if require_boot_discovery_gate {
@@ -487,7 +500,8 @@ fn run_boot_discovery_gate(
                 ));
                 return Ok(());
             }
-            if ready
+            if cfg.allow_ready_only_fallback
+                && ready
                 && scan_nonzero_events == 0
                 && ssid_seen_events == 0
                 && gate_started.elapsed() >= ready_only_fallback_after
@@ -742,10 +756,28 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 Ok(())
             }
             "net_apply_config" => {
+                if query_net_status(&mut self.console)?
+                    .as_ref()
+                    .is_some_and(|status| is_ready(status, true))
+                {
+                    self.logger
+                        .info("net_apply_config: skip NETCFG SET because network is already ready");
+                    return Ok(());
+                }
                 let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
                 wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
             }
             "net_start" => {
+                // Avoid restarting a healthy stack: forcing NET START from an
+                // already-ready state has regressed into listener_timeout loops.
+                if query_net_status(&mut self.console)?
+                    .as_ref()
+                    .is_some_and(|status| is_ready(status, true))
+                {
+                    self.logger
+                        .info("net_start: skip NET START because network is already ready");
+                    return Ok(());
+                }
                 if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
                     let listener_ready_now =
                         query_net_status(&mut self.console)?.is_some_and(|status| {
@@ -761,12 +793,48 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                         "net_start: listener enable ack not obtained ({err}); continuing because listener is already ready"
                     ));
                 }
+                if let Some(status) = query_net_status(&mut self.console)? {
+                    if is_ready(&status, true) {
+                        self.logger
+                            .info("net_start: skip NET START because listener is already ready");
+                        return Ok(());
+                    }
+                    let ipv4_zero = status.ipv4.as_deref().is_none_or(|ip| ip == "0.0.0.0");
+                    let stuck_listener_wait =
+                        matches!(status.state.as_deref(), Some("ListenerWait" | "DhcpWait"))
+                            && ipv4_zero;
+                    if stuck_listener_wait {
+                        self.logger.info(format!(
+                            "net_start: state={} with ipv4=0.0.0.0; forcing NET RECOVER",
+                            status.state.as_deref().unwrap_or("unknown")
+                        ));
+                        wait_net_ack(&mut self.console, "NET RECOVER")?;
+                        thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
+                        return Ok(());
+                    }
+                    let active_state = matches!(
+                        status.state.as_deref(),
+                        Some(
+                            "Ready"
+                                | "Recovering"
+                                | "Starting"
+                                | "Scanning"
+                                | "Associating"
+                                | "DhcpWait"
+                                | "ListenerWait"
+                        )
+                    );
+                    if active_state {
+                        self.logger.info(format!(
+                            "net_start: skip NET START because state is already active ({})",
+                            status.state.as_deref().unwrap_or("unknown")
+                        ));
+                        return Ok(());
+                    }
+                }
                 if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
                     let ready_now = query_net_status(&mut self.console)?.is_some_and(|status| {
-                        matches!(status.state.as_deref(), Some("Ready"))
-                            && status.link.unwrap_or(false)
-                            && status.listener.unwrap_or(false)
-                            && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
+                        is_ready(&status, true)
                     });
                     if !ready_now {
                         return Err(err);
@@ -805,7 +873,9 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 let remote_file = format!("{}/{}", self.remote_root, upload_name);
                 ctx_set_string(context, "remote_file", &remote_file)?;
                 let started = Instant::now();
-                let result = workflows_upload::upload_file_direct(
+                // The workflow already waits for Ready+listener before this step,
+                // so we can skip the extra upload preflight health roundtrip.
+                let result = workflows_upload::upload_file_direct_fast(
                     self.logger,
                     &ip,
                     8080,

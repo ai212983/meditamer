@@ -77,8 +77,10 @@ impl Default for DiscoveryProfile {
             status_poll_ms: 1_000,
             recover_before_round: true,
             recover_after_round: false,
-            // Allow firmware NET RECOVER path to settle before judging readiness.
-            recover_settle_ms: 1_200,
+            // Discovery regressed to repeated `scan_done count=0` when settle was
+            // too short after NET RECOVER. Keep this conservative to avoid
+            // reintroducing zero-discovery loops under transient RF churn.
+            recover_settle_ms: 6_000,
             disable_listener_during_probe_rounds: true,
             max_zero_discovery_rounds: 0,
             min_ready_rounds: 1,

@@ -44,16 +44,31 @@ async fn write_data_at(
     while data_idx < data.len() {
         let sector_start = cluster_offset / SD_SECTOR_SIZE;
         let mut byte_in_sector = cluster_offset % SD_SECTOR_SIZE;
-
-        for sector_off in sector_start..volume.sectors_per_cluster as usize {
+        let mut sector_off = sector_start;
+        while sector_off < volume.sectors_per_cluster as usize {
             if data_idx >= data.len() {
                 break;
             }
             let lba = cluster_to_lba(volume, cluster)? + sector_off as u32;
             let remaining = data.len() - data_idx;
+            if byte_in_sector == 0 {
+                let sectors_left = volume.sectors_per_cluster as usize - sector_off;
+                let full_sectors = cmp::min(remaining / SD_SECTOR_SIZE, sectors_left);
+                if full_sectors >= 2 {
+                    let write_bytes = full_sectors * SD_SECTOR_SIZE;
+                    // Restrict CMD25 use to already full, contiguous sectors in a
+                    // single cluster. This keeps behavior deterministic under FAT
+                    // chain fragmentation and avoids partial-sector complexity.
+                    sd.write_sectors_contiguous(lba, &data[data_idx..data_idx + write_bytes])
+                        .await?;
+                    data_idx += write_bytes;
+                    sector_off += full_sectors;
+                    continue;
+                }
+            }
+
             let write_len = cmp::min(remaining, SD_SECTOR_SIZE - byte_in_sector);
             let mut sector = [0u8; SD_SECTOR_SIZE];
-
             if byte_in_sector != 0 || write_len < SD_SECTOR_SIZE {
                 sd.read_sector(lba, &mut sector).await?;
             }
@@ -62,6 +77,7 @@ async fn write_data_at(
             sd.write_sector(lba, &sector).await?;
             data_idx += write_len;
             byte_in_sector = 0;
+            sector_off += 1;
         }
 
         cluster_offset = 0;

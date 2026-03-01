@@ -14,9 +14,11 @@ use esp_hal::{
 const SD_CMD0: u8 = 0;
 const SD_CMD8: u8 = 8;
 const SD_CMD9: u8 = 9;
+const SD_CMD13: u8 = 13;
 const SD_CMD16: u8 = 16;
 const SD_CMD17: u8 = 17;
 const SD_CMD24: u8 = 24;
+const SD_CMD25: u8 = 25;
 const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
@@ -61,11 +63,14 @@ pub enum SdProbeError {
     Cmd16Unexpected(u8),
     Cmd17Unexpected(u8),
     Cmd24Unexpected(u8),
+    Cmd25Unexpected(u8),
+    Cmd13Unexpected(u8, u8),
     NoResponse(u8),
     DataTokenTimeout(u8),
     DataTokenUnexpected(u8, u8),
     WriteDataRejected(u8),
     WriteBusyTimeout,
+    WriteLengthInvalid(usize),
     NotInitialized,
     CapacityDecodeFailed,
 }

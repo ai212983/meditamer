@@ -37,9 +37,7 @@ impl<'d> SdCardProbe<'d> {
 
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFE).await?;
-        for &byte in data {
-            let _ = self.transfer_byte(byte).await?;
-        }
+        self.spi.write(data)?;
         // Data CRC16 is ignored in SPI mode unless CRC is explicitly enabled.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
@@ -50,13 +48,7 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::WriteDataRejected(response));
         }
 
-        let mut released = false;
-        for _ in 0..200_000 {
-            if self.transfer_byte(0xFF).await? == 0xFF {
-                released = true;
-                break;
-            }
-        }
+        let released = self.wait_write_ready().await?;
         self.end_transaction().await;
         if !released {
             return Err(SdProbeError::WriteBusyTimeout);
@@ -96,7 +88,7 @@ impl<'d> SdCardProbe<'d> {
         extra_response: &mut [u8],
         release_cs_after: bool,
     ) -> Result<u8, SdProbeError> {
-        let frame = [
+        let mut frame = [
             0x40 | cmd,
             (arg >> 24) as u8,
             (arg >> 16) as u8,
@@ -106,9 +98,7 @@ impl<'d> SdCardProbe<'d> {
         ];
 
         self.cs.set_low();
-        for byte in frame {
-            let _ = self.transfer_byte(byte).await?;
-        }
+        self.spi.transfer_in_place(&mut frame)?;
 
         let mut r1 = 0xFFu8;
         let mut got_response = false;
@@ -125,8 +115,9 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::NoResponse(cmd));
         }
 
-        for slot in extra_response {
-            *slot = self.transfer_byte(0xFF).await?;
+        if !extra_response.is_empty() {
+            extra_response.fill(0xFF);
+            self.spi.transfer_in_place(extra_response)?;
         }
 
         if release_cs_after {
@@ -136,8 +127,13 @@ impl<'d> SdCardProbe<'d> {
     }
 
     async fn send_dummy_clocks(&mut self, bytes: usize) -> Result<(), SdProbeError> {
-        for _ in 0..bytes {
-            let _ = self.transfer_byte(0xFF).await?;
+        const DUMMY_CLOCK_CHUNK: usize = 32;
+        let mut frame = [0xFFu8; DUMMY_CLOCK_CHUNK];
+        let mut remaining = bytes;
+        while remaining > 0 {
+            let chunk = remaining.min(DUMMY_CLOCK_CHUNK);
+            self.spi.transfer_in_place(&mut frame[..chunk])?;
+            remaining -= chunk;
         }
         Ok(())
     }
@@ -165,10 +161,8 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD9, token));
         }
 
-        let mut block = [0u8; 16];
-        for slot in &mut block {
-            *slot = self.transfer_byte(0xFF).await?;
-        }
+        let mut block = [0xFFu8; 16];
+        self.spi.transfer_in_place(&mut block)?;
         // Read and discard CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
@@ -212,9 +206,8 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
         }
 
-        for slot in out {
-            *slot = self.transfer_byte(0xFF).await?;
-        }
+        out.fill(0xFF);
+        self.spi.transfer_in_place(out)?;
         // Discard data CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;

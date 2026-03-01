@@ -22,8 +22,9 @@ status_poll_ms = 1000
 recover_before_round = true
 recover_after_round = false
 # Let firmware settle after NET RECOVER before sampling diagnostics.
-# 1200ms matches firmware reconnect settle windows used around disconnect paths.
-recover_settle_ms = 1200
+# 6000ms prevents recurring false `discovery_empty` loops seen with 1200ms
+# under real AP/channel contention during immediate post-boot checks.
+recover_settle_ms = 6000
 # Temporary pressure-reduction mode for zero-discovery diagnosis:
 # keep Wi-Fi discovery active while gating the upload HTTP listener.
 disable_listener_during_probe_rounds = true

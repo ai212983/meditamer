@@ -42,7 +42,12 @@ The regression was primarily orchestration/timing pressure, not a persistent rad
 - `scan_active_min_ms=600`
 - `scan_active_max_ms=1500`
 - `scan_passive_ms=1500`
-6. Treat zero-discovery as a hard regression signal:
+6. Keep post-recover settle conservative in discovery workflows:
+- `recover_settle_ms=6000` (lower values, especially `1200`, have reintroduced immediate `discovery_empty` loops)
+7. Scope acceptance boot-discovery gate to immediate post-boot only:
+- `HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS=30000` default
+- rationale: avoid forcing scan-evidence checks during later cycles where link can remain healthy without new scan telemetry
+8. Treat zero-discovery as a hard regression signal:
 - require at least one non-zero scan event and at least one target SSID-seen round before acceptance throughput tests.
 
 ## Required Validation Sequence

@@ -81,3 +81,36 @@ Source runs:
 - pre 64 KiB: `test_name=health_harden_3cycle` (cycle 1)
 - post 128 KiB: `test_name=sdperf_post_128k_bounded`
 - post 64 KiB: `test_name=sdperf_post_64k_bounded`
+
+## 2026-03-01: guarded CMD25 + discovery/acceptance gate hardening
+
+Validation order used:
+
+1. bounded discovery debug after boot (`rounds=1`)
+2. acceptance 1-cycle
+3. acceptance 3-cycle
+4. bounded soak (10 cycles)
+
+Representative command shape:
+
+```bash
+HOSTCTL_NET_CYCLES=1|3|10 \
+scripts/tests/hw/test_wifi_acceptance.sh
+```
+
+Primary run artifacts:
+
+- discovery: `/tmp/final2_discovery_1round`
+- acceptance 1-cycle: `/tmp/final4_acceptance_1cycle`
+- acceptance 3-cycle: `/tmp/final4_acceptance_3cycle`
+- acceptance soak10: `/tmp/final4_acceptance_soak10`
+
+Observed throughput:
+
+- 1-cycle: `upload_ms=4002`, `throughput_kib_s=127.94`
+- 3-cycle average: `avg_upload_s=4.35`, `avg_kib_s=117.78`
+- soak10 average: `avg_upload_s=4.34`, `avg_kib_s=118.79`
+
+Comparison vs earlier historical aggregate (`2.21 KiB/s` effective, 2026-02-26 section above):
+
+- effective throughput: `2.21 -> 118.79 KiB/s` (`~53.8x`)
