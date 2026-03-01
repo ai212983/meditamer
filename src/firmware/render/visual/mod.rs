@@ -27,7 +27,7 @@ use super::{
     clock::{draw_centered_bitmap_text_with_white_rim, format_render_time_text, render_time_font},
     local_seconds_since_epoch,
 };
-use helpers::*;
+use helpers::{background_alpha_50_mask, build_sun_params, pattern_seed, sun_center_for_time};
 pub(crate) use shanshui_render::render_shanshui_update;
 
 pub(crate) fn next_visual_seed(

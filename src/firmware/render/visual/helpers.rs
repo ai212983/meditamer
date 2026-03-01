@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    local_seconds_since_epoch, Point, SumiSunParams, SunFx, TimeSyncState,
+    REFRESH_INTERVAL_SECONDS, SUMINAGASHI_BG_ALPHA_50_THRESHOLD, SUNRISE_SECONDS_OF_DAY,
+    SUNSET_SECONDS_OF_DAY, SUN_FORCE_CENTER, SUN_TARGET_DIAMETER_PX,
+};
 
 pub(super) fn pattern_seed(
     uptime_seconds: u32,

@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    draw_centered_bitmap_text_with_white_rim, format_render_time_text, psram, render_time_font,
+    shanshui, update_marble_metrics, BinaryColor, InkplateDriver, Instant, TimeSyncState,
+    SUN_RENDER_TIME_Y_OFFSET,
+};
+use embedded_graphics::prelude::DrawTarget;
 
 pub(crate) async fn render_shanshui_update(
     display: &mut InkplateDriver,
