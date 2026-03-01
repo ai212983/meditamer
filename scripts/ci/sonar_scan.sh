@@ -6,7 +6,13 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 work_dir="$repo_root/.scannerwork"
 lock_dir="$repo_root/.scannerwork.lock"
-env_file="${SONAR_ENV_FILE:-$repo_root/.env.local}"
+default_env_file="$repo_root/.env.local"
+if [[ ! -f "$default_env_file" && -f "$repo_root/.env" ]]; then
+  default_env_file="$repo_root/.env"
+fi
+env_file="${SONAR_ENV_FILE:-$default_env_file}"
+run_host_coverage="${SONAR_RUN_HOST_COVERAGE:-1}"
+host_coverage_script="$repo_root/scripts/ci/coverage_host.sh"
 
 host_url="${SONAR_HOST_URL:-http://localhost:9000}"
 project_key="${SONAR_PROJECT_KEY:-Meditamer}"
@@ -51,6 +57,15 @@ Recommended:
   2) set SONAR_TOKEN in .env.local
 EOF
   exit 1
+fi
+
+if [[ "$run_host_coverage" == "1" ]]; then
+  if [[ ! -x "$host_coverage_script" ]]; then
+    echo "coverage script not found or not executable: $host_coverage_script" >&2
+    exit 1
+  fi
+  echo "Running host coverage before SonarQube scan..."
+  "$host_coverage_script"
 fi
 
 if ! mkdir "$lock_dir" 2>/dev/null; then

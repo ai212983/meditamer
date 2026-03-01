@@ -60,3 +60,27 @@ jobs:
         run: scripts/ci/lint_rust_analyzer.sh
       - name: Code analysis ratchet
         run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh
+
+  host-coverage:
+    name: Host Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Setup stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked cargo-llvm-cov
+      - name: Run host coverage
+        run: scripts/ci/coverage_host.sh
+      - name: Upload host coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-coverage
+          path: logs/coverage/**
+          if-no-files-found: error

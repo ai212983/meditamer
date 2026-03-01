@@ -39,6 +39,13 @@ Install conventional commit linter:
 go install github.com/conventionalcommit/commitlint@latest
 ```
 
+Install host coverage tooling:
+
+```bash
+rustup component add llvm-tools-preview --toolchain stable
+cargo install --locked cargo-llvm-cov
+```
+
 Install hooks:
 
 ```bash
@@ -92,21 +99,37 @@ Rust-analyzer baseline lint:
 scripts/ci/lint_rust_analyzer.sh
 ```
 
+Host coverage (line coverage + LCOV artifacts):
+
+```bash
+scripts/ci/coverage_host.sh
+```
+
+Optional host coverage env vars:
+
+- `HOST_COVERAGE_OUTPUT_DIR` (default `./logs/coverage`)
+- `HOST_COVERAGE_MIN_LINE` (default `0`; fail if any crate is below this percent)
+- `RUSTUP_TOOLCHAIN` (default `stable`)
+
 SonarQube scan (local server):
 
 ```bash
 scripts/ci/sonar_scan.sh
 ```
 
+By default the scan runs `scripts/ci/coverage_host.sh` first and imports
+`logs/coverage/host_coverage.lcov` via `sonar.rust.lcov.reportPaths`.
+
 Optional SonarQube env vars:
 
 - `SONAR_TOKEN` (required; auto-loaded from `.env.local` when present)
 - `SONAR_HOST_URL` (default `http://localhost:9000`)
 - `SONAR_PROJECT_KEY` (default `Meditamer`)
+- `SONAR_RUN_HOST_COVERAGE` (`1` default; set `0` to skip pre-scan host coverage)
 - `SONAR_POLL_CE` (`1` default; set `0` to skip waiting for CE completion)
 - `SONAR_CE_TIMEOUT_SEC` (default `300`)
 - `SONAR_CE_POLL_INTERVAL_SEC` (default `2`)
-- `SONAR_ENV_FILE` (optional override for env file path; default `.env.local`)
+- `SONAR_ENV_FILE` (optional override for env file path; defaults to `.env.local`, falls back to `.env` if missing)
 
 Notes for this workspace:
 

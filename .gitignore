@@ -13,8 +13,12 @@
 /scripts/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
+/logs/coverage/
+/*.lcov
+/*.profraw
 .env.local
 .env.*.local
+.env
 .scannerwork/
 
 ## gh-csi settings and working directory

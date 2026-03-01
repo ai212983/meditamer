@@ -205,9 +205,8 @@ def rasterize(
         nz = (b0 * n0[2]) + (b1 * n1[2]) + (b2 * n2[2])
 
         region_norm = normal_buf[miny : maxy + 1, minx : maxx + 1]
-        region_norm[..., 0][update] = nx[update]
-        region_norm[..., 1][update] = ny[update]
-        region_norm[..., 2][update] = nz[update]
+        normal_updates = np.stack([nx, ny, nz], axis=-1)
+        region_norm[update] = normal_updates[update]
 
     nlen = np.linalg.norm(normal_buf, axis=2, keepdims=True)
     normal_buf = normal_buf / np.clip(nlen, 1e-8, None)
