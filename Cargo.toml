@@ -13,6 +13,9 @@ test = false
 
 [lib]
 test = false
+harness = false
+bench = false
+doctest = false
 
 [profile.release]
 opt-level = "s"
