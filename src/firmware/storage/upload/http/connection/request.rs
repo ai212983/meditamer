@@ -1,0 +1,150 @@
+use embassy_net::tcp::{Error as TcpError, TcpSocket};
+use embassy_time::{with_timeout, Duration};
+use esp_println::println;
+
+use super::super::helpers::{
+    drain_remaining_body, find_header_end, parse_content_length, validate_upload_auth,
+    write_response, UploadAuthError,
+};
+use super::{RequestContext, HTTP_HEADER_READ_TIMEOUT_MS};
+use crate::firmware::telemetry;
+
+pub(super) async fn authorize_request(
+    socket: &mut TcpSocket<'_>,
+    header: &str,
+    request: &RequestContext<'_>,
+) -> Result<(), &'static str> {
+    if request.request_path == "/health" {
+        return Ok(());
+    }
+
+    match validate_upload_auth(header) {
+        Ok(()) => Ok(()),
+        Err(UploadAuthError::MissingOrInvalidToken) => {
+            drain_body(socket, request).await?;
+            write_response(
+                socket,
+                b"401 Unauthorized",
+                b"missing or invalid upload token",
+            )
+            .await;
+            Err("missing or invalid upload token")
+        }
+    }
+}
+
+async fn drain_body(
+    socket: &mut TcpSocket<'_>,
+    request: &RequestContext<'_>,
+) -> Result<(), &'static str> {
+    drain_remaining_body(
+        socket,
+        request.content_length_or_zero,
+        request.body_bytes_in_buffer,
+    )
+    .await
+}
+
+pub(super) async fn read_header(
+    socket: &mut TcpSocket<'_>,
+    header_buf: &mut [u8],
+) -> Result<(usize, usize), &'static str> {
+    let mut filled = 0usize;
+    let mut header_read_ops = 0u32;
+
+    let header_end = loop {
+        if filled == header_buf.len() {
+            write_response(socket, b"413 Payload Too Large", b"header too large").await;
+            return Err("header too large");
+        }
+
+        let n = read_header_chunk(socket, &mut header_buf[filled..], filled).await?;
+
+        if n == 0 {
+            return log_header_eof(socket, filled, header_read_ops);
+        }
+
+        header_read_ops = header_read_ops.saturating_add(1);
+        filled += n;
+
+        if let Some(end) = find_header_end(&header_buf[..filled]) {
+            break end;
+        }
+    };
+
+    Ok((filled, header_end))
+}
+
+async fn read_header_chunk(
+    socket: &mut TcpSocket<'_>,
+    buffer: &mut [u8],
+    filled: usize,
+) -> Result<usize, &'static str> {
+    match with_timeout(
+        Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS),
+        socket.read(buffer),
+    )
+    .await
+    {
+        Ok(Ok(n)) => Ok(n),
+        Ok(Err(err)) => {
+            log_header_read_error(socket, filled, err);
+            if matches!(err, TcpError::ConnectionReset) && filled == 0 {
+                Err("read header reset empty")
+            } else if matches!(err, TcpError::ConnectionReset) {
+                Err("read header reset")
+            } else {
+                Err("read header")
+            }
+        }
+        Err(_) => {
+            write_response(socket, b"408 Request Timeout", b"request header timeout").await;
+            Err("request header timeout")
+        }
+    }
+}
+
+fn log_header_read_error(socket: &TcpSocket<'_>, filled: usize, err: TcpError) {
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: header read err={:?} filled={} recv_queue={} send_queue={} state={:?} remote={:?}",
+            err,
+            filled,
+            socket.recv_queue(),
+            socket.send_queue(),
+            socket.state(),
+            socket.remote_endpoint(),
+        );
+    }
+}
+
+fn log_header_eof(
+    socket: &TcpSocket<'_>,
+    filled: usize,
+    header_read_ops: u32,
+) -> Result<(usize, usize), &'static str> {
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: header eof filled={} reads={} recv_queue={} state={:?} remote={:?}",
+            filled,
+            header_read_ops,
+            socket.recv_queue(),
+            socket.state(),
+            socket.remote_endpoint(),
+        );
+    }
+    Err("eof header")
+}
+
+pub(super) async fn parse_content_length_or_http_error(
+    socket: &mut TcpSocket<'_>,
+    header: &str,
+) -> Result<Option<usize>, &'static str> {
+    match parse_content_length(header) {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            write_response(socket, b"400 Bad Request", b"invalid Content-Length").await;
+            Err(err)
+        }
+    }
+}
