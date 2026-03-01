@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    Fx, TreeShape, FX_0_35, FX_0_4, FX_0_45, FX_0_6, FX_HALF, FX_ONE, FX_THREE, FX_TWO, FX_ZERO,
+};
 
 mod noise;
 mod river;

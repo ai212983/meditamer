@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    blend_u8, depth_factor_from_surfaces, fx_i32, hash_xy, layer_height, river_row_strength,
+    smoothstep01, value_noise1d, Fx, FX_0_35, FX_0_4, FX_0_45, FX_0_6, FX_HALF, FX_ONE, FX_ZERO,
+};
 
 pub(in super::super) fn river_override(
     base_ink: u8,

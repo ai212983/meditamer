@@ -1,4 +1,4 @@
-use super::*;
+use super::{Fx, FX_ONE, FX_THREE, FX_TWO, FX_ZERO};
 
 #[inline]
 pub(in super::super) fn value_noise1d(x: i32, seed: u32, cell_shift: u8) -> Fx {

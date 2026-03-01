@@ -29,7 +29,10 @@ struct TreeShape {
 }
 
 mod helpers;
-use helpers::*;
+use helpers::{
+    depth_factor_from_surfaces, hash_xy, layer_height, lerp_u16, ridge_noise, river_override,
+    river_tree_exclusion, slope_abs, tree_halo, tree_ink, value_noise2d,
+};
 
 pub fn render_shanshui<T>(target: &mut T, seed: u32)
 where
