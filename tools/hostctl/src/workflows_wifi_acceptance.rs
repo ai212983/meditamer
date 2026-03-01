@@ -873,13 +873,17 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 let remote_file = format!("{}/{}", self.remote_root, upload_name);
                 ctx_set_string(context, "remote_file", &remote_file)?;
                 let started = Instant::now();
+                // Keep timeout tunable for bounded profiling runs. Production-like
+                // behavior stays unchanged with the 180s default.
+                let upload_timeout_sec =
+                    env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
                 // The workflow already waits for Ready+listener before this step,
                 // so we can skip the extra upload preflight health roundtrip.
                 let result = workflows_upload::upload_file_direct_fast(
                     self.logger,
                     &ip,
                     8080,
-                    180.0,
+                    upload_timeout_sec,
                     &self.payload_path,
                     &cycle_root,
                     self.token.as_deref(),

@@ -105,9 +105,13 @@ impl<'d> SdCardProbe<'d> {
     }
 
     async fn apply_data_clock(&mut self) -> Result<(), SdProbeError> {
+        // Keep this tunable via build-time env so throughput experiments can
+        // sweep SD SPI data clock safely without code churn.
+        let data_rate_mhz = Self::data_spi_rate_mhz();
+        esp_println::println!("sdprobe: data_spi_mhz={}", data_rate_mhz);
         let config = SpiConfig::default()
             .with_mode(SpiMode::_0)
-            .with_frequency(Rate::from_mhz(SD_DATA_SPI_RATE_MHZ));
+            .with_frequency(Rate::from_mhz(data_rate_mhz));
         self.spi.apply_config(&config)?;
         Ok(())
     }

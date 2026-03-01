@@ -191,3 +191,52 @@ Interpretation:
 - remaining speed ceiling is mostly:
   - SD-side write latency (`sd_ms`), and
   - host/network body-feed jitter (`body_ms`) variance.
+
+## 2026-03-01: SD SPI data clock sweep (24/30/36/40 MHz, bounded 1-cycle)
+
+Change set:
+
+- SD probe now supports build-time data clock override:
+  - `MEDITAMER_SD_SPI_DATA_MHZ` (preferred)
+  - `SD_SPI_DATA_MHZ` (fallback alias)
+- Accepted range: `12..40` MHz
+- New default selected: `36` MHz
+
+Benchmark shape used:
+
+```bash
+HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0 \
+HOSTCTL_NET_CYCLES=1 \
+HOSTCTL_NET_OPERATION_RETRIES=1 \
+HOSTCTL_NET_UPLOAD_TIMEOUT_SEC=45 \
+HOSTCTL_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC=20 \
+HOSTCTL_UPLOAD_NET_RECOVERY_TIMEOUT_SEC=10 \
+scripts/tests/hw/test_wifi_acceptance.sh
+```
+
+Results (524288-byte payload):
+
+- `24 MHz`: `upload_ms=2867`, `throughput_kib_s=178.58`
+- `30 MHz`: `upload_ms=2956`, `throughput_kib_s=173.21`
+- `36 MHz`: `upload_ms=2626`, `throughput_kib_s=194.97`
+- `40 MHz`: `upload_ms=2812`, `throughput_kib_s=182.08`
+
+Device-side write metrics stayed stable in sampled runs:
+
+- `cmd24_sectors=40`
+- `cmd25_attempt_sectors=1024`
+- `cmd25_success_sectors=1024`
+- `cmd25_fallback_bursts=0`
+
+Representative upload-phase stats:
+
+- `30 MHz`: `body_ms=919`, `sd_ms=1302`, `req_ms=2275`
+- `36 MHz`: `body_ms=1034`, `sd_ms=1228`, `req_ms=2307`
+- `40 MHz`: `body_ms=782`, `sd_ms=1300`, `req_ms=2135`
+
+Selection:
+
+- `36 MHz` gave the best measured host throughput in this sweep
+  without reintroducing CMD25 fallback or write errors.
+- Keep env override available for board/SD-card-specific rollback:
+  `MEDITAMER_SD_SPI_DATA_MHZ=24` (or another validated value).

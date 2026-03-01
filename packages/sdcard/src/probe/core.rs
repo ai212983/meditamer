@@ -23,7 +23,9 @@ const SD_CMD55: u8 = 55;
 const SD_ACMD41: u8 = 41;
 const SD_CMD58: u8 = 58;
 const SD_INIT_SPI_RATE_KHZ: u32 = 400;
-const SD_DATA_SPI_RATE_MHZ: u32 = 24;
+const SD_DATA_SPI_RATE_MHZ_DEFAULT: u32 = 36;
+const SD_DATA_SPI_RATE_MHZ_MIN: u32 = 12;
+const SD_DATA_SPI_RATE_MHZ_MAX: u32 = 40;
 pub const SD_SECTOR_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -181,4 +183,32 @@ impl<'d> SdCardProbe<'d> {
         self.write_metrics.cmd25_fallback_bursts =
             self.write_metrics.cmd25_fallback_bursts.saturating_add(1);
     }
+
+    pub(crate) fn data_spi_rate_mhz() -> u32 {
+        let configured = option_env!("MEDITAMER_SD_SPI_DATA_MHZ")
+            .or(option_env!("SD_SPI_DATA_MHZ"))
+            .and_then(parse_ascii_u32);
+        match configured {
+            Some(mhz) if (SD_DATA_SPI_RATE_MHZ_MIN..=SD_DATA_SPI_RATE_MHZ_MAX).contains(&mhz) => {
+                mhz
+            }
+            _ => SD_DATA_SPI_RATE_MHZ_DEFAULT,
+        }
+    }
+}
+
+fn parse_ascii_u32(value: &str) -> Option<u32> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = 0u32;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        let digit = (b - b'0') as u32;
+        out = out.checked_mul(10)?.checked_add(digit)?;
+    }
+    Some(out)
 }
