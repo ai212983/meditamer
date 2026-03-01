@@ -98,26 +98,11 @@ async fn is_directory_empty(
             sd.read_sector(lba, &mut sector).await?;
             for slot in 0..DIR_ENTRIES_PER_SECTOR {
                 let base = slot * DIR_ENTRY_SIZE;
-                let first = sector[base];
-                if first == 0x00 {
-                    return Ok(true);
+                match classify_directory_empty_slot(&sector, base) {
+                    DirectoryEmptySlot::EndOfDirectory => return Ok(true),
+                    DirectoryEmptySlot::Ignore => continue,
+                    DirectoryEmptySlot::Occupied => return Ok(false),
                 }
-                if first == 0xE5 {
-                    continue;
-                }
-                let attr = sector[base + 11];
-                if attr == ATTR_LONG_NAME || (attr & ATTR_VOLUME) != 0 {
-                    continue;
-                }
-                let mut short = [0u8; 11];
-                short.copy_from_slice(&sector[base..base + 11]);
-                if short == [b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' '] {
-                    continue;
-                }
-                if short == [b'.', b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' '] {
-                    continue;
-                }
-                return Ok(false);
             }
         }
         match next_cluster(sd, volume, cluster).await? {
@@ -125,6 +110,40 @@ async fn is_directory_empty(
             None => return Ok(true),
         }
     }
+}
+
+enum DirectoryEmptySlot {
+    EndOfDirectory,
+    Ignore,
+    Occupied,
+}
+
+fn classify_directory_empty_slot(sector: &[u8; SD_SECTOR_SIZE], base: usize) -> DirectoryEmptySlot {
+    let first = sector[base];
+    if first == 0x00 {
+        return DirectoryEmptySlot::EndOfDirectory;
+    }
+    if first == 0xE5 {
+        return DirectoryEmptySlot::Ignore;
+    }
+
+    let attr = sector[base + 11];
+    if attr == ATTR_LONG_NAME || (attr & ATTR_VOLUME) != 0 {
+        return DirectoryEmptySlot::Ignore;
+    }
+
+    let mut short = [0u8; 11];
+    short.copy_from_slice(&sector[base..base + 11]);
+    if is_dot_short_name(&short) {
+        return DirectoryEmptySlot::Ignore;
+    }
+
+    DirectoryEmptySlot::Occupied
+}
+
+fn is_dot_short_name(short: &[u8; 11]) -> bool {
+    *short == [b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ']
+        || *short == [b'.', b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ']
 }
 
 async fn initialize_directory_cluster(
@@ -221,37 +240,35 @@ fn normalize_short_char(byte: u8) -> Result<u8, SdFatError> {
 
 fn short_name_to_text(raw: &[u8; 11], out: &mut [u8]) -> usize {
     let mut len = 0usize;
-
-    for &b in &raw[0..8] {
-        if b == b' ' {
-            break;
-        }
-        if len >= out.len() {
-            return len;
-        }
-        out[len] = b;
-        len += 1;
-    }
+    append_short_component(&raw[0..8], out, &mut len);
 
     let has_ext = raw[8..11].iter().any(|&b| b != b' ');
     if has_ext {
-        if len >= out.len() {
+        if !append_short_char(out, &mut len, b'.') {
             return len;
         }
-        out[len] = b'.';
-        len += 1;
-        for &b in &raw[8..11] {
-            if b == b' ' {
-                break;
-            }
-            if len >= out.len() {
-                return len;
-            }
-            out[len] = b;
-            len += 1;
-        }
+        append_short_component(&raw[8..11], out, &mut len);
     }
 
     len
 }
 
+fn append_short_component(raw: &[u8], out: &mut [u8], len: &mut usize) {
+    for &byte in raw {
+        if byte == b' ' {
+            break;
+        }
+        if !append_short_char(out, len, byte) {
+            break;
+        }
+    }
+}
+
+fn append_short_char(out: &mut [u8], len: &mut usize, byte: u8) -> bool {
+    if *len >= out.len() {
+        return false;
+    }
+    out[*len] = byte;
+    *len += 1;
+    true
+}

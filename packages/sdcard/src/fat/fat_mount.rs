@@ -197,12 +197,7 @@ async fn parse_fat32_boot(
         return Err(SdFatError::UnsupportedSectorSize(bytes_per_sector));
     }
 
-    let sectors_per_cluster = boot[13];
-    if sectors_per_cluster == 0 || !sectors_per_cluster.is_power_of_two() {
-        return Err(SdFatError::UnsupportedSectorsPerCluster(
-            sectors_per_cluster,
-        ));
-    }
+    let sectors_per_cluster = parse_sectors_per_cluster(&boot)?;
 
     let reserved_sectors = u16::from_le_bytes([boot[14], boot[15]]) as u32;
     let fats = boot[16];
@@ -210,24 +205,8 @@ async fn parse_fat32_boot(
         return Err(SdFatError::InvalidBootSector);
     }
 
-    let fat_size_16 = u16::from_le_bytes([boot[22], boot[23]]) as u32;
-    let fat_size_32 = u32::from_le_bytes([boot[36], boot[37], boot[38], boot[39]]);
-    let fat_size = if fat_size_16 != 0 {
-        fat_size_16
-    } else {
-        fat_size_32
-    };
-
-    if fat_size == 0 || fat_size_32 == 0 {
-        return Err(SdFatError::UnsupportedFatType);
-    }
-
-    let total_16 = u16::from_le_bytes([boot[19], boot[20]]) as u32;
-    let total_32 = u32::from_le_bytes([boot[32], boot[33], boot[34], boot[35]]);
-    let total_sectors = if total_16 != 0 { total_16 } else { total_32 };
-    if total_sectors == 0 {
-        return Err(SdFatError::InvalidBootSector);
-    }
+    let fat_size = parse_fat_size(&boot)?;
+    let total_sectors = parse_total_sectors(&boot)?;
 
     let root_cluster = u32::from_le_bytes([boot[44], boot[45], boot[46], boot[47]]);
     if root_cluster < 2 {
@@ -255,6 +234,41 @@ async fn parse_fat32_boot(
         root_cluster,
         total_clusters,
     })
+}
+
+fn parse_sectors_per_cluster(boot: &[u8; SD_SECTOR_SIZE]) -> Result<u8, SdFatError> {
+    let sectors_per_cluster = boot[13];
+    if sectors_per_cluster == 0 || !sectors_per_cluster.is_power_of_two() {
+        return Err(SdFatError::UnsupportedSectorsPerCluster(
+            sectors_per_cluster,
+        ));
+    }
+    Ok(sectors_per_cluster)
+}
+
+fn parse_fat_size(boot: &[u8; SD_SECTOR_SIZE]) -> Result<u32, SdFatError> {
+    let fat_size_16 = u16::from_le_bytes([boot[22], boot[23]]) as u32;
+    let fat_size_32 = u32::from_le_bytes([boot[36], boot[37], boot[38], boot[39]]);
+    let fat_size = if fat_size_16 != 0 {
+        fat_size_16
+    } else {
+        fat_size_32
+    };
+
+    if fat_size == 0 || fat_size_32 == 0 {
+        return Err(SdFatError::UnsupportedFatType);
+    }
+    Ok(fat_size)
+}
+
+fn parse_total_sectors(boot: &[u8; SD_SECTOR_SIZE]) -> Result<u32, SdFatError> {
+    let total_16 = u16::from_le_bytes([boot[19], boot[20]]) as u32;
+    let total_32 = u32::from_le_bytes([boot[32], boot[33], boot[34], boot[35]]);
+    let total_sectors = if total_16 != 0 { total_16 } else { total_32 };
+    if total_sectors == 0 {
+        return Err(SdFatError::InvalidBootSector);
+    }
+    Ok(total_sectors)
 }
 
 fn first_fat_partition_lba(sector0: &[u8; SD_SECTOR_SIZE]) -> Option<u32> {

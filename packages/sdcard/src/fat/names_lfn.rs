@@ -5,9 +5,7 @@ fn parse_path(path: &str, out: &mut [PathSegment; MAX_PATH_SEGMENTS]) -> Result<
     }
 
     let mut idx = 0usize;
-    while idx < bytes.len() && bytes[idx] == b'/' {
-        idx += 1;
-    }
+    skip_path_separators(bytes, &mut idx);
     if idx == bytes.len() {
         return Ok(0);
     }
@@ -18,28 +16,37 @@ fn parse_path(path: &str, out: &mut [PathSegment; MAX_PATH_SEGMENTS]) -> Result<
             return Err(SdFatError::PathTooDeep);
         }
 
-        let start = idx;
-        while idx < bytes.len() && bytes[idx] != b'/' {
-            idx += 1;
-        }
-        let seg = &bytes[start..idx];
-        if seg.is_empty() || seg.len() > FAT_NAME_MAX {
-            return Err(SdFatError::InvalidPath);
-        }
-        let mut name = [0u8; FAT_NAME_MAX];
-        name[..seg.len()].copy_from_slice(seg);
-        out[count] = PathSegment {
-            name,
-            len: seg.len() as u8,
-        };
+        let segment = next_path_segment(bytes, &mut idx)?;
+        out[count] = segment;
         count += 1;
 
-        while idx < bytes.len() && bytes[idx] == b'/' {
-            idx += 1;
-        }
+        skip_path_separators(bytes, &mut idx);
     }
 
     Ok(count)
+}
+
+fn skip_path_separators(bytes: &[u8], idx: &mut usize) {
+    while *idx < bytes.len() && bytes[*idx] == b'/' {
+        *idx += 1;
+    }
+}
+
+fn next_path_segment(bytes: &[u8], idx: &mut usize) -> Result<PathSegment, SdFatError> {
+    let start = *idx;
+    while *idx < bytes.len() && bytes[*idx] != b'/' {
+        *idx += 1;
+    }
+    let seg = &bytes[start..*idx];
+    if seg.is_empty() || seg.len() > FAT_NAME_MAX {
+        return Err(SdFatError::InvalidPath);
+    }
+    let mut name = [0u8; FAT_NAME_MAX];
+    name[..seg.len()].copy_from_slice(seg);
+    Ok(PathSegment {
+        name,
+        len: seg.len() as u8,
+    })
 }
 
 fn path_segment_to_name(segment: PathSegment) -> [u8; FAT_NAME_MAX] {
@@ -111,35 +118,63 @@ fn build_display_name(
 ) -> ([u8; FAT_NAME_MAX], usize, usize) {
     let mut out = [0u8; FAT_NAME_MAX];
 
-    if lfn.expected_slots > 0
-        && lfn.expected_slots as usize <= MAX_LFN_SLOTS
-        && lfn.seen_mask == lfn_expected_mask(lfn.expected_slots)
-        && lfn.checksum == short_name_checksum(short_name)
-    {
-        let mut len = 0usize;
-        'outer: for slot in 0..lfn.expected_slots as usize {
-            for code in lfn.utf16_parts[slot].iter() {
-                if *code == 0x0000 || *code == 0xFFFF {
-                    break 'outer;
-                }
-                if let Some(ch) = char::from_u32(*code as u32) {
-                    let mut tmp = [0u8; 4];
-                    let encoded = ch.encode_utf8(&mut tmp).as_bytes();
-                    if len + encoded.len() > out.len() {
-                        break 'outer;
-                    }
-                    out[len..len + encoded.len()].copy_from_slice(encoded);
-                    len += encoded.len();
-                }
-            }
-        }
-        if len > 0 {
-            return (out, len, lfn.expected_slots as usize);
-        }
+    if let Some((len, lfn_count)) = try_build_lfn_display_name(lfn, short_name, &mut out) {
+        return (out, len, lfn_count);
     }
 
     let short_len = short_name_to_text(short_name, &mut out);
     (out, short_len, 0)
+}
+
+fn try_build_lfn_display_name(
+    lfn: &LfnState,
+    short_name: &[u8; 11],
+    out: &mut [u8; FAT_NAME_MAX],
+) -> Option<(usize, usize)> {
+    if !lfn_matches_short_name(lfn, short_name) {
+        return None;
+    }
+
+    let len = copy_lfn_utf16_to_utf8(lfn, out);
+    if len == 0 {
+        return None;
+    }
+    Some((len, lfn.expected_slots as usize))
+}
+
+fn lfn_matches_short_name(lfn: &LfnState, short_name: &[u8; 11]) -> bool {
+    lfn.expected_slots > 0
+        && lfn.expected_slots as usize <= MAX_LFN_SLOTS
+        && lfn.seen_mask == lfn_expected_mask(lfn.expected_slots)
+        && lfn.checksum == short_name_checksum(short_name)
+}
+
+fn copy_lfn_utf16_to_utf8(lfn: &LfnState, out: &mut [u8; FAT_NAME_MAX]) -> usize {
+    let mut len = 0usize;
+    for slot in 0..lfn.expected_slots as usize {
+        if !append_lfn_utf16_part(&lfn.utf16_parts[slot], out, &mut len) {
+            break;
+        }
+    }
+    len
+}
+
+fn append_lfn_utf16_part(part: &[u16; 13], out: &mut [u8; FAT_NAME_MAX], len: &mut usize) -> bool {
+    for code in part.iter() {
+        if *code == 0x0000 || *code == 0xFFFF {
+            return false;
+        }
+        if let Some(ch) = char::from_u32(*code as u32) {
+            let mut tmp = [0u8; 4];
+            let encoded = ch.encode_utf8(&mut tmp).as_bytes();
+            if *len + encoded.len() > out.len() {
+                return false;
+            }
+            out[*len..*len + encoded.len()].copy_from_slice(encoded);
+            *len += encoded.len();
+        }
+    }
+    true
 }
 
 fn consume_lfn_entry(state: &mut LfnState, location: DirLocation, entry: &[u8]) {
@@ -205,21 +240,10 @@ async fn short_name_exists(
             sd.read_sector(lba, &mut sector).await?;
             for slot in 0..DIR_ENTRIES_PER_SECTOR {
                 let base = slot * DIR_ENTRY_SIZE;
-                let first = sector[base];
-                if first == 0x00 {
-                    return Ok(false);
-                }
-                if first == 0xE5 {
-                    continue;
-                }
-                let attr = sector[base + 11];
-                if attr == ATTR_LONG_NAME || (attr & ATTR_VOLUME) != 0 {
-                    continue;
-                }
-                let mut existing = [0u8; 11];
-                existing.copy_from_slice(&sector[base..base + 11]);
-                if &existing == short_name {
-                    return Ok(true);
+                match classify_short_name_slot(&sector, base, short_name) {
+                    ShortNameSlot::Continue => {}
+                    ShortNameSlot::EndOfDirectory => return Ok(false),
+                    ShortNameSlot::Match => return Ok(true),
                 }
             }
         }
@@ -230,46 +254,46 @@ async fn short_name_exists(
     }
 }
 
+enum ShortNameSlot {
+    Continue,
+    EndOfDirectory,
+    Match,
+}
+
+fn classify_short_name_slot(
+    sector: &[u8; SD_SECTOR_SIZE],
+    base: usize,
+    short_name: &[u8; 11],
+) -> ShortNameSlot {
+    let first = sector[base];
+    if first == 0x00 {
+        return ShortNameSlot::EndOfDirectory;
+    }
+    if first == 0xE5 {
+        return ShortNameSlot::Continue;
+    }
+
+    let attr = sector[base + 11];
+    if attr == ATTR_LONG_NAME || (attr & ATTR_VOLUME) != 0 {
+        return ShortNameSlot::Continue;
+    }
+
+    let mut existing = [0u8; 11];
+    existing.copy_from_slice(&sector[base..base + 11]);
+    if &existing == short_name {
+        return ShortNameSlot::Match;
+    }
+    ShortNameSlot::Continue
+}
+
 fn make_short_alias(name: &[u8], attempt: u32) -> [u8; 11] {
     let mut out = [b' '; 11];
-    let mut dot = None;
-    for (i, byte) in name.iter().enumerate() {
-        if *byte == b'.' {
-            dot = Some(i);
-        }
-    }
-    let (base, ext) = match dot {
-        Some(idx) => (&name[..idx], &name[idx + 1..]),
-        None => (name, &[][..]),
-    };
+    let (base, ext) = split_name_parts(name);
+    write_alias_extension(&mut out, ext);
 
-    let mut ext_len = 0usize;
-    for byte in ext.iter() {
-        if ext_len >= 3 {
-            break;
-        }
-        out[8 + ext_len] = normalize_short_char(*byte).unwrap_or(b'_');
-        ext_len += 1;
-    }
-
-    let suffix = attempt.max(1);
-    let mut digits_buf = [0u8; 10];
-    let mut digits_len = 0usize;
-    let mut n = suffix;
-    while n > 0 {
-        digits_buf[digits_len] = b'0' + (n % 10) as u8;
-        digits_len += 1;
-        n /= 10;
-    }
+    let (digits_buf, digits_len) = suffix_digits(attempt.max(1));
     let max_base = 8usize.saturating_sub(1 + digits_len);
-    let mut base_len = 0usize;
-    for byte in base.iter() {
-        if base_len >= max_base {
-            break;
-        }
-        out[base_len] = normalize_short_char(*byte).unwrap_or(b'_');
-        base_len += 1;
-    }
+    let mut base_len = write_alias_base(&mut out, base, max_base);
     if base_len == 0 {
         out[0] = b'F';
         out[1] = b'I';
@@ -290,6 +314,52 @@ fn make_short_alias(name: &[u8], attempt: u32) -> [u8; 11] {
     }
 
     out
+}
+
+fn split_name_parts(name: &[u8]) -> (&[u8], &[u8]) {
+    let mut dot = None;
+    for (i, byte) in name.iter().enumerate() {
+        if *byte == b'.' {
+            dot = Some(i);
+        }
+    }
+    match dot {
+        Some(idx) => (&name[..idx], &name[idx + 1..]),
+        None => (name, &[][..]),
+    }
+}
+
+fn write_alias_extension(out: &mut [u8; 11], ext: &[u8]) {
+    for (ext_len, byte) in ext.iter().enumerate() {
+        if ext_len >= 3 {
+            break;
+        }
+        out[8 + ext_len] = normalize_short_char(*byte).unwrap_or(b'_');
+    }
+}
+
+fn suffix_digits(suffix: u32) -> ([u8; 10], usize) {
+    let mut digits_buf = [0u8; 10];
+    let mut digits_len = 0usize;
+    let mut n = suffix;
+    while n > 0 {
+        digits_buf[digits_len] = b'0' + (n % 10) as u8;
+        digits_len += 1;
+        n /= 10;
+    }
+    (digits_buf, digits_len)
+}
+
+fn write_alias_base(out: &mut [u8; 11], base: &[u8], max_base: usize) -> usize {
+    let mut base_len = 0usize;
+    for byte in base.iter() {
+        if base_len >= max_base {
+            break;
+        }
+        out[base_len] = normalize_short_char(*byte).unwrap_or(b'_');
+        base_len += 1;
+    }
+    base_len
 }
 
 async fn select_new_entry_name(
@@ -330,4 +400,3 @@ async fn select_new_entry_name(
 
     Err(SdFatError::DirFull)
 }
-
