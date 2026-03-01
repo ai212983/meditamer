@@ -23,9 +23,16 @@ const HTTP_RW_BUF_FALLBACK: usize = 512;
 #[cfg(not(feature = "psram-alloc"))]
 const HTTP_RW_BUF_FALLBACK: usize = 2048;
 #[cfg(feature = "psram-alloc")]
-const HTTP_RW_BUF_TARGET: usize = 4096;
+// Keep a large RX window in PSRAM so /upload can continue receiving while the
+// SD writer is busy; this trims body-read stalls between chunk roundtrips.
+const HTTP_RX_BUF_TARGET: usize = 65_536;
+#[cfg(feature = "psram-alloc")]
+// TX path is response-only for this listener, so a smaller buffer is enough.
+const HTTP_TX_BUF_TARGET: usize = 4_096;
 #[cfg(not(feature = "psram-alloc"))]
-const HTTP_RW_BUF_TARGET: usize = HTTP_RW_BUF_FALLBACK;
+const HTTP_RX_BUF_TARGET: usize = HTTP_RW_BUF_FALLBACK;
+#[cfg(not(feature = "psram-alloc"))]
+const HTTP_TX_BUF_TARGET: usize = HTTP_RW_BUF_FALLBACK;
 #[cfg(feature = "psram-alloc")]
 const HTTP_CHUNK_BUF_FALLBACK: usize = 1024;
 #[cfg(not(feature = "psram-alloc"))]
@@ -182,8 +189,8 @@ pub(super) async fn run_http_server(stack: Stack<'static>) {
         }
 
         if rx_buffer.is_none() {
-            rx_buffer = Some(init_http_buffer(&RX_BUFFER, HTTP_RW_BUF_TARGET, "http_rx"));
-            tx_buffer = Some(init_http_buffer(&TX_BUFFER, HTTP_RW_BUF_TARGET, "http_tx"));
+            rx_buffer = Some(init_http_buffer(&RX_BUFFER, HTTP_RX_BUF_TARGET, "http_rx"));
+            tx_buffer = Some(init_http_buffer(&TX_BUFFER, HTTP_TX_BUF_TARGET, "http_tx"));
             header_buffer = Some(init_http_buffer(
                 &HEADER_BUFFER,
                 HTTP_HEADER_MAX,

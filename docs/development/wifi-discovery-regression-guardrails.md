@@ -75,6 +75,13 @@ Run in this order after boot:
 When profiling upload throughput, do not continue long upload runs if discovery/connectivity is failing.
 Discovery non-zero is a prerequisite for meaningful upload-rate diagnostics.
 
+After discovery has already been proven non-zero in the current session (discovery-debug + acceptance smoke),
+run pure throughput profiling with:
+
+- `HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0`
+
+Rationale: avoids spending upload diagnostics time in strict boot scan-evidence gating loops.
+
 ## Maintenance Notes
 
 - Preserve and extend comments around scan timeout shaping and esp-radio dwell semantics in:

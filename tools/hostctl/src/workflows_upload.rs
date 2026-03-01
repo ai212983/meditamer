@@ -28,6 +28,7 @@ fn make_client(timeout_sec: f64) -> Result<Client> {
     let connect_timeout = Duration::from_secs_f64(connect_timeout_s.max(0.1));
     Ok(Client::builder()
         .no_proxy()
+        .tcp_nodelay(true)
         .timeout(timeout)
         .connect_timeout(connect_timeout)
         .build()?)
@@ -295,7 +296,9 @@ fn upload_file(
         timeout_sec,
     )?;
 
-    let chunk_size = env_utils::parse_env_u64("HOSTCTL_UPLOAD_CHUNK_SIZE", 8192)? as usize;
+    // Keep fallback /upload_chunk requests coarse-grained to reduce per-request
+    // HTTP and SD roundtrip overhead on constrained Wi-Fi links.
+    let chunk_size = env_utils::parse_env_u64("HOSTCTL_UPLOAD_CHUNK_SIZE", 49152)? as usize;
     for chunk in data.chunks(chunk_size.max(1)) {
         let chunk_url = format!("http://{host}:{port}/upload_chunk");
         let _ = request_sd_busy_aware(
@@ -507,7 +510,7 @@ fn walkdir_sorted(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-pub fn upload_file_direct(
+pub fn upload_file_direct_fast(
     logger: &mut Logger,
     host: &str,
     port: u16,
@@ -516,14 +519,27 @@ pub fn upload_file_direct(
     dst_root: &str,
     token: Option<&str>,
 ) -> Result<()> {
-    let opts = UploadOptions {
-        host: host.to_string(),
-        port,
-        src: Some(src.to_path_buf()),
-        dst: dst_root.to_string(),
-        timeout_sec,
-        rm: vec![],
-        token: token.map(|s| s.to_string()),
-    };
-    run_upload(logger, opts)
+    if !src.exists() {
+        return Err(anyhow!("Source path does not exist: {}", src.display()));
+    }
+
+    let client = make_client(timeout_sec)?;
+    let remote_file = remote_join(dst_root, Path::new(src.file_name().unwrap_or_default()));
+    let remote_dir = Path::new(&remote_file)
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "/".to_string());
+
+    let skip_mkdir = env_utils::parse_env_bool01("HOSTCTL_UPLOAD_SKIP_MKDIR", false)?;
+    if skip_mkdir {
+        logger.info(format!("[mkdir -p] skipped ({remote_dir})"));
+    } else {
+        logger.info(format!("[mkdir -p] {remote_dir}"));
+        mkdir_p(&client, host, port, timeout_sec, &remote_dir, token)?;
+    }
+
+    logger.info(format!("[upload] {} -> {remote_file}", src.display()));
+    upload_file(&client, host, port, timeout_sec, src, &remote_file, token)?;
+    logger.info("Upload complete.");
+    Ok(())
 }

@@ -114,3 +114,49 @@ Observed throughput:
 Comparison vs earlier historical aggregate (`2.21 KiB/s` effective, 2026-02-26 section above):
 
 - effective throughput: `2.21 -> 118.79 KiB/s` (`~53.8x`)
+
+## 2026-03-01: wider HTTP RX window (PSRAM) + host TCP no-delay
+
+Change set:
+
+- firmware: increase upload listener TCP RX buffer target to `65536` (TX `4096`)
+- hostctl: enable `tcp_nodelay(true)` for upload client requests
+
+Validation command shape (upload-rate diagnostics mode):
+
+```bash
+HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0 \
+HOSTCTL_NET_CYCLES=1|3|10 \
+scripts/tests/hw/test_wifi_acceptance.sh
+```
+
+Artifacts:
+
+- 1-cycle: `/tmp/final5_acceptance_1cycle_nogate`
+- 3-cycle: `/tmp/final5_acceptance_3cycle_nogate`
+- soak10: `/tmp/final5_acceptance_soak10b_nogate`
+
+Observed throughput (524288-byte payload):
+
+- 1-cycle: `upload_ms=2458`, `throughput_kib_s=208.30`
+- 3-cycle average: `avg_upload_s=2.64`, `avg_kib_s=195.58`
+- soak10 average: `avg_upload_s=2.68`, `avg_kib_s=192.56`
+
+Comparison vs previous iteration (`final4`, guarded CMD25 section):
+
+- 1-cycle throughput: `127.94 -> 208.30 KiB/s` (`+62.8%`)
+- 3-cycle average throughput: `117.78 -> 195.58 KiB/s` (`+66.1%`)
+- soak10 average throughput: `118.79 -> 192.56 KiB/s` (`+62.1%`)
+
+Device-side upload telemetry moved from roughly:
+
+- `body_ms=1763`, `sd_ms=1822`, `req_ms=3669`
+
+to:
+
+- `body_ms=855`, `sd_ms=1301`, `req_ms=2205` (1-cycle representative)
+
+Next bottleneck indicated by telemetry:
+
+- `sd_ms` is now the dominant component (`~1.2-1.3s` per 512 KiB upload),
+  so further gains likely require SD write-path improvements (not HTTP buffering).
