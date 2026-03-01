@@ -319,10 +319,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::{eval_condition, execute_workflow, WorkflowRuntime};
     use anyhow::Result;
     use serde_json::Value;
     use serverless_workflow_core::models::workflow::WorkflowDefinition;
-    use super::{eval_condition, execute_workflow, WorkflowRuntime};
 
     struct TestRuntime {
         actions: Vec<String>,

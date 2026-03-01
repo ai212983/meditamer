@@ -11,6 +11,7 @@ mod workflows_serial;
 mod workflows_troubleshoot;
 mod workflows_upload;
 mod workflows_wifi_acceptance;
+mod workflows_wifi_common;
 mod workflows_wifi_discovery;
 
 use std::path::PathBuf;
