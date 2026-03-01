@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    DelayOps, GpioFast, I2cOps, InkplateHal, InkplateHalError, PinMode, Result, CL_MASK, DATA_MASK,
+    GMOD, IO_INT_ADDR, OE, PANEL_OUT1_ENABLE_MASK, PANEL_OUT_ENABLE_MASK, PWRUP, PWR_GOOD_OK, SPV,
+    TPS65186_ADDR, VCOM, WAKEUP,
+};
 
 impl<I2C, D> InkplateHal<I2C, D>
 where

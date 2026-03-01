@@ -1,4 +1,6 @@
-use super::super::*;
+use super::super::{
+    DelayOps, I2cOps, InkplateHal, Result, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BYTES, LUT2, LUTB,
+};
 
 impl<I2C, D> InkplateHal<I2C, D>
 where

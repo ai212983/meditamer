@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    BinaryColor, DelayOps, DrawTarget, I2cOps, Infallible, InkplateHal, OriginDimensions, Pixel,
+    Size, E_INK_HEIGHT, E_INK_WIDTH,
+};
 
 #[cfg(feature = "graphics")]
 impl<I2C, D> OriginDimensions for InkplateHal<I2C, D> {
