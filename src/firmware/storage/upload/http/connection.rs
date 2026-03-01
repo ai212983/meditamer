@@ -71,51 +71,10 @@ async fn read_header(
             return Err("header too large");
         }
 
-        let n = match with_timeout(
-            Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS),
-            socket.read(&mut header_buf[filled..]),
-        )
-        .await
-        {
-            Ok(Ok(n)) => n,
-            Ok(Err(err)) => {
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                    println!(
-                        "upload_http: header read err={:?} filled={} recv_queue={} send_queue={} state={:?} remote={:?}",
-                        err,
-                        filled,
-                        socket.recv_queue(),
-                        socket.send_queue(),
-                        socket.state(),
-                        socket.remote_endpoint(),
-                    );
-                }
-                return if matches!(err, TcpError::ConnectionReset) && filled == 0 {
-                    Err("read header reset empty")
-                } else if matches!(err, TcpError::ConnectionReset) {
-                    Err("read header reset")
-                } else {
-                    Err("read header")
-                };
-            }
-            Err(_) => {
-                write_response(socket, b"408 Request Timeout", b"request header timeout").await;
-                return Err("request header timeout");
-            }
-        };
+        let n = read_header_chunk(socket, &mut header_buf[filled..], filled).await?;
 
         if n == 0 {
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                println!(
-                    "upload_http: header eof filled={} reads={} recv_queue={} state={:?} remote={:?}",
-                    filled,
-                    header_read_ops,
-                    socket.recv_queue(),
-                    socket.state(),
-                    socket.remote_endpoint(),
-                );
-            }
-            return Err("eof header");
+            return log_header_eof(socket, filled, header_read_ops);
         }
 
         header_read_ops = header_read_ops.saturating_add(1);
@@ -127,6 +86,67 @@ async fn read_header(
     };
 
     Ok((filled, header_end))
+}
+
+async fn read_header_chunk(
+    socket: &mut TcpSocket<'_>,
+    buffer: &mut [u8],
+    filled: usize,
+) -> Result<usize, &'static str> {
+    match with_timeout(
+        Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS),
+        socket.read(buffer),
+    )
+    .await
+    {
+        Ok(Ok(n)) => Ok(n),
+        Ok(Err(err)) => {
+            log_header_read_error(socket, filled, err);
+            if matches!(err, TcpError::ConnectionReset) && filled == 0 {
+                Err("read header reset empty")
+            } else if matches!(err, TcpError::ConnectionReset) {
+                Err("read header reset")
+            } else {
+                Err("read header")
+            }
+        }
+        Err(_) => {
+            write_response(socket, b"408 Request Timeout", b"request header timeout").await;
+            Err("request header timeout")
+        }
+    }
+}
+
+fn log_header_read_error(socket: &TcpSocket<'_>, filled: usize, err: TcpError) {
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: header read err={:?} filled={} recv_queue={} send_queue={} state={:?} remote={:?}",
+            err,
+            filled,
+            socket.recv_queue(),
+            socket.send_queue(),
+            socket.state(),
+            socket.remote_endpoint(),
+        );
+    }
+}
+
+fn log_header_eof(
+    socket: &TcpSocket<'_>,
+    filled: usize,
+    header_read_ops: u32,
+) -> Result<(usize, usize), &'static str> {
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: header eof filled={} reads={} recv_queue={} state={:?} remote={:?}",
+            filled,
+            header_read_ops,
+            socket.recv_queue(),
+            socket.state(),
+            socket.remote_endpoint(),
+        );
+    }
+    Err("eof header")
 }
 
 async fn parse_content_length_or_http_error(
