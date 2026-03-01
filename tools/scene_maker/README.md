@@ -40,17 +40,15 @@ Place PNG files in an input directory (default `tools/scene_maker/input`):
 
 ## Build bundle
 ```bash
-CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
+cargo +stable run \
   --manifest-path tools/scene_maker/Cargo.toml \
   --target aarch64-apple-darwin -- \
   build --input /path/to/maps --out /path/to/scene.scenebundle
 ```
 
-Important: this repo has ESP32 global rustflags in `.cargo/config.toml`; the `CARGO_ENCODED_RUSTFLAGS=''` prefix is needed for host desktop tools.
-
 ## Inspect bundle
 ```bash
-CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
+cargo +stable run \
   --manifest-path tools/scene_maker/Cargo.toml \
   --target aarch64-apple-darwin -- \
   inspect --bundle /path/to/scene.scenebundle

@@ -160,9 +160,8 @@ pub(crate) fn compression_name(code: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
-    use std::path::PathBuf;
 
-    use super::{parse_build_args, CHANNELS, Compression};
+    use super::{read_header, write_header, BundleHeader, HEADER_LEN};
 
     #[test]
     fn header_roundtrip_via_reader() {

@@ -1,9 +1,9 @@
 [build]
 target = "xtensa-esp32-none-elf"
-rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x"]
 
 [target.xtensa-esp32-none-elf]
 runner = "scripts/build/xtensa_runner.sh"
+rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x"]
 
 [unstable]
 build-std = ["core", "alloc"]

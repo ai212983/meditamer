@@ -13,7 +13,7 @@
 
 ## Render
 ```bash
-CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
+cargo +stable run \
   --manifest-path tools/scene_viewer/Cargo.toml \
   --target aarch64-apple-darwin -- \
   render --bundle /path/to/scene.scenebundle --out /path/to/render.png \
@@ -24,7 +24,7 @@ CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
 
 ## Ghosting emulation
 ```bash
-CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
+cargo +stable run \
   --manifest-path tools/scene_viewer/Cargo.toml \
   --target aarch64-apple-darwin -- \
   render --bundle /path/to/scene.scenebundle --out /path/to/render.png \
@@ -33,7 +33,7 @@ CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
 
 ## Inspect bundle
 ```bash
-CARGO_ENCODED_RUSTFLAGS='' cargo +stable run \
+cargo +stable run \
   --manifest-path tools/scene_viewer/Cargo.toml \
   --target aarch64-apple-darwin -- \
   inspect --bundle /path/to/scene.scenebundle
