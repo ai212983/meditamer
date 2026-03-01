@@ -244,6 +244,23 @@ pub(super) async fn handle_connection(
                 stats.sd_wait_ms,
                 elapsed_ms_u32(request_started_at),
             );
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                let avg_chunk = if stats.chunk_count == 0 {
+                    0
+                } else {
+                    stats.sent_bytes / stats.chunk_count as usize
+                };
+                println!(
+                    "upload_http: upload_chunk stats bytes={} chunks={} avg_chunk={} max_chunk={} body_ms={} sd_ms={} req_ms={}",
+                    stats.sent_bytes,
+                    stats.chunk_count,
+                    avg_chunk,
+                    stats.max_chunk_bytes,
+                    stats.body_read_ms,
+                    stats.sd_wait_ms,
+                    elapsed_ms_u32(request_started_at),
+                );
+            }
 
             write_response(socket, b"200 OK", b"chunk ok").await;
             Ok(())
@@ -350,6 +367,23 @@ pub(super) async fn handle_connection(
                 sd_wait_ms.saturating_add(stats.sd_wait_ms),
                 elapsed_ms_u32(request_started_at),
             );
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                let avg_chunk = if stats.chunk_count == 0 {
+                    0
+                } else {
+                    stats.sent_bytes / stats.chunk_count as usize
+                };
+                println!(
+                    "upload_http: upload stats bytes={} chunks={} avg_chunk={} max_chunk={} body_ms={} sd_ms={} req_ms={}",
+                    stats.sent_bytes,
+                    stats.chunk_count,
+                    avg_chunk,
+                    stats.max_chunk_bytes,
+                    stats.body_read_ms,
+                    sd_wait_ms.saturating_add(stats.sd_wait_ms),
+                    elapsed_ms_u32(request_started_at),
+                );
+            }
             write_response(socket, b"201 Created", b"upload ok").await;
             Ok(())
         }
@@ -380,6 +414,8 @@ fn usize_to_u32_saturating(value: usize) -> u32 {
 
 struct UploadBodyStats {
     sent_bytes: usize,
+    chunk_count: u32,
+    max_chunk_bytes: usize,
     body_read_ms: u32,
     sd_wait_ms: u32,
 }
@@ -407,6 +443,8 @@ async fn forward_upload_body(
     let mut body_read_ms = 0u32;
     let mut sd_wait_ms = 0u32;
     let mut sent_bytes = 0usize;
+    let mut chunk_count = 0u32;
+    let mut max_chunk_bytes = 0usize;
 
     let mut prefetched_offset = 0usize;
     while prefetched_offset < prefetched.len() && consumed < content_length {
@@ -425,6 +463,8 @@ async fn forward_upload_body(
                 .map_err(UploadBodyError::Roundtrip)?;
             sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
             sent_bytes += pending;
+            chunk_count = chunk_count.saturating_add(1);
+            max_chunk_bytes = max_chunk_bytes.max(pending);
             pending = 0;
         }
     }
@@ -459,12 +499,16 @@ async fn forward_upload_body(
                 .map_err(UploadBodyError::Roundtrip)?;
             sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(sd_started_at));
             sent_bytes += pending;
+            chunk_count = chunk_count.saturating_add(1);
+            max_chunk_bytes = max_chunk_bytes.max(pending);
             pending = 0;
         }
     }
 
     Ok(UploadBodyStats {
         sent_bytes,
+        chunk_count,
+        max_chunk_bytes,
         body_read_ms,
         sd_wait_ms,
     })

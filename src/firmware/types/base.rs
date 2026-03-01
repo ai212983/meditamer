@@ -12,7 +12,9 @@ pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
-pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 8192;
+// Larger upload chunks reduce per-chunk SD roundtrip overhead and improve
+// sustained HTTP upload throughput when PSRAM is available.
+pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 49_152;
 #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 4096;
 #[cfg(not(feature = "asset-upload-http"))]

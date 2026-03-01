@@ -1,5 +1,5 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{with_timeout, Duration, Instant};
 
 use super::super::super::{
     config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
@@ -140,14 +140,22 @@ async fn sd_upload_roundtrip_raw_locked(
 }
 
 async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<SdUploadResult> {
-    loop {
-        if let Ok(result) = SD_UPLOAD_RESULTS.try_receive() {
-            return Some(result);
-        }
-        if started_at.elapsed() >= Duration::from_millis(SD_UPLOAD_RESPONSE_TIMEOUT_MS) {
-            return None;
-        }
-        Timer::after(Duration::from_millis(1)).await;
+    if let Ok(result) = SD_UPLOAD_RESULTS.try_receive() {
+        return Some(result);
+    }
+
+    let remaining_ms = SD_UPLOAD_RESPONSE_TIMEOUT_MS
+        .saturating_sub(started_at.elapsed().as_millis() as u64)
+        .max(1);
+
+    match with_timeout(
+        Duration::from_millis(remaining_ms),
+        SD_UPLOAD_RESULTS.receive(),
+    )
+    .await
+    {
+        Ok(result) => Some(result),
+        Err(_) => None,
     }
 }
 
