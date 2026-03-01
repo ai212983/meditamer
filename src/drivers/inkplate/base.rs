@@ -123,39 +123,45 @@ where
 
     pub fn draw_test_pattern(&mut self, pattern: TestPattern) {
         self.clear_bw();
+        if self.fill_solid_pattern_if_requested(pattern) {
+            return;
+        }
+
+        for y in 0..E_INK_HEIGHT {
+            for x in 0..E_INK_WIDTH {
+                if Self::pattern_pixel_is_black(pattern, x, y) {
+                    self.set_pixel_bw(x, y, true);
+                }
+            }
+        }
+    }
+
+    fn fill_solid_pattern_if_requested(&mut self, pattern: TestPattern) -> bool {
+        match pattern {
+            TestPattern::SolidBlack => {
+                self.framebuffer_bw.fill(0xFF);
+                true
+            }
+            TestPattern::SolidWhite => {
+                self.framebuffer_bw.fill(0x00);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn pattern_pixel_is_black(pattern: TestPattern, x: usize, y: usize) -> bool {
         match pattern {
             TestPattern::CheckerboardDiagonals => {
-                for y in 0..E_INK_HEIGHT {
-                    for x in 0..E_INK_WIDTH {
-                        let checker = ((x / 24) + (y / 24)) % 2 == 0;
-                        let diag_a = x == y;
-                        let diag_b = x + y == E_INK_WIDTH - 1;
-                        if checker || diag_a || diag_b {
-                            self.set_pixel_bw(x, y, true);
-                        }
-                    }
-                }
+                let checker = ((x / 24) + (y / 24)) % 2 == 0;
+                let diag_a = x == y;
+                let diag_b = x + y == E_INK_WIDTH - 1;
+                checker || diag_a || diag_b
             }
-            TestPattern::VerticalBars => {
-                for y in 0..E_INK_HEIGHT {
-                    for x in 0..E_INK_WIDTH {
-                        if (x / 50) % 2 == 0 {
-                            self.set_pixel_bw(x, y, true);
-                        }
-                    }
-                }
-            }
-            TestPattern::HorizontalBars => {
-                for y in 0..E_INK_HEIGHT {
-                    if (y / 50) % 2 == 0 {
-                        for x in 0..E_INK_WIDTH {
-                            self.set_pixel_bw(x, y, true);
-                        }
-                    }
-                }
-            }
-            TestPattern::SolidBlack => self.framebuffer_bw.fill(0xFF),
-            TestPattern::SolidWhite => self.framebuffer_bw.fill(0x00),
+            TestPattern::VerticalBars => (x / 50) % 2 == 0,
+            TestPattern::HorizontalBars => (y / 50) % 2 == 0,
+            TestPattern::SolidBlack => true,
+            TestPattern::SolidWhite => false,
         }
     }
 }

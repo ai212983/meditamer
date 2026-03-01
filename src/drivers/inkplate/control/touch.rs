@@ -144,12 +144,33 @@ where
     }
 
     pub fn touch_read_sample(&mut self, rotation: u8) -> Result<TouchSample, I2C::Error> {
+        self.touch_ensure_resolution()?;
+        let raw = self.touch_read_raw_data_with_retry()?;
+        let bit_count = (raw[7].count_ones() as u8).min(2);
+        let raw_points = self.touch_decode_valid_points(&raw);
+        // Some idle/no-data reads still report non-zero status bits in raw[7].
+        // Prefer decoded coordinate validity to avoid phantom touches.
+        let coord_count = Self::touch_count_nonzero_points(&raw_points);
+        let touch_count = touch_presence_count(bit_count, coord_count);
+        let points = self.touch_transform_points(&raw_points, rotation);
+
+        Ok(TouchSample {
+            touch_count,
+            points,
+            raw,
+        })
+    }
+
+    fn touch_ensure_resolution(&mut self) -> Result<(), I2C::Error> {
         if self.touch_x_res == 0 || self.touch_y_res == 0 {
             let (x_res, y_res) = self.touch_read_resolution()?;
             self.touch_x_res = x_res;
             self.touch_y_res = y_res;
         }
+        Ok(())
+    }
 
+    fn touch_read_raw_data_with_retry(&mut self) -> Result<[u8; 8], I2C::Error> {
         let mut raw = self.touch_read_raw_data()?;
         // Some ELAN frames are all-zero even while a finger is moving. A short
         // in-call retry burst reduces one-frame gesture collapse without
@@ -161,11 +182,13 @@ where
             self.delay.delay_ms(TOUCH_RAW_EMPTY_RETRY_DELAY_MS);
             raw = self.touch_read_raw_data()?;
         }
+        Ok(raw)
+    }
 
-        let bit_count = (raw[7].count_ones() as u8).min(2);
+    fn touch_decode_valid_points(&self, raw: &[u8; 8]) -> [(u16, u16); 2] {
         let mut raw_points = [(0u16, 0u16); 2];
         for (idx, raw_point) in raw_points.iter_mut().enumerate() {
-            let decoded = Self::touch_decode_xy(&raw, idx);
+            let decoded = Self::touch_decode_xy(raw, idx);
             *raw_point = if touch_raw_point_plausible(
                 decoded.0,
                 decoded.1,
@@ -183,14 +206,21 @@ where
         if raw_points[0] == (0, 0) && raw_points[1] != (0, 0) {
             raw_points.swap(0, 1);
         }
-        // Some idle/no-data reads still report non-zero status bits in raw[7].
-        // Prefer decoded coordinate validity to avoid phantom touches.
-        let coord_count = raw_points
+        raw_points
+    }
+
+    fn touch_count_nonzero_points(raw_points: &[(u16, u16); 2]) -> u8 {
+        raw_points
             .iter()
             .filter(|(x, y)| *x != 0 || *y != 0)
-            .count() as u8;
-        let touch_count = touch_presence_count(bit_count, coord_count);
+            .count() as u8
+    }
 
+    fn touch_transform_points(
+        &self,
+        raw_points: &[(u16, u16); 2],
+        rotation: u8,
+    ) -> [TouchPoint; 2] {
         let mut points = [TouchPoint::default(); 2];
         for (idx, point) in points.iter_mut().enumerate() {
             let (x_raw, y_raw) = raw_points[idx];
@@ -200,12 +230,7 @@ where
                 self.touch_transform_point(x_raw, y_raw, rotation)
             };
         }
-
-        Ok(TouchSample {
-            touch_count,
-            points,
-            raw,
-        })
+        points
     }
 
     fn touch_decode_xy(raw: &[u8; 8], index: usize) -> (u16, u16) {
