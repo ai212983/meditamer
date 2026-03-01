@@ -622,83 +622,130 @@ fn wait_state_progress(console: &mut SerialConsole, timeout_ms: u32) -> Result<(
     Err(anyhow!("net_wait_state: did not leave idle state"))
 }
 
+struct WaitReadyState {
+    started: Instant,
+    post_connect_window_ms: u32,
+    post_connect_deadline: Option<Instant>,
+    first_connect_ms: Option<u32>,
+    last_nonterminal_failure: Option<NetStatus>,
+    overall_deadline: Instant,
+}
+
+impl WaitReadyState {
+    fn new(started: Instant, policy: NetPolicy) -> Self {
+        let post_connect_window_ms = policy
+            .dhcp_timeout_ms
+            .saturating_add(policy.listener_timeout_ms)
+            .saturating_add(2_000);
+        let overall_deadline = started + Duration::from_millis(overall_ready_timeout_ms(policy));
+        Self {
+            started,
+            post_connect_window_ms,
+            post_connect_deadline: None,
+            first_connect_ms: None,
+            last_nonterminal_failure: None,
+            overall_deadline,
+        }
+    }
+
+    fn elapsed_ms(&self) -> u32 {
+        self.started.elapsed().as_millis() as u32
+    }
+
+    fn handle_status(&mut self, status: NetStatus) -> Result<Option<(u32, u32, String)>> {
+        self.update_connect_timing(&status);
+        if let Some(ip) = self.extract_listener_ip(&status) {
+            let listen_ms = self.elapsed_ms();
+            return Ok(Some((
+                self.first_connect_ms
+                    .unwrap_or_else(|| self.elapsed_ms())
+                    .max(1),
+                listen_ms,
+                ip,
+            )));
+        }
+        self.update_failure_if_any(status)?;
+        Ok(None)
+    }
+
+    fn update_connect_timing(&mut self, status: &NetStatus) {
+        let state = status.state.as_deref().unwrap_or("");
+        let linked = status.link.unwrap_or(false);
+        if linked {
+            if self.first_connect_ms.is_none() {
+                self.first_connect_ms = Some(self.elapsed_ms());
+            }
+            if self.post_connect_deadline.is_none() {
+                self.post_connect_deadline =
+                    Some(Instant::now() + Duration::from_millis(self.post_connect_window_ms as u64));
+            }
+            return;
+        }
+        if self.should_reset_post_connect_deadline(state) {
+            self.post_connect_deadline = None;
+        }
+    }
+
+    fn should_reset_post_connect_deadline(&self, state: &str) -> bool {
+        matches!(state, "Recovering" | "Starting" | "Scanning" | "Associating")
+    }
+
+    fn extract_listener_ip(&self, status: &NetStatus) -> Option<String> {
+        let ipv4 = status.ipv4.as_deref()?;
+        if !status.listener.unwrap_or(false) || ipv4 == "0.0.0.0" {
+            return None;
+        }
+        Some(ipv4.to_string())
+    }
+
+    fn update_failure_if_any(&mut self, status: NetStatus) -> Result<()> {
+        let failure_class = status.failure_class.as_deref().unwrap_or("none");
+        if failure_class == "none" {
+            return Ok(());
+        }
+        if self.is_terminal_failure(&status) {
+            return Err(anyhow!("{}", format_failure(&status)));
+        }
+        self.last_nonterminal_failure = Some(status);
+        Ok(())
+    }
+
+    fn is_terminal_failure(&self, status: &NetStatus) -> bool {
+        matches!(status.state.as_deref(), Some("Failed"))
+            || matches!(status.ladder_step.as_deref(), Some("terminal_fail"))
+    }
+
+    fn maybe_format_timeout(&self, prefix: &str) -> String {
+        if let Some(status) = &self.last_nonterminal_failure {
+            format!("net_wait_ready: {prefix} ({})", format_failure(status))
+        } else {
+            format!("net_wait_ready: {prefix}")
+        }
+    }
+
+    fn check_timeouts(&self) -> Result<()> {
+        if let Some(deadline) = self.post_connect_deadline {
+            if Instant::now() > deadline {
+            return Err(anyhow!("{}", self.maybe_format_timeout("listener timeout")));
+            }
+        }
+        if Instant::now() > self.overall_deadline {
+            return Err(anyhow!("{}", self.maybe_format_timeout("overall timeout")));
+        }
+        Ok(())
+    }
+}
+
 fn wait_ready(console: &mut SerialConsole, policy: NetPolicy) -> Result<(u32, u32, String)> {
     let started = Instant::now();
-    let post_connect_window_ms = policy
-        .dhcp_timeout_ms
-        .saturating_add(policy.listener_timeout_ms)
-        .saturating_add(2_000);
-    let overall_deadline = started + Duration::from_millis(overall_ready_timeout_ms(policy));
-    let mut post_connect_deadline: Option<Instant> = None;
-    let mut first_connect_ms: Option<u32> = None;
-    let mut last_nonterminal_failure: Option<NetStatus> = None;
+    let mut state = WaitReadyState::new(started, policy);
     loop {
         if let Some(status) = query_net_status(console)? {
-            let state = status.state.as_deref().unwrap_or("");
-            let linked = status.link.unwrap_or(false);
-            if linked {
-                if first_connect_ms.is_none() {
-                    first_connect_ms = Some(started.elapsed().as_millis() as u32);
-                }
-                if post_connect_deadline.is_none() {
-                    post_connect_deadline =
-                        Some(Instant::now() + Duration::from_millis(post_connect_window_ms as u64));
-                }
-            } else if matches!(
-                state,
-                "Recovering" | "Starting" | "Scanning" | "Associating"
-            ) {
-                // Link dropped and firmware is re-entering connect path; clear the listener-phase
-                // deadline so host does not fail a valid reconnect attempt.
-                post_connect_deadline = None;
-            }
-            if status.listener.unwrap_or(false) {
-                if let Some(ipv4) = status.ipv4.as_deref() {
-                    if ipv4 != "0.0.0.0" {
-                        let listen_ms = started.elapsed().as_millis() as u32;
-                        return Ok((
-                            first_connect_ms
-                                .unwrap_or_else(|| started.elapsed().as_millis() as u32)
-                                .max(1),
-                            listen_ms,
-                            ipv4.to_string(),
-                        ));
-                    }
-                }
-            }
-            if let Some(failure_class) = status.failure_class.as_deref() {
-                if failure_class != "none" {
-                    let terminal_state = matches!(status.state.as_deref(), Some("Failed"));
-                    let terminal_ladder =
-                        matches!(status.ladder_step.as_deref(), Some("terminal_fail"));
-                    if terminal_state || terminal_ladder {
-                        return Err(anyhow!("{}", format_failure(&status)));
-                    }
-                    last_nonterminal_failure = Some(status.clone());
-                }
+            if let Some(result) = state.handle_status(status)? {
+                return Ok(result);
             }
         }
-
-        if let Some(deadline) = post_connect_deadline {
-            if Instant::now() > deadline {
-                if let Some(status) = last_nonterminal_failure.as_ref() {
-                    return Err(anyhow!(
-                        "net_wait_ready: listener timeout ({})",
-                        format_failure(status)
-                    ));
-                }
-                return Err(anyhow!("net_wait_ready: listener timeout"));
-            }
-        }
-        if Instant::now() > overall_deadline {
-            if let Some(status) = last_nonterminal_failure.as_ref() {
-                return Err(anyhow!(
-                    "net_wait_ready: overall timeout ({})",
-                    format_failure(status)
-                ));
-            }
-            return Err(anyhow!("net_wait_ready: overall timeout"));
-        }
+        state.check_timeouts()?;
         thread::sleep(Duration::from_millis(350));
     }
 }
@@ -781,249 +828,310 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
         self.capture_mem_diag_lines()?;
         let result = match action {
-            "prepare_payload" => {
-                ensure_parent_dir(&self.payload_path)?;
-                let mut data = vec![0u8; 524_288];
-                for (i, slot) in data.iter_mut().enumerate() {
-                    *slot = ((i * 17 + 31) & 0xFF) as u8;
-                }
-                fs::write(&self.payload_path, data)?;
-                Ok(())
-            }
-            "start_run" => {
-                ctx_set_u32(context, "cycle", 1)?;
-                ctx_set_u32(context, "cycles", self.cycles)?;
-                ctx_set_u32(context, "operation_retries", self.operation_retries)?;
-                self.mem_read_mark = self.console.mark();
-                Ok(())
-            }
-            "net_apply_config" => {
-                if query_net_status(&mut self.console)?
-                    .as_ref()
-                    .is_some_and(|status| is_ready(status, true))
-                {
-                    self.logger
-                        .info("net_apply_config: skip NETCFG SET because network is already ready");
-                    return Ok(());
-                }
-                let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
-                wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
-            }
-            "net_start" => {
-                // Avoid restarting a healthy stack: forcing NET START from an
-                // already-ready state has regressed into listener_timeout loops.
-                if query_net_status(&mut self.console)?
-                    .as_ref()
-                    .is_some_and(|status| is_ready(status, true))
-                {
-                    self.logger
-                        .info("net_start: skip NET START because network is already ready");
-                    return Ok(());
-                }
-                if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
-                    let listener_ready_now =
-                        query_net_status(&mut self.console)?.is_some_and(|status| {
-                            matches!(status.state.as_deref(), Some("Ready"))
-                                && status.link.unwrap_or(false)
-                                && status.listener.unwrap_or(false)
-                                && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
-                        });
-                    if !listener_ready_now {
-                        return Err(anyhow!("net_start: listener enable failed ({err})"));
-                    }
-                    self.logger.info(format!(
-                        "net_start: listener enable ack not obtained ({err}); continuing because listener is already ready"
-                    ));
-                }
-                if let Some(status) = query_net_status(&mut self.console)? {
-                    if is_ready(&status, true) {
-                        self.logger
-                            .info("net_start: skip NET START because listener is already ready");
-                        return Ok(());
-                    }
-                    let ipv4_zero = status.ipv4.as_deref().is_none_or(|ip| ip == "0.0.0.0");
-                    let stuck_listener_wait =
-                        matches!(status.state.as_deref(), Some("ListenerWait" | "DhcpWait"))
-                            && ipv4_zero;
-                    if stuck_listener_wait {
-                        self.logger.info(format!(
-                            "net_start: state={} with ipv4=0.0.0.0; forcing NET RECOVER",
-                            status.state.as_deref().unwrap_or("unknown")
-                        ));
-                        wait_net_ack(&mut self.console, "NET RECOVER")?;
-                        thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
-                        return Ok(());
-                    }
-                    let active_state = matches!(
-                        status.state.as_deref(),
-                        Some(
-                            "Ready"
-                                | "Recovering"
-                                | "Starting"
-                                | "Scanning"
-                                | "Associating"
-                                | "DhcpWait"
-                                | "ListenerWait"
-                        )
-                    );
-                    if active_state {
-                        self.logger.info(format!(
-                            "net_start: skip NET START because state is already active ({})",
-                            status.state.as_deref().unwrap_or("unknown")
-                        ));
-                        return Ok(());
-                    }
-                }
-                if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
-                    let ready_now = query_net_status(&mut self.console)?.is_some_and(|status| {
-                        is_ready(&status, true)
-                    });
-                    if !ready_now {
-                        return Err(err);
-                    }
-                    self.logger.info(format!(
-                        "net_start: start ack not obtained ({err}); continuing because network is already ready"
-                    ));
-                }
-                Ok(())
-            }
+            "prepare_payload" => self.handle_prepare_payload(),
+            "start_run" => self.handle_start_run(context),
+            "net_apply_config" => self.handle_net_apply_config(),
+            "net_start" => self.handle_net_start(),
             "net_wait_state" => {
                 wait_state_progress(&mut self.console, self.policy.connect_timeout_ms)
             }
-            "net_wait_ready" => {
-                let (connect_ms, listen_ms, ip) = wait_ready(&mut self.console, self.policy)?;
-                ctx_set_u32(context, "connect_ms", connect_ms)?;
-                ctx_set_u32(context, "listen_ms", listen_ms)?;
-                ctx_set_string(context, "ip", &ip)?;
-                self.connect_samples.push(connect_ms as f64 / 1000.0);
-                self.listen_samples.push(listen_ms as f64 / 1000.0);
-                Ok(())
-            }
-            "init_upload_attempt" => {
-                ctx_set_u32(context, "upload_attempt", 1)?;
-                ctx_set_bool(context, "upload_done", false)?;
-                Ok(())
-            }
-            "net_upload_once" => {
-                let ip = ctx_get_string(context, "ip")?;
-                let cycle_root = self.remote_root.clone();
-                let upload_name = self
-                    .payload_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "net_acceptance_payload.bin".to_string());
-                let remote_file = format!("{}/{}", self.remote_root, upload_name);
-                ctx_set_string(context, "remote_file", &remote_file)?;
-                let started = Instant::now();
-                // Keep timeout tunable for bounded profiling runs. Production-like
-                // behavior stays unchanged with the 180s default.
-                let upload_timeout_sec =
-                    env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
-                // The workflow already waits for Ready+listener before this step,
-                // so we can skip the extra upload preflight health roundtrip.
-                let result = workflows_upload::upload_file_direct_fast(
-                    self.logger,
-                    &ip,
-                    8080,
-                    upload_timeout_sec,
-                    &self.payload_path,
-                    &cycle_root,
-                    self.token.as_deref(),
-                );
-                let upload_ms = started.elapsed().as_millis() as u32;
-                ctx_set_u32(context, "upload_ms", upload_ms)?;
-                match result {
-                    Ok(()) => {
-                        ctx_set_bool(context, "upload_done", true)?;
-                        ctx_set_string(context, "upload_error", "")?;
-                    }
-                    Err(err) => {
-                        ctx_set_bool(context, "upload_done", false)?;
-                        ctx_set_string(context, "upload_error", &err.to_string())?;
-                    }
-                }
-                Ok(())
-            }
-            "net_verify_once" => {
-                let remote_file = ctx_get_string(context, "remote_file")?;
-                if !verify_remote_file(&mut self.console, &remote_file)? {
-                    return Err(anyhow!("remote verify failed for {remote_file}"));
-                }
-                Ok(())
-            }
-            "net_collect_diag" => {
-                let status_re = Regex::new(r"^NET_STATUS \{")?;
-                let mark = self.console.mark();
-                self.console.send_line("NET STATUS")?;
-                if let Some(line) =
-                    self.console
-                        .wait_for_regex_since(mark, &status_re, Duration::from_secs(2))?
-                {
-                    self.logger.info(format!("diag: {line}"));
-                }
-                Ok(())
-            }
-            "net_recover_once" => {
-                if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                    self.logger.info(format!(
-                        "net_recover_once: recover ack not obtained ({err}); continuing"
-                    ));
-                }
-                Ok(())
-            }
-            "increment_upload_attempt" => {
-                let attempt = ctx_get_u32(context, "upload_attempt")?;
-                ctx_set_u32(context, "upload_attempt", attempt.saturating_add(1))?;
-                Ok(())
-            }
-            "fail_upload" | "net_fail" => {
-                self.log_mem_summary("failure summary");
-                let detail = ctx_get_string(context, "upload_error")
-                    .unwrap_or_else(|_| "network/upload workflow failed".to_string());
-                Err(anyhow!("{detail}"))
-            }
-            "finalize_cycle" => {
-                let connect_ms = ctx_get_u32(context, "connect_ms")?;
-                let listen_ms = ctx_get_u32(context, "listen_ms")?;
-                let upload_ms = ctx_get_u32(context, "upload_ms")?;
-                let cycle = ctx_get_u32(context, "cycle")?;
-                let payload_bytes = fs::metadata(&self.payload_path)?.len() as f64;
-                let upload_s = (upload_ms as f64 / 1000.0).max(0.001);
-                let kib_s = payload_bytes / 1024.0 / upload_s;
-                self.upload_samples.push(upload_s);
-                self.throughput_samples.push(kib_s);
-                self.logger.info(format!(
-                    "cycle {}: connect_ms={} listen_ms={} upload_ms={} throughput_kib_s={:.2}",
-                    cycle, connect_ms, listen_ms, upload_ms, kib_s
-                ));
-                Ok(())
-            }
-            "advance_cycle" => {
-                let cycle = ctx_get_u32(context, "cycle")?;
-                ctx_set_u32(context, "cycle", cycle.saturating_add(1))?;
-                Ok(())
-            }
-            "print_summary" => {
-                let avg_connect = avg(&self.connect_samples);
-                let avg_listen = avg(&self.listen_samples);
-                let avg_upload = avg(&self.upload_samples);
-                let avg_throughput = avg(&self.throughput_samples);
-                self.logger.info(format!(
-                    "summary cycles={} avg_connect_s={:.2} avg_listen_s={:.2} avg_upload_s={:.2} avg_kib_s={:.2} total_s={:.2}",
-                    self.connect_samples.len(),
-                    avg_connect,
-                    avg_listen,
-                    avg_upload,
-                    avg_throughput,
-                    self.started.elapsed().as_secs_f64(),
-                ));
-                self.log_mem_summary("summary");
-                Ok(())
-            }
+            "net_wait_ready" => self.handle_net_wait_ready(context),
+            "init_upload_attempt" => self.handle_init_upload_attempt(context),
+            "net_upload_once" => self.handle_net_upload_once(context),
+            "net_verify_once" => self.handle_net_verify_once(context),
+            "net_collect_diag" => self.handle_net_collect_diag(),
+            "net_recover_once" => self.handle_net_recover_once(),
+            "increment_upload_attempt" => self.handle_increment_upload_attempt(context),
+            "fail_upload" | "net_fail" => self.handle_fail_upload(context),
+            "finalize_cycle" => self.handle_finalize_cycle(context),
+            "advance_cycle" => self.handle_advance_cycle(context),
+            "print_summary" => self.handle_print_summary(),
             _ => Err(anyhow!("unknown workflow action: {action}")),
         };
         self.capture_mem_diag_lines()?;
         result
+    }
+}
+
+impl WifiAcceptanceRuntime<'_> {
+
+    fn handle_prepare_payload(&mut self) -> Result<()> {
+        ensure_parent_dir(&self.payload_path)?;
+        let mut data = vec![0u8; 524_288];
+        for (i, slot) in data.iter_mut().enumerate() {
+            *slot = ((i * 17 + 31) & 0xFF) as u8;
+        }
+        fs::write(&self.payload_path, data)?;
+        Ok(())
+    }
+
+    fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
+        ctx_set_u32(context, "cycle", 1)?;
+        ctx_set_u32(context, "cycles", self.cycles)?;
+        ctx_set_u32(context, "operation_retries", self.operation_retries)?;
+        self.mem_read_mark = self.console.mark();
+        Ok(())
+    }
+
+    fn handle_net_apply_config(&mut self) -> Result<()> {
+        if query_net_status(&mut self.console)?
+            .as_ref()
+            .is_some_and(|status| is_ready(status, true))
+        {
+            self.logger
+                .info("net_apply_config: skip NETCFG SET because network is already ready");
+            return Ok(());
+        }
+        let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
+        wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
+    }
+
+    fn handle_net_start(&mut self) -> Result<()> {
+        // Avoid restarting a healthy stack: forcing NET START from an
+        // already-ready state has regressed into listener_timeout loops.
+        if self.should_skip_net_start_if_ready()? {
+            return Ok(());
+        }
+        self.ensure_listener_on()?;
+        if let Some(status) = query_net_status(&mut self.console)? {
+            if self.should_return_from_status(status)? {
+                return Ok(());
+            }
+        }
+        self.ensure_net_start_ack()?;
+        Ok(())
+    }
+
+    fn should_skip_net_start_if_ready(&mut self) -> Result<bool> {
+        if query_net_status(&mut self.console)?
+            .as_ref()
+            .is_some_and(|status| is_ready(status, true))
+        {
+            self.logger
+                .info("net_start: skip NET START because network is already ready");
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn ensure_listener_on(&mut self) -> Result<()> {
+        if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+            if !self.is_listener_ready()? {
+                return Err(anyhow!("net_start: listener enable failed ({err})"));
+            }
+            self.logger.info(format!(
+                "net_start: listener enable ack not obtained ({err}); continuing because listener is already ready"
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_listener_ready(&mut self) -> Result<bool> {
+        Ok(query_net_status(&mut self.console)?
+            .as_ref()
+            .is_some_and(|status| {
+                matches!(status.state.as_deref(), Some("Ready"))
+                    && status.link.unwrap_or(false)
+                    && status.listener.unwrap_or(false)
+                    && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
+            }))
+    }
+
+    fn should_return_from_status(&mut self, status: NetStatus) -> Result<bool> {
+        if is_ready(&status, true) {
+            self.logger
+                .info("net_start: skip NET START because listener is already ready");
+            return Ok(true);
+        }
+        if self.is_stuck_listener_wait(&status) {
+            self.logger.info(format!(
+                "net_start: state={} with ipv4=0.0.0.0; forcing NET RECOVER",
+                status.state.as_deref().unwrap_or("unknown")
+            ));
+            wait_net_ack(&mut self.console, "NET RECOVER")?;
+            thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
+            return Ok(true);
+        }
+        if self.is_active_state(&status) {
+            self.logger.info(format!(
+                "net_start: skip NET START because state is already active ({})",
+                status.state.as_deref().unwrap_or("unknown")
+            ));
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn is_stuck_listener_wait(&self, status: &NetStatus) -> bool {
+        let ipv4_zero = status.ipv4.as_deref().is_none_or(|ip| ip == "0.0.0.0");
+        matches!(status.state.as_deref(), Some("ListenerWait" | "DhcpWait")) && ipv4_zero
+    }
+
+    fn is_active_state(&self, status: &NetStatus) -> bool {
+        matches!(
+            status.state.as_deref(),
+            Some(
+                "Ready"
+                    | "Recovering"
+                    | "Starting"
+                    | "Scanning"
+                    | "Associating"
+                    | "DhcpWait"
+                    | "ListenerWait"
+            )
+        )
+    }
+
+    fn ensure_net_start_ack(&mut self) -> Result<()> {
+        if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
+            if !query_net_status(&mut self.console)?.is_some_and(|status| is_ready(&status, true)) {
+                return Err(err);
+            }
+            self.logger.info(format!(
+                "net_start: start ack not obtained ({err}); continuing because network is already ready"
+            ));
+        }
+        Ok(())
+    }
+
+    fn handle_net_wait_ready(&mut self, context: &mut Value) -> Result<()> {
+        let (connect_ms, listen_ms, ip) = wait_ready(&mut self.console, self.policy)?;
+        ctx_set_u32(context, "connect_ms", connect_ms)?;
+        ctx_set_u32(context, "listen_ms", listen_ms)?;
+        ctx_set_string(context, "ip", &ip)?;
+        self.connect_samples.push(connect_ms as f64 / 1000.0);
+        self.listen_samples.push(listen_ms as f64 / 1000.0);
+        Ok(())
+    }
+
+    fn handle_init_upload_attempt(&self, context: &mut Value) -> Result<()> {
+        ctx_set_u32(context, "upload_attempt", 1)?;
+        ctx_set_bool(context, "upload_done", false)?;
+        Ok(())
+    }
+
+    fn handle_net_upload_once(&mut self, context: &mut Value) -> Result<()> {
+        let ip = ctx_get_string(context, "ip")?;
+        let cycle_root = self.remote_root.clone();
+        let upload_name = self
+            .payload_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "net_acceptance_payload.bin".to_string());
+        let remote_file = format!("{}/{}", self.remote_root, upload_name);
+        ctx_set_string(context, "remote_file", &remote_file)?;
+        let started = Instant::now();
+        // Keep timeout tunable for bounded profiling runs. Production-like
+        // behavior stays unchanged with the 180s default.
+        let upload_timeout_sec =
+            env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
+        // The workflow already waits for Ready+listener before this step,
+        // so we can skip the extra upload preflight health roundtrip.
+        let result = workflows_upload::upload_file_direct_fast(
+            self.logger,
+            &ip,
+            8080,
+            upload_timeout_sec,
+            &self.payload_path,
+            &cycle_root,
+            self.token.as_deref(),
+        );
+        let upload_ms = started.elapsed().as_millis() as u32;
+        ctx_set_u32(context, "upload_ms", upload_ms)?;
+        match result {
+            Ok(()) => {
+                ctx_set_bool(context, "upload_done", true)?;
+                ctx_set_string(context, "upload_error", "")?;
+            }
+            Err(err) => {
+                ctx_set_bool(context, "upload_done", false)?;
+                ctx_set_string(context, "upload_error", &err.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_net_verify_once(&mut self, context: &mut Value) -> Result<()> {
+        let remote_file = ctx_get_string(context, "remote_file")?;
+        if !verify_remote_file(&mut self.console, &remote_file)? {
+            return Err(anyhow!("remote verify failed for {remote_file}"));
+        }
+        Ok(())
+    }
+
+    fn handle_net_collect_diag(&mut self) -> Result<()> {
+        let status_re = Regex::new(r"^NET_STATUS \{")?;
+        let mark = self.console.mark();
+        self.console.send_line("NET STATUS")?;
+        if let Some(line) = self
+            .console
+            .wait_for_regex_since(mark, &status_re, Duration::from_secs(2))?
+        {
+            self.logger.info(format!("diag: {line}"));
+        }
+        Ok(())
+    }
+
+    fn handle_net_recover_once(&mut self) -> Result<()> {
+        if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
+            self.logger
+                .info(format!("net_recover_once: recover ack not obtained ({err}); continuing"));
+        }
+        Ok(())
+    }
+
+    fn handle_increment_upload_attempt(&self, context: &mut Value) -> Result<()> {
+        let attempt = ctx_get_u32(context, "upload_attempt")?;
+        ctx_set_u32(context, "upload_attempt", attempt.saturating_add(1))?;
+        Ok(())
+    }
+
+    fn handle_fail_upload(&mut self, context: &mut Value) -> Result<()> {
+        self.log_mem_summary("failure summary");
+        let detail = ctx_get_string(context, "upload_error")
+            .unwrap_or_else(|_| "network/upload workflow failed".to_string());
+        Err(anyhow!("{detail}"))
+    }
+
+    fn handle_finalize_cycle(&mut self, context: &mut Value) -> Result<()> {
+        let connect_ms = ctx_get_u32(context, "connect_ms")?;
+        let listen_ms = ctx_get_u32(context, "listen_ms")?;
+        let upload_ms = ctx_get_u32(context, "upload_ms")?;
+        let cycle = ctx_get_u32(context, "cycle")?;
+        let payload_bytes = fs::metadata(&self.payload_path)?.len() as f64;
+        let upload_s = (upload_ms as f64 / 1000.0).max(0.001);
+        let kib_s = payload_bytes / 1024.0 / upload_s;
+        self.upload_samples.push(upload_s);
+        self.throughput_samples.push(kib_s);
+        self.logger.info(format!(
+            "cycle {}: connect_ms={} listen_ms={} upload_ms={} throughput_kib_s={:.2}",
+            cycle, connect_ms, listen_ms, upload_ms, kib_s
+        ));
+        Ok(())
+    }
+
+    fn handle_advance_cycle(&self, context: &mut Value) -> Result<()> {
+        let cycle = ctx_get_u32(context, "cycle")?;
+        ctx_set_u32(context, "cycle", cycle.saturating_add(1))?;
+        Ok(())
+    }
+
+    fn handle_print_summary(&mut self) -> Result<()> {
+        let avg_connect = avg(&self.connect_samples);
+        let avg_listen = avg(&self.listen_samples);
+        let avg_upload = avg(&self.upload_samples);
+        let avg_throughput = avg(&self.throughput_samples);
+        self.logger.info(format!(
+            "summary cycles={} avg_connect_s={:.2} avg_listen_s={:.2} avg_upload_s={:.2} avg_kib_s={:.2} total_s={:.2}",
+            self.connect_samples.len(),
+            avg_connect,
+            avg_listen,
+            avg_upload,
+            avg_throughput,
+            self.started.elapsed().as_secs_f64(),
+        ));
+        self.log_mem_summary("summary");
+        Ok(())
     }
 }
 
