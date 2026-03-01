@@ -13,6 +13,9 @@
 /scripts/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
+.env.local
+.env.*.local
+.scannerwork/
 
 ## gh-csi settings and working directory
 .gh-csi/models.toml

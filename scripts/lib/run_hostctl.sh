@@ -2,6 +2,21 @@
 
 set -euo pipefail
 
+load_repo_env_file_if_present() {
+    local relative_path="${1:-.env.local}"
+    local script_dir repo_root env_path
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    repo_root="$(cd "$script_dir/../.." && pwd)"
+    env_path="$repo_root/$relative_path"
+
+    if [[ -f "$env_path" ]]; then
+        # shellcheck source=/dev/null
+        set -a
+        source "$env_path"
+        set +a
+    fi
+}
+
 run_hostctl() {
     local script_dir repo_root manifest_path toolchain host_target
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
