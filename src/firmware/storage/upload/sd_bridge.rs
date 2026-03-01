@@ -145,7 +145,7 @@ async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<Sd
     }
 
     let remaining_ms = SD_UPLOAD_RESPONSE_TIMEOUT_MS
-        .saturating_sub(started_at.elapsed().as_millis() as u64)
+        .saturating_sub(started_at.elapsed().as_millis())
         .max(1);
 
     match with_timeout(
