@@ -1,4 +1,7 @@
-use super::*;
+use super::super::{
+    DitherMode, Fx, BLUE_NOISE_32X32, BLUE_NOISE_600, BLUE_NOISE_600_HEIGHT, BLUE_NOISE_600_WIDTH,
+    BLUE_NOISE_SIDE, FX_3PI_OVER_4, FX_EPSILON, FX_ONE, FX_PI_OVER_4, FX_THREE, FX_TWO, FX_ZERO,
+};
 
 #[inline]
 fn blue_noise_threshold_u8(x: i32, y: i32) -> u8 {

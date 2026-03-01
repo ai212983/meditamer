@@ -1,5 +1,9 @@
-use super::*;
 use embedded_graphics::pixelcolor::BinaryColor;
+
+use super::{
+    dither_threshold_u8, DitherMode, RenderMode, SumiSunParams, FX_0_05, FX_0_2, FX_0_45, FX_0_55,
+    FX_1_8, FX_255, FX_2_2, FX_EPSILON, FX_HALF, FX_ONE, FX_TAU, FX_THREE, FX_TWO, FX_ZERO,
+};
 
 mod noise_math;
 

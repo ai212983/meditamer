@@ -4,7 +4,7 @@ use embedded_graphics::{
 };
 
 use super::sampling::{sample_sumi_sun_binary_pixel, sample_sumi_sun_gray4_level};
-use super::*;
+use super::{DitherMode, RenderMode, SumiSunParams};
 
 pub fn render_sumi_sun<T>(
     target: &mut T,
