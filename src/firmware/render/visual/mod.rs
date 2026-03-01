@@ -176,11 +176,7 @@ async fn render_suminagashi_with_staging(
                     dither: SUMINAGASHI_DITHER_MODE,
                 },
                 |x, py| background_alpha_50_mask(x, py, seed),
-                |x, py| {
-                    let row = (py - y) as usize;
-                    let idx = row * width_usize + x as usize;
-                    stage_buf[idx] = 1;
-                },
+                |x, py| stage_mark_pixel(stage_buf, width_usize, y, x, py),
             );
         }
 
@@ -192,28 +188,11 @@ async fn render_suminagashi_with_staging(
                 sun_params,
                 SUMINAGASHI_RENDER_MODE,
                 SUMINAGASHI_DITHER_MODE,
-                |x, py| {
-                    let row = (py - y) as usize;
-                    let idx = row * width_usize + x as usize;
-                    stage_buf[idx] = 1;
-                },
+                |x, py| stage_mark_pixel(stage_buf, width_usize, y, x, py),
             );
         }
 
-        let mut row = 0usize;
-        while row < chunk_rows_active {
-            let py = y as usize + row;
-            let row_start = row * width_usize;
-            let row_slice = &stage_buf[row_start..row_start + width_usize];
-            let mut x = 0usize;
-            while x < row_slice.len() {
-                if row_slice[x] != 0 {
-                    display.set_pixel_bw(x, py, true);
-                }
-                x += 1;
-            }
-            row += 1;
-        }
+        flush_stage_to_display(display, stage_buf, width_usize, chunk_rows_active, y);
 
         y = y_end;
         if y < height {
@@ -223,6 +202,37 @@ async fn render_suminagashi_with_staging(
 
     psram::log_allocator_high_water("render_suminagashi_staging");
     true
+}
+
+#[cfg(feature = "psram-alloc")]
+fn stage_mark_pixel(stage_buf: &mut [u8], width_usize: usize, chunk_start_y: i32, x: i32, py: i32) {
+    let row = (py - chunk_start_y) as usize;
+    let idx = row * width_usize + x as usize;
+    stage_buf[idx] = 1;
+}
+
+#[cfg(feature = "psram-alloc")]
+fn flush_stage_to_display(
+    display: &mut InkplateDriver,
+    stage_buf: &[u8],
+    width_usize: usize,
+    chunk_rows_active: usize,
+    chunk_start_y: i32,
+) {
+    let mut row = 0usize;
+    while row < chunk_rows_active {
+        let py = chunk_start_y as usize + row;
+        let row_start = row * width_usize;
+        let row_slice = &stage_buf[row_start..row_start + width_usize];
+        let mut x = 0usize;
+        while x < row_slice.len() {
+            if row_slice[x] != 0 {
+                display.set_pixel_bw(x, py, true);
+            }
+            x += 1;
+        }
+        row += 1;
+    }
 }
 
 fn update_marble_metrics(started: Instant, tag: &str) {
