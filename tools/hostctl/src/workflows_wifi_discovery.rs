@@ -362,6 +362,80 @@ fn fmt_min(value: &Option<(u64, String)>) -> String {
     }
 }
 
+struct ProbeRoundState {
+    ready: bool,
+    scan_zero_events: u32,
+    scan_nonzero_events: u32,
+    no_ap_found_events: u32,
+    ssid_seen_events: u32,
+    last_failure_class: String,
+    read_mark: usize,
+    next_status_poll: Instant,
+    deadline: Instant,
+    round_mem_diag: MemDiagSummary,
+}
+
+impl Default for ProbeRoundState {
+    fn default() -> Self {
+        Self {
+            ready: false,
+            scan_zero_events: 0,
+            scan_nonzero_events: 0,
+            no_ap_found_events: 0,
+            ssid_seen_events: 0,
+            last_failure_class: String::new(),
+            read_mark: 0,
+            next_status_poll: Instant::now(),
+            deadline: Instant::now(),
+            round_mem_diag: MemDiagSummary::default(),
+        }
+    }
+}
+
+impl ProbeRoundState {
+    fn new(read_mark: usize, deadline: Instant) -> Self {
+        Self {
+            read_mark,
+            next_status_poll: Instant::now(),
+            deadline,
+            last_failure_class: "none".to_string(),
+            ..Self::default()
+        }
+    }
+
+    fn ingest_line(&mut self, line: &str, ssid_marker: &str, require_listener: bool) {
+        if let Some(count) = parse_scan_done_count(line) {
+            if count == 0 {
+                self.scan_zero_events = self.scan_zero_events.saturating_add(1);
+            } else {
+                self.scan_nonzero_events = self.scan_nonzero_events.saturating_add(1);
+            }
+        }
+        if line.contains("reason=201") || line.contains("no_ap_found") {
+            self.no_ap_found_events = self.no_ap_found_events.saturating_add(1);
+        }
+        if line.starts_with("upload_http: scan ap ssid=") && line.contains(ssid_marker) {
+            self.ssid_seen_events = self.ssid_seen_events.saturating_add(1);
+        }
+        if line.starts_with("NET_STATUS ") {
+            if let Ok(status) = parse_net_status_line(line) {
+                self.last_failure_class = status
+                    .failure_class
+                    .as_deref()
+                    .unwrap_or("none")
+                    .to_string();
+                if is_ready(&status, require_listener) {
+                    self.ready = true;
+                }
+            }
+        }
+    }
+
+    fn is_zero_discovery(&self) -> bool {
+        !self.ready && self.scan_zero_events > 0 && self.scan_nonzero_events == 0
+    }
+}
+
 fn active_scan_timeout_ms(policy: &NetPolicy) -> u64 {
     // Mirror firmware timeout shaping so host and firmware evaluate the same
     // scan-budget window.
@@ -420,291 +494,296 @@ fn recommended_round_timeout_ms(policy: &NetPolicy, profile: &DiscoveryProfile) 
 impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
         match action {
-            "start_run" => {
-                ctx_set_u32(context, "round", 1)?;
-                ctx_set_u32(context, "rounds", self.profile.rounds)?;
-                ctx_set_bool(context, "run_passed", false)?;
-                ctx_set_string(context, "run_error", "")?;
-                if self.profile.disable_listener_during_probe_rounds {
-                    wait_net_ack(&mut self.console, "NET LISTENER OFF")?;
-                }
-                self.logger.info(format!(
-                    "wifi-discovery-debug: effective_round_timeout_ms={} (profile_round_timeout_ms={})",
-                    recommended_round_timeout_ms(&self.policy, &self.profile),
-                    self.profile.round_timeout_ms
-                ));
-                Ok(())
-            }
-            "net_apply_config" => {
-                let payload = json!({
-                    "ssid": self.ssid,
-                    "password": self.password,
-                    "connect_timeout_ms": self.policy.connect_timeout_ms,
-                    "dhcp_timeout_ms": self.policy.dhcp_timeout_ms,
-                    "pinned_dhcp_timeout_ms": self.policy.pinned_dhcp_timeout_ms,
-                    "listener_timeout_ms": self.policy.listener_timeout_ms,
-                    "scan_active_min_ms": self.policy.scan_active_min_ms,
-                    "scan_active_max_ms": self.policy.scan_active_max_ms,
-                    "scan_passive_ms": self.policy.scan_passive_ms,
-                    "retry_same_max": self.policy.retry_same_max,
-                    "rotate_candidate_max": self.policy.rotate_candidate_max,
-                    "rotate_auth_max": self.policy.rotate_auth_max,
-                    "full_scan_reset_max": self.policy.full_scan_reset_max,
-                    "driver_restart_max": self.policy.driver_restart_max,
-                    "cooldown_ms": self.policy.cooldown_ms,
-                    "driver_restart_backoff_ms": self.policy.driver_restart_backoff_ms,
-                })
-                .to_string();
-                wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
-            }
-            "probe_round" => {
-                let round = ctx_get_u32(context, "round")?;
-                if self.profile.recover_before_round {
-                    if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                        self.logger.info(format!(
-                            "round {round}: NET RECOVER before probe failed ({err})"
-                        ));
-                    }
-                    self.console
-                        .settle(self.profile.recover_settle_ms as u64)
-                        .ok();
-                }
-                if self.profile.disable_listener_during_probe_rounds {
-                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER OFF") {
-                        self.logger
-                            .info(format!("round {round}: NET LISTENER OFF failed ({err})"));
-                    }
-                }
-
-                let mark = self.console.mark();
-                if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
-                    self.logger
-                        .info(format!("round {round}: NET START ack not obtained ({err})"));
-                }
-
-                let mut ready = false;
-                let mut scan_zero_events = 0u32;
-                let mut scan_nonzero_events = 0u32;
-                let mut no_ap_found_events = 0u32;
-                let mut ssid_seen_events = 0u32;
-                let mut last_status: Option<NetStatus> = None;
-                let mut round_mem_diag = MemDiagSummary::default();
-                let mut read_mark = mark;
-                let mut next_status_poll = Instant::now();
-                let deadline = Instant::now()
-                    + Duration::from_millis(recommended_round_timeout_ms(
-                        &self.policy,
-                        &self.profile,
-                    ));
-                while Instant::now() < deadline {
-                    self.console.poll_once()?;
-                    for line in self.console.read_recent_lines(read_mark) {
-                        read_mark = read_mark.saturating_add(1);
-                        self.mem_diag.record_line(&line);
-                        round_mem_diag.record_line(&line);
-                        if let Some(count) = parse_scan_done_count(&line) {
-                            if count == 0 {
-                                scan_zero_events = scan_zero_events.saturating_add(1);
-                            } else {
-                                scan_nonzero_events = scan_nonzero_events.saturating_add(1);
-                            }
-                        }
-                        if line.contains("reason=201") || line.contains("no_ap_found") {
-                            no_ap_found_events = no_ap_found_events.saturating_add(1);
-                        }
-                        if line.starts_with("upload_http: scan ap ssid=")
-                            && line.contains(&format!("scan ap ssid={}", self.ssid))
-                        {
-                            ssid_seen_events = ssid_seen_events.saturating_add(1);
-                        }
-                        if line.starts_with("NET_STATUS ") {
-                            if let Ok(status) = parse_net_status_line(&line) {
-                                let require_listener =
-                                    !self.profile.disable_listener_during_probe_rounds;
-                                if is_ready(&status, require_listener) {
-                                    ready = true;
-                                }
-                                last_status = Some(status);
-                            }
-                        }
-                    }
-                    if ready {
-                        break;
-                    }
-                    if Instant::now() >= next_status_poll {
-                        let _ = self.console.send_line("NET STATUS");
-                        next_status_poll = Instant::now()
-                            + Duration::from_millis(self.profile.status_poll_ms as u64);
-                    }
-                    thread::sleep(Duration::from_millis(self.profile.poll_interval_ms as u64));
-                }
-
-                let zero_discovery = !ready && scan_zero_events > 0 && scan_nonzero_events == 0;
-                if ready {
-                    self.ready_rounds = self.ready_rounds.saturating_add(1);
-                }
-                if zero_discovery {
-                    self.zero_discovery_rounds = self.zero_discovery_rounds.saturating_add(1);
-                }
-                if ssid_seen_events > 0 {
-                    self.ssid_seen_rounds = self.ssid_seen_rounds.saturating_add(1);
-                }
-                self.total_scan_zero_events =
-                    self.total_scan_zero_events.saturating_add(scan_zero_events);
-                self.total_scan_nonzero_events = self
-                    .total_scan_nonzero_events
-                    .saturating_add(scan_nonzero_events);
-                self.total_no_ap_found_events = self
-                    .total_no_ap_found_events
-                    .saturating_add(no_ap_found_events);
-
-                let failure_class = last_status
-                    .as_ref()
-                    .and_then(|status| status.failure_class.clone())
-                    .unwrap_or_else(|| "none".to_string());
-
-                self.samples.push(RoundSample {
-                    round,
-                    ready,
-                    zero_discovery,
-                    scan_zero_events,
-                    scan_nonzero_events,
-                    no_ap_found_events,
-                    ssid_seen_events,
-                    failure_class: failure_class.clone(),
-                });
-
-                self.logger.info(format!(
-                    "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={} min_internal_free={} min_total_free={} nomem_stage_samples={}",
-                    round,
-                    ready,
-                    zero_discovery,
-                    scan_zero_events,
-                    scan_nonzero_events,
-                    no_ap_found_events,
-                    ssid_seen_events,
-                    failure_class,
-                    fmt_min(&round_mem_diag.min_internal_free),
-                    fmt_min(&round_mem_diag.min_free),
-                    round_mem_diag.nomem_stage_samples
-                ));
-
-                if self.profile.recover_after_round {
-                    if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-                        self.logger.info(format!(
-                            "round {round}: NET RECOVER after probe failed ({err})"
-                        ));
-                    }
-                    self.console
-                        .settle(self.profile.recover_settle_ms as u64)
-                        .ok();
-                }
-
-                ctx_set_bool(context, "round_ready", ready)?;
-                ctx_set_bool(context, "round_zero_discovery", zero_discovery)?;
-                Ok(())
-            }
-            "advance_round" => {
-                let round = ctx_get_u32(context, "round")?;
-                ctx_set_u32(context, "round", round.saturating_add(1))
-            }
-            "evaluate_results" => {
-                let pass_zero =
-                    self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
-                let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
-                let observed_scan_activity =
-                    self.total_scan_zero_events > 0 || self.total_scan_nonzero_events > 0;
-                // If rounds already reach Ready without new scan telemetry, do not
-                // force ssid_seen evidence. That pattern happens when link/listener
-                // are already healthy and no discovery cycle is needed.
-                // Invariant: "ready" is authoritative for this diagnostic. SSID
-                // evidence is only required when a discovery cycle actually ran.
-                let require_ssid_evidence = observed_scan_activity || self.ready_rounds == 0;
-                let pass_ssid = !require_ssid_evidence
-                    || self.ssid_seen_rounds >= self.profile.min_ssid_seen_rounds;
-                let passed = pass_zero && pass_ready && pass_ssid;
-
-                let mut failures = Vec::new();
-                if !pass_zero {
-                    failures.push(format!(
-                        "zero_discovery_rounds={} exceeds max_zero_discovery_rounds={}",
-                        self.zero_discovery_rounds, self.profile.max_zero_discovery_rounds
-                    ));
-                }
-                if !pass_ready {
-                    failures.push(format!(
-                        "ready_rounds={} below min_ready_rounds={}",
-                        self.ready_rounds, self.profile.min_ready_rounds
-                    ));
-                }
-                if !pass_ssid {
-                    failures.push(format!(
-                        "ssid_seen_rounds={} below min_ssid_seen_rounds={}",
-                        self.ssid_seen_rounds, self.profile.min_ssid_seen_rounds
-                    ));
-                }
-                let run_error = failures.join("; ");
-
-                ctx_set_bool(context, "run_passed", passed)?;
-                ctx_set_string(context, "run_error", &run_error)?;
-                Ok(())
-            }
-            "print_summary" => {
-                self.logger.info(format!(
-                    "summary rounds={} ready_rounds={} zero_discovery_rounds={} ssid_seen_rounds={} total_scan_zero_events={} total_scan_nonzero_events={} total_no_ap_found_events={}",
-                    self.samples.len(),
-                    self.ready_rounds,
-                    self.zero_discovery_rounds,
-                    self.ssid_seen_rounds,
-                    self.total_scan_zero_events,
-                    self.total_scan_nonzero_events,
-                    self.total_no_ap_found_events
-                ));
-                self.logger.info(format!(
-                    "summary mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
-                    self.mem_diag.samples,
-                    self.mem_diag.radio_samples,
-                    self.mem_diag.upload_samples,
-                    self.mem_diag.nomem_stage_samples,
-                    fmt_min(&self.mem_diag.min_internal_free),
-                    fmt_min(&self.mem_diag.min_external_free),
-                    fmt_min(&self.mem_diag.min_free),
-                    fmt_min(&self.mem_diag.min_internal_low_water),
-                ));
-                for sample in &self.samples {
-                    self.logger.info(format!(
-                        "round {} detail ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={}",
-                        sample.round,
-                        sample.ready,
-                        sample.zero_discovery,
-                        sample.scan_zero_events,
-                        sample.scan_nonzero_events,
-                        sample.no_ap_found_events,
-                        sample.ssid_seen_events,
-                        sample.failure_class
-                    ));
-                }
-                if self.profile.disable_listener_during_probe_rounds {
-                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
-                        self.logger
-                            .info(format!("summary: NET LISTENER ON restore failed ({err})"));
-                    }
-                }
-                Ok(())
-            }
-            "fail_run" => {
-                if self.profile.disable_listener_during_probe_rounds {
-                    if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
-                        self.logger
-                            .info(format!("fail_run: NET LISTENER ON restore failed ({err})"));
-                    }
-                }
-                let detail = ctx_get_string(context, "run_error")
-                    .unwrap_or_else(|_| "wifi discovery debug failed".to_string());
-                Err(anyhow!("{detail}"))
-            }
+            "start_run" => self.handle_start_run(context),
+            "net_apply_config" => self.handle_net_apply_config(),
+            "probe_round" => self.handle_probe_round(context),
+            "advance_round" => self.handle_advance_round(context),
+            "evaluate_results" => self.handle_evaluate_results(context),
+            "print_summary" => self.handle_print_summary(),
+            "fail_run" => self.handle_fail_run(context),
             _ => Err(anyhow!("unknown workflow action: {action}")),
         }
+    }
+}
+
+impl WifiDiscoveryRuntime<'_> {
+    fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
+        ctx_set_u32(context, "round", 1)?;
+        ctx_set_u32(context, "rounds", self.profile.rounds)?;
+        ctx_set_bool(context, "run_passed", false)?;
+        ctx_set_string(context, "run_error", "")?;
+        if self.profile.disable_listener_during_probe_rounds {
+            wait_net_ack(&mut self.console, "NET LISTENER OFF")?;
+        }
+        self.logger.info(format!(
+            "wifi-discovery-debug: effective_round_timeout_ms={} (profile_round_timeout_ms={})",
+            recommended_round_timeout_ms(&self.policy, &self.profile),
+            self.profile.round_timeout_ms
+        ));
+        Ok(())
+    }
+
+    fn handle_net_apply_config(&mut self) -> Result<()> {
+        let payload = json!({
+            "ssid": self.ssid,
+            "password": self.password,
+            "connect_timeout_ms": self.policy.connect_timeout_ms,
+            "dhcp_timeout_ms": self.policy.dhcp_timeout_ms,
+            "pinned_dhcp_timeout_ms": self.policy.pinned_dhcp_timeout_ms,
+            "listener_timeout_ms": self.policy.listener_timeout_ms,
+            "scan_active_min_ms": self.policy.scan_active_min_ms,
+            "scan_active_max_ms": self.policy.scan_active_max_ms,
+            "scan_passive_ms": self.policy.scan_passive_ms,
+            "retry_same_max": self.policy.retry_same_max,
+            "rotate_candidate_max": self.policy.rotate_candidate_max,
+            "rotate_auth_max": self.policy.rotate_auth_max,
+            "full_scan_reset_max": self.policy.full_scan_reset_max,
+            "driver_restart_max": self.policy.driver_restart_max,
+            "cooldown_ms": self.policy.cooldown_ms,
+            "driver_restart_backoff_ms": self.policy.driver_restart_backoff_ms,
+        })
+        .to_string();
+        wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
+    }
+
+    fn handle_probe_round(&mut self, context: &mut Value) -> Result<()> {
+        let round = ctx_get_u32(context, "round")?;
+        let ssid_marker = format!("scan ap ssid={}", self.ssid);
+        let require_listener = !self.profile.disable_listener_during_probe_rounds;
+
+        if let Err(err) = self.maybe_recover_before_round(round) {
+            self.logger.info(format!(
+                "round {round}: NET RECOVER before probe failed ({err})"
+            ));
+        }
+        self.prepare_probe_round(round);
+        if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
+            self.logger
+                .info(format!("round {round}: NET START ack not obtained ({err})"));
+        }
+
+        let mut state = self.new_probe_round_state();
+        while Instant::now() < state.deadline {
+            state = self.collect_probe_round_lines(state, &ssid_marker, require_listener)?;
+            if state.ready {
+                break;
+            }
+            self.send_status_poll_if_ready(&mut state);
+            thread::sleep(Duration::from_millis(self.profile.poll_interval_ms as u64));
+        }
+
+        let zero_discovery = state.is_zero_discovery();
+        self.record_round_results(round, &state, zero_discovery);
+        if self.profile.recover_after_round {
+            if let Err(err) = self.maybe_recover_after_round(round) {
+                self.logger.info(format!(
+                    "round {round}: NET RECOVER after probe failed ({err})"
+                ));
+            }
+        }
+        ctx_set_bool(context, "round_ready", state.ready)?;
+        ctx_set_bool(context, "round_zero_discovery", zero_discovery)?;
+        Ok(())
+    }
+
+    fn maybe_recover_before_round(&mut self, _round: u32) -> Result<()> {
+        if !self.profile.recover_before_round {
+            return Ok(());
+        }
+        wait_net_ack(&mut self.console, "NET RECOVER")?;
+        self.console.settle(self.profile.recover_settle_ms as u64)?;
+        Ok(())
+    }
+
+    fn prepare_probe_round(&mut self, round: u32) {
+        if !self.profile.disable_listener_during_probe_rounds {
+            return;
+        }
+        if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER OFF") {
+            self.logger
+                .info(format!("round {round}: NET LISTENER OFF failed ({err})"));
+        }
+    }
+
+    fn new_probe_round_state(&self) -> ProbeRoundState {
+        ProbeRoundState::new(
+            self.console.mark(),
+            Instant::now()
+                + Duration::from_millis(recommended_round_timeout_ms(&self.policy, &self.profile)),
+        )
+    }
+
+    fn collect_probe_round_lines(
+        &mut self,
+        mut state: ProbeRoundState,
+        ssid_marker: &str,
+        require_listener: bool,
+    ) -> Result<ProbeRoundState> {
+        self.console.poll_once()?;
+        for line in self.console.read_recent_lines(state.read_mark) {
+            state.read_mark = state.read_mark.saturating_add(1);
+            self.mem_diag.record_line(&line);
+            state.round_mem_diag.record_line(&line);
+            state.ingest_line(&line, ssid_marker, require_listener);
+        }
+        Ok(state)
+    }
+
+    fn send_status_poll_if_ready(&mut self, state: &mut ProbeRoundState) {
+        if Instant::now() >= state.next_status_poll {
+            let _ = self.console.send_line("NET STATUS");
+            state.next_status_poll =
+                Instant::now() + Duration::from_millis(self.profile.status_poll_ms as u64);
+        }
+    }
+
+    fn maybe_recover_after_round(&mut self, round: u32) -> Result<()> {
+        wait_net_ack(&mut self.console, "NET RECOVER")
+            .map_err(|err| anyhow!("round {round}: NET RECOVER after probe failed ({err})"))?;
+        self.console.settle(self.profile.recover_settle_ms as u64)?;
+        Ok(())
+    }
+
+    fn record_round_results(&mut self, round: u32, state: &ProbeRoundState, zero_discovery: bool) {
+        if state.ready {
+            self.ready_rounds = self.ready_rounds.saturating_add(1);
+        }
+        if zero_discovery {
+            self.zero_discovery_rounds = self.zero_discovery_rounds.saturating_add(1);
+        }
+        if state.ssid_seen_events > 0 {
+            self.ssid_seen_rounds = self.ssid_seen_rounds.saturating_add(1);
+        }
+        self.total_scan_zero_events = self
+            .total_scan_zero_events
+            .saturating_add(state.scan_zero_events);
+        self.total_scan_nonzero_events = self
+            .total_scan_nonzero_events
+            .saturating_add(state.scan_nonzero_events);
+        self.total_no_ap_found_events = self
+            .total_no_ap_found_events
+            .saturating_add(state.no_ap_found_events);
+
+        self.samples.push(RoundSample {
+            round,
+            ready: state.ready,
+            zero_discovery,
+            scan_zero_events: state.scan_zero_events,
+            scan_nonzero_events: state.scan_nonzero_events,
+            no_ap_found_events: state.no_ap_found_events,
+            ssid_seen_events: state.ssid_seen_events,
+            failure_class: state.last_failure_class.clone(),
+        });
+        self.logger.info(format!(
+            "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={} min_internal_free={} min_total_free={} nomem_stage_samples={}",
+            round,
+            state.ready,
+            zero_discovery,
+            state.scan_zero_events,
+            state.scan_nonzero_events,
+            state.no_ap_found_events,
+            state.ssid_seen_events,
+            state.last_failure_class,
+            fmt_min(&state.round_mem_diag.min_internal_free),
+            fmt_min(&state.round_mem_diag.min_free),
+            state.round_mem_diag.nomem_stage_samples
+        ));
+    }
+
+    fn handle_advance_round(&mut self, context: &mut Value) -> Result<()> {
+        let round = ctx_get_u32(context, "round")?;
+        ctx_set_u32(context, "round", round.saturating_add(1))
+    }
+
+    fn handle_evaluate_results(&mut self, context: &mut Value) -> Result<()> {
+        let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
+        let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
+        let observed_scan_activity =
+            self.total_scan_zero_events > 0 || self.total_scan_nonzero_events > 0;
+        let require_ssid_evidence = observed_scan_activity || self.ready_rounds == 0;
+        let pass_ssid =
+            !require_ssid_evidence || self.ssid_seen_rounds >= self.profile.min_ssid_seen_rounds;
+        let passed = pass_zero && pass_ready && pass_ssid;
+
+        let mut failures = Vec::new();
+        if !pass_zero {
+            failures.push(format!(
+                "zero_discovery_rounds={} exceeds max_zero_discovery_rounds={}",
+                self.zero_discovery_rounds, self.profile.max_zero_discovery_rounds
+            ));
+        }
+        if !pass_ready {
+            failures.push(format!(
+                "ready_rounds={} below min_ready_rounds={}",
+                self.ready_rounds, self.profile.min_ready_rounds
+            ));
+        }
+        if !pass_ssid {
+            failures.push(format!(
+                "ssid_seen_rounds={} below min_ssid_seen_rounds={}",
+                self.ssid_seen_rounds, self.profile.min_ssid_seen_rounds
+            ));
+        }
+        let run_error = failures.join("; ");
+        ctx_set_bool(context, "run_passed", passed)?;
+        ctx_set_string(context, "run_error", &run_error)?;
+        Ok(())
+    }
+
+    fn handle_print_summary(&mut self) -> Result<()> {
+        self.logger.info(format!(
+            "summary rounds={} ready_rounds={} zero_discovery_rounds={} ssid_seen_rounds={} total_scan_zero_events={} total_scan_nonzero_events={} total_no_ap_found_events={}",
+            self.samples.len(),
+            self.ready_rounds,
+            self.zero_discovery_rounds,
+            self.ssid_seen_rounds,
+            self.total_scan_zero_events,
+            self.total_scan_nonzero_events,
+            self.total_no_ap_found_events
+        ));
+        self.logger.info(format!(
+            "summary mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
+            self.mem_diag.samples,
+            self.mem_diag.radio_samples,
+            self.mem_diag.upload_samples,
+            self.mem_diag.nomem_stage_samples,
+            fmt_min(&self.mem_diag.min_internal_free),
+            fmt_min(&self.mem_diag.min_external_free),
+            fmt_min(&self.mem_diag.min_free),
+            fmt_min(&self.mem_diag.min_internal_low_water),
+        ));
+        for sample in &self.samples {
+            self.logger.info(format!(
+                "round {} detail ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={}",
+                sample.round,
+                sample.ready,
+                sample.zero_discovery,
+                sample.scan_zero_events,
+                sample.scan_nonzero_events,
+                sample.no_ap_found_events,
+                sample.ssid_seen_events,
+                sample.failure_class
+            ));
+        }
+        if self.profile.disable_listener_during_probe_rounds {
+            if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+                self.logger
+                    .info(format!("summary: NET LISTENER ON restore failed ({err})"));
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_fail_run(&mut self, context: &mut Value) -> Result<()> {
+        if self.profile.disable_listener_during_probe_rounds {
+            if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
+                self.logger
+                    .info(format!("fail_run: NET LISTENER ON restore failed ({err})"));
+            }
+        }
+        let detail = ctx_get_string(context, "run_error")
+            .unwrap_or_else(|_| "wifi discovery debug failed".to_string());
+        Err(anyhow!("{detail}"))
     }
 }
 

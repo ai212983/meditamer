@@ -345,7 +345,9 @@ action: inspect\n  --bundle FILE          Bundle to inspect (default: tools/scen
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
+
+    use super::{parse_build_args, Compression};
 
     #[test]
     fn parse_build_args_uses_defaults() {

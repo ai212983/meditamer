@@ -322,7 +322,7 @@ action: inspect\n  --bundle FILE           Bundle path"
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{parse_render_args, DitherMode, OutputMode};
 
     #[test]
     fn parse_render_args_uses_defaults() {

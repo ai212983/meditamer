@@ -302,7 +302,7 @@ fn sdreq_regex(op: Option<&str>) -> Result<Regex> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::sdreq_regex;
 
     #[test]
     fn sdreq_regex_matches_exact_op_token() {

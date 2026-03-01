@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::*;
+use super::{run_render, CH_ALBEDO, CH_LIGHT};
 
 #[test]
 fn run_render_smoke_writes_output_and_debug_images() {

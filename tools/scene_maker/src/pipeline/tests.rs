@@ -7,7 +7,7 @@ use std::{
 use image::{GrayImage, ImageBuffer};
 use serde_json::Value;
 
-use super::*;
+use super::{run_build, CHANNELS};
 use crate::format::read_header;
 
 #[test]
