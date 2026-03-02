@@ -9,6 +9,7 @@ mod workflows_sdcard;
 #[cfg(test)]
 mod workflows_sdcard_tests;
 mod workflows_serial;
+mod workflows_storage;
 mod workflows_troubleshoot;
 mod workflows_upload;
 mod workflows_wifi_acceptance;
