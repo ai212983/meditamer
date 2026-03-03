@@ -114,6 +114,7 @@ pub(crate) enum SdUploadCommand {
 
 pub(crate) struct SdUploadRequest {
     pub(crate) command: SdUploadCommand,
+    pub(crate) enqueued_at_ms: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +137,8 @@ pub(crate) struct SdUploadResult {
     pub(crate) ok: bool,
     pub(crate) code: SdUploadResultCode,
     pub(crate) bytes_written: u32,
+    pub(crate) chunk_queue_wait_ms: u32,
+    pub(crate) chunk_handler_ms: u32,
 }
 
 #[derive(Clone, Copy)]

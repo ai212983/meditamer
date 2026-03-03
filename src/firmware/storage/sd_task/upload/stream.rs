@@ -97,6 +97,7 @@ pub(super) async fn handle_begin(
 #[inline(never)]
 pub(super) async fn handle_chunk(
     data_len: u32,
+    queue_wait_ms: u32,
     session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
@@ -180,6 +181,7 @@ pub(super) async fn handle_chunk(
     active.last_activity_at = Instant::now();
     let chunk_total_ms = elapsed_ms_u32(chunk_started_at);
     active.chunk_timing.record_chunk(
+        queue_wait_ms,
         chunk_total_ms,
         ensure_ready_ms,
         payload_lock_ms,
@@ -277,6 +279,10 @@ pub(super) async fn handle_commit(
         active.chunk_timing.chunk_total_ms_total,
         active.chunk_timing.chunk_count,
     );
+    let chunk_queue_wait_ms_avg = div_or_zero(
+        active.chunk_timing.chunk_queue_wait_ms_total,
+        active.chunk_timing.chunk_count,
+    );
     let chunk_ensure_ready_ms_avg = div_or_zero(
         active.chunk_timing.ensure_ready_ms_total,
         active.chunk_timing.chunk_count,
@@ -301,8 +307,16 @@ pub(super) async fn handle_commit(
         active.chunk_timing.chunk_overhead_ms_total,
         active.chunk_timing.chunk_count,
     );
+    let chunk_non_append_ms_avg = div_or_zero(
+        active.chunk_timing.chunk_non_append_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_residual_ms_avg = div_or_zero(
+        active.chunk_timing.chunk_residual_ms_total,
+        active.chunk_timing.chunk_count,
+    );
     esp_println::println!(
-        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={} cmd25_success_burst_ms_total={} cmd25_success_burst_ms_avg={} cmd25_ready_wait_count={} cmd25_ready_wait_ms_total={} cmd25_ready_wait_ms_avg={} cmd25_ready_wait_polls_total={} cmd25_ready_wait_polls_avg={} cmd25_ready_wait_over_1ms={} cmd25_ready_wait_over_4ms={} cmd25_ready_wait_over_8ms={} chunk_count={} chunk_total_ms_total={} chunk_total_ms_avg={} chunk_total_ms_max={} chunk_total_over_200ms={} chunk_total_over_400ms={} chunk_ensure_ready_ms_total={} chunk_ensure_ready_ms_avg={} chunk_ensure_ready_ms_max={} chunk_payload_lock_ms_total={} chunk_payload_lock_ms_avg={} chunk_payload_lock_ms_max={} chunk_append_ms_total={} chunk_append_ms_avg={} chunk_append_ms_max={} chunk_append_over_200ms={} chunk_append_over_400ms={} chunk_append_capacity_ms_total={} chunk_append_capacity_ms_avg={} chunk_append_capacity_ms_max={} chunk_append_write_data_ms_total={} chunk_append_write_data_ms_avg={} chunk_append_write_data_ms_max={} chunk_overhead_ms_total={} chunk_overhead_ms_avg={} chunk_overhead_ms_max={}",
+        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={} cmd25_success_burst_ms_total={} cmd25_success_burst_ms_avg={} cmd25_ready_wait_count={} cmd25_ready_wait_ms_total={} cmd25_ready_wait_ms_avg={} cmd25_ready_wait_polls_total={} cmd25_ready_wait_polls_avg={} cmd25_ready_wait_over_1ms={} cmd25_ready_wait_over_4ms={} cmd25_ready_wait_over_8ms={} chunk_count={} chunk_queue_wait_ms_total={} chunk_queue_wait_ms_avg={} chunk_queue_wait_ms_max={} chunk_total_ms_total={} chunk_total_ms_avg={} chunk_total_ms_max={} chunk_total_over_200ms={} chunk_total_over_400ms={} chunk_ensure_ready_ms_total={} chunk_ensure_ready_ms_avg={} chunk_ensure_ready_ms_max={} chunk_payload_lock_ms_total={} chunk_payload_lock_ms_avg={} chunk_payload_lock_ms_max={} chunk_append_ms_total={} chunk_append_ms_avg={} chunk_append_ms_max={} chunk_append_over_200ms={} chunk_append_over_400ms={} chunk_append_capacity_ms_total={} chunk_append_capacity_ms_avg={} chunk_append_capacity_ms_max={} chunk_append_write_data_ms_total={} chunk_append_write_data_ms_avg={} chunk_append_write_data_ms_max={} chunk_non_append_ms_total={} chunk_non_append_ms_avg={} chunk_non_append_ms_max={} chunk_residual_ms_total={} chunk_residual_ms_avg={} chunk_residual_ms_max={} chunk_overhead_ms_total={} chunk_overhead_ms_avg={} chunk_overhead_ms_max={}",
         final_path_str,
         active.bytes_written,
         write_metrics_delta.cmd24_sectors,
@@ -322,6 +336,9 @@ pub(super) async fn handle_commit(
         write_metrics_delta.cmd25_ready_wait_over_4ms,
         write_metrics_delta.cmd25_ready_wait_over_8ms,
         active.chunk_timing.chunk_count,
+        active.chunk_timing.chunk_queue_wait_ms_total,
+        chunk_queue_wait_ms_avg,
+        active.chunk_timing.chunk_queue_wait_ms_max,
         active.chunk_timing.chunk_total_ms_total,
         chunk_total_ms_avg,
         active.chunk_timing.chunk_total_ms_max,
@@ -344,6 +361,12 @@ pub(super) async fn handle_commit(
         active.chunk_timing.append_write_data_ms_total,
         chunk_append_write_data_ms_avg,
         active.chunk_timing.append_write_data_ms_max,
+        active.chunk_timing.chunk_non_append_ms_total,
+        chunk_non_append_ms_avg,
+        active.chunk_timing.chunk_non_append_ms_max,
+        active.chunk_timing.chunk_residual_ms_total,
+        chunk_residual_ms_avg,
+        active.chunk_timing.chunk_residual_ms_max,
         active.chunk_timing.chunk_overhead_ms_total,
         chunk_overhead_ms_avg,
         active.chunk_timing.chunk_overhead_ms_max,

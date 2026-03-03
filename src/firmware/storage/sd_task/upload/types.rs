@@ -8,6 +8,8 @@ use super::super::SD_UPLOAD_PATH_BUF_MAX;
 #[derive(Clone, Copy, Debug, Default)]
 pub(in super::super) struct SdUploadChunkTimingMetrics {
     pub(super) chunk_count: u32,
+    pub(super) chunk_queue_wait_ms_total: u32,
+    pub(super) chunk_queue_wait_ms_max: u32,
     pub(super) chunk_total_ms_total: u32,
     pub(super) chunk_total_ms_max: u32,
     pub(super) chunk_total_over_200ms: u32,
@@ -24,6 +26,10 @@ pub(in super::super) struct SdUploadChunkTimingMetrics {
     pub(super) append_capacity_ms_max: u32,
     pub(super) append_write_data_ms_total: u32,
     pub(super) append_write_data_ms_max: u32,
+    pub(super) chunk_non_append_ms_total: u32,
+    pub(super) chunk_non_append_ms_max: u32,
+    pub(super) chunk_residual_ms_total: u32,
+    pub(super) chunk_residual_ms_max: u32,
     pub(super) chunk_overhead_ms_total: u32,
     pub(super) chunk_overhead_ms_max: u32,
 }
@@ -31,6 +37,7 @@ pub(in super::super) struct SdUploadChunkTimingMetrics {
 impl SdUploadChunkTimingMetrics {
     pub(super) fn record_chunk(
         &mut self,
+        chunk_queue_wait_ms: u32,
         chunk_total_ms: u32,
         ensure_ready_ms: u32,
         payload_lock_ms: u32,
@@ -39,6 +46,10 @@ impl SdUploadChunkTimingMetrics {
         append_write_data_ms: u32,
     ) {
         self.chunk_count = self.chunk_count.saturating_add(1);
+        self.chunk_queue_wait_ms_total = self
+            .chunk_queue_wait_ms_total
+            .saturating_add(chunk_queue_wait_ms);
+        self.chunk_queue_wait_ms_max = self.chunk_queue_wait_ms_max.max(chunk_queue_wait_ms);
         self.chunk_total_ms_total = self.chunk_total_ms_total.saturating_add(chunk_total_ms);
         self.chunk_total_ms_max = self.chunk_total_ms_max.max(chunk_total_ms);
         if chunk_total_ms >= 200 {
@@ -71,6 +82,15 @@ impl SdUploadChunkTimingMetrics {
             .append_write_data_ms_total
             .saturating_add(append_write_data_ms);
         self.append_write_data_ms_max = self.append_write_data_ms_max.max(append_write_data_ms);
+
+        let chunk_non_append_ms = chunk_total_ms.saturating_sub(append_total_ms);
+        self.chunk_non_append_ms_total = self
+            .chunk_non_append_ms_total
+            .saturating_add(chunk_non_append_ms);
+        self.chunk_non_append_ms_max = self.chunk_non_append_ms_max.max(chunk_non_append_ms);
+        let chunk_residual_ms = chunk_queue_wait_ms.saturating_add(chunk_non_append_ms);
+        self.chunk_residual_ms_total = self.chunk_residual_ms_total.saturating_add(chunk_residual_ms);
+        self.chunk_residual_ms_max = self.chunk_residual_ms_max.max(chunk_residual_ms);
 
         let accounted_ms = ensure_ready_ms
             .saturating_add(payload_lock_ms)

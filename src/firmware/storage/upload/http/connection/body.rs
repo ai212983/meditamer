@@ -20,6 +20,9 @@ pub(super) struct UploadBodyStats {
     pub(super) payload_copy_ms: u32,
     pub(super) sd_queue_ms: u32,
     pub(super) sd_task_wait_ms: u32,
+    pub(super) sd_task_queue_wait_ms: u32,
+    pub(super) sd_task_handler_ms: u32,
+    pub(super) sd_task_residual_ms: u32,
     pub(super) sd_wait_ms: u32,
     pub(super) chunk_p50_ms: u32,
     pub(super) chunk_p95_ms: u32,
@@ -120,7 +123,7 @@ pub(super) fn log_upload_stats(
             stats.sent_bytes / stats.chunk_count as usize
         };
         println!(
-            "upload_http: {} stats pipeline={} bytes={} chunks={} avg_chunk={} max_chunk={} read_wait_ms={} copy_ms={} sd_queue_ms={} sd_task_ms={} sd_ms={} chunk_p50_ms={} chunk_p95_ms={} chunk_max_ms={} chunk_samples={} chunk_samples_dropped={} commit_ms={} req_ms={}",
+            "upload_http: {} stats pipeline={} bytes={} chunks={} avg_chunk={} max_chunk={} read_wait_ms={} copy_ms={} sd_queue_ms={} sd_task_ms={} sd_task_queue_wait_ms={} sd_task_handler_ms={} sd_task_residual_ms={} sd_ms={} chunk_p50_ms={} chunk_p95_ms={} chunk_max_ms={} chunk_samples={} chunk_samples_dropped={} commit_ms={} req_ms={}",
             phase,
             if UPLOAD_CHUNK_PIPELINE_ENABLED {
                 "on"
@@ -135,6 +138,9 @@ pub(super) fn log_upload_stats(
             stats.payload_copy_ms,
             stats.sd_queue_ms,
             stats.sd_task_wait_ms,
+            stats.sd_task_queue_wait_ms,
+            stats.sd_task_handler_ms,
+            stats.sd_task_residual_ms,
             total_sd_wait_ms,
             stats.chunk_p50_ms,
             stats.chunk_p95_ms,
@@ -176,6 +182,9 @@ async fn forward_upload_body(
     let mut payload_copy_ms = 0u32;
     let mut sd_queue_ms = 0u32;
     let mut sd_task_wait_ms = 0u32;
+    let mut sd_task_queue_wait_ms = 0u32;
+    let mut sd_task_handler_ms = 0u32;
+    let mut sd_task_residual_ms = 0u32;
     let mut sd_wait_ms = 0u32;
     let mut sent_bytes = 0usize;
     let mut chunk_count = 0u32;
@@ -207,6 +216,9 @@ async fn forward_upload_body(
                 &mut payload_copy_ms,
                 &mut sd_queue_ms,
                 &mut sd_task_wait_ms,
+                &mut sd_task_queue_wait_ms,
+                &mut sd_task_handler_ms,
+                &mut sd_task_residual_ms,
                 &mut sd_wait_ms,
                 &mut sent_bytes,
                 &mut chunk_count,
@@ -252,6 +264,9 @@ async fn forward_upload_body(
                 &mut payload_copy_ms,
                 &mut sd_queue_ms,
                 &mut sd_task_wait_ms,
+                &mut sd_task_queue_wait_ms,
+                &mut sd_task_handler_ms,
+                &mut sd_task_residual_ms,
                 &mut sd_wait_ms,
                 &mut sent_bytes,
                 &mut chunk_count,
@@ -267,6 +282,9 @@ async fn forward_upload_body(
         &mut payload_copy_ms,
         &mut sd_queue_ms,
         &mut sd_task_wait_ms,
+        &mut sd_task_queue_wait_ms,
+        &mut sd_task_handler_ms,
+        &mut sd_task_residual_ms,
         &mut sd_wait_ms,
         &mut sent_bytes,
         &mut chunk_count,
@@ -284,6 +302,9 @@ async fn forward_upload_body(
         payload_copy_ms,
         sd_queue_ms,
         sd_task_wait_ms,
+        sd_task_queue_wait_ms,
+        sd_task_handler_ms,
+        sd_task_residual_ms,
         sd_wait_ms,
         chunk_p50_ms,
         chunk_p95_ms,
@@ -299,6 +320,9 @@ async fn queue_chunk_for_sd(
     payload_copy_ms: &mut u32,
     sd_queue_ms: &mut u32,
     sd_task_wait_ms: &mut u32,
+    sd_task_queue_wait_ms: &mut u32,
+    sd_task_handler_ms: &mut u32,
+    sd_task_residual_ms: &mut u32,
     sd_wait_ms: &mut u32,
     sent_bytes: &mut usize,
     chunk_count: &mut u32,
@@ -310,6 +334,9 @@ async fn queue_chunk_for_sd(
         payload_copy_ms,
         sd_queue_ms,
         sd_task_wait_ms,
+        sd_task_queue_wait_ms,
+        sd_task_handler_ms,
+        sd_task_residual_ms,
         sd_wait_ms,
         sent_bytes,
         chunk_count,
@@ -334,6 +361,9 @@ async fn queue_chunk_for_sd(
             payload_copy_ms,
             sd_queue_ms,
             sd_task_wait_ms,
+            sd_task_queue_wait_ms,
+            sd_task_handler_ms,
+            sd_task_residual_ms,
             sd_wait_ms,
             sent_bytes,
             chunk_count,
@@ -350,6 +380,9 @@ async fn flush_inflight_chunk(
     payload_copy_ms: &mut u32,
     sd_queue_ms: &mut u32,
     sd_task_wait_ms: &mut u32,
+    sd_task_queue_wait_ms: &mut u32,
+    sd_task_handler_ms: &mut u32,
+    sd_task_residual_ms: &mut u32,
     sd_wait_ms: &mut u32,
     sent_bytes: &mut usize,
     chunk_count: &mut u32,
@@ -359,13 +392,20 @@ async fn flush_inflight_chunk(
     let Some(inflight_chunk) = inflight.take() else {
         return Ok(());
     };
-    let roundtrip_ms = sd_upload_chunk_finish(inflight_chunk.transfer)
+    let chunk_finish = sd_upload_chunk_finish(inflight_chunk.transfer)
         .await
         .map_err(UploadBodyError::Roundtrip)?;
+    let roundtrip_ms = chunk_finish.roundtrip_ms;
     let task_wait_ms = roundtrip_ms.saturating_sub(inflight_chunk.queue_ms);
+    let task_residual_ms = task_wait_ms
+        .saturating_sub(chunk_finish.queue_wait_ms)
+        .saturating_sub(chunk_finish.handler_ms);
     *payload_copy_ms = payload_copy_ms.saturating_add(inflight_chunk.copy_ms);
     *sd_queue_ms = sd_queue_ms.saturating_add(inflight_chunk.queue_ms);
     *sd_task_wait_ms = sd_task_wait_ms.saturating_add(task_wait_ms);
+    *sd_task_queue_wait_ms = sd_task_queue_wait_ms.saturating_add(chunk_finish.queue_wait_ms);
+    *sd_task_handler_ms = sd_task_handler_ms.saturating_add(chunk_finish.handler_ms);
+    *sd_task_residual_ms = sd_task_residual_ms.saturating_add(task_residual_ms);
     *sd_wait_ms = sd_wait_ms.saturating_add(roundtrip_ms);
     *sent_bytes = sent_bytes.saturating_add(inflight_chunk.len);
     *chunk_count = chunk_count.saturating_add(1);

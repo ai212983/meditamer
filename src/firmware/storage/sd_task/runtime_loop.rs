@@ -128,6 +128,8 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                             ok: false,
                             code,
                             bytes_written: 0,
+                            chunk_queue_wait_ms: 0,
+                            chunk_handler_ms: 0,
                         });
                         continue;
                     }
@@ -194,6 +196,8 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                             ok: false,
                             code,
                             bytes_written: 0,
+                            chunk_queue_wait_ms: 0,
+                            chunk_handler_ms: 0,
                         });
                         continue;
                     }

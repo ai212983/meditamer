@@ -74,5 +74,7 @@ pub(super) fn upload_result(
         ok,
         code,
         bytes_written,
+        chunk_queue_wait_ms: 0,
+        chunk_handler_ms: 0,
     }
 }

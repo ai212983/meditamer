@@ -28,6 +28,12 @@ pub(crate) struct SdUploadChunkInFlight {
     _lock: MutexGuard<'static, CriticalSectionRawMutex, ()>,
 }
 
+pub(crate) struct SdUploadChunkFinish {
+    pub(crate) roundtrip_ms: u32,
+    pub(crate) queue_wait_ms: u32,
+    pub(crate) handler_ms: u32,
+}
+
 pub(crate) async fn sd_upload_chunk_start(
     data: &[u8],
 ) -> Result<SdUploadChunkInFlight, SdUploadRoundtripError> {
@@ -53,6 +59,7 @@ pub(crate) async fn sd_upload_chunk_start(
             command: SdUploadCommand::Chunk {
                 data_len: data.len() as u32,
             },
+            enqueued_at_ms: now_ms_u32(),
         })
         .await;
     Ok(SdUploadChunkInFlight {
@@ -64,7 +71,7 @@ pub(crate) async fn sd_upload_chunk_start(
 
 pub(crate) async fn sd_upload_chunk_finish(
     inflight: SdUploadChunkInFlight,
-) -> Result<u32, SdUploadRoundtripError> {
+) -> Result<SdUploadChunkFinish, SdUploadRoundtripError> {
     let started_at = inflight.started_at;
     let _lock = inflight._lock;
     let result = match receive_sd_upload_result_with_timeout(started_at).await {
@@ -91,7 +98,11 @@ pub(crate) async fn sd_upload_chunk_finish(
         return Err(SdUploadRoundtripError::Device(result.code));
     }
 
-    Ok(roundtrip_ms)
+    Ok(SdUploadChunkFinish {
+        roundtrip_ms,
+        queue_wait_ms: result.chunk_queue_wait_ms,
+        handler_ms: result.chunk_handler_ms,
+    })
 }
 
 pub(crate) async fn sd_upload_roundtrip(
@@ -171,7 +182,12 @@ async fn sd_upload_roundtrip_raw_locked(
     drain_stale_sd_upload_results();
 
     let started_at = Instant::now();
-    SD_UPLOAD_REQUESTS.send(SdUploadRequest { command }).await;
+    SD_UPLOAD_REQUESTS
+        .send(SdUploadRequest {
+            command,
+            enqueued_at_ms: now_ms_u32(),
+        })
+        .await;
 
     let result = match receive_sd_upload_result_with_timeout(started_at).await {
         Some(result) => result,
@@ -231,5 +247,14 @@ fn elapsed_ms_u32(started_at: Instant) -> u32 {
         u32::MAX
     } else {
         elapsed as u32
+    }
+}
+
+fn now_ms_u32() -> u32 {
+    let now_ms = Instant::now().as_millis();
+    if now_ms > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        now_ms as u32
     }
 }

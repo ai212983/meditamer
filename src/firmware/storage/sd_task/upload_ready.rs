@@ -4,6 +4,8 @@ fn disabled_upload_result() -> SdUploadResult {
         ok: false,
         code: SdUploadResultCode::Busy,
         bytes_written: 0,
+        chunk_queue_wait_ms: 0,
+        chunk_handler_ms: 0,
     }
 }
 
@@ -64,6 +66,7 @@ async fn abort_active_upload_session(
     process_upload_request(
         SdUploadRequest {
             command: SdUploadCommand::Abort,
+            enqueued_at_ms: now_ms_u32(),
         },
         upload_session,
         sd_probe,
@@ -71,4 +74,14 @@ async fn abort_active_upload_session(
         upload_mounted,
     )
     .await
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn now_ms_u32() -> u32 {
+    let now_ms = embassy_time::Instant::now().as_millis();
+    if now_ms > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        now_ms as u32
+    }
 }

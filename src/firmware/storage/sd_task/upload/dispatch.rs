@@ -5,6 +5,7 @@ use super::types::{
     split_upload_command, SdUploadSession, UploadCommandGroup, UploadPathCommand,
     UploadStreamCommand,
 };
+use embassy_time::Instant;
 
 pub(super) async fn process_upload_request(
     request: SdUploadRequest,
@@ -13,9 +14,18 @@ pub(super) async fn process_upload_request(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> SdUploadResult {
+    let queue_wait_ms = elapsed_since_ms_u32(request.enqueued_at_ms);
     match split_upload_command(request.command) {
         UploadCommandGroup::Stream(stream) => {
-            process_upload_stream_request(stream, session, sd_probe, powered, upload_mounted).await
+            process_upload_stream_request(
+                stream,
+                queue_wait_ms,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+            )
+            .await
         }
         UploadCommandGroup::Path(path) => {
             process_upload_path_request(path, session, sd_probe, powered, upload_mounted).await
@@ -26,6 +36,7 @@ pub(super) async fn process_upload_request(
 #[inline(never)]
 async fn process_upload_stream_request(
     command: UploadStreamCommand,
+    queue_wait_ms: u32,
     session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
@@ -49,7 +60,13 @@ async fn process_upload_stream_request(
             .await
         }
         UploadStreamCommand::Chunk { data_len } => {
-            handle_chunk(data_len, session, sd_probe, powered, upload_mounted).await
+            let handler_started_at = Instant::now();
+            let mut result =
+                handle_chunk(data_len, queue_wait_ms, session, sd_probe, powered, upload_mounted)
+                    .await;
+            result.chunk_queue_wait_ms = queue_wait_ms;
+            result.chunk_handler_ms = elapsed_ms_u32(handler_started_at);
+            result
         }
         UploadStreamCommand::Commit => {
             handle_commit(session, sd_probe, powered, upload_mounted).await
@@ -57,6 +74,29 @@ async fn process_upload_stream_request(
         UploadStreamCommand::Abort => {
             handle_abort(session, sd_probe, powered, upload_mounted).await
         }
+    }
+}
+
+fn elapsed_since_ms_u32(started_ms: u32) -> u32 {
+    let now_ms = now_ms_u32();
+    now_ms.wrapping_sub(started_ms)
+}
+
+fn now_ms_u32() -> u32 {
+    let now_ms = Instant::now().as_millis();
+    if now_ms > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        now_ms as u32
+    }
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
     }
 }
 
