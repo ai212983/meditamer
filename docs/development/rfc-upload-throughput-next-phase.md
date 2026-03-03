@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; next focus is `36 MHz` tail-latency root-cause reduction)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; CMD25 burst diagnostics completed; next focus is SD task/FAT append chunk-latency root cause)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -187,6 +187,8 @@ Rollback:
 17. [x] Mark `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` as stable for bounded soak gate and move to variance-reduction A/B planning.
 18. [x] Run SD SPI variance A/B (`MEDITAMER_SD_SPI_DATA_MHZ=36` vs `40`) with full regression gate + soak and compare request-timing spread (`logs/wifi_regression_gate_sdspi36b_20260303_151750`, `logs/wifi_regression_gate_sdspi40_20260303_152151`).
 19. [x] Fix host panic classification false-positive on upload metrics lines containing `_abort` (`2b2a3b3`).
+20. [x] Add CMD25 burst/ready-wait diagnostics to upload write metrics (`3bb91e0`).
+21. [x] Run 3x `36 MHz` bounded soak regression gates with burst diagnostics and correlate request timing with CMD25 wait metrics (`logs/wifi_regression_gate_sdspi36_burstdiag_r1_20260303_161323`, `logs/wifi_regression_gate_sdspi36_burstdiag_r2_20260303_161645`, `logs/wifi_regression_gate_sdspi36_burstdiag_r3b_20260303_162537`).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -397,12 +399,39 @@ Rollback:
   - do not promote `40 MHz`; it increases timing spread and exhibits
     significantly worse upper-tail latency in this bounded soak pass.
 
-## 11.10 Next Step (Specific)
+## 11.10 2026-03-03 CMD25 Burst Diagnostics + 3x Soak Correlation
 
-- Focused tail-latency root-cause at stable baseline (`36 MHz`):
-  - run three repeated regression-gate passes at `36 MHz` with soak enabled,
-    then correlate any `req_ms > 3400` spikes with same-request `sd_ms`,
-    `read_wait_ms`, and `chunk_max_ms` from `upload_http: upload stats`.
-  - If spikes align with SD-side latency (`sd_ms`/`chunk_max_ms`), target SD
-    write burst path diagnostics next; if spikes align with `read_wait_ms`,
-    target Wi-Fi/TCP ingress timing path next.
+- Instrumentation commit:
+  - `3bb91e0` (`feat(storage): add cmd25 burst wait diagnostics for uploads`)
+  - new per-upload `sd_upload: write_metrics` fields:
+    - `cmd25_success_burst_ms_total`, `cmd25_success_burst_ms_avg`
+    - `cmd25_ready_wait_count`, `cmd25_ready_wait_ms_total`,
+      `cmd25_ready_wait_ms_avg`
+    - `cmd25_ready_wait_polls_total`, `cmd25_ready_wait_polls_avg`
+    - `cmd25_ready_wait_over_1ms`, `cmd25_ready_wait_over_4ms`,
+      `cmd25_ready_wait_over_8ms`
+
+- 3x `36 MHz` bounded soak runs used for correlation:
+  - `logs/wifi_regression_gate_sdspi36_burstdiag_r1_20260303_161323`
+  - `logs/wifi_regression_gate_sdspi36_burstdiag_r2_20260303_161645`
+  - `logs/wifi_regression_gate_sdspi36_burstdiag_r3b_20260303_162537`
+  - note: `logs/wifi_regression_gate_sdspi36_burstdiag_r3_20260303_162008`
+    failed due host-side health send failures despite `NET_STATUS state=Ready`,
+    so it is excluded from correlation set.
+
+- Correlation result:
+  - all three selected runs passed full gate (including soak).
+  - no soak uploads exceeded `req_ms > 3400` in this instrumented set (`0/30`).
+  - CMD25 wait metrics remained low per upload:
+    - `cmd25_ready_wait_ms_total` averaged `3.2..4.2 ms`
+    - `cmd25_ready_wait_over_8ms` was rare (`0..1` events per run total)
+  - conclusion: observed latency spread is not primarily explained by CMD25
+    ready-wait stalls.
+
+## 11.11 Next Step (Specific)
+
+- Shift root-cause focus from CMD25 wait path to SD task/FAT append path:
+  - add per-chunk timing instrumentation around `fat::append_session_write` and
+    related SD task boundaries to expose where `chunk_max_ms` spikes originate.
+  - rerun the same 3x `36 MHz` bounded soak gate and correlate high
+    `chunk_max_ms` samples with the new append-path timing fields.

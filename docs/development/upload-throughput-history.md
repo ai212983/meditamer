@@ -615,11 +615,42 @@ Tooling note from this pass:
   - fix: narrow abort matching to real abort signatures (`abort()`, `aborted`,
     `abort was called`).
 
+## 2026-03-03: CMD25 burst diagnostics + 3x soak correlation
+
+Instrumentation commit:
+
+- `3bb91e0`: `feat(storage): add cmd25 burst wait diagnostics for uploads`
+- added per-upload `sd_upload: write_metrics` fields:
+  - `cmd25_success_burst_ms_total`, `cmd25_success_burst_ms_avg`
+  - `cmd25_ready_wait_count`, `cmd25_ready_wait_ms_total`,
+    `cmd25_ready_wait_ms_avg`
+  - `cmd25_ready_wait_polls_total`, `cmd25_ready_wait_polls_avg`
+  - `cmd25_ready_wait_over_1ms`, `cmd25_ready_wait_over_4ms`,
+    `cmd25_ready_wait_over_8ms`
+
+3x `36 MHz` bounded soak runs used for correlation:
+
+- `logs/wifi_regression_gate_sdspi36_burstdiag_r1_20260303_161323`
+- `logs/wifi_regression_gate_sdspi36_burstdiag_r2_20260303_161645`
+- `logs/wifi_regression_gate_sdspi36_burstdiag_r3b_20260303_162537`
+- excluded run: `logs/wifi_regression_gate_sdspi36_burstdiag_r3_20260303_162008`
+  (host-side health send failures while `NET_STATUS state=Ready`)
+
+Correlation results:
+
+- selected runs passed full gate (including soak).
+- no selected soak uploads exceeded `req_ms > 3400` (`0/30`).
+- CMD25 wait signals stayed low per upload:
+  - `cmd25_ready_wait_ms_total` averaged `3.2..4.2 ms`
+  - `cmd25_ready_wait_over_8ms` remained rare (`0..1` events per run total)
+- interpretation: current latency spread is not primarily explained by CMD25
+  write-ready waiting.
+
 ## Next step
 
-Run repeated `36 MHz` soak passes and target outlier root-cause:
+Shift root-cause work to SD task/FAT append path:
 
-- execute three full regression-gate reruns at `36 MHz`;
-- flag high-latency uploads (`req_ms > 3400`) and correlate with same-request
-  `sd_ms`, `read_wait_ms`, and `chunk_max_ms` fields to select the next
-  code-path intervention (SD-path vs network ingress path).
+- add per-chunk timing around `fat::append_session_write` and SD task upload
+  boundaries to isolate where `chunk_max_ms` spikes originate.
+- rerun the same 3x `36 MHz` bounded soak gate and correlate high
+  `chunk_max_ms` samples with new append-path timing fields.
