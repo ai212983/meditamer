@@ -240,3 +240,101 @@ Selection:
   without reintroducing CMD25 fallback or write errors.
 - Keep env override available for board/SD-card-specific rollback:
   `MEDITAMER_SD_SPI_DATA_MHZ=24` (or another validated value).
+
+## 2026-03-03: upload chunk pipeline A/B regression gate (`off` vs `on`)
+
+Validation shape (full regression gate, no soak):
+
+```bash
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_ab_off_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+
+CARGO_FEATURES=asset-upload-http-pipeline \
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_ab_on_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifacts:
+
+- pipeline off: `logs/wifi_regression_gate_ab_off_20260303_115711`
+- pipeline on: `logs/wifi_regression_gate_ab_on_20260303_120041`
+
+Gate status:
+
+- both runs passed discovery debug + acceptance 1-cycle + acceptance 3-cycle
+- no panic/reboot markers
+- no zero-discovery regression (`zero_discovery_rounds=0` in both runs)
+
+Observed throughput (524288-byte payload):
+
+- pipeline off:
+  - 1-cycle: `upload_ms=4412`, `throughput_kib_s=116.05`
+  - 3-cycle average: `avg_upload_s=4.79`, `avg_kib_s=107.48`
+- pipeline on:
+  - 1-cycle: `upload_ms=4103`, `throughput_kib_s=124.79`
+  - 3-cycle average: `avg_upload_s=4.14`, `avg_kib_s=123.86`
+
+Delta (pipeline on vs off):
+
+- 1-cycle upload time: `4412 -> 4103 ms` (`-7.0%`)
+- 3-cycle average upload time: `4.79 -> 4.14 s` (`-13.6%`)
+- 3-cycle average throughput: `107.48 -> 123.86 KiB/s` (`+15.2%`)
+
+Notes:
+
+- Device-side `upload_http: upload stats` line confirms feature mode:
+  - off log shows `pipeline=off`
+  - on log shows `pipeline=on`
+- With overlap enabled, per-bucket decomposition is not directly comparable to
+  stop-and-wait mode in isolation; end-to-end `upload_ms` and host KiB/s are the
+  primary A/B decision signals.
+
+## 2026-03-03: default-feature confirmation gate (pipeline on by default)
+
+Validation shape:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_default_confirm_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifact:
+
+- `logs/wifi_regression_gate_default_confirm_20260303_121014`
+
+Gate status:
+
+- passed discovery debug + acceptance 1-cycle + acceptance 3-cycle
+- no panic/reboot markers
+- no zero-discovery regression
+
+Observed throughput (524288-byte payload):
+
+- 1-cycle: `upload_ms=4169`, `throughput_kib_s=122.81`
+- 3-cycle average: `avg_upload_s=4.54`, `avg_kib_s=113.11`
+
+Representative decomposition signal (`pipeline=on`):
+
+- `chunks=11`, `avg_chunk=47662`, `max_chunk=49152`
+- `read_wait_ms=2714`, `sd_ms=3053`, `commit_ms=233`, `req_ms=3327`
+
+Interpretation:
+
+- default-on behavior stays within prior pipeline-on envelope
+- commit/metadata remains secondary versus multi-second transfer path costs, so
+  Phase C metadata tightening stays deferred.

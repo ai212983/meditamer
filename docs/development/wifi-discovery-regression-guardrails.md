@@ -1,6 +1,6 @@
 # Wi-Fi Discovery Regression Guardrails
 
-As of: 2026-03-01
+As of: 2026-03-03
 
 ## Problem Statement
 
@@ -70,6 +70,27 @@ Run in this order after boot:
 4. Bounded soak
 - run `scripts/tests/hw/test_wifi_acceptance.sh` with a bounded soak cycle count (for example `10`).
 
+Canonical single-command path:
+
+- run `scripts/tests/hw/test_wifi_regression_gate.sh`
+- this wraps the sequence above, writes per-stage logs, and emits `report.json`
+- panic/reboot signatures are treated as hard failure signals and trigger panic excerpt capture
+
+## Panic-First Handling
+
+When a panic or unexpected reboot signature appears (`Guru Meditation`, `panic`, `backtrace`,
+`stack overflow`, `stack smashing`, `assertion failed`, `BOOT_RESET reason=...`):
+
+1. Stop concurrent workflows for the same device/port.
+2. Preserve failing logs and panic excerpt.
+3. Run one troubleshoot pass (`scripts/tests/hw/test_troubleshoot_hw.sh`).
+4. Reproduce once with unchanged settings.
+5. If reproduced twice, open blocking regression report with artifact bundle.
+
+Full operational protocol (reporting template, triage ladder, closure criteria):
+
+- `docs/development/wifi-upload-regression-protocol.md`
+
 ## Throughput Diagnostic Constraint
 
 When profiling upload throughput, do not continue long upload runs if discovery/connectivity is failing.
@@ -88,3 +109,21 @@ Rationale: avoids spending upload diagnostics time in strict boot scan-evidence 
   - `tools/hostctl/src/workflows_wifi_discovery.rs`
 - If refactoring acceptance/discovery workflows, keep this invariant:
   - discovery proof first, throughput profiling second.
+
+## Latest Verification (2026-03-03)
+
+Pipeline A/B regression gate runs (`off` vs `on`) both passed discovery and acceptance stages:
+
+- `logs/wifi_regression_gate_ab_off_20260303_115711/report.json`
+- `logs/wifi_regression_gate_ab_on_20260303_120041/report.json`
+- `logs/wifi_regression_gate_default_confirm_20260303_121014/report.json` (post-enable default confirmation)
+
+Observed discovery outcome in both runs:
+
+- `zero_discovery_rounds == 0`
+- `scan_nonzero_events > 0`
+- `ssid_seen_rounds > 0`
+
+Conclusion:
+
+- Enabling upload chunk pipeline by default did not reintroduce the zero-discovery regression signature in this validation pass.

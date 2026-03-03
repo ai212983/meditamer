@@ -1,8 +1,9 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: Proposed
+- Status: In Progress (Phases A-B complete; Phase C deferred; next A/B pending)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
+- Last Updated: 2026-03-03
 - Scope: firmware upload path + host acceptance harness (no `tools/scene_*`)
 
 ## 1. Summary
@@ -68,6 +69,8 @@ Interpretation:
 
 ## 6.1 Phase A: Latency Decomposition Telemetry
 
+- Status: Completed (2026-03-03)
+
 Add explicit metrics/log fields for each upload request:
 
 - socket read wait time
@@ -80,6 +83,8 @@ Add explicit metrics/log fields for each upload request:
 Expected output should support a one-line decomposition per upload and summary counters in existing `METRICS UPLOAD_*` serial reporting.
 
 ## 6.2 Phase B: Chunk Pipeline (Double Buffer)
+
+- Status: Completed (implemented and enabled by default after 2026-03-03 A/B pass)
 
 Implement a two-buffer producer/consumer flow:
 
@@ -94,6 +99,8 @@ Constraints:
 - Maintain compatibility with existing `/upload` and `/upload_chunk` behavior.
 
 ## 6.3 Phase C: Metadata Cost Tightening
+
+- Status: Deferred (post-pipeline evidence shows commit/metadata is not dominant)
 
 After pipeline lands, profile remaining fixed cost.
 If commit-phase metadata is still dominant:
@@ -161,10 +168,61 @@ Rollback:
 
 ## 11. Execution Checklist for Next Session
 
-1. Confirm baseline commit and run discovery proof.
-2. Add Phase A telemetry.
-3. Run 1/3/soak with no behavior changes; record decomposition baseline.
-4. Implement Phase B pipeline with guard toggle.
-5. Re-run 1/3/soak, compare deltas, check discovery stability.
-6. Decide on Phase C only if fixed commit/metadata cost remains dominant.
-7. Update throughput history and regression guardrail docs with final measurements.
+1. [x] Confirm baseline commit and run discovery proof (2026-03-01 sequence recorded in throughput history).
+2. [x] Add Phase A telemetry (implemented in firmware metrics and upload decomposition reporting).
+3. [x] Run 1/3/soak with no behavior changes; record decomposition baseline (recorded in throughput history).
+4. [x] Implement Phase B pipeline with guard toggle (`asset-upload-http-pipeline`).
+5. [x] Re-run 1/3/soak with pipeline enabled, compare deltas, and check discovery stability (2026-03-03 A/B run).
+6. [x] Decide on Phase C only if fixed commit/metadata cost remains dominant after Phase B A/B (2026-03-03: deferred; commit cost not dominant in A/B logs).
+7. [x] Update throughput history and regression guardrail docs with final A/B measurements.
+8. [x] Re-run regression gate with pipeline enabled in default feature set (`logs/wifi_regression_gate_default_confirm_20260303_121014`).
+9. [ ] Run next A/B: make upload chunk size build-tunable, then compare `SD_UPLOAD_CHUNK_MAX=49_152` vs `65_536` under the same regression gate.
+
+## 11.1 2026-03-03 A/B Execution Result
+
+- Baseline (`pipeline=off`) regression gate:
+  - run_id: `20260303_115711`
+  - output: `logs/wifi_regression_gate_ab_off_20260303_115711`
+  - result: passed (`discovery_debug`, acceptance 1-cycle, acceptance 3-cycle)
+  - acceptance summary:
+    - 1-cycle: `upload_ms=4412`, `throughput_kib_s=116.05`
+    - 3-cycle avg: `avg_upload_s=4.79`, `avg_kib_s=107.48`
+
+- Variant (`pipeline=on`, `asset-upload-http-pipeline`) regression gate:
+  - run_id: `20260303_120041`
+  - output: `logs/wifi_regression_gate_ab_on_20260303_120041`
+  - result: passed (`discovery_debug`, acceptance 1-cycle, acceptance 3-cycle)
+  - acceptance summary:
+    - 1-cycle: `upload_ms=4103`, `throughput_kib_s=124.79`
+    - 3-cycle avg: `avg_upload_s=4.14`, `avg_kib_s=123.86`
+
+- A/B delta (pipeline on vs off):
+  - 1-cycle upload time: `4412 -> 4103 ms` (`-7.0%`)
+  - 3-cycle average upload time: `4.79 -> 4.14 s` (`-13.6%`)
+  - 3-cycle average throughput: `107.48 -> 123.86 KiB/s` (`+15.2%`)
+  - discovery stability: no zero-discovery regression observed (`zero_discovery_rounds=0` in both runs)
+
+- Decision:
+  - enable `asset-upload-http-pipeline` in default feature set
+  - keep rollback path available via `CARGO_NO_DEFAULT_FEATURES=1` with
+    explicit feature list excluding `asset-upload-http-pipeline`
+
+## 11.2 2026-03-03 Default-Feature Confirmation (Post-Enable)
+
+- Default build regression gate:
+  - run_id: `20260303_121014`
+  - output: `logs/wifi_regression_gate_default_confirm_20260303_121014`
+  - result: passed (`discovery_debug`, acceptance 1-cycle, acceptance 3-cycle)
+  - acceptance summary:
+    - 1-cycle: `upload_ms=4169`, `throughput_kib_s=122.81`
+    - 3-cycle avg: `avg_upload_s=4.54`, `avg_kib_s=113.11`
+
+- Phase C decision basis:
+  - `commit_ms` in sampled upload stats remains ~`233..235 ms` while request totals
+    remain multi-second (`req_ms` ~`3190..3355`), so metadata/commit is not the
+    dominant cost in this phase.
+
+- Specific next step (codebase-aligned):
+  - Add build-time tuning for `SD_UPLOAD_CHUNK_MAX` (currently fixed at `49_152` in
+    `src/firmware/types/base.rs`) and run an A/B sweep at `49_152` vs `65_536` using
+    `scripts/tests/hw/test_wifi_regression_gate.sh`.
