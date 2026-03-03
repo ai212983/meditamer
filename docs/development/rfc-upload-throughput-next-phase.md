@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size A/B complete; panic mitigation landed; extended soak confirmation pending)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default switched to `65_536` via risk acceptance; monitor transport-reset reliability)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -180,7 +180,7 @@ Rollback:
 10. [x] Run bounded soak at `SD_UPLOAD_CHUNK_MAX=65_536` before default switch (2026-03-03: failed due runtime panic in acceptance soak).
 11. [x] Add stack-headroom diagnostics around upload begin/route + SD begin and capture panic-focused evidence (`feat(telemetry): add stack headroom probes for upload panic triage`).
 12. [x] Reduce default touch trace pressure to recover stack headroom and rerun `65_536` bounded soak (`fix(touch): reduce trace channel buffers to reclaim stack headroom` + pass at `logs/wifi_regression_gate_65536_postfix_20260303_141406`).
-13. [ ] Run extended soak (24h profile) at `SD_UPLOAD_CHUNK_MAX=65_536` before default switch.
+13. [x] Waive extended soak (24h profile) and proceed with default switch at `SD_UPLOAD_CHUNK_MAX=65_536` (owner risk acceptance, 2026-03-03).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -315,4 +315,16 @@ Rollback:
   - a separate instrumentation run (`logs/wifi_regression_gate_stackdiag_postfix_20260303_140801`) failed soak on a transport-level body read reset (`ConnectionReset`) without panic/reboot signatures.
 
 - Next decision gate:
-  - keep default chunk size at `49_152` until extended soak repeats panic-free behavior at `65_536`.
+  - superseded by Section 11.6 risk-accept decision.
+
+## 11.6 2026-03-03 Owner Decision: Skip 24h Soak and Proceed
+
+- Decision input:
+  - explicit owner instruction to skip the 24h soak and proceed.
+
+- Action taken:
+  - switch firmware default `SD_UPLOAD_CHUNK_MAX_DEFAULT` to `65_536`.
+  - align host fallback `/upload_chunk` default (`HOSTCTL_UPLOAD_CHUNK_SIZE`) to `65536`.
+
+- Operational note:
+  - keep `MEDITAMER_SD_UPLOAD_CHUNK_MAX` override available for quick rollback to `49_152` if field behavior regresses.

@@ -624,7 +624,7 @@ scripts/assets/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin
 
 Optional upload helper tuning:
 
-- `HOSTCTL_UPLOAD_CHUNK_SIZE` controls chunk size in bytes for `/upload_chunk` fallback flow (default `49152`).
+- `HOSTCTL_UPLOAD_CHUNK_SIZE` controls chunk size in bytes for `/upload_chunk` fallback flow (default `65536`).
 
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 

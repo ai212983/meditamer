@@ -120,6 +120,7 @@ Pipeline A/B regression gate runs (`off` vs `on`) both passed discovery and acce
 - `logs/wifi_regression_gate_chunk_ab_49152_final_20260303_123948/report.json` (`SD_UPLOAD_CHUNK_MAX=49_152`)
 - `logs/wifi_regression_gate_chunk_ab_65536_20260303_124328/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`)
 - `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`, soak stage failed with runtime panic)
+- `logs/wifi_regression_gate_65536_postfix_20260303_141406/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`, post-mitigation soak stage passed)
 
 Observed discovery outcome in all listed runs:
 

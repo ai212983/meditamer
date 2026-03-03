@@ -501,3 +501,25 @@ Decision impact:
 
 - panic signature (`stack guard write`) did not reproduce in the post-mitigation `65_536` soak rerun.
 - keep default chunk size at `49_152` until extended soak repeats this result.
+
+## 2026-03-03: owner decision to skip 24h soak and proceed
+
+Decision:
+
+- skip extended 24h soak gate and proceed with default switch.
+
+Applied defaults:
+
+- firmware: `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` (`src/firmware/types/base.rs`)
+- host fallback uploader: `HOSTCTL_UPLOAD_CHUNK_SIZE` default `65536` (`tools/hostctl/src/workflows_storage/upload/transfer.rs`)
+
+Post-switch sanity check (default build, no chunk-size override):
+
+- acceptance 1-cycle: `cycle 1 ... upload_ms=4892 ... throughput_kib_s=104.66`
+- decomposition confirms default chunking: `chunks=8`, `max_chunk=65536`
+
+Rollback path:
+
+- override firmware chunk size at build time with:
+  - `MEDITAMER_SD_UPLOAD_CHUNK_MAX=49152`
+  - (fallback env key: `SD_UPLOAD_CHUNK_MAX`)
