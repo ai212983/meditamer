@@ -338,3 +338,117 @@ Interpretation:
 - default-on behavior stays within prior pipeline-on envelope
 - commit/metadata remains secondary versus multi-second transfer path costs, so
   Phase C metadata tightening stays deferred.
+
+## 2026-03-03: upload chunk-size A/B (`49_152` vs `65_536`)
+
+Change set:
+
+- firmware upload chunk size is now build-time tunable for PSRAM upload builds:
+  - preferred env: `MEDITAMER_SD_UPLOAD_CHUNK_MAX`
+  - fallback env: `SD_UPLOAD_CHUNK_MAX`
+  - accepted range: `4096..65536`
+- internal upload chunk command length widened to `u32` so `65536` is represented safely.
+
+Validation shape:
+
+```bash
+# baseline (default 49_152)
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_chunk_ab_49152_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+
+# variant (65_536)
+MEDITAMER_SD_UPLOAD_CHUNK_MAX=65536 \
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_chunk_ab_65536_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifacts:
+
+- `49_152`: `logs/wifi_regression_gate_chunk_ab_49152_final_20260303_123948`
+- `65_536`: `logs/wifi_regression_gate_chunk_ab_65536_20260303_124328`
+
+Gate status:
+
+- both runs passed discovery debug + acceptance 1-cycle + acceptance 3-cycle
+- no panic/reboot markers in the final A/B pair
+- no zero-discovery regression in the final A/B pair
+
+Observed throughput (524288-byte payload):
+
+- `49_152`:
+  - 1-cycle: `upload_ms=4828`, `throughput_kib_s=106.05`
+  - 3-cycle average: `avg_upload_s=5.08`, `avg_kib_s=101.07`
+- `65_536`:
+  - 1-cycle: `upload_ms=4708`, `throughput_kib_s=108.75`
+  - 3-cycle average: `avg_upload_s=4.36`, `avg_kib_s=117.86`
+
+Delta (`65_536` vs `49_152`):
+
+- 1-cycle upload time: `4828 -> 4708 ms` (`-2.5%`)
+- 3-cycle average upload time: `5.08 -> 4.36 s` (`-14.2%`)
+- 3-cycle average throughput: `101.07 -> 117.86 KiB/s` (`+16.6%`)
+
+Representative decomposition:
+
+- `49_152` path:
+  - `chunks=11`, `max_chunk=49152`, `cmd25_attempt_bursts=21`, `cmd25_fallback_bursts=0`
+- `65_536` path:
+  - `chunks=8`, `max_chunk=65536`, `cmd25_attempt_bursts=16`, `cmd25_fallback_bursts=0`
+
+Notes:
+
+- one earlier baseline attempt (`logs/wifi_regression_gate_chunk_ab_49152_20260303_122009`)
+  recorded a panic during acceptance (`runtime_panic_other`), but that panic did not reproduce
+  in the final paired A/B runs above.
+
+## 2026-03-03: bounded soak follow-up for `SD_UPLOAD_CHUNK_MAX=65_536`
+
+Validation shape:
+
+```bash
+MEDITAMER_SD_UPLOAD_CHUNK_MAX=65536 \
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_SOAK_CYCLES=10 \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifact:
+
+- `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052`
+
+Result:
+
+- discovery debug: passed
+- acceptance 1-cycle: passed
+- acceptance 3-cycle: passed
+- acceptance soak (10 cycles): failed with runtime panic
+
+Panic marker:
+
+- `Detected a write to the stack guard value on ProCpu`
+- captured in:
+  - `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052/panic_excerpt.log`
+  - `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052/report.json`
+
+Decision impact:
+
+- keep default upload chunk size at `49_152` for now.
+- keep `65_536` as opt-in override until soak is stable.

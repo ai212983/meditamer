@@ -71,6 +71,8 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 1. Set `HOSTCTL_PORT` explicitly.
 2. Run `scripts/tests/hw/test_troubleshoot_hw.sh` once with defaults.
 3. If it fails, read summary fields: `failure_stage`, `failure_class`, `failure_detail`.
+   - for runtime failures, `failure_detail` may include `runtime_subclass=...`
+     (`runtime_panic_guru`, `runtime_panic_stack`, `runtime_panic_assert`, `runtime_panic_other`, `runtime_unexpected_reboot`)
 4. Attach artifacts in report:
    - `uart_log=...`
    - `soak_logs=...`

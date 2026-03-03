@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; next A/B pending)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size A/B complete; soak follow-up open)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -176,7 +176,8 @@ Rollback:
 6. [x] Decide on Phase C only if fixed commit/metadata cost remains dominant after Phase B A/B (2026-03-03: deferred; commit cost not dominant in A/B logs).
 7. [x] Update throughput history and regression guardrail docs with final A/B measurements.
 8. [x] Re-run regression gate with pipeline enabled in default feature set (`logs/wifi_regression_gate_default_confirm_20260303_121014`).
-9. [ ] Run next A/B: make upload chunk size build-tunable, then compare `SD_UPLOAD_CHUNK_MAX=49_152` vs `65_536` under the same regression gate.
+9. [x] Run next A/B: make upload chunk size build-tunable, then compare `SD_UPLOAD_CHUNK_MAX=49_152` vs `65_536` under the same regression gate (2026-03-03 chunk-size A/B run).
+10. [x] Run bounded soak at `SD_UPLOAD_CHUNK_MAX=65_536` before default switch (2026-03-03: failed due runtime panic in acceptance soak).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -226,3 +227,67 @@ Rollback:
   - Add build-time tuning for `SD_UPLOAD_CHUNK_MAX` (currently fixed at `49_152` in
     `src/firmware/types/base.rs`) and run an A/B sweep at `49_152` vs `65_536` using
     `scripts/tests/hw/test_wifi_regression_gate.sh`.
+
+## 11.3 2026-03-03 Chunk-Size A/B (`49_152` vs `65_536`)
+
+- Implementation:
+  - added build-time chunk-size override in `src/firmware/types/base.rs`:
+    - preferred: `MEDITAMER_SD_UPLOAD_CHUNK_MAX`
+    - fallback: `SD_UPLOAD_CHUNK_MAX`
+    - accepted range (PSRAM upload build): `4096..65536`
+  - widened upload chunk command length field to `u32` to safely support `65536`
+    without truncation.
+
+- Baseline (`SD_UPLOAD_CHUNK_MAX=49_152`) regression gate:
+  - run_id: `20260303_123948`
+  - output: `logs/wifi_regression_gate_chunk_ab_49152_final_20260303_123948`
+  - result: passed
+  - acceptance summary:
+    - 1-cycle: `upload_ms=4828`, `throughput_kib_s=106.05`
+    - 3-cycle avg: `avg_upload_s=5.08`, `avg_kib_s=101.07`
+
+- Variant (`MEDITAMER_SD_UPLOAD_CHUNK_MAX=65536`) regression gate:
+  - run_id: `20260303_124328`
+  - output: `logs/wifi_regression_gate_chunk_ab_65536_20260303_124328`
+  - result: passed
+  - acceptance summary:
+    - 1-cycle: `upload_ms=4708`, `throughput_kib_s=108.75`
+    - 3-cycle avg: `avg_upload_s=4.36`, `avg_kib_s=117.86`
+
+- A/B delta (`65536` vs `49_152`):
+  - 1-cycle upload time: `4828 -> 4708 ms` (`-2.5%`)
+  - 3-cycle average upload time: `5.08 -> 4.36 s` (`-14.2%`)
+  - 3-cycle average throughput: `101.07 -> 117.86 KiB/s` (`+16.6%`)
+  - discovery: passed in both runs (`discovery_debug` stage passed; no panic/reboot markers)
+
+- Decomposition signal:
+  - `49_152` variant: `chunks=11`, `max_chunk=49152`, `cmd25_attempt_bursts=21`
+  - `65_536` variant: `chunks=8`, `max_chunk=65536`, `cmd25_attempt_bursts=16`
+  - both: `cmd25_fallback_bursts=0`
+
+- Decision:
+  - keep build-time override support in place.
+  - do not switch default chunk size to `65536` yet.
+
+## 11.4 2026-03-03 Bounded Soak Follow-Up (`65_536`)
+
+- Run:
+  - output: `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052`
+  - command shape: `HOSTCTL_NET_SOAK_CYCLES=10 scripts/tests/hw/test_wifi_regression_gate.sh`
+
+- Result:
+  - `discovery_debug`: passed
+  - `acceptance_1_cycle`: passed
+  - `acceptance_3_cycle`: passed
+  - `acceptance_soak`: failed (`final_status=failed`)
+  - panic class: `runtime_panic_other`
+  - panic excerpt: `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052/panic_excerpt.log`
+
+- Failure signature:
+  - panic occurred during repeated soak uploads at `request method=PUT path=/upload`
+    after `sd_upload: begin ...`
+  - runtime message: `Detected a write to the stack guard value on ProCpu`
+
+- Decision:
+  - keep default `SD_UPLOAD_CHUNK_MAX=49_152` for now.
+  - treat `65_536` as experimental override only until panic root cause is fixed and soak passes.

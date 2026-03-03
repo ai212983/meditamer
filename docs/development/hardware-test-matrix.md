@@ -61,6 +61,42 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/tests/hw/t
 HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/tests/hw/test_sdcard_hw.sh
 ```
 
+## 2B. Wi-Fi/Upload Regression Gate (Automated)
+
+Canonical command:
+
+```bash
+HOSTCTL_NET_PORT=/dev/cu.usbserial-540 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_SSID='<wifi-ssid>' \
+HOSTCTL_NET_PASSWORD='<wifi-password>' \
+HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+What this gate runs:
+
+1. discovery debug (bounded)
+2. acceptance 1-cycle
+3. acceptance 3-cycle
+4. optional soak (`HOSTCTL_NET_SOAK_CYCLES`)
+
+Pass criteria:
+
+- final status is `passed`
+- `report.json` exists and all required stage logs are present
+- discovery counters satisfy:
+  - `zero_discovery_rounds == 0`
+  - `scan_nonzero_events > 0`
+  - `ssid_seen_rounds > 0`
+- panic/reboot signatures are absent
+
+If panic is detected:
+
+- preserve panic excerpt artifact
+- run troubleshoot workflow once
+- attach troubleshoot output with regression report
+
 ## 3. Cold Boot Cycles (Manual)
 
 Procedure:
@@ -141,6 +177,11 @@ Pass criteria:
 - Date/time:
 - Firmware commit:
 - Test run ID:
+- Wi-Fi/upload regression gate report path:
+- Panic detected (yes/no):
+- Panic class + first marker (if yes):
+- Panic excerpt path (if yes):
+- Troubleshoot run path/result (if panic):
 - Reset-cycle soak result:
 - Cold boot result:
 - Long refresh result:

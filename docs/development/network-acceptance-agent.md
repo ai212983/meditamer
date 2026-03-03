@@ -53,6 +53,14 @@ Readiness and failure diagnosis must use structured lines:
 4. Classify from `NET_STATUS.failure_class` / `failure_code` first, then from HTTP upload errors.
 5. Apply one targeted fix, rerun, and compare cycle summaries.
 
+For full Wi-Fi/upload regression verification (discovery + acceptance + panic-first reporting), run:
+
+```bash
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+and attach its `report.json` artifact.
+
 ## Acceptance Gate
 
 1. 1-cycle bounded smoke pass.

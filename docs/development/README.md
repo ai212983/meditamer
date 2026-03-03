@@ -13,6 +13,7 @@ The firmware now targets `esp-hal` (`xtensa-esp32-none-elf`) as the primary and 
 - `hardware-test-matrix.md`: Hardware testing matrices.
 - `reliability-issues.md`: Current ranked reliability risks, evidence, and mitigation gates.
 - `wifi-discovery-regression-guardrails.md`: Why zero-discovery can regress and how to prevent it.
+- `wifi-upload-regression-protocol.md`: Panic-first containment, triage, artifact, and closure protocol for Wi-Fi/upload regressions.
 - `troubleshoot-agent.md`: Agent-first runbook for the Serverless Workflow troubleshooting script.
 
 ## Git Hooks
@@ -97,6 +98,12 @@ Rust-analyzer baseline lint:
 
 ```bash
 scripts/ci/lint_rust_analyzer.sh
+```
+
+Stack-risk guard (host-side static check for large fixed stack arrays):
+
+```bash
+scripts/ci/check_stack_risk.sh
 ```
 
 Host coverage (line coverage + LCOV artifacts):
@@ -437,11 +444,13 @@ METRICS MARBLE_REDRAW_MS=<n> MAX_MS=<n>
 METRICS WIFI attempt=<n> success=<n> failure=<n> no_ap=<n> scan_runs=<n> scan_empty=<n> scan_hits=<n>
 METRICS UPLOAD accept_ok=<n> accept_err=<n> request_err=<n> req_hdr_to=<n> req_read_body=<n> req_sd_busy=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n> sess_timeout_abort=<n> sess_mode_off_abort=<n>
 METRICS UPLOAD_PHASE req=<n> bytes=<n> body_ms=<n> body_max=<n> sd_ms=<n> sd_max=<n> req_ms=<n> req_max=<n>
+METRICS UPLOAD_DECOMP copy_ms=<n> copy_max=<n> sdq_ms=<n> sdq_max=<n> sdtask_ms=<n> sdtask_max=<n> commit_ms=<n> commit_max=<n> chunk_p50_max=<n> chunk_p95_max=<n> chunk_max=<n> chunk_samples=<n> chunk_drop=<n>
 METRICS UPLOAD_RTT begin_n=<n> begin_ms=<n> begin_max=<n> chunk_n=<n> chunk_ms=<n> chunk_max=<n> commit_n=<n> commit_ms=<n> commit_max=<n> abort_n=<n> abort_ms=<n> abort_max=<n> mkdir_n=<n> mkdir_ms=<n> mkdir_max=<n> rm_n=<n> rm_ms=<n> rm_max=<n>
 METRICS NET wifi_connected=<0|1> http_listening=<0|1> ip=<a.b.c.d>
 ```
 
 `UPLOAD_PHASE` reports end-to-end per-request timing buckets for upload body handling.
+`UPLOAD_DECOMP` reports phase decomposition (payload copy, SD queue/send, SD task wait, commit) plus bounded per-request chunk latency summary maxima.
 `UPLOAD_RTT` reports SD roundtrip counts and timing totals/maxima by command phase.
 
 ### Runtime Telemetry Domain Control
@@ -510,6 +519,10 @@ Notes:
 
 - optional compile-time credentials are still supported via `MEDITAMER_WIFI_SSID` / `MEDITAMER_WIFI_PASSWORD`
   (fallback `SSID` / `PASSWORD`).
+- upload chunk size is compile-time tunable for PSRAM upload builds:
+  - preferred env: `MEDITAMER_SD_UPLOAD_CHUNK_MAX`
+  - fallback env: `SD_UPLOAD_CHUNK_MAX`
+  - accepted range: `4096..65536` (bytes)
 - upload service must be enabled at runtime (`STATE SET upload=on`).
 - hard-cut runtime network control now uses `NET*` UART commands only.
 - server listens on port `8080` after DHCP lease.
@@ -638,6 +651,10 @@ scripts/tests/hw/test_wifi_acceptance.sh
 - strategy execution is declarative (`tools/hostctl/scenarios/wifi-acceptance.sw.yaml`) with primitive hostctl actions.
 - consumes only `HOSTCTL_NET_*` environment contract.
 - readiness uses structured firmware frames (`NET_STATUS {...}`), not monitor-tail text parsing.
+- upload chunk pipeline A/B: default build now enables the pipeline feature.
+- to force baseline (pipeline off) for comparison, use:
+  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/build/build.sh debug`
+  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/device/flash.sh debug`
 
 Wi-Fi zero-discovery diagnostic workflow:
 
@@ -667,6 +684,31 @@ scripts/tests/hw/test_wifi_discovery_debug.sh
   - target SSID visibility.
 - root-cause and guardrails reference:
   `docs/development/wifi-discovery-regression-guardrails.md`.
+
+Wi-Fi/upload regression gate (panic-first, fail-fast):
+
+```bash
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+- sequence: discovery debug -> acceptance 1-cycle -> acceptance 3-cycle -> optional soak
+- emits per-stage logs and machine-readable `report.json`
+- when panic/reboot markers are detected, the gate captures panic excerpt and can auto-run troubleshoot workflow
+
+Optional regression-gate env vars:
+
+- `HOSTCTL_NET_SOAK_CYCLES` (`0` default; skip soak)
+- `HOSTCTL_NET_PANIC_AUTO_TROUBLESHOOT` (`1` default)
+- `HOSTCTL_NET_PANIC_CONTEXT_LINES` (`80` default)
+- `HOSTCTL_NET_PANIC_EXCERPT_PATH` (optional override path)
+- `HOSTCTL_NET_REGRESSION_REPORT_PATH` (optional override path)
+
+Wi-Fi workflow guardrail env vars:
+
+- `HOSTCTL_NET_LOCK_PATH` (optional lock file path override)
+- `HOSTCTL_NET_LOCK_WAIT_SEC` (`0` default; fail-fast lock)
+- `HOSTCTL_NET_ALLOW_LOG_APPEND` (`0` default; enforce unique log path)
+- `HOSTCTL_NET_ENFORCE_POLICY_FLOORS` (`1` default)
 
 ## Hostctl Workflow Authoring
 
