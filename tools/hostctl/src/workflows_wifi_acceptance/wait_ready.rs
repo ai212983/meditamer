@@ -7,23 +7,25 @@ use anyhow::{anyhow, Result};
 
 use crate::{
     serial_console::SerialConsole,
-    workflows_wifi_common::{query_net_status, NetPolicy, NetStatus},
+    workflows_wifi_common::{detect_panic_signal, query_net_status, NetPolicy, NetStatus},
 };
 
 fn format_failure(status: &NetStatus) -> String {
     format!(
-        "network failure class={} code={} state={:?} ladder={:?} attempt={:?} uptime_ms={:?}",
+        "network failure class={} code={} state={:?} ladder={:?} attempt={:?} listener_enabled={:?} uptime_ms={:?}",
         status.failure_class.as_deref().unwrap_or("unknown"),
         status.failure_code.unwrap_or_default(),
         status.state,
         status.ladder_step,
         status.attempt,
+        status.listener_enabled,
         status.uptime_ms
     )
 }
 
 pub(super) fn wait_state_progress(console: &mut SerialConsole, timeout_ms: u32) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+    let mut read_mark = console.mark();
     while Instant::now() < deadline {
         if let Some(status) = query_net_status(console)? {
             let already_ready = matches!(status.state.as_deref(), Some("Ready"))
@@ -41,6 +43,7 @@ pub(super) fn wait_state_progress(console: &mut SerialConsole, timeout_ms: u32) 
                 return Ok(());
             }
         }
+        detect_panic_since_mark(console, &mut read_mark)?;
         thread::sleep(Duration::from_millis(250));
     }
     Err(anyhow!("net_wait_state: did not leave idle state"))
@@ -120,7 +123,7 @@ impl WaitReadyState {
 
     fn extract_listener_ip(&self, status: &NetStatus) -> Option<String> {
         let ipv4 = status.ipv4.as_deref()?;
-        if !status.listener.unwrap_or(false) || ipv4 == "0.0.0.0" {
+        if !status.listener.unwrap_or(false) || !status.listener_enabled.unwrap_or(true) || ipv4 == "0.0.0.0" {
             return None;
         }
         Some(ipv4.to_string())
@@ -170,15 +173,33 @@ pub(super) fn wait_ready(
 ) -> Result<(u32, u32, String)> {
     let started = Instant::now();
     let mut state = WaitReadyState::new(started, policy);
+    let mut read_mark = console.mark();
     loop {
         if let Some(status) = query_net_status(console)? {
             if let Some(result) = state.handle_status(status)? {
                 return Ok(result);
             }
         }
+        detect_panic_since_mark(console, &mut read_mark)?;
         state.check_timeouts()?;
         thread::sleep(Duration::from_millis(350));
     }
+}
+
+fn detect_panic_since_mark(console: &SerialConsole, read_mark: &mut usize) -> Result<()> {
+    for line in console.read_recent_lines(*read_mark) {
+        let line_index = *read_mark;
+        *read_mark = (*read_mark).saturating_add(1);
+        if let Some(signal) = detect_panic_signal(&line, line_index) {
+            return Err(anyhow!(
+                "panic_detected class={} line_index={} line={}",
+                signal.class.as_str(),
+                signal.marker_index,
+                signal.marker_line
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn overall_ready_timeout_ms(policy: NetPolicy) -> u64 {
@@ -201,4 +222,122 @@ fn overall_ready_timeout_ms(policy: NetPolicy) -> u64 {
     per_attempt_ms
         .saturating_mul(ladder_attempts)
         .clamp(90_000, 420_000)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{Read, Write},
+        path::PathBuf,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use anyhow::{anyhow, Result};
+    use serialport::{SerialPort, TTYPort};
+    use tempfile::tempdir;
+
+    use super::{wait_ready, wait_state_progress};
+    use crate::{serial_console::SerialConsole, workflows_wifi_common::NetPolicy};
+
+    fn open_pty_pair() -> Result<(TTYPort, TTYPort)> {
+        TTYPort::pair().map_err(|err| anyhow!("TTYPort::pair failed: {err}"))
+    }
+
+    fn spawn_status_panic_responder(mut master: TTYPort) -> thread::JoinHandle<()> {
+        let _ = master.set_timeout(Duration::from_millis(80));
+        thread::spawn(move || {
+            let mut rx = Vec::<u8>::new();
+            let mut chunk = [0u8; 512];
+            let mut emitted_panic = false;
+            let mut last_activity = Instant::now();
+
+            loop {
+                let n = match master.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        last_activity = Instant::now();
+                        n
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+                        if last_activity.elapsed() > Duration::from_secs(2) {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if last_activity.elapsed() > Duration::from_secs(2) {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                rx.extend_from_slice(&chunk[..n]);
+
+                while let Some(pos) = rx.iter().position(|byte| *byte == b'\n') {
+                    let mut line = rx.drain(..=pos).collect::<Vec<u8>>();
+                    while matches!(line.last(), Some(b'\r' | b'\n')) {
+                        line.pop();
+                    }
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let command = String::from_utf8_lossy(&line).trim().to_string();
+                    if command != "NET STATUS" {
+                        continue;
+                    }
+
+                    let _ = master.write_all(
+                        b"NET_STATUS {\"state\":\"Idle\",\"link\":false,\"ipv4\":\"0.0.0.0\",\"listener\":false,\"listener_enabled\":false,\"failure_class\":\"none\"}\r\n",
+                    );
+                    if !emitted_panic {
+                        let _ = master
+                            .write_all(b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n");
+                        emitted_panic = true;
+                    }
+                    let _ = master.flush();
+                }
+            }
+        })
+    }
+
+    fn test_console(slave: TTYPort) -> Result<SerialConsole> {
+        let temp = tempdir()?;
+        let log_path = PathBuf::from(temp.path()).join("wait_ready_panic_test.log");
+        SerialConsole::from_port_for_tests(Box::new(slave), Some(&log_path))
+    }
+
+    #[test]
+    fn wait_state_progress_fails_fast_on_panic_marker() -> Result<()> {
+        let (master, slave) = open_pty_pair()?;
+        let responder = spawn_status_panic_responder(master);
+        let mut console = test_console(slave)?;
+
+        let err = wait_state_progress(&mut console, 2_500).expect_err("must fail");
+        assert!(err.to_string().contains("panic_detected"));
+        assert!(err.to_string().contains("runtime_panic_guru"));
+
+        responder
+            .join()
+            .map_err(|_| anyhow!("status panic responder thread panicked"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn wait_ready_fails_fast_on_panic_marker() -> Result<()> {
+        let (master, slave) = open_pty_pair()?;
+        let responder = spawn_status_panic_responder(master);
+        let mut console = test_console(slave)?;
+
+        let err = wait_ready(&mut console, NetPolicy::default()).expect_err("must fail");
+        assert!(err.to_string().contains("panic_detected"));
+        assert!(err.to_string().contains("runtime_panic_guru"));
+
+        responder
+            .join()
+            .map_err(|_| anyhow!("status panic responder thread panicked"))?;
+        Ok(())
+    }
 }

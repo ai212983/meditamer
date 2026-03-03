@@ -45,6 +45,7 @@ pub struct NetStatus {
     pub link: Option<bool>,
     pub ipv4: Option<String>,
     pub listener: Option<bool>,
+    pub listener_enabled: Option<bool>,
     pub failure_class: Option<String>,
     pub failure_code: Option<u64>,
     pub ladder_step: Option<String>,

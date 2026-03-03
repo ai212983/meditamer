@@ -23,10 +23,23 @@ pub fn preflight(console: &mut SerialConsole) -> Result<()> {
 }
 
 pub fn wait_net_ack(console: &mut SerialConsole, command: &str) -> Result<()> {
+    let expected_op = expected_ack_op(command);
+    let mut op_mismatch_count = 0u32;
+    let mut last_mismatch_line: Option<String> = None;
     for _ in 0..12 {
         let (status, line) = console.command_wait_ack(command, "NET", Duration::from_secs(4))?;
         match status {
-            AckStatus::Ok => return Ok(()),
+            AckStatus::Ok => {
+                if let Some(op) = expected_op {
+                    if !ack_line_matches_op(line.as_deref(), op) {
+                        op_mismatch_count = op_mismatch_count.saturating_add(1);
+                        last_mismatch_line = line;
+                        thread::sleep(Duration::from_millis(250));
+                        continue;
+                    }
+                }
+                return Ok(());
+            }
             AckStatus::Busy | AckStatus::None => thread::sleep(Duration::from_millis(400)),
             AckStatus::Err => {
                 if line
@@ -41,7 +54,51 @@ pub fn wait_net_ack(console: &mut SerialConsole, command: &str) -> Result<()> {
             }
         }
     }
+    if op_mismatch_count > 0 {
+        return Err(anyhow!(
+            "{command}: NET OK ack op mismatch count={} last_line={}",
+            op_mismatch_count,
+            last_mismatch_line.unwrap_or_else(|| "<none>".to_string())
+        ));
+    }
     Err(anyhow!("{command}: no NET OK ack"))
+}
+
+fn expected_ack_op(command: &str) -> Option<&'static str> {
+    let trimmed = command.trim_start();
+    if trimmed.starts_with("NET LISTENER ON") {
+        return Some("listener_on");
+    }
+    if trimmed.starts_with("NET LISTENER OFF") {
+        return Some("listener_off");
+    }
+    if trimmed.starts_with("NET START") {
+        return Some("start");
+    }
+    if trimmed.starts_with("NET STOP") {
+        return Some("stop");
+    }
+    if trimmed.starts_with("NET RECOVER") {
+        return Some("recover");
+    }
+    if trimmed.starts_with("NETCFG SET") {
+        return Some("config_set");
+    }
+    None
+}
+
+fn ack_line_matches_op(line: Option<&str>, expected_op: &str) -> bool {
+    let Some(line) = line else {
+        return false;
+    };
+    if !line.contains(" OK") {
+        return false;
+    }
+    if !line.contains("op=") {
+        // Backward-compatible path for firmware that only prints `NET OK`.
+        return true;
+    }
+    line.contains(&format!("op={expected_op}"))
 }
 
 pub fn parse_net_status_line(line: &str) -> Result<NetStatus> {
@@ -51,11 +108,15 @@ pub fn parse_net_status_line(line: &str) -> Result<NetStatus> {
     serde_json::from_str::<NetStatus>(payload).context("invalid NET_STATUS json payload")
 }
 
-pub fn query_net_status(console: &mut SerialConsole) -> Result<Option<NetStatus>> {
+pub fn query_net_status_line(console: &mut SerialConsole) -> Result<Option<String>> {
     let status_re = Regex::new(r"^NET_STATUS \{")?;
     let mark = console.mark();
     console.send_line("NET STATUS")?;
-    let Some(line) = console.wait_for_regex_since(mark, &status_re, Duration::from_secs(2))? else {
+    console.wait_for_regex_since(mark, &status_re, Duration::from_secs(2))
+}
+
+pub fn query_net_status(console: &mut SerialConsole) -> Result<Option<NetStatus>> {
+    let Some(line) = query_net_status_line(console)? else {
         return Ok(None);
     };
     let Ok(status) = parse_net_status_line(&line) else {
@@ -88,7 +149,7 @@ pub fn is_ready(status: &NetStatus, require_listener: bool) -> bool {
         return false;
     }
     if require_listener {
-        status.listener.unwrap_or(false)
+        status.listener.unwrap_or(false) && status.listener_enabled.unwrap_or(true)
     } else {
         true
     }
@@ -114,4 +175,34 @@ pub fn netcfg_set_payload(ssid: &str, password: &str, policy: NetPolicy) -> Stri
         "driver_restart_backoff_ms": policy.driver_restart_backoff_ms,
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ack_line_matches_op, expected_ack_op};
+
+    #[test]
+    fn expected_ack_op_maps_known_commands() {
+        assert_eq!(expected_ack_op("NET LISTENER ON"), Some("listener_on"));
+        assert_eq!(expected_ack_op("NET LISTENER OFF"), Some("listener_off"));
+        assert_eq!(expected_ack_op("NET START"), Some("start"));
+        assert_eq!(expected_ack_op("NET STOP"), Some("stop"));
+        assert_eq!(expected_ack_op("NET RECOVER"), Some("recover"));
+        assert_eq!(
+            expected_ack_op("NETCFG SET {\"ssid\":\"x\"}"),
+            Some("config_set")
+        );
+        assert_eq!(expected_ack_op("NET STATUS"), None);
+    }
+
+    #[test]
+    fn ack_line_matches_expected_op_and_allows_legacy_plain_ok() {
+        assert!(ack_line_matches_op(
+            Some("NET OK op=listener_on"),
+            "listener_on"
+        ));
+        assert!(!ack_line_matches_op(Some("NET OK op=start"), "listener_on"));
+        assert!(ack_line_matches_op(Some("NET OK"), "listener_on"));
+        assert!(!ack_line_matches_op(None, "listener_on"));
+    }
 }

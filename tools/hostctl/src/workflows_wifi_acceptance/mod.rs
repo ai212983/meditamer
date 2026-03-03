@@ -14,7 +14,10 @@ use crate::{
     logging::{ensure_parent_dir, Logger},
     scenarios::{execute_workflow, load_workflow},
     serial_console::SerialConsole,
-    workflows_wifi_common::{preflight, MemDiagSummary, NetPolicy},
+    workflows_wifi_common::{
+        acquire_port_lock, enforce_log_path_policy, enforce_policy_floors, preflight,
+        MemDiagSummary, NetPolicy, PanicSignal,
+    },
 };
 
 use boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig};
@@ -43,6 +46,8 @@ struct WifiAcceptanceRuntime<'a> {
     started: Instant,
     mem_diag: MemDiagSummary,
     mem_read_mark: usize,
+    panic_monitoring_enabled: bool,
+    panic_first: Option<PanicSignal>,
 }
 
 pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> Result<()> {
@@ -71,14 +76,18 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         }))
     });
 
-    ensure_parent_dir(&log_path)?;
-    let mut console = SerialConsole::open(&port, baud, Some(&log_path))?;
-    preflight(&mut console)?;
-
     let policy_raw = fs::read_to_string(&policy_path)
         .with_context(|| format!("failed reading HOSTCTL_NET_POLICY_PATH: {policy_path}"))?;
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
         .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
+    enforce_policy_floors(policy, None)?;
+    enforce_log_path_policy(&log_path)?;
+    ensure_parent_dir(&log_path)?;
+    let _port_lock = acquire_port_lock(&port)?;
+
+    let mut console = SerialConsole::open(&port, baud, Some(&log_path))?;
+    preflight(&mut console)?;
+
     let cycles = env_utils::parse_env_u32("HOSTCTL_NET_CYCLES", 3)?.max(1);
     let operation_retries = env_utils::parse_env_u32("HOSTCTL_NET_OPERATION_RETRIES", 3)?.max(1);
     let require_boot_discovery_gate =
@@ -133,6 +142,8 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         started: Instant::now(),
         mem_diag: MemDiagSummary::default(),
         mem_read_mark: 0,
+        panic_monitoring_enabled: false,
+        panic_first: None,
     };
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())

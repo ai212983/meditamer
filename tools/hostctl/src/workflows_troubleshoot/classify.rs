@@ -27,11 +27,7 @@ pub(super) fn classify_failure(stage: &str, detail: &str) -> String {
         return "flash".to_string();
     }
 
-    if lower.contains("guru meditation")
-        || lower.contains("panic")
-        || lower.contains("backtrace")
-        || lower.contains("stack overflow")
-        || lower.contains("stack smashing")
+    if runtime_subclass(detail).is_some()
     {
         return "runtime".to_string();
     }
@@ -61,9 +57,29 @@ pub(super) fn classify_failure(stage: &str, detail: &str) -> String {
     "unknown".to_string()
 }
 
+pub(super) fn runtime_subclass(detail: &str) -> Option<&'static str> {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("boot_reset reason=") {
+        return Some("runtime_unexpected_reboot");
+    }
+    if lower.contains("guru meditation") {
+        return Some("runtime_panic_guru");
+    }
+    if lower.contains("stack overflow") || lower.contains("stack smashing") {
+        return Some("runtime_panic_stack");
+    }
+    if lower.contains("assertion failed") {
+        return Some("runtime_panic_assert");
+    }
+    if lower.contains("panic") || lower.contains("backtrace") || lower.contains("abort") {
+        return Some("runtime_panic_other");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::classify_failure;
+    use super::{classify_failure, runtime_subclass};
 
     #[test]
     fn classify_transport() {
@@ -78,6 +94,10 @@ mod tests {
         assert_eq!(
             classify_failure("probe", "Guru Meditation Error: Core 0 panic'ed"),
             "runtime"
+        );
+        assert_eq!(
+            runtime_subclass("Guru Meditation Error: Core 0 panic'ed"),
+            Some("runtime_panic_guru")
         );
     }
 
@@ -94,6 +114,18 @@ mod tests {
                 "dhcp_no_ipv4_stall: connected-without-ipv4 observed 77 samples"
             ),
             "dhcp_no_ipv4_stall"
+        );
+    }
+
+    #[test]
+    fn classify_unexpected_reboot_as_runtime() {
+        assert_eq!(
+            classify_failure("probe", "BOOT_RESET reason=Software code=3"),
+            "runtime"
+        );
+        assert_eq!(
+            runtime_subclass("BOOT_RESET reason=Software code=3"),
+            Some("runtime_unexpected_reboot")
         );
     }
 }

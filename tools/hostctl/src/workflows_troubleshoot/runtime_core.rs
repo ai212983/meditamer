@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    classify::classify_failure,
+    classify::{classify_failure, runtime_subclass},
     context::{ctx_set_bool, ctx_set_string},
     TroubleshootConfig, TroubleshootRuntime,
 };
@@ -65,6 +65,15 @@ impl<'a> TroubleshootRuntime<'a> {
     ) -> Result<()> {
         let detail = detail.into();
         let class = classify_failure(stage, &detail);
+        let detail = if class == "runtime" {
+            if let Some(subclass) = runtime_subclass(&detail) {
+                format!("runtime_subclass={subclass}; {detail}")
+            } else {
+                detail
+            }
+        } else {
+            detail
+        };
 
         self.result = "failed".to_string();
         self.failure_stage = stage.to_string();
@@ -153,6 +162,9 @@ impl<'a> TroubleshootRuntime<'a> {
             .warn(format!("Look at: {}", self.uart_log_path.display()));
         self.logger.warn(
             "Focus on first panic/backtrace/stack marker rather than downstream command timeouts.",
+        );
+        self.logger.warn(
+            "Capture/reset guidance: compare METRICS BOOT reset_code before/after run when unexpected reboot is suspected.",
         );
     }
 

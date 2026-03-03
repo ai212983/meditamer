@@ -13,7 +13,10 @@ use crate::{
     logging::{ensure_parent_dir, Logger},
     scenarios::{execute_workflow, load_workflow},
     serial_console::SerialConsole,
-    workflows_wifi_common::{preflight, MemDiagSummary, NetPolicy},
+    workflows_wifi_common::{
+        acquire_port_lock, enforce_log_path_policy, enforce_policy_floors, preflight,
+        MemDiagSummary, NetPolicy, PanicSignal,
+    },
 };
 
 use probe::RoundSample;
@@ -39,6 +42,7 @@ struct WifiDiscoveryRuntime<'a> {
     total_scan_nonzero_events: u32,
     total_no_ap_found_events: u32,
     mem_diag: MemDiagSummary,
+    panic_first: Option<PanicSignal>,
 }
 
 pub fn run_wifi_discovery_debug(
@@ -71,11 +75,6 @@ pub fn run_wifi_discovery_debug(
             )
         }))
     });
-    ensure_parent_dir(&log_path)?;
-
-    let mut console = SerialConsole::open(&port, baud, Some(&log_path))?;
-    preflight(&mut console)?;
-
     let policy_raw = fs::read_to_string(&policy_path)
         .with_context(|| format!("failed reading HOSTCTL_NET_POLICY_PATH: {policy_path}"))?;
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
@@ -90,6 +89,14 @@ pub fn run_wifi_discovery_debug(
     if profile.rounds == 0 {
         return Err(anyhow!("discovery profile must set rounds >= 1"));
     }
+
+    enforce_policy_floors(policy, Some(profile.recover_settle_ms))?;
+    enforce_log_path_policy(&log_path)?;
+    ensure_parent_dir(&log_path)?;
+    let _port_lock = acquire_port_lock(&port)?;
+
+    let mut console = SerialConsole::open(&port, baud, Some(&log_path))?;
+    preflight(&mut console)?;
 
     let workflow = load_workflow(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-discovery-debug.sw.yaml"),
@@ -110,6 +117,7 @@ pub fn run_wifi_discovery_debug(
         total_scan_nonzero_events: 0,
         total_no_ap_found_events: 0,
         mem_diag: MemDiagSummary::default(),
+        panic_first: None,
     };
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())

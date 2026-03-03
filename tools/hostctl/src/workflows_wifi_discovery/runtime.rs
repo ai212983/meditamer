@@ -9,8 +9,8 @@ use serde_json::Value;
 use crate::{
     scenarios::WorkflowRuntime,
     workflows_wifi_common::{
-        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, fmt_min,
-        netcfg_set_payload, wait_net_ack,
+        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32,
+        detect_panic_signal, extract_context_window, fmt_min, netcfg_set_payload, wait_net_ack,
     },
 };
 
@@ -41,6 +41,7 @@ impl WifiDiscoveryRuntime<'_> {
         ctx_set_u32(context, "rounds", self.profile.rounds)?;
         ctx_set_bool(context, "run_passed", false)?;
         ctx_set_string(context, "run_error", "")?;
+        self.panic_first = None;
         if self.profile.disable_listener_during_probe_rounds {
             wait_net_ack(&mut self.console, "NET LISTENER OFF")?;
         }
@@ -76,11 +77,26 @@ impl WifiDiscoveryRuntime<'_> {
         let mut state = self.new_probe_round_state();
         while Instant::now() < state.deadline {
             state = self.collect_probe_round_lines(state, &ssid_marker, require_listener)?;
+            if state.panic_signal.is_some() {
+                break;
+            }
             if state.ready {
                 break;
             }
             self.send_status_poll_if_ready(&mut state);
             thread::sleep(Duration::from_millis(self.profile.poll_interval_ms as u64));
+        }
+
+        if let Some(signal) = state.panic_signal.clone() {
+            if self.panic_first.is_none() {
+                self.panic_first = Some(signal.clone());
+            }
+            if self.profile.disable_listener_during_probe_rounds {
+                let _ = wait_net_ack(&mut self.console, "NET LISTENER ON");
+            }
+            let detail = self.panic_signal_detail(&signal);
+            ctx_set_string(context, "run_error", &detail)?;
+            return Err(anyhow!("{detail}"));
         }
 
         let zero_discovery = state.is_zero_discovery();
@@ -132,10 +148,17 @@ impl WifiDiscoveryRuntime<'_> {
     ) -> Result<ProbeRoundState> {
         self.console.poll_once()?;
         for line in self.console.read_recent_lines(state.read_mark) {
+            let line_index = state.read_mark;
             state.read_mark = state.read_mark.saturating_add(1);
             self.mem_diag.record_line(&line);
             state.round_mem_diag.record_line(&line);
+            if state.panic_signal.is_none() {
+                state.panic_signal = detect_panic_signal(&line, line_index);
+            }
             state.ingest_line(&line, ssid_marker, require_listener);
+            if state.panic_signal.is_some() {
+                break;
+            }
         }
         Ok(state)
     }
@@ -201,6 +224,31 @@ impl WifiDiscoveryRuntime<'_> {
         ));
     }
 
+    fn panic_signal_detail(&self, signal: &crate::workflows_wifi_common::PanicSignal) -> String {
+        let excerpt_start = signal.marker_index.saturating_sub(3);
+        let excerpt_source = self.console.read_recent_lines(excerpt_start);
+        let excerpt = format_context_excerpt(extract_context_window(
+            &excerpt_source,
+            excerpt_start,
+            signal.marker_index,
+            3,
+        ));
+        match excerpt {
+            Some(window) => format!(
+                "panic_detected class={} line_index={} line={} context={window}",
+                signal.class.as_str(),
+                signal.marker_index,
+                signal.marker_line
+            ),
+            None => format!(
+                "panic_detected class={} line_index={} line={}",
+                signal.class.as_str(),
+                signal.marker_index,
+                signal.marker_line
+            ),
+        }
+    }
+
     fn handle_advance_round(&mut self, context: &mut Value) -> Result<()> {
         let round = ctx_get_u32(context, "round")?;
         ctx_set_u32(context, "round", round.saturating_add(1))
@@ -263,6 +311,14 @@ impl WifiDiscoveryRuntime<'_> {
             fmt_min(&self.mem_diag.min_free),
             fmt_min(&self.mem_diag.min_internal_low_water),
         ));
+        if let Some(signal) = &self.panic_first {
+            self.logger.info(format!(
+                "summary panic class={} line_index={} line={}",
+                signal.class.as_str(),
+                signal.marker_index,
+                signal.marker_line
+            ));
+        }
         for sample in &self.samples {
             self.logger.info(format!(
                 "round {} detail ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={}",
@@ -295,5 +351,161 @@ impl WifiDiscoveryRuntime<'_> {
         let detail = ctx_get_string(context, "run_error")
             .unwrap_or_else(|_| "wifi discovery debug failed".to_string());
         Err(anyhow!("{detail}"))
+    }
+}
+
+fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
+    if window.is_empty() {
+        return None;
+    }
+    Some(
+        window
+            .into_iter()
+            .map(|(idx, line)| format!("{idx}:{line}"))
+            .collect::<Vec<_>>()
+            .join(" | "),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{Read, Write},
+        path::PathBuf,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use anyhow::{anyhow, Result};
+    use serde_json::json;
+    use serialport::{SerialPort, TTYPort};
+    use tempfile::tempdir;
+
+    use super::super::{profile::DiscoveryProfile, WifiDiscoveryRuntime};
+    use crate::{
+        logging::Logger,
+        serial_console::SerialConsole,
+        workflows_wifi_common::{MemDiagSummary, NetPolicy},
+    };
+
+    fn open_pty_pair() -> Result<(TTYPort, TTYPort)> {
+        TTYPort::pair().map_err(|err| anyhow!("TTYPort::pair failed: {err}"))
+    }
+
+    fn spawn_discovery_panic_responder(mut master: TTYPort) -> thread::JoinHandle<()> {
+        let _ = master.set_timeout(Duration::from_millis(80));
+        thread::spawn(move || {
+            let mut rx = Vec::<u8>::new();
+            let mut chunk = [0u8; 512];
+            let mut emitted_panic = false;
+            let mut last_activity = Instant::now();
+
+            loop {
+                let n = match master.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        last_activity = Instant::now();
+                        n
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+                        if last_activity.elapsed() > Duration::from_secs(2) {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if last_activity.elapsed() > Duration::from_secs(2) {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(_) => break,
+                };
+                rx.extend_from_slice(&chunk[..n]);
+
+                while let Some(pos) = rx.iter().position(|byte| *byte == b'\n') {
+                    let mut line = rx.drain(..=pos).collect::<Vec<u8>>();
+                    while matches!(line.last(), Some(b'\r' | b'\n')) {
+                        line.pop();
+                    }
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let command = String::from_utf8_lossy(&line).trim().to_string();
+                    if command == "NET START" {
+                        let _ = master.write_all(b"NET OK op=start\r\n");
+                        let _ = master.flush();
+                    } else if command == "NET STATUS" {
+                        let _ = master.write_all(
+                            b"NET_STATUS {\"state\":\"Idle\",\"link\":false,\"ipv4\":\"0.0.0.0\",\"listener\":false,\"listener_enabled\":false}\r\n",
+                        );
+                        if !emitted_panic {
+                            let _ = master.write_all(
+                                b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n",
+                            );
+                            emitted_panic = true;
+                        }
+                        let _ = master.flush();
+                    }
+                }
+            }
+        })
+    }
+
+    fn test_console(slave: TTYPort) -> Result<SerialConsole> {
+        let temp = tempdir()?;
+        let log_path = PathBuf::from(temp.path()).join("discovery_runtime_panic_test.log");
+        SerialConsole::from_port_for_tests(Box::new(slave), Some(&log_path))
+    }
+
+    #[test]
+    fn probe_round_fails_fast_when_panic_marker_is_seen() -> Result<()> {
+        let (master, slave) = open_pty_pair()?;
+        let responder = spawn_discovery_panic_responder(master);
+        let mut logger = Logger::new(None)?;
+        let mut runtime = WifiDiscoveryRuntime {
+            logger: &mut logger,
+            console: test_console(slave)?,
+            ssid: "test-ap".to_string(),
+            password: "test-pass".to_string(),
+            policy: NetPolicy::default(),
+            profile: DiscoveryProfile {
+                rounds: 1,
+                round_timeout_ms: 2_000,
+                poll_interval_ms: 30,
+                status_poll_ms: 120,
+                recover_before_round: false,
+                recover_after_round: false,
+                recover_settle_ms: 6_000,
+                disable_listener_during_probe_rounds: false,
+                max_zero_discovery_rounds: 0,
+                min_ready_rounds: 1,
+                min_ssid_seen_rounds: 1,
+            },
+            samples: Vec::new(),
+            ready_rounds: 0,
+            zero_discovery_rounds: 0,
+            ssid_seen_rounds: 0,
+            total_scan_zero_events: 0,
+            total_scan_nonzero_events: 0,
+            total_no_ap_found_events: 0,
+            mem_diag: MemDiagSummary::default(),
+            panic_first: None,
+        };
+
+        let mut context = json!({"round": 1});
+        let err = runtime
+            .handle_probe_round(&mut context)
+            .expect_err("panic marker should fail round immediately");
+        assert!(err.to_string().contains("panic_detected"));
+        assert!(err.to_string().contains("runtime_panic_guru"));
+        assert!(runtime.panic_first.is_some());
+
+        drop(runtime);
+        responder
+            .join()
+            .map_err(|_| anyhow!("discovery panic responder thread panicked"))?;
+        Ok(())
     }
 }

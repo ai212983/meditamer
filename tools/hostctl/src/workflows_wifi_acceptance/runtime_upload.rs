@@ -10,7 +10,8 @@ use serde_json::Value;
 use crate::{
     env_utils, workflows_upload,
     workflows_wifi_common::{
-        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, wait_net_ack,
+        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, is_ready,
+        query_net_status, query_net_status_line, PanicSignal,
     },
 };
 
@@ -30,14 +31,18 @@ impl WifiAcceptanceRuntime<'_> {
         let started = Instant::now();
         let upload_timeout_sec =
             env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
+        let retry_policy = resolve_net_upload_retry_policy()?;
         let result = workflows_upload::upload_file_direct_fast(
             self.logger,
-            &ip,
-            8080,
-            upload_timeout_sec,
-            &self.payload_path,
-            &cycle_root,
-            self.token.as_deref(),
+            workflows_upload::DirectUploadOptions {
+                host: &ip,
+                port: 8080,
+                timeout_sec: upload_timeout_sec,
+                src: &self.payload_path,
+                dst_root: &cycle_root,
+                token: self.token.as_deref(),
+                retry_policy,
+            },
         );
         let upload_ms = started.elapsed().as_millis() as u32;
         ctx_set_u32(context, "upload_ms", upload_ms)?;
@@ -47,16 +52,49 @@ impl WifiAcceptanceRuntime<'_> {
                 ctx_set_string(context, "upload_error", "")?;
             }
             Err(err) => {
+                let mut detail = err.to_string();
+                if detail.contains("health check failed: GET") {
+                    let diag_message = append_health_fail_net_status(
+                        &mut detail,
+                        query_net_status_line(&mut self.console).map_err(|err| err.to_string()),
+                    );
+                    self.logger.info(diag_message);
+                }
+
+                if let Err(panic_err) = self.capture_mem_diag_lines() {
+                    detail.push_str(&format!("; {panic_err}"));
+                    ctx_set_bool(context, "upload_done", false)?;
+                    ctx_set_string(context, "upload_error", &detail)?;
+                    return Err(anyhow!("{detail}"));
+                }
+
+                if append_panic_signal_context(&mut detail, self.panic_signal()) {
+                    ctx_set_bool(context, "upload_done", false)?;
+                    ctx_set_string(context, "upload_error", &detail)?;
+                    return Err(anyhow!("{detail}"));
+                }
+
                 ctx_set_bool(context, "upload_done", false)?;
-                ctx_set_string(context, "upload_error", &err.to_string())?;
+                ctx_set_string(context, "upload_error", &detail)?;
             }
         }
         Ok(())
     }
 
     pub(super) fn handle_net_verify_once(&mut self, context: &mut Value) -> Result<()> {
+        let ip = ctx_get_string(context, "ip")?;
         let remote_file = ctx_get_string(context, "remote_file")?;
-        if !verify_remote_file(&mut self.console, &remote_file)? {
+        let verify_timeout_sec =
+            env_utils::parse_env_f64("HOSTCTL_NET_VERIFY_TIMEOUT_SEC", 30.0)?.max(0.5);
+        let retry_policy = resolve_net_upload_retry_policy()?;
+        if !workflows_upload::stat_remote_file(
+            &ip,
+            8080,
+            verify_timeout_sec,
+            &remote_file,
+            self.token.as_deref(),
+            retry_policy,
+        )? {
             return Err(anyhow!("remote verify failed for {remote_file}"));
         }
         Ok(())
@@ -76,10 +114,13 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     pub(super) fn handle_net_recover_once(&mut self) -> Result<()> {
-        if let Err(err) = wait_net_ack(&mut self.console, "NET RECOVER") {
-            self.logger.info(format!(
-                "net_recover_once: recover ack not obtained ({err}); continuing"
-            ));
+        self.send_net_command_best_effort("NET RECOVER");
+        self.wait_recover_ready();
+        if !self.is_recover_ready() {
+            self.send_net_command_best_effort("NET LISTENER ON");
+            thread::sleep(Duration::from_millis(120));
+            self.send_net_command_best_effort("NET START");
+            self.wait_recover_ready();
         }
         Ok(())
     }
@@ -139,34 +180,113 @@ impl WifiAcceptanceRuntime<'_> {
     }
 }
 
-fn verify_remote_file(
-    console: &mut crate::serial_console::SerialConsole,
-    remote_path: &str,
-) -> Result<bool> {
-    let re = Regex::new(r"^SDFATSTAT (OK|BUSY|ERR)")?;
-    for _ in 0..8 {
-        let mark = console.mark();
-        console.send_line(&format!("SDFATSTAT {remote_path}"))?;
-        let line = console.wait_for_regex_since(mark, &re, Duration::from_secs(4))?;
-        let Some(line) = line else {
-            continue;
-        };
-        if line.contains("SDFATSTAT ERR") {
-            return Ok(false);
-        }
-        if line.contains("SDFATSTAT BUSY") {
-            thread::sleep(Duration::from_millis(400));
-            continue;
-        }
-        let req_id = console
-            .wait_for_sdreq_id_since(mark, Some("fat_stat"), Duration::from_secs(8))?
-            .ok_or_else(|| anyhow!("missing SDREQ id for fat_stat"))?;
-        let done = console.sdwait_for_id(req_id, 30_000)?.unwrap_or_default();
-        if done.contains("SDWAIT DONE") && done.contains("status=ok") && done.contains("code=ok") {
-            return Ok(true);
+impl WifiAcceptanceRuntime<'_> {
+    fn send_net_command_best_effort(&mut self, command: &str) {
+        if let Err(err) = self.console.send_line(command) {
+            self.logger.info(format!(
+                "net_recover_once: failed to send {command} ({err}); continuing"
+            ));
         }
     }
-    Ok(false)
+
+    fn wait_recover_ready(&mut self) {
+        let ready_timeout_sec =
+            env_utils::parse_env_f64("HOSTCTL_NET_RECOVER_READY_TIMEOUT_SEC", 12.0)
+                .unwrap_or(12.0)
+                .max(0.5);
+        let poll_sec = env_utils::parse_env_f64("HOSTCTL_NET_RECOVER_READY_POLL_SEC", 0.4)
+            .unwrap_or(0.4)
+            .max(0.05);
+        let deadline = Instant::now() + Duration::from_secs_f64(ready_timeout_sec);
+
+        loop {
+            if let Ok(Some(status)) = query_net_status(&mut self.console) {
+                if is_ready(&status, true) {
+                    return;
+                }
+            }
+            if Instant::now() >= deadline {
+                self.logger.info(format!(
+                    "net_recover_once: ready wait timed out after {:.1}s; retrying upload anyway",
+                    ready_timeout_sec
+                ));
+                return;
+            }
+            thread::sleep(Duration::from_secs_f64(poll_sec));
+        }
+    }
+
+    fn is_recover_ready(&mut self) -> bool {
+        match query_net_status(&mut self.console) {
+            Ok(Some(status)) => is_ready(&status, true),
+            Ok(None) => false,
+            Err(err) => {
+                self.logger.info(format!(
+                    "net_recover_once: status query failed ({err}); treating as not ready"
+                ));
+                false
+            }
+        }
+    }
+}
+
+fn resolve_net_upload_retry_policy() -> Result<workflows_upload::UploadRetryPolicy> {
+    let default_sd_busy_retry_s =
+        env_utils::parse_env_f64("HOSTCTL_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", 30.0)?.max(1.0);
+    let default_net_recovery_timeout_s =
+        env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_TIMEOUT_SEC", 8.0)?.max(0.1);
+    let default_net_recovery_poll_s =
+        env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_POLL_SEC", 0.8)?.max(0.05);
+    Ok(workflows_upload::UploadRetryPolicy {
+        sd_busy_total_retry_sec: env_utils::parse_env_f64(
+            "HOSTCTL_NET_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC",
+            default_sd_busy_retry_s,
+        )?
+        .max(1.0),
+        net_recovery_timeout_sec: env_utils::parse_env_f64(
+            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_TIMEOUT_SEC",
+            default_net_recovery_timeout_s,
+        )?
+        .max(0.1),
+        net_recovery_poll_sec: env_utils::parse_env_f64(
+            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_POLL_SEC",
+            default_net_recovery_poll_s,
+        )?
+        .max(0.05),
+    })
+}
+
+fn append_health_fail_net_status(
+    detail: &mut String,
+    status_query: std::result::Result<Option<String>, String>,
+) -> String {
+    match status_query {
+        Ok(Some(line)) => {
+            detail.push_str(&format!("; net_status={line}"));
+            format!("health_fail_diag: {line}")
+        }
+        Ok(None) => {
+            detail.push_str("; net_status=<unavailable>");
+            "health_fail_diag: NET_STATUS unavailable".to_string()
+        }
+        Err(err) => {
+            detail.push_str(&format!("; net_status_query_error={err}"));
+            format!("health_fail_diag: NET_STATUS query failed ({err})")
+        }
+    }
+}
+
+fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>) -> bool {
+    let Some(signal) = signal else {
+        return false;
+    };
+    detail.push_str(&format!(
+        "; panic_class={} panic_line_index={} panic_line={}",
+        signal.class.as_str(),
+        signal.marker_index,
+        signal.marker_line
+    ));
+    true
 }
 
 fn avg(values: &[f64]) -> f64 {
@@ -174,5 +294,41 @@ fn avg(values: &[f64]) -> f64 {
         0.0
     } else {
         values.iter().sum::<f64>() / values.len() as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_health_fail_net_status, append_panic_signal_context};
+    use crate::workflows_wifi_common::detect_panic_signal;
+
+    #[test]
+    fn health_failure_detail_includes_net_status_snapshot() {
+        let mut detail = "health check failed: GET http://10.0.0.8:8080/health".to_string();
+        let diag = append_health_fail_net_status(
+            &mut detail,
+            Ok(Some(
+                "NET_STATUS {\"state\":\"Ready\",\"link\":true,\"ipv4\":\"10.0.0.8\"}".to_string(),
+            )),
+        );
+        assert!(diag.contains("health_fail_diag: NET_STATUS"));
+        assert!(detail.contains("net_status=NET_STATUS"));
+    }
+
+    #[test]
+    fn health_failure_detail_records_query_error_and_panic_context() {
+        let mut detail = "health check failed: GET http://10.0.0.8:8080/health".to_string();
+        let diag = append_health_fail_net_status(
+            &mut detail,
+            Err("serial read timed out".to_string()),
+        );
+        assert!(diag.contains("NET_STATUS query failed"));
+        assert!(detail.contains("net_status_query_error=serial read timed out"));
+
+        let signal = detect_panic_signal("Guru Meditation Error: Core 0 panic'ed", 42)
+            .expect("panic signal must be detected");
+        assert!(append_panic_signal_context(&mut detail, Some(&signal)));
+        assert!(detail.contains("panic_class=runtime_panic_guru"));
+        assert!(detail.contains("panic_line_index=42"));
     }
 }

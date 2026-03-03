@@ -46,7 +46,7 @@ pub(super) fn run_boot_discovery_gate(
     ));
 
     let gate = run_boot_discovery_loop(logger, console, ssid, password, policy, cfg);
-    let restore_listener = wait_net_ack(console, "NET LISTENER ON");
+    let restore_listener = restore_listener_gate(logger, console);
     match (gate, restore_listener) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(gate_err), Ok(())) => Err(gate_err),
@@ -57,6 +57,35 @@ pub(super) fn run_boot_discovery_gate(
             "boot discovery gate failed ({gate_err}); listener restore also failed ({restore_err})"
         )),
     }
+}
+
+fn restore_listener_gate(logger: &mut Logger, console: &mut SerialConsole) -> Result<()> {
+    wait_net_ack(console, "NET LISTENER ON")?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if let Some(status) = query_net_status(console)? {
+            if status.listener_enabled.unwrap_or(true) {
+                return Ok(());
+            }
+        }
+        thread::sleep(Duration::from_millis(180));
+    }
+
+    logger.info("boot discovery gate: listener_enabled stayed false after NET LISTENER ON; retrying");
+    wait_net_ack(console, "NET LISTENER ON")?;
+    let confirm_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < confirm_deadline {
+        if let Some(status) = query_net_status(console)? {
+            if status.listener_enabled.unwrap_or(true) {
+                return Ok(());
+            }
+        }
+        thread::sleep(Duration::from_millis(180));
+    }
+
+    Err(anyhow!(
+        "boot discovery gate: NET LISTENER ON acked but listener_enabled remained false"
+    ))
 }
 
 fn query_boot_status_with_retry(console: &mut SerialConsole) -> Result<NetStatus> {
@@ -193,5 +222,56 @@ impl BootDiscoveryLoopState {
             let _ = console.send_line("NET STATUS");
             self.next_status_poll = Instant::now() + Duration::from_millis(1_000);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{BootDiscoveryGateConfig, BootDiscoveryLoopState};
+
+    fn cfg(allow_ready_only_fallback: bool) -> BootDiscoveryGateConfig {
+        BootDiscoveryGateConfig {
+            max_boot_uptime_ms: 30_000,
+            timeout_ms: 5_000,
+            settle_ms: 6_000,
+            allow_ready_only_fallback,
+        }
+    }
+
+    #[test]
+    fn boot_gate_passes_with_ready_scan_and_ssid_evidence() {
+        let mut state = BootDiscoveryLoopState::new(cfg(false));
+        state.observe_boot_line(
+            "upload_http: event scan_done status=0 count=2 scan_id=1",
+            "test-ap",
+        );
+        state.observe_boot_line("upload_http: scan ap ssid=test-ap rssi=-50", "test-ap");
+        state.observe_boot_line(
+            "NET_STATUS {\"state\":\"Ready\",\"link\":true,\"ipv4\":\"192.168.1.8\",\"listener\":false,\"listener_enabled\":false}",
+            "test-ap",
+        );
+        assert!(state.reached_success());
+    }
+
+    #[test]
+    fn boot_gate_fails_without_scan_and_ssid_evidence() {
+        let mut state = BootDiscoveryLoopState::new(cfg(false));
+        state.observe_boot_line(
+            "NET_STATUS {\"state\":\"Ready\",\"link\":true,\"ipv4\":\"192.168.1.8\",\"listener\":false,\"listener_enabled\":false}",
+            "test-ap",
+        );
+        assert!(!state.reached_success());
+        assert!(!state.should_fallback(&cfg(false)));
+    }
+
+    #[test]
+    fn ready_only_fallback_requires_explicit_enable() {
+        let mut state = BootDiscoveryLoopState::new(cfg(true));
+        state.ready = true;
+        state.ready_only_fallback_after = Duration::from_millis(0);
+        assert!(state.should_fallback(&cfg(true)));
+        assert!(!state.should_fallback(&cfg(false)));
     }
 }

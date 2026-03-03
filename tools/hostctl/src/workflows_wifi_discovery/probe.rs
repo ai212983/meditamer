@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::workflows_wifi_common::{
-    is_ready, parse_net_status_line, parse_scan_done_count, MemDiagSummary,
+    is_ready, parse_net_status_line, parse_scan_done_count, MemDiagSummary, PanicSignal,
 };
 
 #[derive(Clone, Debug)]
@@ -27,6 +27,7 @@ pub(super) struct ProbeRoundState {
     pub next_status_poll: Instant,
     pub deadline: Instant,
     pub round_mem_diag: MemDiagSummary,
+    pub panic_signal: Option<PanicSignal>,
 }
 
 impl Default for ProbeRoundState {
@@ -42,6 +43,7 @@ impl Default for ProbeRoundState {
             next_status_poll: Instant::now(),
             deadline: Instant::now(),
             round_mem_diag: MemDiagSummary::default(),
+            panic_signal: None,
         }
     }
 }
