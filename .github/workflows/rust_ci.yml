@@ -54,6 +54,12 @@ jobs:
         run: scripts/tests/host/test_touch_core_host.sh
       - name: Run host touch replay suite
         run: scripts/tests/host/test_touch_replay_host.sh
+      - name: Run hostctl host suite
+        run: scripts/tests/host/test_hostctl_host.sh
+      - name: Stack-risk guard
+        run: scripts/ci/check_stack_risk.sh
+      - name: Stack-risk fixture tests
+        run: scripts/tests/host/test_check_stack_risk.sh
       - name: Host tooling clippy
         run: scripts/ci/lint_host_tools.sh
       - name: Rust analyzer baseline

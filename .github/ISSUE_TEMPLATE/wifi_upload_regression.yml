@@ -1,0 +1,110 @@
+name: Wi-Fi/Upload Regression
+description: Report a Wi-Fi/upload regression with panic-first artifact bundle.
+title: "[wifi/upload-regression] "
+labels:
+  - bug
+  - wifi
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Attach the regression gate `report.json` and required stage logs.
+        If panic was detected, include panic excerpt and troubleshoot output.
+  - type: input
+    id: first_seen
+    attributes:
+      label: First Seen Timestamp (UTC)
+      placeholder: "2026-03-03T12:34:56Z"
+    validations:
+      required: true
+  - type: input
+    id: commit_sha
+    attributes:
+      label: Commit SHA
+      placeholder: "abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: dirty_state
+    attributes:
+      label: Workspace State
+      options:
+        - clean
+        - dirty
+    validations:
+      required: true
+  - type: input
+    id: failing_stage
+    attributes:
+      label: Failing Stage
+      placeholder: "discovery_debug | acceptance_1_cycle | acceptance_3_cycle | acceptance_soak"
+    validations:
+      required: true
+  - type: input
+    id: failure_class
+    attributes:
+      label: Failure Class
+      placeholder: "runtime_panic_guru | discovery_zero | health_unreachable | ..."
+    validations:
+      required: true
+  - type: input
+    id: failure_code
+    attributes:
+      label: Failure Code (if any)
+      placeholder: "201"
+  - type: input
+    id: reproducibility_count
+    attributes:
+      label: Reproducibility Count
+      placeholder: "2"
+    validations:
+      required: true
+  - type: input
+    id: report_json_path
+    attributes:
+      label: Regression Gate report.json Path
+      placeholder: "logs/wifi_regression_gate_YYYYMMDD_HHMMSS/report.json"
+    validations:
+      required: true
+  - type: input
+    id: panic_class
+    attributes:
+      label: Panic Class (if panic)
+      placeholder: "runtime_panic_guru | runtime_panic_stack | runtime_unexpected_reboot"
+  - type: input
+    id: panic_marker
+    attributes:
+      label: Panic First Marker Line/Index (if panic)
+      placeholder: "line=123 marker=Guru Meditation Error..."
+  - type: input
+    id: panic_excerpt
+    attributes:
+      label: Panic Excerpt Path (if panic)
+      placeholder: "logs/wifi_regression_gate_.../panic_excerpt.log"
+  - type: input
+    id: reset_code_before_after
+    attributes:
+      label: METRICS BOOT reset_code Before/After (if available)
+      placeholder: "before=1 after=3"
+  - type: input
+    id: troubleshoot_result
+    attributes:
+      label: Troubleshoot Run Path/Result
+      placeholder: "logs/.../troubleshoot.log (failed: runtime)"
+  - type: textarea
+    id: commands_env
+    attributes:
+      label: Command and Env Overrides Used
+      description: Redact credentials/tokens.
+      placeholder: |
+        HOSTCTL_NET_CYCLES=3 ...
+        scripts/tests/hw/test_wifi_acceptance.sh
+    validations:
+      required: true
+  - type: textarea
+    id: next_target
+    attributes:
+      label: Next Single Fix Target
+      placeholder: "One targeted fix to apply before rerun."
+    validations:
+      required: true
