@@ -50,6 +50,7 @@ pub fn run() -> ! {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
+    telemetry::log_stack_headroom("boot_after_rtos_start");
 
     let uart_cfg = UartConfig::default().with_baudrate(UART_BAUD);
     let uart = Uart::new(peripherals.UART0, uart_cfg)

@@ -6,6 +6,7 @@ use super::helpers::{ensure_upload_ready, map_fat_error_to_upload_code, upload_r
 use super::metrics::write_metrics_delta;
 use super::path_ops::{build_temp_upload_path, parse_upload_path};
 use super::types::SdUploadSession;
+use crate::firmware::telemetry;
 use crate::firmware::storage::transfer_buffers;
 use embassy_time::Instant;
 use sdcard::fat;
@@ -20,6 +21,7 @@ pub(super) async fn handle_begin(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> SdUploadResult {
+    telemetry::log_stack_headroom("sd_upload_begin_entry");
     if session.is_some() {
         return upload_result(false, SdUploadResultCode::Busy, 0);
     }
@@ -50,6 +52,7 @@ pub(super) async fn handle_begin(
         );
         return upload_result(false, code, 0);
     }
+    telemetry::log_stack_headroom("sd_upload_begin_ready");
 
     let (temp_path, temp_len) = match build_temp_upload_path(final_path_bytes) {
         Ok(path) => path,
@@ -60,18 +63,20 @@ pub(super) async fn handle_begin(
         Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
     };
 
-    let append_session = match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await
-    {
-        Ok(session) => session,
-        Err(err) => {
-            esp_println::println!(
-                "sd_upload: begin append_session_create_or_open failed temp_path={} err={:?}",
-                temp_path_str,
-                err
-            );
-            return upload_result(false, map_fat_error_to_upload_code(&err), 0);
-        }
-    };
+    telemetry::log_stack_headroom("sd_upload_begin_fat_before");
+    let append_session =
+        match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await {
+            Ok(session) => session,
+            Err(err) => {
+                esp_println::println!(
+                    "sd_upload: begin append_session_create_or_open failed temp_path={} err={:?}",
+                    temp_path_str,
+                    err
+                );
+                return upload_result(false, map_fat_error_to_upload_code(&err), 0);
+            }
+        };
+    telemetry::log_stack_headroom("sd_upload_begin_fat_after");
     let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
     final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
     *session = Some(SdUploadSession {

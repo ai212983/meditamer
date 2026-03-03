@@ -98,6 +98,7 @@ async fn handle_upload_begin(
     socket: &mut TcpSocket<'_>,
     request: &RequestContext<'_>,
 ) -> Result<(), &'static str> {
+    telemetry::log_stack_headroom("http_upload_begin_route_entry");
     drain_body(socket, request).await?;
     let (path, path_len) = parse_path_or_400(socket, request.target, "/upload_begin").await?;
     let expected_size = parse_u32_or_400(socket, request.target, "/upload_begin", "size").await?;
@@ -174,6 +175,7 @@ async fn handle_upload(
     header_buf: &[u8],
     request: &RequestContext<'_>,
 ) -> Result<(), &'static str> {
+    telemetry::log_stack_headroom("http_upload_route_entry");
     let content_length = required_content_length(socket, request.content_length).await?;
     let (path, path_len) = parse_path_or_400(socket, request.target, "/upload").await?;
     if content_length > u32::MAX as usize {
@@ -186,6 +188,7 @@ async fn handle_upload(
     let expected_size = content_length as u32;
 
     let begin_started_at = Instant::now();
+    telemetry::log_stack_headroom("http_upload_sd_begin_before");
     sd_upload_or_http_error(
         socket,
         SdUploadCommand::Begin {
@@ -195,6 +198,7 @@ async fn handle_upload(
         },
     )
     .await?;
+    telemetry::log_stack_headroom("http_upload_sd_begin_after");
     sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(begin_started_at));
 
     let prefetched = prefetched_body_slice(header_buf, request, content_length);
