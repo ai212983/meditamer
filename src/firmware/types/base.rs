@@ -12,7 +12,7 @@ pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
-const SD_UPLOAD_CHUNK_MAX_DEFAULT: usize = 49_152;
+const SD_UPLOAD_CHUNK_MAX_DEFAULT: usize = 65_536;
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 const SD_UPLOAD_CHUNK_MAX_MIN: usize = 4_096;
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]

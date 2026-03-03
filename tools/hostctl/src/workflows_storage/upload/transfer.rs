@@ -106,7 +106,7 @@ pub(super) fn upload_file(
 
     // Keep fallback /upload_chunk requests coarse-grained to reduce per-request
     // HTTP and SD roundtrip overhead on constrained Wi-Fi links.
-    let chunk_size = env_utils::parse_env_u64("HOSTCTL_UPLOAD_CHUNK_SIZE", 49152)? as usize;
+    let chunk_size = env_utils::parse_env_u64("HOSTCTL_UPLOAD_CHUNK_SIZE", 65536)? as usize;
     for chunk in data.chunks(chunk_size.max(1)) {
         let chunk_url = format!(
             "http://{}:{}/upload_chunk",
