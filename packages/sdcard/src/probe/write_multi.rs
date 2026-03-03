@@ -1,7 +1,15 @@
+use embassy_time::Instant;
+
 const SD_TOKEN_START_WRITE_MULTI: u8 = 0xFC;
 const SD_TOKEN_STOP_WRITE_MULTI: u8 = 0xFD;
 const SD_MULTI_WRITE_MAX_SECTORS: usize = 64;
 const SD_WRITE_READY_POLL_LIMIT: usize = 200_000;
+
+struct WaitReadyDiag {
+    released: bool,
+    elapsed_ms: u32,
+    polls: u32,
+}
 
 impl<'d> SdCardProbe<'d> {
     pub async fn write_sectors_contiguous(
@@ -26,6 +34,7 @@ impl<'d> SdCardProbe<'d> {
 
             if burst_sectors >= 2 {
                 self.record_cmd25_attempt(burst_sectors);
+                let burst_started_at = Instant::now();
                 // Keep CMD25 strictly opportunistic. Any anomaly drops to proven
                 // CMD24-per-sector writes to preserve correctness and avoid
                 // reintroducing storage-side instability while tuning throughput.
@@ -33,7 +42,8 @@ impl<'d> SdCardProbe<'d> {
                     self.record_cmd25_fallback();
                     self.write_sectors_cmd24_fallback(current_lba, burst).await?;
                 } else {
-                    self.record_cmd25_success(burst_sectors);
+                    let burst_elapsed_ms = elapsed_ms_u32(burst_started_at);
+                    self.record_cmd25_success(burst_sectors, burst_elapsed_ms);
                     let last_lba = current_lba
                         .saturating_add((burst_sectors as u32).saturating_sub(1));
                     let last_sector = &burst[burst.len() - SD_SECTOR_SIZE..];
@@ -101,7 +111,9 @@ impl<'d> SdCardProbe<'d> {
                 self.end_transaction().await;
                 return Err(SdProbeError::WriteDataRejected(response));
             }
-            if !self.wait_write_ready().await? {
+            let ready = self.wait_write_ready_timed().await?;
+            self.record_cmd25_ready_wait(ready.elapsed_ms, ready.polls);
+            if !ready.released {
                 self.end_transaction().await;
                 return Err(SdProbeError::WriteBusyTimeout);
             }
@@ -110,7 +122,9 @@ impl<'d> SdCardProbe<'d> {
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(SD_TOKEN_STOP_WRITE_MULTI).await?;
         let _ = self.transfer_byte(0xFF).await?;
-        let released = self.wait_write_ready().await?;
+        let stop_ready = self.wait_write_ready_timed().await?;
+        self.record_cmd25_ready_wait(stop_ready.elapsed_ms, stop_ready.polls);
+        let released = stop_ready.released;
         self.end_transaction().await;
         if !released {
             return Err(SdProbeError::WriteBusyTimeout);
@@ -125,11 +139,45 @@ impl<'d> SdCardProbe<'d> {
     }
 
     async fn wait_write_ready(&mut self) -> Result<bool, SdProbeError> {
-        for _ in 0..SD_WRITE_READY_POLL_LIMIT {
+        Ok(self.wait_write_ready_timed().await?.released)
+    }
+}
+
+impl WaitReadyDiag {
+    fn new(released: bool, elapsed_ms: u32, polls: u32) -> Self {
+        Self {
+            released,
+            elapsed_ms,
+            polls,
+        }
+    }
+}
+
+impl<'d> SdCardProbe<'d> {
+    async fn wait_write_ready_timed(&mut self) -> Result<WaitReadyDiag, SdProbeError> {
+        let started_at = Instant::now();
+        for polls in 1..=SD_WRITE_READY_POLL_LIMIT {
             if self.transfer_byte(0xFF).await? == 0xFF {
-                return Ok(true);
+                return Ok(WaitReadyDiag::new(
+                    true,
+                    elapsed_ms_u32(started_at),
+                    polls as u32,
+                ));
             }
         }
-        Ok(false)
+        Ok(WaitReadyDiag::new(
+            false,
+            elapsed_ms_u32(started_at),
+            SD_WRITE_READY_POLL_LIMIT as u32,
+        ))
+    }
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
     }
 }

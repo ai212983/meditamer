@@ -236,8 +236,23 @@ pub(super) async fn handle_commit(
         active.write_metrics_start,
         sd_probe.write_metrics_snapshot(),
     );
+    let cmd25_success_burst_ms_avg = if write_metrics_delta.cmd25_success_bursts == 0 {
+        0
+    } else {
+        write_metrics_delta.cmd25_success_burst_ms_total / write_metrics_delta.cmd25_success_bursts
+    };
+    let cmd25_ready_wait_ms_avg = if write_metrics_delta.cmd25_ready_wait_count == 0 {
+        0
+    } else {
+        write_metrics_delta.cmd25_ready_wait_ms_total / write_metrics_delta.cmd25_ready_wait_count
+    };
+    let cmd25_ready_wait_polls_avg = if write_metrics_delta.cmd25_ready_wait_count == 0 {
+        0
+    } else {
+        write_metrics_delta.cmd25_ready_wait_polls_total / write_metrics_delta.cmd25_ready_wait_count
+    };
     esp_println::println!(
-        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={}",
+        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={} cmd25_success_burst_ms_total={} cmd25_success_burst_ms_avg={} cmd25_ready_wait_count={} cmd25_ready_wait_ms_total={} cmd25_ready_wait_ms_avg={} cmd25_ready_wait_polls_total={} cmd25_ready_wait_polls_avg={} cmd25_ready_wait_over_1ms={} cmd25_ready_wait_over_4ms={} cmd25_ready_wait_over_8ms={}",
         final_path_str,
         active.bytes_written,
         write_metrics_delta.cmd24_sectors,
@@ -246,6 +261,16 @@ pub(super) async fn handle_commit(
         write_metrics_delta.cmd25_fallback_bursts,
         write_metrics_delta.cmd25_attempt_sectors,
         write_metrics_delta.cmd25_success_sectors,
+        write_metrics_delta.cmd25_success_burst_ms_total,
+        cmd25_success_burst_ms_avg,
+        write_metrics_delta.cmd25_ready_wait_count,
+        write_metrics_delta.cmd25_ready_wait_ms_total,
+        cmd25_ready_wait_ms_avg,
+        write_metrics_delta.cmd25_ready_wait_polls_total,
+        cmd25_ready_wait_polls_avg,
+        write_metrics_delta.cmd25_ready_wait_over_1ms,
+        write_metrics_delta.cmd25_ready_wait_over_4ms,
+        write_metrics_delta.cmd25_ready_wait_over_8ms,
     );
     let bytes_written = active.bytes_written;
     *session = None;

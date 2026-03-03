@@ -36,6 +36,13 @@ pub struct SdWriteMetrics {
     pub cmd25_success_bursts: u32,
     pub cmd25_success_sectors: u32,
     pub cmd25_fallback_bursts: u32,
+    pub cmd25_success_burst_ms_total: u32,
+    pub cmd25_ready_wait_count: u32,
+    pub cmd25_ready_wait_ms_total: u32,
+    pub cmd25_ready_wait_polls_total: u32,
+    pub cmd25_ready_wait_over_1ms: u32,
+    pub cmd25_ready_wait_over_4ms: u32,
+    pub cmd25_ready_wait_over_8ms: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,18 +177,53 @@ impl<'d> SdCardProbe<'d> {
             .saturating_add(sectors.min(u32::MAX as usize) as u32);
     }
 
-    pub(crate) fn record_cmd25_success(&mut self, sectors: usize) {
+    pub(crate) fn record_cmd25_success(&mut self, sectors: usize, burst_elapsed_ms: u32) {
         self.write_metrics.cmd25_success_bursts =
             self.write_metrics.cmd25_success_bursts.saturating_add(1);
         self.write_metrics.cmd25_success_sectors = self
             .write_metrics
             .cmd25_success_sectors
             .saturating_add(sectors.min(u32::MAX as usize) as u32);
+        self.write_metrics.cmd25_success_burst_ms_total = self
+            .write_metrics
+            .cmd25_success_burst_ms_total
+            .saturating_add(burst_elapsed_ms);
     }
 
     pub(crate) fn record_cmd25_fallback(&mut self) {
         self.write_metrics.cmd25_fallback_bursts =
             self.write_metrics.cmd25_fallback_bursts.saturating_add(1);
+    }
+
+    pub(crate) fn record_cmd25_ready_wait(&mut self, elapsed_ms: u32, polls: u32) {
+        self.write_metrics.cmd25_ready_wait_count =
+            self.write_metrics.cmd25_ready_wait_count.saturating_add(1);
+        self.write_metrics.cmd25_ready_wait_ms_total = self
+            .write_metrics
+            .cmd25_ready_wait_ms_total
+            .saturating_add(elapsed_ms);
+        self.write_metrics.cmd25_ready_wait_polls_total = self
+            .write_metrics
+            .cmd25_ready_wait_polls_total
+            .saturating_add(polls);
+        if elapsed_ms >= 1 {
+            self.write_metrics.cmd25_ready_wait_over_1ms = self
+                .write_metrics
+                .cmd25_ready_wait_over_1ms
+                .saturating_add(1);
+        }
+        if elapsed_ms >= 4 {
+            self.write_metrics.cmd25_ready_wait_over_4ms = self
+                .write_metrics
+                .cmd25_ready_wait_over_4ms
+                .saturating_add(1);
+        }
+        if elapsed_ms >= 8 {
+            self.write_metrics.cmd25_ready_wait_over_8ms = self
+                .write_metrics
+                .cmd25_ready_wait_over_8ms
+                .saturating_add(1);
+        }
     }
 
     pub(crate) fn data_spi_rate_mhz() -> u32 {
