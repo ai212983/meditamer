@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; CMD25 burst diagnostics completed; next focus is SD task/FAT append chunk-latency root cause)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; CMD25 + FAT append diagnostics completed; next focus is SD bridge/task-queue residual chunk-latency root cause)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -189,6 +189,8 @@ Rollback:
 19. [x] Fix host panic classification false-positive on upload metrics lines containing `_abort` (`2b2a3b3`).
 20. [x] Add CMD25 burst/ready-wait diagnostics to upload write metrics (`3bb91e0`).
 21. [x] Run 3x `36 MHz` bounded soak regression gates with burst diagnostics and correlate request timing with CMD25 wait metrics (`logs/wifi_regression_gate_sdspi36_burstdiag_r1_20260303_161323`, `logs/wifi_regression_gate_sdspi36_burstdiag_r2_20260303_161645`, `logs/wifi_regression_gate_sdspi36_burstdiag_r3b_20260303_162537`).
+22. [x] Add per-chunk FAT append timing diagnostics (`ensure_capacity_ms`, `write_data_ms`, chunk boundary totals) to upload write metrics (`64f6da6`).
+23. [x] Run 3x `36 MHz` bounded soak regression gates with append diagnostics and correlate high `chunk_max_ms` against append-path timing fields (`logs/wifi_regression_gate_sdspi36_appenddiag_r1b_20260303_163755`, `logs/wifi_regression_gate_sdspi36_appenddiag_r2_20260303_164229`, `logs/wifi_regression_gate_sdspi36_appenddiag_r3_20260303_164631`).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -428,10 +430,42 @@ Rollback:
   - conclusion: observed latency spread is not primarily explained by CMD25
     ready-wait stalls.
 
-## 11.11 Next Step (Specific)
+## 11.11 2026-03-03 FAT Append Diagnostics + 3x Soak Correlation
 
-- Shift root-cause focus from CMD25 wait path to SD task/FAT append path:
-  - add per-chunk timing instrumentation around `fat::append_session_write` and
-    related SD task boundaries to expose where `chunk_max_ms` spikes originate.
-  - rerun the same 3x `36 MHz` bounded soak gate and correlate high
-    `chunk_max_ms` samples with the new append-path timing fields.
+- Instrumentation commit:
+  - `64f6da6` (`feat(upload): add fat append chunk timing diagnostics`)
+  - new `sd_upload: write_metrics` fields for SD-task chunk boundaries:
+    - `chunk_total_ms_*`, `chunk_ensure_ready_ms_*`,
+      `chunk_payload_lock_ms_*`
+    - `chunk_append_ms_*`, `chunk_append_capacity_ms_*`,
+      `chunk_append_write_data_ms_*`
+    - `chunk_overhead_ms_*` and outlier counters (`*_over_200ms`, `*_over_400ms`)
+
+- 3x `36 MHz` bounded soak runs:
+  - `logs/wifi_regression_gate_sdspi36_appenddiag_r1b_20260303_163755`
+  - `logs/wifi_regression_gate_sdspi36_appenddiag_r2_20260303_164229`
+  - `logs/wifi_regression_gate_sdspi36_appenddiag_r3_20260303_164631`
+  - all three passed full gate (discovery, `1-cycle`, `3-cycle`, soak=10).
+
+- Correlation result:
+  - `req_ms > 3400`: `0/30`.
+  - `chunk_max_ms > 400`: `5/30` samples (`420`, `629`, `477`, `449`, `407`).
+  - append-path timings stayed tight:
+    - `chunk_append_ms_avg` per upload: `126.7..127.4 ms`
+    - `chunk_append_capacity_ms_avg`: `38.0..38.5 ms`
+    - `chunk_append_write_data_ms_avg`: `87.6..87.9 ms`
+    - `chunk_append_ms_max` observed ceiling: `145 ms`
+  - outlier example:
+    - `chunk_max_ms=629` while same-upload `chunk_append_ms_max=134`.
+  - conclusion: current upper-tail `chunk_max_ms` spread is not dominated by
+    `fat::append_session_write` execution time.
+
+## 11.12 Next Step (Specific)
+
+- Shift root-cause focus from FAT append internals to SD bridge/task-queue residual wait:
+  - instrument queue-to-handler latency and handler-to-response timing around
+    `SdUploadCommand::Chunk` dispatch/response boundaries.
+  - compute per-upload residual explicitly (`sd_task_ms/chunk - chunk_append_ms_avg`)
+    and correlate with high `chunk_max_ms` uploads (`>400 ms`).
+  - validate with another bounded 3x `36 MHz` soak set after queue-boundary
+    instrumentation.

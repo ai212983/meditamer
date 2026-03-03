@@ -646,11 +646,52 @@ Correlation results:
 - interpretation: current latency spread is not primarily explained by CMD25
   write-ready waiting.
 
+## 2026-03-03: FAT append diagnostics + 3x soak correlation
+
+Instrumentation commit:
+
+- `64f6da6`: `feat(upload): add fat append chunk timing diagnostics`
+- adds `sd_upload: write_metrics` chunk-boundary fields:
+  - `chunk_total_ms_*`, `chunk_ensure_ready_ms_*`, `chunk_payload_lock_ms_*`
+  - `chunk_append_ms_*`, `chunk_append_capacity_ms_*`,
+    `chunk_append_write_data_ms_*`
+  - `chunk_overhead_ms_*`, plus `chunk_total_over_200ms/_over_400ms` and
+    `chunk_append_over_200ms/_over_400ms`
+
+3x `36 MHz` bounded soak artifacts:
+
+- `logs/wifi_regression_gate_sdspi36_appenddiag_r1b_20260303_163755`
+- `logs/wifi_regression_gate_sdspi36_appenddiag_r2_20260303_164229`
+- `logs/wifi_regression_gate_sdspi36_appenddiag_r3_20260303_164631`
+
+Gate status:
+
+- all three runs passed every stage (`discovery_debug`, `acceptance_1_cycle`,
+  `acceptance_3_cycle`, `acceptance_soak`).
+
+Correlation summary:
+
+- `req_ms > 3400`: `0/30`.
+- `chunk_max_ms > 400`: `5/30` (`420`, `629`, `477`, `449`, `407`).
+- append-path timing stayed tight across all runs:
+  - `chunk_append_ms_avg`: `126.7..127.4 ms`
+  - `chunk_append_capacity_ms_avg`: `38.0..38.5 ms`
+  - `chunk_append_write_data_ms_avg`: `87.6..87.9 ms`
+  - observed `chunk_append_ms_max` ceiling: `145 ms`
+- representative outlier pair:
+  - upload with `chunk_max_ms=629` had `chunk_append_ms_max=134`.
+- interpretation:
+  - current `chunk_max_ms` upper tail is not primarily caused by
+    `fat::append_session_write` execution time.
+  - residual wait outside append remains material (`sd_task_ms/chunk -
+    chunk_append_ms_avg` roughly `150..191 ms` in these runs).
+
 ## Next step
 
-Shift root-cause work to SD task/FAT append path:
+Shift root-cause work to SD bridge/task-queue residual timing:
 
-- add per-chunk timing around `fat::append_session_write` and SD task upload
-  boundaries to isolate where `chunk_max_ms` spikes originate.
-- rerun the same 3x `36 MHz` bounded soak gate and correlate high
-  `chunk_max_ms` samples with new append-path timing fields.
+- instrument queue-to-handler start latency and handler-to-response latency for
+  `SdUploadCommand::Chunk`.
+- preserve append diagnostics and correlate residual wait fields with high
+  `chunk_max_ms` uploads (`>400 ms`).
+- rerun bounded 3x `36 MHz` soak after queue-boundary instrumentation.
