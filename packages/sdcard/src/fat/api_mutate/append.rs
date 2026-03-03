@@ -1,3 +1,5 @@
+use embassy_time::Instant;
+
 pub async fn append_file(
     sd: &mut SdCardProbe<'_>,
     path: &str,
@@ -14,6 +16,13 @@ pub struct FatAppendSession {
     record: DirRecord,
     allocated_clusters: usize,
     tail_cluster: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FatAppendWriteDiag {
+    pub ensure_capacity_ms: u32,
+    pub write_data_ms: u32,
+    pub total_ms: u32,
 }
 
 pub async fn begin_append_session(
@@ -101,10 +110,22 @@ pub async fn append_session_write(
     session: &mut FatAppendSession,
     data: &[u8],
 ) -> Result<(), SdFatError> {
+    let mut diag = FatAppendWriteDiag::default();
+    append_session_write_with_diag(sd, session, data, &mut diag).await
+}
+
+pub async fn append_session_write_with_diag(
+    sd: &mut SdCardProbe<'_>,
+    session: &mut FatAppendSession,
+    data: &[u8],
+    diag: &mut FatAppendWriteDiag,
+) -> Result<(), SdFatError> {
+    *diag = FatAppendWriteDiag::default();
     if data.is_empty() {
         return Ok(());
     }
 
+    let total_started_at = Instant::now();
     let old_size = session.record.size as usize;
     let new_size = old_size
         .checked_add(data.len())
@@ -113,9 +134,14 @@ pub async fn append_session_write(
         })?;
     let cluster_size = SD_SECTOR_SIZE * session.volume.sectors_per_cluster as usize;
     let new_clusters = clusters_for_size(new_size, cluster_size);
+    let ensure_started_at = Instant::now();
     ensure_append_capacity(sd, session, new_clusters).await?;
+    diag.ensure_capacity_ms = elapsed_ms_u32(ensure_started_at);
+    let write_started_at = Instant::now();
     write_data_at(sd, &session.volume, session.record.first_cluster, old_size, data).await?;
+    diag.write_data_ms = elapsed_ms_u32(write_started_at);
     session.record.size = new_size as u32;
+    diag.total_ms = elapsed_ms_u32(total_started_at);
     Ok(())
 }
 
@@ -192,4 +218,13 @@ async fn cluster_tail(
 ) -> Result<u32, SdFatError> {
     debug_assert!(cluster_count > 0);
     cluster_at_index(sd, volume, first_cluster, cluster_count.saturating_sub(1)).await
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
+    }
 }

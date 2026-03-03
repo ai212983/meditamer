@@ -89,6 +89,7 @@ pub(super) async fn handle_begin(
         bytes_written: 0,
         last_activity_at: Instant::now(),
         write_metrics_start: sd_probe.write_metrics_snapshot(),
+        chunk_timing: super::types::SdUploadChunkTimingMetrics::default(),
     });
     upload_result(true, SdUploadResultCode::Ok, 0)
 }
@@ -104,6 +105,7 @@ pub(super) async fn handle_chunk(
     let Some(active) = session.as_mut() else {
         return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
     };
+    let chunk_started_at = Instant::now();
     let data_len = (data_len as usize).min(SD_UPLOAD_CHUNK_MAX);
     if data_len == 0 {
         return upload_result(true, SdUploadResultCode::Ok, active.bytes_written);
@@ -124,16 +126,21 @@ pub(super) async fn handle_chunk(
         );
     }
 
+    let ensure_ready_started_at = Instant::now();
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        let ensure_ready_ms = elapsed_ms_u32(ensure_ready_started_at);
         esp_println::println!(
-            "sd_upload: chunk ensure_upload_ready failed code={:?} bytes_written={} data_len={}",
+            "sd_upload: chunk ensure_upload_ready failed code={:?} bytes_written={} data_len={} ensure_ready_ms={}",
             code,
             active.bytes_written,
-            data_len
+            data_len,
+            ensure_ready_ms,
         );
         return upload_result(false, code, active.bytes_written);
     }
+    let ensure_ready_ms = elapsed_ms_u32(ensure_ready_started_at);
 
+    let payload_lock_started_at = Instant::now();
     let mut chunk_data = match transfer_buffers::lock_upload_chunk_buffer().await {
         Ok(buffer) => buffer,
         Err(_) => {
@@ -144,18 +151,24 @@ pub(super) async fn handle_chunk(
             );
         }
     };
-    if let Err(err) = fat::append_session_write(
+    let payload_lock_ms = elapsed_ms_u32(payload_lock_started_at);
+    let mut append_diag = fat::FatAppendWriteDiag::default();
+    if let Err(err) = fat::append_session_write_with_diag(
         sd_probe,
         &mut active.append_session,
         &chunk_data.as_mut_slice()[..data_len],
+        &mut append_diag,
     )
     .await
     {
         esp_println::println!(
-            "sd_upload: chunk append_session_write failed err={:?} bytes_written={} data_len={}",
+            "sd_upload: chunk append_session_write failed err={:?} bytes_written={} data_len={} append_total_ms={} append_capacity_ms={} append_write_data_ms={}",
             err,
             active.bytes_written,
-            data_len
+            data_len,
+            append_diag.total_ms,
+            append_diag.ensure_capacity_ms,
+            append_diag.write_data_ms,
         );
         return upload_result(
             false,
@@ -165,6 +178,15 @@ pub(super) async fn handle_chunk(
     }
     active.bytes_written = next_bytes_written;
     active.last_activity_at = Instant::now();
+    let chunk_total_ms = elapsed_ms_u32(chunk_started_at);
+    active.chunk_timing.record_chunk(
+        chunk_total_ms,
+        ensure_ready_ms,
+        payload_lock_ms,
+        append_diag.total_ms,
+        append_diag.ensure_capacity_ms,
+        append_diag.write_data_ms,
+    );
     upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
 }
 
@@ -251,8 +273,36 @@ pub(super) async fn handle_commit(
     } else {
         write_metrics_delta.cmd25_ready_wait_polls_total / write_metrics_delta.cmd25_ready_wait_count
     };
+    let chunk_total_ms_avg = div_or_zero(
+        active.chunk_timing.chunk_total_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_ensure_ready_ms_avg = div_or_zero(
+        active.chunk_timing.ensure_ready_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_payload_lock_ms_avg = div_or_zero(
+        active.chunk_timing.payload_lock_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_append_ms_avg = div_or_zero(
+        active.chunk_timing.append_total_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_append_capacity_ms_avg = div_or_zero(
+        active.chunk_timing.append_capacity_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_append_write_data_ms_avg = div_or_zero(
+        active.chunk_timing.append_write_data_ms_total,
+        active.chunk_timing.chunk_count,
+    );
+    let chunk_overhead_ms_avg = div_or_zero(
+        active.chunk_timing.chunk_overhead_ms_total,
+        active.chunk_timing.chunk_count,
+    );
     esp_println::println!(
-        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={} cmd25_success_burst_ms_total={} cmd25_success_burst_ms_avg={} cmd25_ready_wait_count={} cmd25_ready_wait_ms_total={} cmd25_ready_wait_ms_avg={} cmd25_ready_wait_polls_total={} cmd25_ready_wait_polls_avg={} cmd25_ready_wait_over_1ms={} cmd25_ready_wait_over_4ms={} cmd25_ready_wait_over_8ms={}",
+        "sd_upload: write_metrics path={} bytes={} cmd24_sectors={} cmd25_attempt_bursts={} cmd25_success_bursts={} cmd25_fallback_bursts={} cmd25_attempt_sectors={} cmd25_success_sectors={} cmd25_success_burst_ms_total={} cmd25_success_burst_ms_avg={} cmd25_ready_wait_count={} cmd25_ready_wait_ms_total={} cmd25_ready_wait_ms_avg={} cmd25_ready_wait_polls_total={} cmd25_ready_wait_polls_avg={} cmd25_ready_wait_over_1ms={} cmd25_ready_wait_over_4ms={} cmd25_ready_wait_over_8ms={} chunk_count={} chunk_total_ms_total={} chunk_total_ms_avg={} chunk_total_ms_max={} chunk_total_over_200ms={} chunk_total_over_400ms={} chunk_ensure_ready_ms_total={} chunk_ensure_ready_ms_avg={} chunk_ensure_ready_ms_max={} chunk_payload_lock_ms_total={} chunk_payload_lock_ms_avg={} chunk_payload_lock_ms_max={} chunk_append_ms_total={} chunk_append_ms_avg={} chunk_append_ms_max={} chunk_append_over_200ms={} chunk_append_over_400ms={} chunk_append_capacity_ms_total={} chunk_append_capacity_ms_avg={} chunk_append_capacity_ms_max={} chunk_append_write_data_ms_total={} chunk_append_write_data_ms_avg={} chunk_append_write_data_ms_max={} chunk_overhead_ms_total={} chunk_overhead_ms_avg={} chunk_overhead_ms_max={}",
         final_path_str,
         active.bytes_written,
         write_metrics_delta.cmd24_sectors,
@@ -271,6 +321,32 @@ pub(super) async fn handle_commit(
         write_metrics_delta.cmd25_ready_wait_over_1ms,
         write_metrics_delta.cmd25_ready_wait_over_4ms,
         write_metrics_delta.cmd25_ready_wait_over_8ms,
+        active.chunk_timing.chunk_count,
+        active.chunk_timing.chunk_total_ms_total,
+        chunk_total_ms_avg,
+        active.chunk_timing.chunk_total_ms_max,
+        active.chunk_timing.chunk_total_over_200ms,
+        active.chunk_timing.chunk_total_over_400ms,
+        active.chunk_timing.ensure_ready_ms_total,
+        chunk_ensure_ready_ms_avg,
+        active.chunk_timing.ensure_ready_ms_max,
+        active.chunk_timing.payload_lock_ms_total,
+        chunk_payload_lock_ms_avg,
+        active.chunk_timing.payload_lock_ms_max,
+        active.chunk_timing.append_total_ms_total,
+        chunk_append_ms_avg,
+        active.chunk_timing.append_total_ms_max,
+        active.chunk_timing.append_total_over_200ms,
+        active.chunk_timing.append_total_over_400ms,
+        active.chunk_timing.append_capacity_ms_total,
+        chunk_append_capacity_ms_avg,
+        active.chunk_timing.append_capacity_ms_max,
+        active.chunk_timing.append_write_data_ms_total,
+        chunk_append_write_data_ms_avg,
+        active.chunk_timing.append_write_data_ms_max,
+        active.chunk_timing.chunk_overhead_ms_total,
+        chunk_overhead_ms_avg,
+        active.chunk_timing.chunk_overhead_ms_max,
     );
     let bytes_written = active.bytes_written;
     *session = None;
@@ -318,5 +394,22 @@ pub(super) async fn handle_abort(
                 active.bytes_written,
             )
         }
+    }
+}
+
+fn div_or_zero(total: u32, count: u32) -> u32 {
+    if count == 0 {
+        0
+    } else {
+        total / count
+    }
+}
+
+fn elapsed_ms_u32(started_at: Instant) -> u32 {
+    let elapsed = started_at.elapsed().as_millis();
+    if elapsed > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        elapsed as u32
     }
 }
