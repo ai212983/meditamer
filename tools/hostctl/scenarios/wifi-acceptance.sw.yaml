@@ -65,6 +65,9 @@ do:
       then: "finalize_cycle"
   - finalize_cycle:
       call: "finalize_cycle"
+      then: "assert_upload_metrics"
+  - assert_upload_metrics:
+      call: "assert_upload_metrics"
       then: "advance_cycle"
   - advance_cycle:
       call: "advance_cycle"

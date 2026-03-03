@@ -18,6 +18,30 @@ use crate::{
 use super::WifiAcceptanceRuntime;
 
 impl WifiAcceptanceRuntime<'_> {
+    pub(super) fn handle_assert_upload_metrics(&mut self, context: &mut Value) -> Result<()> {
+        let current = self.query_req_read_body_reset()?;
+        let baseline = self.req_read_body_reset_baseline.unwrap_or(current);
+        let delta = current.saturating_sub(baseline);
+        ctx_set_u32(context, "req_read_body_reset_delta", delta)?;
+        ctx_set_u32(context, "req_read_body_reset_total", current)?;
+
+        if delta > self.req_read_body_reset_max_delta {
+            return Err(anyhow!(
+                "upload metrics guard failed: req_read_body_reset delta={} exceeds max_delta={} (baseline={} current={})",
+                delta,
+                self.req_read_body_reset_max_delta,
+                baseline,
+                current
+            ));
+        }
+
+        self.logger.info(format!(
+            "upload_metrics_guard: req_read_body_reset delta={} max_delta={} baseline={} current={}",
+            delta, self.req_read_body_reset_max_delta, baseline, current
+        ));
+        Ok(())
+    }
+
     pub(super) fn handle_net_upload_once(&mut self, context: &mut Value) -> Result<()> {
         let ip = ctx_get_string(context, "ip")?;
         let cycle_root = self.remote_root.clone();
@@ -181,6 +205,19 @@ impl WifiAcceptanceRuntime<'_> {
 }
 
 impl WifiAcceptanceRuntime<'_> {
+    pub(super) fn query_req_read_body_reset(&mut self) -> Result<u32> {
+        let mark = self.console.mark();
+        self.console.send_line("METRICS")?;
+        let re = Regex::new(r"^METRICS UPLOAD ")?;
+        let line = self
+            .console
+            .wait_for_regex_since(mark, &re, Duration::from_secs(2))?
+            .ok_or_else(|| anyhow!("missing METRICS UPLOAD response"))?;
+
+        parse_metrics_key_u32(&line, "req_read_body_reset")
+            .ok_or_else(|| anyhow!("METRICS UPLOAD missing req_read_body_reset: {line}"))
+    }
+
     fn send_net_command_best_effort(&mut self, command: &str) {
         if let Err(err) = self.console.send_line(command) {
             self.logger.info(format!(
@@ -297,9 +334,17 @@ fn avg(values: &[f64]) -> f64 {
     }
 }
 
+fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<u32>().ok())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{append_health_fail_net_status, append_panic_signal_context};
+    use super::{
+        append_health_fail_net_status, append_panic_signal_context, parse_metrics_key_u32,
+    };
     use crate::workflows_wifi_common::detect_panic_signal;
 
     #[test]
@@ -318,10 +363,8 @@ mod tests {
     #[test]
     fn health_failure_detail_records_query_error_and_panic_context() {
         let mut detail = "health check failed: GET http://10.0.0.8:8080/health".to_string();
-        let diag = append_health_fail_net_status(
-            &mut detail,
-            Err("serial read timed out".to_string()),
-        );
+        let diag =
+            append_health_fail_net_status(&mut detail, Err("serial read timed out".to_string()));
         assert!(diag.contains("NET_STATUS query failed"));
         assert!(detail.contains("net_status_query_error=serial read timed out"));
 
@@ -330,5 +373,13 @@ mod tests {
         assert!(append_panic_signal_context(&mut detail, Some(&signal)));
         assert!(detail.contains("panic_class=runtime_panic_guru"));
         assert!(detail.contains("panic_line_index=42"));
+    }
+
+    #[test]
+    fn parse_req_read_body_reset_metric_from_upload_line() {
+        let line = "METRICS UPLOAD accept_ok=10 accept_err=0 request_err=1 req_hdr_to=0 req_read_body=1 req_read_body_reset=1 req_sd_busy=0 sd_errors=0";
+        assert_eq!(parse_metrics_key_u32(line, "req_read_body_reset"), Some(1));
+        assert_eq!(parse_metrics_key_u32(line, "req_read_body"), Some(1));
+        assert_eq!(parse_metrics_key_u32(line, "missing"), None);
     }
 }

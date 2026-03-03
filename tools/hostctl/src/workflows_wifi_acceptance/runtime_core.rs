@@ -94,6 +94,7 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             "init_upload_attempt" => self.handle_init_upload_attempt(context),
             "net_upload_once" => self.handle_net_upload_once(context),
             "net_verify_once" => self.handle_net_verify_once(context),
+            "assert_upload_metrics" => self.handle_assert_upload_metrics(context),
             "net_collect_diag" => self.handle_net_collect_diag(),
             "net_recover_once" => self.handle_net_recover_once(),
             "increment_upload_attempt" => self.handle_increment_upload_attempt(context),
@@ -126,6 +127,7 @@ impl WifiAcceptanceRuntime<'_> {
         self.mem_read_mark = self.console.mark();
         self.panic_monitoring_enabled = true;
         self.panic_first = None;
+        self.req_read_body_reset_baseline = Some(self.query_req_read_body_reset()?);
         Ok(())
     }
 
