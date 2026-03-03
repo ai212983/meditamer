@@ -76,6 +76,32 @@ pub(crate) fn snapshot() -> Snapshot {
             .load(Ordering::Relaxed),
         upload_http_upload_body_read_ms_max: UPLOAD_HTTP_UPLOAD_BODY_READ_MS_MAX
             .load(Ordering::Relaxed),
+        upload_http_upload_payload_copy_ms_total: UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_TOTAL
+            .load(Ordering::Relaxed),
+        upload_http_upload_payload_copy_ms_max: UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_sd_queue_ms_total: UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_TOTAL
+            .load(Ordering::Relaxed),
+        upload_http_upload_sd_queue_ms_max: UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_sd_task_wait_ms_total: UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_TOTAL
+            .load(Ordering::Relaxed),
+        upload_http_upload_sd_task_wait_ms_max: UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_commit_ms_total: UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL
+            .load(Ordering::Relaxed),
+        upload_http_upload_commit_ms_max: UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_chunk_p50_ms_max: UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_chunk_p95_ms_max: UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_chunk_max_ms_max: UPLOAD_HTTP_UPLOAD_CHUNK_MAX_MS_MAX
+            .load(Ordering::Relaxed),
+        upload_http_upload_chunk_samples_total: UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_TOTAL
+            .load(Ordering::Relaxed),
+        upload_http_upload_chunk_samples_dropped: UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_DROPPED
+            .load(Ordering::Relaxed),
         upload_http_upload_sd_wait_ms_total: UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_TOTAL
             .load(Ordering::Relaxed),
         upload_http_upload_sd_wait_ms_max: UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_MAX

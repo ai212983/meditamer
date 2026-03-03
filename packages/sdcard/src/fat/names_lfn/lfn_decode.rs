@@ -6,26 +6,31 @@ fn short_name_checksum(short: &[u8; 11]) -> u8 {
     sum
 }
 
-fn lfn_expected_mask(slots: u8) -> u8 {
-    if slots >= 8 {
-        0xFF
+fn lfn_expected_mask(slots: u8) -> u32 {
+    if slots == 0 {
+        0
     } else {
-        (1u8 << slots) - 1
+        (1u32 << slots) - 1
     }
 }
 
-fn build_display_name(
+fn build_display_name_into(
     lfn: &LfnState,
     short_name: &[u8; 11],
-) -> ([u8; FAT_NAME_MAX], usize, usize) {
-    let mut out = [0u8; FAT_NAME_MAX];
-
-    if let Some((len, lfn_count)) = try_build_lfn_display_name(lfn, short_name, &mut out) {
-        return (out, len, lfn_count);
+    out: &mut [u8; FAT_NAME_MAX],
+) -> (usize, usize) {
+    if let Some((len, lfn_count)) = try_build_lfn_display_name(lfn, short_name, out) {
+        return (len, lfn_count);
     }
 
-    let short_len = short_name_to_text(short_name, &mut out);
-    (out, short_len, 0)
+    let short_len = short_name_to_text(short_name, out);
+    (short_len, 0)
+}
+
+fn build_display_name(lfn: &LfnState, short_name: &[u8; 11]) -> ([u8; FAT_NAME_MAX], usize, usize) {
+    let mut out = [0u8; FAT_NAME_MAX];
+    let (name_len, lfn_count) = build_display_name_into(lfn, short_name, &mut out);
+    (out, name_len, lfn_count)
 }
 
 fn try_build_lfn_display_name(
@@ -120,5 +125,5 @@ fn consume_lfn_entry(state: &mut LfnState, location: DirLocation, entry: &[u8]) 
     let part_idx = (seq - 1) as usize;
     state.utf16_parts[part_idx] = units;
     state.lfn_locations[part_idx] = location;
-    state.seen_mask |= 1 << part_idx;
+    state.seen_mask |= 1u32 << part_idx;
 }

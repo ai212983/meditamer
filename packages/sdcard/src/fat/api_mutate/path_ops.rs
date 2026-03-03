@@ -8,6 +8,11 @@ pub async fn mkdir(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErro
     let volume = mount_fat32(sd).await?;
     let parent_cluster = resolve_dir_cluster(sd, &volume, &segments, count - 1).await?;
     let target = segments[count - 1];
+    if let Ok(short_target) = encode_short_name(target.as_bytes()) {
+        if short_name_exists(sd, &volume, parent_cluster, &short_target).await? {
+            return Err(SdFatError::AlreadyExists);
+        }
+    }
     let existing = scan_directory(sd, &volume, parent_cluster, Some(&target), 0).await?;
     if existing.found.is_some() {
         return Err(SdFatError::AlreadyExists);
@@ -65,7 +70,12 @@ pub async fn remove(sd: &mut SdCardProbe<'_>, path: &str) -> Result<(), SdFatErr
         }
     }
     if found.record.first_cluster >= 2 {
-        free_chain(sd, &volume, found.record.first_cluster).await?;
+        if found.record.is_dir() {
+            free_chain(sd, &volume, found.record.first_cluster).await?;
+        } else {
+            free_chain_for_record(sd, &volume, found.record.first_cluster, found.record.size)
+                .await?;
+        }
     }
     mark_found_deleted(sd, &found).await
 }
@@ -157,7 +167,13 @@ pub async fn rename_replace(
             return Err(SdFatError::IsDirectory);
         }
         if dst_found.record.first_cluster >= 2 {
-            free_chain(sd, &volume, dst_found.record.first_cluster).await?;
+            free_chain_for_record(
+                sd,
+                &volume,
+                dst_found.record.first_cluster,
+                dst_found.record.size,
+            )
+            .await?;
         }
         mark_found_deleted(sd, &dst_found).await?;
     }

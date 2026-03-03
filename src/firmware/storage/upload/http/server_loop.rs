@@ -41,9 +41,35 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
         return false;
     }
 
-    if !service_mode::upload_http_listener_enabled() {
+    let listener_enabled = service_mode::upload_http_listener_enabled();
+    let listener_seq = service_mode::upload_http_listener_set_seq();
+    if listener_enabled != state.listener_gate_last_enabled || listener_seq != state.listener_gate_last_seq
+    {
+        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+            esp_println::println!(
+                "upload_http: listener_gate transition enabled={} seq={} prev_enabled={} prev_seq={}",
+                listener_enabled,
+                listener_seq,
+                state.listener_gate_last_enabled,
+                state.listener_gate_last_seq,
+            );
+        }
+        state.listener_gate_last_enabled = listener_enabled;
+        state.listener_gate_last_seq = listener_seq;
+        state.listener_gate_disabled_logged = false;
+    }
+
+    if !listener_enabled {
         state.reset_all();
         telemetry::set_upload_http_listener(false, None);
+        if !state.listener_gate_disabled_logged && telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET)
+        {
+            esp_println::println!(
+                "upload_http: listener gate disabled; waiting for NET LISTENER ON (seq={})",
+                listener_seq
+            );
+            state.listener_gate_disabled_logged = true;
+        }
         log_http_mem_diag("listener_disabled_pause");
         Timer::after(Duration::from_millis(500)).await;
         return false;
@@ -121,4 +147,3 @@ fn log_listener_start(local_ipv4: [u8; 4], state: &mut HttpServerLoopState) {
     }
     state.listening_logged = true;
 }
-

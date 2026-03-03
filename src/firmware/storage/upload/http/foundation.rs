@@ -1,5 +1,5 @@
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
-use embassy_time::{with_timeout, Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use static_cell::StaticCell;
 
 mod connection;
@@ -105,6 +105,9 @@ struct HttpServerLoopState {
     waiting_dhcp_logged: bool,
     dhcp_wait_started_at: Option<Instant>,
     dhcp_ready: bool,
+    listener_gate_last_enabled: bool,
+    listener_gate_last_seq: u32,
+    listener_gate_disabled_logged: bool,
 }
 
 impl HttpServerLoopState {
@@ -114,6 +117,9 @@ impl HttpServerLoopState {
             waiting_dhcp_logged: false,
             dhcp_wait_started_at: None,
             dhcp_ready: false,
+            listener_gate_last_enabled: service_mode::upload_http_listener_enabled(),
+            listener_gate_last_seq: service_mode::upload_http_listener_set_seq(),
+            listener_gate_disabled_logged: false,
         }
     }
 
@@ -184,4 +190,3 @@ struct HttpServerBuffersMut<'a> {
     header: &'a mut HttpBuffer<HTTP_HEADER_MAX>,
     chunk: &'a mut HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>,
 }
-

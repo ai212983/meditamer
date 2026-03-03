@@ -94,7 +94,7 @@ pub(crate) enum SdUploadCommand {
         expected_size: u32,
     },
     Chunk {
-        data_len: u16,
+        data_len: u32,
     },
     Commit,
     Abort,
@@ -103,6 +103,10 @@ pub(crate) enum SdUploadCommand {
         path_len: u8,
     },
     Remove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    Stat {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },

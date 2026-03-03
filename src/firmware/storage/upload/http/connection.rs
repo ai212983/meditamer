@@ -1,4 +1,5 @@
 use embassy_net::tcp::TcpSocket;
+use embassy_time::Duration;
 use esp_println::println;
 
 use super::super::super::super::telemetry;
@@ -27,7 +28,10 @@ pub(super) async fn handle_connection(
     chunk_buf: &mut [u8],
     header_buf: &mut [u8],
 ) -> Result<(), &'static str> {
-    let (filled, header_end) = request::read_header(socket, header_buf).await?;
+    socket.set_timeout(Some(Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS)));
+    let header_result = request::read_header(socket, header_buf).await;
+    socket.set_timeout(Some(Duration::from_secs(super::HTTP_SOCKET_TIMEOUT_SECS)));
+    let (filled, header_end) = header_result?;
     let header = core::str::from_utf8(&header_buf[..header_end]).map_err(|_| "header utf8")?;
     let (method, target) = super::helpers::parse_request_line(header).ok_or("bad request line")?;
     let content_length = request::parse_content_length_or_http_error(socket, header).await?;

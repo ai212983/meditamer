@@ -46,6 +46,15 @@ pub(crate) fn record_upload_http_health_request() {
 pub(crate) fn record_upload_http_upload_phase(
     bytes: u32,
     body_read_ms: u32,
+    payload_copy_ms: u32,
+    sd_queue_ms: u32,
+    sd_task_wait_ms: u32,
+    commit_ms: u32,
+    chunk_p50_ms: u32,
+    chunk_p95_ms: u32,
+    chunk_max_ms: u32,
+    chunk_samples: u32,
+    chunk_samples_dropped: u32,
     sd_wait_ms: u32,
     request_ms: u32,
 ) {
@@ -53,6 +62,22 @@ pub(crate) fn record_upload_http_upload_phase(
     saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BYTES, bytes);
     saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL, body_read_ms);
     update_max_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_MAX, body_read_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_TOTAL, payload_copy_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_MAX, payload_copy_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_TOTAL, sd_queue_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_MAX, sd_queue_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_TOTAL, sd_task_wait_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_MAX, sd_task_wait_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL, commit_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX, commit_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX, chunk_p50_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX, chunk_p95_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_MAX_MS_MAX, chunk_max_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_TOTAL, chunk_samples);
+    saturating_add_u32(
+        &UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_DROPPED,
+        chunk_samples_dropped,
+    );
     saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_TOTAL, sd_wait_ms);
     update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_MAX, sd_wait_ms);
     saturating_add_u32(&UPLOAD_HTTP_UPLOAD_REQUEST_MS_TOTAL, request_ms);

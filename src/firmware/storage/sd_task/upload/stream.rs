@@ -34,6 +34,14 @@ pub(super) async fn handle_begin(
         expected_size
     );
     let final_path_bytes = final_path.as_bytes();
+    if final_path_bytes.len() > SD_UPLOAD_PATH_BUF_MAX {
+        esp_println::println!(
+            "sd_upload: begin final_path_too_long path_len={} max_len={}",
+            final_path_bytes.len(),
+            SD_UPLOAD_PATH_BUF_MAX
+        );
+        return upload_result(false, SdUploadResultCode::InvalidPath, 0);
+    }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
         esp_println::println!(
@@ -52,34 +60,18 @@ pub(super) async fn handle_begin(
         Err(_) => return upload_result(false, SdUploadResultCode::InvalidPath, 0),
     };
 
-    let mut append_session =
-        match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await {
-            Ok(session) => session,
-            Err(err) => {
-                esp_println::println!(
-                    "sd_upload: begin append_session_create_or_open failed temp_path={} err={:?}",
-                    temp_path_str,
-                    err
-                );
-                return upload_result(false, map_fat_error_to_upload_code(&err), 0);
-            }
-        };
-    if expected_size > 0 {
-        // Reserve FAT chain capacity upfront so chunk writes stay on the hot
-        // data path without intermittent allocation/link updates.
-        if let Err(err) =
-            fat::append_session_reserve(sd_probe, &mut append_session, expected_size as usize).await
-        {
+    let append_session = match fat::begin_append_session_create_or_open(sd_probe, temp_path_str).await
+    {
+        Ok(session) => session,
+        Err(err) => {
             esp_println::println!(
-                "sd_upload: begin append_session_reserve failed temp_path={} expected_size={} err={:?}",
+                "sd_upload: begin append_session_create_or_open failed temp_path={} err={:?}",
                 temp_path_str,
-                expected_size,
                 err
             );
             return upload_result(false, map_fat_error_to_upload_code(&err), 0);
         }
-    }
-
+    };
     let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
     final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
     *session = Some(SdUploadSession {
@@ -98,7 +90,7 @@ pub(super) async fn handle_begin(
 
 #[inline(never)]
 pub(super) async fn handle_chunk(
-    data_len: u16,
+    data_len: u32,
     session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,

@@ -64,6 +64,19 @@ static UPLOAD_HTTP_UPLOAD_REQUESTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_BYTES: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_BODY_READ_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_CHUNK_MAX_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_TOTAL: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_DROPPED: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_MAX: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_REQUEST_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
@@ -206,6 +219,19 @@ pub(crate) struct Snapshot {
     pub(crate) upload_http_upload_bytes: u32,
     pub(crate) upload_http_upload_body_read_ms_total: u32,
     pub(crate) upload_http_upload_body_read_ms_max: u32,
+    pub(crate) upload_http_upload_payload_copy_ms_total: u32,
+    pub(crate) upload_http_upload_payload_copy_ms_max: u32,
+    pub(crate) upload_http_upload_sd_queue_ms_total: u32,
+    pub(crate) upload_http_upload_sd_queue_ms_max: u32,
+    pub(crate) upload_http_upload_sd_task_wait_ms_total: u32,
+    pub(crate) upload_http_upload_sd_task_wait_ms_max: u32,
+    pub(crate) upload_http_upload_commit_ms_total: u32,
+    pub(crate) upload_http_upload_commit_ms_max: u32,
+    pub(crate) upload_http_upload_chunk_p50_ms_max: u32,
+    pub(crate) upload_http_upload_chunk_p95_ms_max: u32,
+    pub(crate) upload_http_upload_chunk_max_ms_max: u32,
+    pub(crate) upload_http_upload_chunk_samples_total: u32,
+    pub(crate) upload_http_upload_chunk_samples_dropped: u32,
     pub(crate) upload_http_upload_sd_wait_ms_total: u32,
     pub(crate) upload_http_upload_sd_wait_ms_max: u32,
     pub(crate) upload_http_upload_request_ms_total: u32,
@@ -252,4 +278,3 @@ pub(crate) struct Snapshot {
     pub(crate) upload_http_listening: bool,
     pub(crate) upload_http_ipv4: Option<[u8; 4]>,
 }
-

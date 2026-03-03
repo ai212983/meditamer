@@ -22,7 +22,11 @@ async fn serve_connection_cycle(
     )
     .await;
 
-    let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
+    // Avoid short-lived `with_timeout` wrapper timers here; use socket-level
+    // timeout for a bounded best-effort flush before closing.
+    socket.set_timeout(Some(Duration::from_millis(250)));
+    let _ = socket.flush().await;
+    socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
     socket.close();
     log_http_mem_diag("request_close");
 }
@@ -53,7 +57,6 @@ async fn accept_connection(
             esp_println::println!("upload_http: accept err={:?}", err);
         }
         log_http_mem_diag("accept_err");
-        let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
         socket.abort();
         return false;
     }

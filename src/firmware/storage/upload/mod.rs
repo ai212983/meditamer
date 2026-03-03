@@ -10,6 +10,8 @@ use static_cell::StaticCell;
 
 use super::super::types::WifiCredentials;
 
+const UPLOAD_NET_STACK_SOCKETS: usize = 4;
+
 pub(crate) struct UploadHttpRuntime {
     pub(crate) wifi_controller: WifiController<'static>,
     pub(crate) initial_credentials: Option<WifiCredentials>,
@@ -23,7 +25,8 @@ pub(crate) fn setup(
     let initial_credentials = wifi::compiled_wifi_credentials();
 
     static RADIO_CTRL: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
-    static STACK_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
+    static STACK_RESOURCES: StaticCell<StackResources<UPLOAD_NET_STACK_SOCKETS>> =
+        StaticCell::new();
 
     let radio_ctrl = match esp_radio::init() {
         Ok(ctrl) => ctrl,
@@ -47,7 +50,7 @@ pub(crate) fn setup(
     let (stack, net_runner) = embassy_net::new(
         ifaces.sta,
         embassy_net::Config::dhcpv4(Default::default()),
-        STACK_RESOURCES.init(StackResources::<8>::new()),
+        STACK_RESOURCES.init(StackResources::<UPLOAD_NET_STACK_SOCKETS>::new()),
         seed,
     );
 

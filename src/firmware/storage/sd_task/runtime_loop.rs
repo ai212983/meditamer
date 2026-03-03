@@ -20,6 +20,14 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
         backoff_until = Some(Instant::now() + Duration::from_millis(failure_backoff_ms(1)));
     }
 
+    #[cfg(feature = "asset-upload-http")]
+    if crate::firmware::storage::transfer_buffers::lock_upload_chunk_buffer()
+        .await
+        .is_err()
+    {
+        esp_println::println!("sdtask: upload_chunk_buffer_prewarm_failed");
+    }
+
     loop {
         if let Some(until) = backoff_until {
             let now = Instant::now();

@@ -1,4 +1,7 @@
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    mutex::{Mutex, MutexGuard},
+};
 use embassy_time::{with_timeout, Duration, Instant};
 
 use super::super::super::{
@@ -19,24 +22,76 @@ pub(crate) enum SdUploadRoundtripError {
     Device(SdUploadResultCode),
 }
 
-pub(crate) async fn sd_upload_chunk(data: &[u8]) -> Result<SdUploadResult, SdUploadRoundtripError> {
+pub(crate) struct SdUploadChunkInFlight {
+    pub(crate) copy_ms: u32,
+    started_at: Instant,
+    _lock: MutexGuard<'static, CriticalSectionRawMutex, ()>,
+}
+
+pub(crate) async fn sd_upload_chunk_start(
+    data: &[u8],
+) -> Result<SdUploadChunkInFlight, SdUploadRoundtripError> {
     if data.len() > SD_UPLOAD_CHUNK_MAX {
         telemetry::record_sd_upload_roundtrip_code(SdUploadResultCode::OperationFailed);
         return Err(SdUploadRoundtripError::Device(
             SdUploadResultCode::OperationFailed,
         ));
     }
-    let _lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    let lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    drain_stale_sd_upload_results();
+    let copy_started_at = Instant::now();
     {
         let mut payload = transfer_buffers::lock_upload_chunk_buffer()
             .await
             .map_err(|_| SdUploadRoundtripError::Device(SdUploadResultCode::OperationFailed))?;
         payload.as_mut_slice()[..data.len()].copy_from_slice(data);
     }
-    sd_upload_roundtrip_raw_locked(SdUploadCommand::Chunk {
-        data_len: data.len() as u16,
+    let copy_ms = elapsed_ms_u32(copy_started_at);
+    let started_at = Instant::now();
+    SD_UPLOAD_REQUESTS
+        .send(SdUploadRequest {
+            command: SdUploadCommand::Chunk {
+                data_len: data.len() as u32,
+            },
+        })
+        .await;
+    Ok(SdUploadChunkInFlight {
+        copy_ms,
+        started_at,
+        _lock: lock,
     })
-    .await
+}
+
+pub(crate) async fn sd_upload_chunk_finish(
+    inflight: SdUploadChunkInFlight,
+) -> Result<u32, SdUploadRoundtripError> {
+    let started_at = inflight.started_at;
+    let _lock = inflight._lock;
+    let result = match receive_sd_upload_result_with_timeout(started_at).await {
+        Some(result) => result,
+        None => {
+            drain_stale_sd_upload_results();
+            let roundtrip_ms = elapsed_ms_u32(started_at);
+            telemetry::record_sd_upload_roundtrip_timing(
+                telemetry::SdUploadRoundtripPhase::Chunk,
+                roundtrip_ms,
+            );
+            telemetry::record_sd_upload_roundtrip_timeout();
+            return Err(SdUploadRoundtripError::Timeout);
+        }
+    };
+    let roundtrip_ms = elapsed_ms_u32(started_at);
+    telemetry::record_sd_upload_roundtrip_timing(
+        telemetry::SdUploadRoundtripPhase::Chunk,
+        roundtrip_ms,
+    );
+
+    if !result.ok {
+        telemetry::record_sd_upload_roundtrip_code(result.code);
+        return Err(SdUploadRoundtripError::Device(result.code));
+    }
+
+    Ok(roundtrip_ms)
 }
 
 pub(crate) async fn sd_upload_roundtrip(
@@ -144,12 +199,14 @@ async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<Sd
         return Some(result);
     }
 
-    let remaining_ms = SD_UPLOAD_RESPONSE_TIMEOUT_MS
-        .saturating_sub(started_at.elapsed().as_millis())
-        .max(1);
+    let remaining_ms =
+        SD_UPLOAD_RESPONSE_TIMEOUT_MS.saturating_sub(started_at.elapsed().as_millis());
+    if remaining_ms == 0 {
+        return None;
+    }
 
     with_timeout(
-        Duration::from_millis(remaining_ms),
+        Duration::from_millis(remaining_ms as u64),
         SD_UPLOAD_RESULTS.receive(),
     )
     .await
@@ -164,6 +221,7 @@ fn phase_for_command(command: &SdUploadCommand) -> telemetry::SdUploadRoundtripP
         SdUploadCommand::Abort => telemetry::SdUploadRoundtripPhase::Abort,
         SdUploadCommand::Mkdir { .. } => telemetry::SdUploadRoundtripPhase::Mkdir,
         SdUploadCommand::Remove { .. } => telemetry::SdUploadRoundtripPhase::Remove,
+        SdUploadCommand::Stat { .. } => telemetry::SdUploadRoundtripPhase::Remove,
     }
 }
 

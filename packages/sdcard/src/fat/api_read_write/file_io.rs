@@ -97,12 +97,11 @@ pub async fn write_file(
         }
     }
 
-    let old_first_cluster = lookup
-        .found
-        .map(|found| found.record.first_cluster)
-        .unwrap_or(0);
-    if old_first_cluster >= 2 {
-        free_chain(sd, &volume, old_first_cluster).await?;
+    if let Some(found) = lookup.found {
+        if found.record.first_cluster >= 2 {
+            free_chain_for_record(sd, &volume, found.record.first_cluster, found.record.size)
+                .await?;
+        }
     }
 
     let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;

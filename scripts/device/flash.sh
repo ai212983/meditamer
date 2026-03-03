@@ -17,6 +17,7 @@ enable_fallback="${ESPFLASH_ENABLE_FALLBACK:-1}"
 skip_update_check="${ESPFLASH_SKIP_UPDATE_CHECK:-1}"
 feature_args=()
 flash_child_pid=""
+no_default_features="${CARGO_NO_DEFAULT_FEATURES:-0}"
 
 if [[ -n "${CARGO_FEATURES:-}" ]]; then
     feature_args+=(--features "$CARGO_FEATURES")
@@ -46,6 +47,7 @@ validate_positive_integer "$primary_baud" "ESPFLASH_BAUD"
 validate_positive_integer "$fallback_baud" "ESPFLASH_FALLBACK_BAUD"
 validate_toggle "$enable_fallback" "ESPFLASH_ENABLE_FALLBACK"
 validate_toggle "$skip_update_check" "ESPFLASH_SKIP_UPDATE_CHECK"
+validate_toggle "$no_default_features" "CARGO_NO_DEFAULT_FEATURES"
 
 cleanup_flash_child() {
     if [[ -n "$flash_child_pid" ]]; then
@@ -120,19 +122,25 @@ fi
 image_path=""
 case "$mode" in
 "release")
-    if (( ${#feature_args[@]} > 0 )); then
-        cargo build --release "${feature_args[@]}"
-    else
-        cargo build --release
+    build_cmd=(cargo build --release)
+    if [[ "$no_default_features" == "1" ]]; then
+        build_cmd+=(--no-default-features)
     fi
+    if (( ${#feature_args[@]} > 0 )); then
+        build_cmd+=("${feature_args[@]}")
+    fi
+    "${build_cmd[@]}"
     image_path="target/xtensa-esp32-none-elf/release/meditamer"
     ;;
 "debug")
-    if (( ${#feature_args[@]} > 0 )); then
-        cargo build "${feature_args[@]}"
-    else
-        cargo build
+    build_cmd=(cargo build)
+    if [[ "$no_default_features" == "1" ]]; then
+        build_cmd+=(--no-default-features)
     fi
+    if (( ${#feature_args[@]} > 0 )); then
+        build_cmd+=("${feature_args[@]}")
+    fi
+    "${build_cmd[@]}"
     image_path="target/xtensa-esp32-none-elf/debug/meditamer"
     ;;
 *)

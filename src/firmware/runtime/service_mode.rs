@@ -1,10 +1,12 @@
 #[cfg(feature = "asset-upload-http")]
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::firmware::app_state::{self, Phase};
 
 #[cfg(feature = "asset-upload-http")]
 static UPLOAD_HTTP_LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
+#[cfg(feature = "asset-upload-http")]
+static UPLOAD_HTTP_LISTENER_SET_SEQ: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) fn upload_enabled() -> bool {
     app_state::snapshot::upload_enabled()
@@ -22,6 +24,12 @@ pub(crate) fn upload_http_listener_enabled() -> bool {
 }
 
 #[cfg(feature = "asset-upload-http")]
+pub(crate) fn upload_http_listener_set_seq() -> u32 {
+    UPLOAD_HTTP_LISTENER_SET_SEQ.load(Ordering::Relaxed)
+}
+
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn set_upload_http_listener_enabled(enabled: bool) {
     UPLOAD_HTTP_LISTENER_ENABLED.store(enabled, Ordering::Relaxed);
+    UPLOAD_HTTP_LISTENER_SET_SEQ.fetch_add(1, Ordering::Relaxed);
 }

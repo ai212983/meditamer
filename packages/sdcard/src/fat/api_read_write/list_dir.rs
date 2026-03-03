@@ -107,7 +107,8 @@ fn parse_list_dir_slot(
 
     let mut raw_name = [0u8; 11];
     raw_name.copy_from_slice(&sector[base..base + 11]);
-    let (name, name_len, _) = build_display_name(lfn, &raw_name);
+    let mut name = [0u8; FAT_NAME_MAX];
+    let (name_len, _) = build_display_name_into(lfn, &raw_name, &mut name);
     let size = u32::from_le_bytes([
         sector[base + 28],
         sector[base + 29],

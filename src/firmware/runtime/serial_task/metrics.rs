@@ -134,6 +134,26 @@ pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
     );
     let _ = uart_write_all(uart, upload_phase_line.as_bytes()).await;
 
+    let mut upload_decomp_line = heapless::String::<512>::new();
+    let _ = write!(
+        &mut upload_decomp_line,
+        "METRICS UPLOAD_DECOMP copy_ms={} copy_max={} sdq_ms={} sdq_max={} sdtask_ms={} sdtask_max={} commit_ms={} commit_max={} chunk_p50_max={} chunk_p95_max={} chunk_max={} chunk_samples={} chunk_drop={}\r\n",
+        snapshot.upload_http_upload_payload_copy_ms_total,
+        snapshot.upload_http_upload_payload_copy_ms_max,
+        snapshot.upload_http_upload_sd_queue_ms_total,
+        snapshot.upload_http_upload_sd_queue_ms_max,
+        snapshot.upload_http_upload_sd_task_wait_ms_total,
+        snapshot.upload_http_upload_sd_task_wait_ms_max,
+        snapshot.upload_http_upload_commit_ms_total,
+        snapshot.upload_http_upload_commit_ms_max,
+        snapshot.upload_http_upload_chunk_p50_ms_max,
+        snapshot.upload_http_upload_chunk_p95_ms_max,
+        snapshot.upload_http_upload_chunk_max_ms_max,
+        snapshot.upload_http_upload_chunk_samples_total,
+        snapshot.upload_http_upload_chunk_samples_dropped,
+    );
+    let _ = uart_write_all(uart, upload_decomp_line.as_bytes()).await;
+
     let mut upload_rtt_line = heapless::String::<512>::new();
     let _ = write!(
         &mut upload_rtt_line,

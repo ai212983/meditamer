@@ -1,12 +1,11 @@
 use embassy_net::tcp::{Error as TcpError, TcpSocket};
-use embassy_time::{with_timeout, Duration};
 use esp_println::println;
 
 use super::super::helpers::{
     drain_remaining_body, find_header_end, parse_content_length, validate_upload_auth,
     write_response, UploadAuthError,
 };
-use super::{RequestContext, HTTP_HEADER_READ_TIMEOUT_MS};
+use super::RequestContext;
 use crate::firmware::telemetry;
 
 pub(super) async fn authorize_request(
@@ -14,6 +13,8 @@ pub(super) async fn authorize_request(
     header: &str,
     request: &RequestContext<'_>,
 ) -> Result<(), &'static str> {
+    // Contract: /health must remain unauthenticated so host-side reachability
+    // checks can distinguish auth failures from transport/listener regressions.
     if request.request_path == "/health" {
         return Ok(());
     }
@@ -80,14 +81,9 @@ async fn read_header_chunk(
     buffer: &mut [u8],
     filled: usize,
 ) -> Result<usize, &'static str> {
-    match with_timeout(
-        Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS),
-        socket.read(buffer),
-    )
-    .await
-    {
-        Ok(Ok(n)) => Ok(n),
-        Ok(Err(err)) => {
+    match socket.read(buffer).await {
+        Ok(n) => Ok(n),
+        Err(err) => {
             log_header_read_error(socket, filled, err);
             if matches!(err, TcpError::ConnectionReset) && filled == 0 {
                 Err("read header reset empty")
@@ -96,10 +92,6 @@ async fn read_header_chunk(
             } else {
                 Err("read header")
             }
-        }
-        Err(_) => {
-            write_response(socket, b"408 Request Timeout", b"request header timeout").await;
-            Err("request header timeout")
         }
     }
 }

@@ -65,7 +65,8 @@ mod tests {
             );
         }
 
-        let (name, len, lfn_count) = build_display_name(&lfn, &short);
+        let mut name = [0u8; FAT_NAME_MAX];
+        let (len, lfn_count) = build_display_name_into(&lfn, &short, &mut name);
         assert_eq!(lfn_count, slots);
         assert_eq!(&name[..len], long.as_bytes());
     }

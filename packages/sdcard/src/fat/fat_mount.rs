@@ -58,8 +58,50 @@ async fn free_chain(
     volume: &Fat32Volume,
     start_cluster: u32,
 ) -> Result<(), SdFatError> {
+    free_chain_limited(
+        sd,
+        volume,
+        start_cluster,
+        volume.total_clusters.saturating_add(2),
+    )
+    .await
+}
+
+async fn free_chain_for_record(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    start_cluster: u32,
+    size_bytes: u32,
+) -> Result<(), SdFatError> {
+    let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
+    let expected_clusters = clusters_for_size(size_bytes as usize, cluster_size);
+    free_chain_for_expected_clusters(sd, volume, start_cluster, expected_clusters).await
+}
+
+async fn free_chain_for_expected_clusters(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    start_cluster: u32,
+    expected_clusters: usize,
+) -> Result<(), SdFatError> {
+    // Allow small slack for on-disk inconsistencies after interrupted writes while
+    // still preventing effectively-unbounded walks on corrupt chains.
+    let limited = expected_clusters.saturating_add(32).max(1);
+    let max_steps = (limited as u32).min(volume.total_clusters.saturating_add(2));
+    free_chain_limited(sd, volume, start_cluster, max_steps).await
+}
+
+async fn free_chain_limited(
+    sd: &mut SdCardProbe<'_>,
+    volume: &Fat32Volume,
+    start_cluster: u32,
+    max_steps: u32,
+) -> Result<(), SdFatError> {
     if start_cluster < 2 {
         return Ok(());
+    }
+    if max_steps == 0 {
+        return Err(SdFatError::ClusterChainTooLong);
     }
 
     let max_cluster = volume.total_clusters.saturating_add(1);
@@ -67,7 +109,7 @@ async fn free_chain(
     let mut visited = 0u32;
 
     loop {
-        if visited > volume.total_clusters.saturating_add(2) {
+        if visited >= max_steps {
             return Err(SdFatError::ClusterChainTooLong);
         }
         visited = visited.saturating_add(1);

@@ -24,6 +24,7 @@ pub(super) async fn dispatch_request(
 ) -> Result<(), &'static str> {
     match (request.method, request.request_path) {
         ("GET", "/health") => handle_health(socket, request).await,
+        ("GET", "/stat") => handle_stat(socket, request).await,
         ("POST", "/mkdir") => handle_mkdir(socket, request).await,
         ("DELETE", "/rm") => handle_delete(socket, request).await,
         ("POST", "/upload_begin") => handle_upload_begin(socket, request).await,
@@ -41,6 +42,9 @@ async fn handle_health(
     socket: &mut TcpSocket<'_>,
     request: &RequestContext<'_>,
 ) -> Result<(), &'static str> {
+    // Contract: /health stays lightweight and independent from SD upload paths.
+    // It must remain safe to probe under pressure and must always bump telemetry
+    // so host workflows can correlate reachability checks with runtime behavior.
     drain_body(socket, request).await?;
     telemetry::record_upload_http_health_request();
     if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
@@ -65,6 +69,17 @@ async fn handle_mkdir(
         println!("upload_http: mkdir done path={}", path_str);
     }
     write_response(socket, b"200 OK", b"mkdir ok").await;
+    Ok(())
+}
+
+async fn handle_stat(
+    socket: &mut TcpSocket<'_>,
+    request: &RequestContext<'_>,
+) -> Result<(), &'static str> {
+    drain_body(socket, request).await?;
+    let (path, path_len) = parse_path_or_400(socket, request.target, "/stat").await?;
+    sd_upload_or_http_error(socket, SdUploadCommand::Stat { path, path_len }).await?;
+    write_response(socket, b"200 OK", b"stat ok").await;
     Ok(())
 }
 
@@ -115,10 +130,19 @@ async fn handle_upload_chunk(
     telemetry::record_upload_http_upload_phase(
         usize_to_u32_saturating(stats.sent_bytes),
         stats.body_read_ms,
+        stats.payload_copy_ms,
+        stats.sd_queue_ms,
+        stats.sd_task_wait_ms,
+        0,
+        stats.chunk_p50_ms,
+        stats.chunk_p95_ms,
+        stats.chunk_max_ms,
+        stats.chunk_samples,
+        stats.chunk_samples_dropped,
         stats.sd_wait_ms,
         elapsed_ms_u32(request_started_at),
     );
-    log_upload_stats("upload_chunk", &stats, stats.sd_wait_ms, request_started_at);
+    log_upload_stats("upload_chunk", &stats, stats.sd_wait_ms, request_started_at, 0);
 
     write_response(socket, b"200 OK", b"chunk ok").await;
     Ok(())
@@ -184,16 +208,26 @@ async fn handle_upload(
         write_roundtrip_error_response(socket, err).await;
         return Err(roundtrip_error_log(err));
     }
-    sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(commit_started_at));
+    let commit_ms = elapsed_ms_u32(commit_started_at);
+    sd_wait_ms = sd_wait_ms.saturating_add(commit_ms);
 
     let total_sd_wait_ms = sd_wait_ms.saturating_add(stats.sd_wait_ms);
     telemetry::record_upload_http_upload_phase(
         usize_to_u32_saturating(stats.sent_bytes),
         stats.body_read_ms,
+        stats.payload_copy_ms,
+        stats.sd_queue_ms,
+        stats.sd_task_wait_ms,
+        commit_ms,
+        stats.chunk_p50_ms,
+        stats.chunk_p95_ms,
+        stats.chunk_max_ms,
+        stats.chunk_samples,
+        stats.chunk_samples_dropped,
         total_sd_wait_ms,
         elapsed_ms_u32(request_started_at),
     );
-    log_upload_stats("upload", &stats, total_sd_wait_ms, request_started_at);
+    log_upload_stats("upload", &stats, total_sd_wait_ms, request_started_at, commit_ms);
 
     write_response(socket, b"201 Created", b"upload ok").await;
     Ok(())

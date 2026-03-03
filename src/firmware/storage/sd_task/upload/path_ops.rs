@@ -79,6 +79,34 @@ pub(super) async fn handle_remove(
     }
 }
 
+#[inline(never)]
+pub(super) async fn handle_stat(
+    path: [u8; SD_PATH_MAX],
+    path_len: u8,
+    session: &mut Option<SdUploadSession>,
+    sd_probe: &mut SdProbeDriver,
+    powered: &mut bool,
+    upload_mounted: &mut bool,
+) -> SdUploadResult {
+    if session.is_some() {
+        return upload_result(false, SdUploadResultCode::Busy, 0);
+    }
+
+    if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
+        return upload_result(false, code, 0);
+    }
+
+    let path_str = match parse_upload_path(&path, path_len) {
+        Ok(path) => path,
+        Err(code) => return upload_result(false, code, 0),
+    };
+
+    match fat::stat(sd_probe, path_str).await {
+        Ok(entry) => upload_result(true, SdUploadResultCode::Ok, entry.size),
+        Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+    }
+}
+
 pub(super) fn build_temp_upload_path(
     final_path: &[u8],
 ) -> Result<([u8; SD_UPLOAD_PATH_BUF_MAX], usize), SdUploadResultCode> {

@@ -115,7 +115,21 @@ pub(super) async fn handle_serial_command(
         }
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetListenerSet { enabled } => {
+            let previous_enabled = service_mode::upload_http_listener_enabled();
+            let seq_before = service_mode::upload_http_listener_set_seq();
             service_mode::set_upload_http_listener_enabled(enabled);
+            let seq_after = service_mode::upload_http_listener_set_seq();
+            if crate::firmware::telemetry::diag_enabled(crate::firmware::telemetry::DIAG_DOMAIN_NET)
+            {
+                esp_println::println!(
+                    "upload_http: listener_control cmd={} prev_enabled={} next_enabled={} seq_before={} seq_after={}",
+                    if enabled { "on" } else { "off" },
+                    previous_enabled,
+                    enabled,
+                    seq_before,
+                    seq_after,
+                );
+            }
             let response = if enabled {
                 b"NET OK op=listener_on\r\n".as_slice()
             } else {

@@ -8,25 +8,29 @@ if [[ -f "$HOME/export-esp.sh" ]]; then
     source "$HOME/export-esp.sh"
 fi
 
-feature_args=()
-if [[ -n "${CARGO_FEATURES:-}" ]]; then
-    feature_args+=(--features "$CARGO_FEATURES")
-fi
+run_cargo_build() {
+    local mode="$1"
+    local cmd=(cargo build)
 
-case "$1" in
-"" | "release")
-    if [[ ${#feature_args[@]} -gt 0 ]]; then
-        cargo build --release "${feature_args[@]}"
-    else
-        cargo build --release
+    if [[ "$mode" == "release" ]]; then
+        cmd+=(--release)
     fi
+    if [[ "${CARGO_NO_DEFAULT_FEATURES:-0}" == "1" ]]; then
+        cmd+=(--no-default-features)
+    fi
+    if [[ -n "${CARGO_FEATURES:-}" ]]; then
+        cmd+=(--features "$CARGO_FEATURES")
+    fi
+
+    "${cmd[@]}"
+}
+
+case "${1:-}" in
+"" | "release")
+    run_cargo_build "release"
     ;;
 "debug")
-    if [[ ${#feature_args[@]} -gt 0 ]]; then
-        cargo build "${feature_args[@]}"
-    else
-        cargo build
-    fi
+    run_cargo_build "debug"
     ;;
 *)
     echo "Wrong argument. Only \"debug\"/\"release\" arguments are supported"

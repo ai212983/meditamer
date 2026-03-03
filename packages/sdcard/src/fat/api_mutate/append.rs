@@ -61,7 +61,7 @@ pub async fn begin_append_session_create_or_open(
         }
         let mut record = found.record;
         if record.first_cluster >= 2 {
-            free_chain(sd, &volume, record.first_cluster).await?;
+            free_chain_for_record(sd, &volume, record.first_cluster, record.size).await?;
         }
         record.first_cluster = 0;
         record.size = 0;

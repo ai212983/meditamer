@@ -1,5 +1,5 @@
 use super::super::super::super::types::{SdProbeDriver, SdUploadRequest, SdUploadResult};
-use super::path_ops::{handle_mkdir, handle_remove};
+use super::path_ops::{handle_mkdir, handle_remove, handle_stat};
 use super::stream::{handle_abort, handle_begin, handle_chunk, handle_commit};
 use super::types::{
     split_upload_command, SdUploadSession, UploadCommandGroup, UploadPathCommand,
@@ -74,6 +74,9 @@ async fn process_upload_path_request(
         }
         UploadPathCommand::Remove { path, path_len } => {
             handle_remove(path, path_len, session, sd_probe, powered, upload_mounted).await
+        }
+        UploadPathCommand::Stat { path, path_len } => {
+            handle_stat(path, path_len, session, sd_probe, powered, upload_mounted).await
         }
     }
 }

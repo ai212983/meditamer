@@ -31,7 +31,7 @@ pub async fn truncate_file(
 
     if target_clusters == 0 {
         if first_cluster >= 2 {
-            free_chain(sd, &volume, first_cluster).await?;
+            free_chain_for_record(sd, &volume, first_cluster, found.record.size).await?;
         }
         first_cluster = 0;
     } else if old_clusters == 0 {
@@ -45,7 +45,8 @@ pub async fn truncate_file(
         let free_start = next_cluster(sd, &volume, keep_tail).await?;
         set_fat_entry(sd, &volume, keep_tail, FAT32_EOC_WRITE).await?;
         if let Some(start) = free_start {
-            free_chain(sd, &volume, start).await?;
+            free_chain_for_expected_clusters(sd, &volume, start, old_clusters - target_clusters)
+                .await?;
         }
     }
 

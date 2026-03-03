@@ -134,7 +134,7 @@ struct DirLookup {
 struct LfnState {
     expected_slots: u8,
     checksum: u8,
-    seen_mask: u8,
+    seen_mask: u32,
     utf16_parts: [[u16; 13]; MAX_LFN_SLOTS],
     lfn_locations: [DirLocation; MAX_LFN_SLOTS],
 }
@@ -151,7 +151,14 @@ impl LfnState {
     }
 
     fn clear(&mut self) {
-        *self = Self::new();
+        self.expected_slots = 0;
+        self.checksum = 0;
+        self.seen_mask = 0;
+        for part in &mut self.utf16_parts {
+            *part = [0xFFFF; 13];
+        }
+        for location in &mut self.lfn_locations {
+            *location = DirLocation::ZERO;
+        }
     }
 }
-

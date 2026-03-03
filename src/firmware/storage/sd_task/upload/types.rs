@@ -29,7 +29,7 @@ pub(super) enum UploadStreamCommand {
         expected_size: u32,
     },
     Chunk {
-        data_len: u16,
+        data_len: u32,
     },
     Commit,
     Abort,
@@ -41,6 +41,10 @@ pub(super) enum UploadPathCommand {
         path_len: u8,
     },
     Remove {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
+    Stat {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
@@ -67,6 +71,9 @@ pub(super) fn split_upload_command(command: SdUploadCommand) -> UploadCommandGro
         }
         SdUploadCommand::Remove { path, path_len } => {
             UploadCommandGroup::Path(UploadPathCommand::Remove { path, path_len })
+        }
+        SdUploadCommand::Stat { path, path_len } => {
+            UploadCommandGroup::Path(UploadPathCommand::Stat { path, path_len })
         }
     }
 }

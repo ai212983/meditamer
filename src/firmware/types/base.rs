@@ -12,9 +12,59 @@ pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const SD_UPLOAD_CHUNK_MAX_DEFAULT: usize = 49_152;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const SD_UPLOAD_CHUNK_MAX_MIN: usize = 4_096;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const SD_UPLOAD_CHUNK_MAX_MAX: usize = 65_536;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const fn parse_ascii_usize(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < b'0' || b > b'9' {
+            return None;
+        }
+        let digit = (b - b'0') as usize;
+        let multiplied = match out.checked_mul(10) {
+            Some(v) => v,
+            None => return None,
+        };
+        out = match multiplied.checked_add(digit) {
+            Some(v) => v,
+            None => return None,
+        };
+        i += 1;
+    }
+    Some(out)
+}
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const fn configured_sd_upload_chunk_max() -> usize {
+    let configured = match option_env!("MEDITAMER_SD_UPLOAD_CHUNK_MAX") {
+        Some(v) => Some(v),
+        None => option_env!("SD_UPLOAD_CHUNK_MAX"),
+    };
+    let parsed = match configured {
+        Some(v) => parse_ascii_usize(v),
+        None => None,
+    };
+    match parsed {
+        Some(bytes) if bytes >= SD_UPLOAD_CHUNK_MAX_MIN && bytes <= SD_UPLOAD_CHUNK_MAX_MAX => {
+            bytes
+        }
+        _ => SD_UPLOAD_CHUNK_MAX_DEFAULT,
+    }
+}
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 // Larger upload chunks reduce per-chunk SD roundtrip overhead and improve
 // sustained HTTP upload throughput when PSRAM is available.
-pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 49_152;
+// Override at build time via MEDITAMER_SD_UPLOAD_CHUNK_MAX (fallback SD_UPLOAD_CHUNK_MAX).
+pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = configured_sd_upload_chunk_max();
 #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 4096;
 #[cfg(not(feature = "asset-upload-http"))]

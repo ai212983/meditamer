@@ -68,7 +68,8 @@ fn parse_record(sector: &[u8; SD_SECTOR_SIZE], base: usize, lfn: &LfnState) -> D
         sector[base + 30],
         sector[base + 31],
     ]);
-    let (display_name, display_name_len, _) = build_display_name(lfn, &short_name);
+    let mut display_name = [0u8; FAT_NAME_MAX];
+    let (display_name_len, _) = build_display_name_into(lfn, &short_name, &mut display_name);
     DirRecord {
         short_name,
         display_name,
