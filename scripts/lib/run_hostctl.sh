@@ -10,10 +10,26 @@ load_repo_env_file_if_present() {
     env_path="$repo_root/$relative_path"
 
     if [[ -f "$env_path" ]]; then
+        # Preserve explicitly provided environment values so callers can override
+        # defaults from .env.local (for example per-stage log paths in gate scripts).
+        local names values name idx
+        names=()
+        values=()
+        while IFS= read -r name; do
+            if [[ -n "${!name+x}" ]]; then
+                names+=("$name")
+                values+=("${!name}")
+            fi
+        done < <(sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$env_path")
+
         # shellcheck source=/dev/null
         set -a
         source "$env_path"
         set +a
+
+        for idx in "${!names[@]}"; do
+            export "${names[$idx]}=${values[$idx]}"
+        done
     fi
 }
 
