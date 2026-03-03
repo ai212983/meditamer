@@ -58,6 +58,7 @@ static UPLOAD_HTTP_ACCEPT_LINK_RESETS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_REQUEST_ERRORS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_HEADER_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_READ_BODY_ERRORS: AtomicU32 = AtomicU32::new(0);
+static UPLOAD_HTTP_READ_BODY_RESETS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_SD_BUSY_ERRORS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_HEALTH_REQUESTS: AtomicU32 = AtomicU32::new(0);
 static UPLOAD_HTTP_UPLOAD_REQUESTS: AtomicU32 = AtomicU32::new(0);
@@ -213,6 +214,7 @@ pub(crate) struct Snapshot {
     pub(crate) upload_http_request_errors: u32,
     pub(crate) upload_http_header_timeouts: u32,
     pub(crate) upload_http_read_body_errors: u32,
+    pub(crate) upload_http_read_body_resets: u32,
     pub(crate) upload_http_sd_busy_errors: u32,
     pub(crate) upload_http_health_requests: u32,
     pub(crate) upload_http_upload_requests: u32,

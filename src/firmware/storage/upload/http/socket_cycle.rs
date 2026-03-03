@@ -78,6 +78,12 @@ async fn handle_connection_request(
     if let Err(err) = connection::handle_connection(socket, chunk_buf, header_buf).await {
         telemetry::record_upload_http_request_error();
         telemetry::record_upload_http_request_bucket(err);
+        if matches!(err, "read body" | "incomplete body") {
+            // Force-close transport immediately after upload-body read failures so
+            // the listener can accept the next connection without waiting for
+            // graceful close semantics on a half-closed peer socket.
+            socket.abort();
+        }
         log_http_mem_diag("request_err");
         if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
             esp_println::println!(

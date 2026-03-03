@@ -68,6 +68,7 @@ pub(crate) fn snapshot() -> Snapshot {
         upload_http_request_errors: UPLOAD_HTTP_REQUEST_ERRORS.load(Ordering::Relaxed),
         upload_http_header_timeouts: UPLOAD_HTTP_HEADER_TIMEOUTS.load(Ordering::Relaxed),
         upload_http_read_body_errors: UPLOAD_HTTP_READ_BODY_ERRORS.load(Ordering::Relaxed),
+        upload_http_read_body_resets: UPLOAD_HTTP_READ_BODY_RESETS.load(Ordering::Relaxed),
         upload_http_sd_busy_errors: UPLOAD_HTTP_SD_BUSY_ERRORS.load(Ordering::Relaxed),
         upload_http_health_requests: UPLOAD_HTTP_HEALTH_REQUESTS.load(Ordering::Relaxed),
         upload_http_upload_requests: UPLOAD_HTTP_UPLOAD_REQUESTS.load(Ordering::Relaxed),

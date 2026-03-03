@@ -22,6 +22,12 @@ pub(crate) fn record_upload_http_request_error() {
     defmt::warn!("telemetry upload_http_request_error");
 }
 
+pub(crate) fn record_upload_http_read_body_reset() {
+    UPLOAD_HTTP_READ_BODY_RESETS.fetch_add(1, Ordering::Relaxed);
+    #[cfg(feature = "telemetry-defmt")]
+    defmt::warn!("telemetry upload_http_read_body_reset");
+}
+
 pub(crate) fn record_upload_http_request_bucket(error: &'static str) {
     match error {
         "request header timeout" => {

@@ -1,7 +1,7 @@
 use core::cmp::min;
 
 use embassy_net::tcp::{Error as TcpError, TcpSocket};
-use embassy_time::Instant;
+use embassy_time::{with_timeout, Duration, Instant};
 use esp_println::println;
 
 use super::super::super::sd_bridge::{
@@ -49,6 +49,7 @@ struct InflightChunk {
 
 const CHUNK_LATENCY_SAMPLE_CAP: usize = 32;
 const UPLOAD_CHUNK_PIPELINE_ENABLED: bool = cfg!(feature = "asset-upload-http-pipeline");
+const UPLOAD_ABORT_RECOVERY_TIMEOUT_MS: u64 = 1_500;
 
 struct ChunkLatencySamples {
     values: [u16; CHUNK_LATENCY_SAMPLE_CAP],
@@ -73,22 +74,31 @@ pub(super) async fn forward_upload_body_or_http_error(
             pending,
             want,
         }) => {
+            let reset = matches!(err, TcpError::ConnectionReset);
+            if reset {
+                telemetry::record_upload_http_read_body_reset();
+            }
             log_upload_body_read_error(socket, err, consumed, content_length, pending, want);
             if abort_on_error {
-                abort_upload_roundtrip().await;
+                abort_upload_roundtrip_bounded(if reset {
+                    "read_body_reset"
+                } else {
+                    "read_body"
+                })
+                .await;
             }
             Err("read body")
         }
         Err(UploadBodyError::IncompleteBody) => {
             if abort_on_error {
-                abort_upload_roundtrip().await;
+                abort_upload_roundtrip_bounded("incomplete_body").await;
             }
             write_response(socket, b"400 Bad Request", b"incomplete body").await;
             Err("incomplete body")
         }
         Err(UploadBodyError::Roundtrip(err)) => {
             if abort_on_error {
-                abort_upload_roundtrip().await;
+                abort_upload_roundtrip_bounded("roundtrip_err").await;
             }
             write_roundtrip_error_response(socket, err).await;
             Err(roundtrip_error_log(err))
@@ -419,6 +429,25 @@ fn log_upload_body_read_error(
     }
 }
 
-async fn abort_upload_roundtrip() {
-    let _ = sd_upload_roundtrip(SdUploadCommand::Abort).await;
+async fn abort_upload_roundtrip_bounded(reason: &str) {
+    let abort_result = with_timeout(
+        Duration::from_millis(UPLOAD_ABORT_RECOVERY_TIMEOUT_MS),
+        sd_upload_roundtrip(SdUploadCommand::Abort),
+    )
+    .await;
+    if let Ok(Err(err)) = abort_result {
+        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+            println!(
+                "upload_http: abort recovery err={} reason={}",
+                roundtrip_error_log(err),
+                reason
+            );
+        }
+    }
+    if abort_result.is_err() && telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        println!(
+            "upload_http: abort recovery timeout reason={} timeout_ms={}",
+            reason, UPLOAD_ABORT_RECOVERY_TIMEOUT_MS
+        );
+    }
 }
