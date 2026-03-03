@@ -7,9 +7,9 @@ use super::types::{
     TouchWizardSwipeTraceSample,
 };
 
-pub(crate) const TOUCH_TRACE_ENABLED: bool = true;
-pub(crate) const TOUCH_EVENT_TRACE_ENABLED: bool = true;
-pub(crate) const TOUCH_WIZARD_TRACE_ENABLED: bool = true;
+pub(crate) const TOUCH_TRACE_ENABLED: bool = false;
+pub(crate) const TOUCH_EVENT_TRACE_ENABLED: bool = false;
+pub(crate) const TOUCH_WIZARD_TRACE_ENABLED: bool = false;
 pub(crate) const TOUCH_CALIBRATION_WIZARD_ENABLED: bool = true;
 // Keep touch polling at 8 ms so gesture starts are not missed between idle ticks.
 // With the current controller behavior (frequent interleaved zero frames), 16 ms
@@ -27,19 +27,30 @@ pub(crate) const TOUCH_MAX_CATCHUP_SAMPLES: u8 = 8;
 pub(crate) const TOUCH_IMU_QUIET_WINDOW_MS: u64 = 120;
 pub(crate) const TOUCH_WIZARD_TRACE_CAPTURE_TAIL_MS: u64 = 240;
 
-pub(crate) static TOUCH_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchTraceSample, 8> =
-    Channel::new();
-pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TouchEvent, 16> =
-    Channel::new();
+const TOUCH_TRACE_SAMPLES_CAP: usize = if TOUCH_TRACE_ENABLED { 8 } else { 1 };
+const TOUCH_EVENT_TRACE_SAMPLES_CAP: usize = if TOUCH_EVENT_TRACE_ENABLED { 16 } else { 1 };
+const TOUCH_WIZARD_SWIPE_TRACE_SAMPLES_CAP: usize = if TOUCH_WIZARD_TRACE_ENABLED { 16 } else { 1 };
+const TOUCH_WIZARD_RAW_TRACE_SAMPLES_CAP: usize = if TOUCH_WIZARD_TRACE_ENABLED { 64 } else { 1 };
+
+pub(crate) static TOUCH_TRACE_SAMPLES: Channel<
+    CriticalSectionRawMutex,
+    TouchTraceSample,
+    TOUCH_TRACE_SAMPLES_CAP,
+> = Channel::new();
+pub(crate) static TOUCH_EVENT_TRACE_SAMPLES: Channel<
+    CriticalSectionRawMutex,
+    TouchEvent,
+    TOUCH_EVENT_TRACE_SAMPLES_CAP,
+> = Channel::new();
 pub(crate) static TOUCH_WIZARD_SWIPE_TRACE_SAMPLES: Channel<
     CriticalSectionRawMutex,
     TouchWizardSwipeTraceSample,
-    16,
+    TOUCH_WIZARD_SWIPE_TRACE_SAMPLES_CAP,
 > = Channel::new();
 pub(crate) static TOUCH_WIZARD_RAW_TRACE_SAMPLES: Channel<
     CriticalSectionRawMutex,
     TouchTraceSample,
-    64,
+    TOUCH_WIZARD_RAW_TRACE_SAMPLES_CAP,
 > = Channel::new();
 pub(crate) static TOUCH_WIZARD_SESSION_EVENTS: Channel<
     CriticalSectionRawMutex,
