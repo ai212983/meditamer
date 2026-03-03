@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` re-validated by 3x bounded soak runs after transport-reset hardening; next focus is throughput variance reduction)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; next focus is `36 MHz` tail-latency root-cause reduction)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -185,6 +185,8 @@ Rollback:
 15. [x] Re-run default `65_536` regression gate (with soak=10) three times and confirm all stages pass with no panic/reboot markers (`logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611`, `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943`, `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315`).
 16. [x] Add host acceptance guardrail step `assert_upload_metrics` to fail if `METRICS UPLOAD req_read_body_reset` increases beyond configured delta (`HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA`, default `0`).
 17. [x] Mark `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` as stable for bounded soak gate and move to variance-reduction A/B planning.
+18. [x] Run SD SPI variance A/B (`MEDITAMER_SD_SPI_DATA_MHZ=36` vs `40`) with full regression gate + soak and compare request-timing spread (`logs/wifi_regression_gate_sdspi36b_20260303_151750`, `logs/wifi_regression_gate_sdspi40_20260303_152151`).
+19. [x] Fix host panic classification false-positive on upload metrics lines containing `_abort` (`2b2a3b3`).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -368,3 +370,39 @@ Rollback:
     - stage pass/fail and panic/reboot markers
     - upload request timing spread (`req_ms` / `sd_ms` / `read_wait_ms` from `upload_http: upload stats`)
     - throughput drift across repeated runs.
+
+## 11.9 2026-03-03 SD SPI Variance A/B (`36` vs `40` MHz)
+
+- Run artifacts:
+  - `36 MHz`: `logs/wifi_regression_gate_sdspi36b_20260303_151750`
+  - `40 MHz`: `logs/wifi_regression_gate_sdspi40_20260303_152151`
+
+- Gate result:
+  - both runs passed: `discovery_debug`, `acceptance_1_cycle`,
+    `acceptance_3_cycle`, `acceptance_soak`
+  - discovery invariants remained intact in both runs.
+
+- Decomposition comparison from `upload_http: upload stats`:
+  - `36 MHz` soak (`n=10`):
+    - `req_ms avg=3162.2`, range `3100..3248`
+    - `sd_ms avg=2864.3`, range `2808..2962`
+    - `read_wait_ms avg=2475.9`, range `2418..2573`
+  - `40 MHz` soak (`n=10`):
+    - `req_ms avg=3377.2`, range `3106..4816`
+    - `sd_ms avg=3037.9`, range `2789..4419`
+    - `read_wait_ms avg=2694.0`, range `2417..4127`
+
+- Decision:
+  - keep SD SPI data clock default at `36 MHz`.
+  - do not promote `40 MHz`; it increases timing spread and exhibits
+    significantly worse upper-tail latency in this bounded soak pass.
+
+## 11.10 Next Step (Specific)
+
+- Focused tail-latency root-cause at stable baseline (`36 MHz`):
+  - run three repeated regression-gate passes at `36 MHz` with soak enabled,
+    then correlate any `req_ms > 3400` spikes with same-request `sd_ms`,
+    `read_wait_ms`, and `chunk_max_ms` from `upload_http: upload stats`.
+  - If spikes align with SD-side latency (`sd_ms`/`chunk_max_ms`), target SD
+    write burst path diagnostics next; if spikes align with `read_wait_ms`,
+    target Wi-Fi/TCP ingress timing path next.

@@ -557,12 +557,69 @@ Decision impact:
 
 - promote `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` from risk-accepted default to stable-for-bounded-soak default under current mitigation set.
 
-## Next variance-reduction A/B target
+## 2026-03-03: SD SPI variance A/B (`36` vs `40` MHz)
 
-Use existing build-time SD SPI clock override (no new codepath) and compare:
+Validation shape (same gate for both variants):
 
-- A: `MEDITAMER_SD_SPI_DATA_MHZ=36` (current default)
-- B: `MEDITAMER_SD_SPI_DATA_MHZ=40`
+```bash
+# A: 36 MHz (default)
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
 
-Run the same regression gate shape with soak enabled for each variant and compare
-timing spread (`req_ms`, `sd_ms`, `read_wait_ms`) plus throughput drift across repeated runs.
+HOSTCTL_NET_SOAK_CYCLES=10 \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_sdspi36b_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+
+# B: 40 MHz
+MEDITAMER_SD_SPI_DATA_MHZ=40 \
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_SOAK_CYCLES=10 \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_sdspi40_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifacts:
+
+- `36 MHz`: `logs/wifi_regression_gate_sdspi36b_20260303_151750`
+- `40 MHz`: `logs/wifi_regression_gate_sdspi40_20260303_152151`
+
+Gate status:
+
+- both runs passed all stages (`discovery_debug`, `acceptance_1_cycle`,
+  `acceptance_3_cycle`, `acceptance_soak`)
+- discovery invariants remained stable in both runs.
+
+Soak decomposition comparison (`upload_http: upload stats`, `n=10`):
+
+- `36 MHz`:
+  - `req_ms avg=3162.2`, range `3100..3248`
+  - `sd_ms avg=2864.3`, range `2808..2962`
+  - `read_wait_ms avg=2475.9`, range `2418..2573`
+- `40 MHz`:
+  - `req_ms avg=3377.2`, range `3106..4816`
+  - `sd_ms avg=3037.9`, range `2789..4419`
+  - `read_wait_ms avg=2694.0`, range `2417..4127`
+
+Decision:
+
+- keep `36 MHz` as SD SPI data-clock default.
+- do not promote `40 MHz`; it introduces a materially wider upper tail in soak.
+
+Tooling note from this pass:
+
+- `2b2a3b3`: `fix(tooling): avoid abort metric false-positives in panic detection`
+  - root cause: panic detector matched telemetry key `sess_timeout_abort=...`
+    as panic due to broad `abort` substring check.
+  - fix: narrow abort matching to real abort signatures (`abort()`, `aborted`,
+    `abort was called`).
+
+## Next step
+
+Run repeated `36 MHz` soak passes and target outlier root-cause:
+
+- execute three full regression-gate reruns at `36 MHz`;
+- flag high-latency uploads (`req_ms > 3400`) and correlate with same-request
+  `sd_ms`, `read_wait_ms`, and `chunk_max_ms` fields to select the next
+  code-path intervention (SD-path vs network ingress path).

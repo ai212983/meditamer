@@ -124,6 +124,8 @@ Pipeline A/B regression gate runs (`off` vs `on`) both passed discovery and acce
 - `logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
 - `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
 - `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
+- `logs/wifi_regression_gate_sdspi36b_20260303_151750/report.json` (`MEDITAMER_SD_SPI_DATA_MHZ=36`, full gate + soak passed)
+- `logs/wifi_regression_gate_sdspi40_20260303_152151/report.json` (`MEDITAMER_SD_SPI_DATA_MHZ=40`, full gate + soak passed)
 
 Observed discovery outcome in all listed runs:
 
@@ -135,3 +137,4 @@ Conclusion:
 
 - Enabling upload chunk pipeline by default did not reintroduce the zero-discovery regression signature in this validation pass.
 - Three additional post-hardening reruns (`connresetfix_r1..r3`) also preserved the same discovery invariants with full soak-stage passes.
+- SD-SPI variance A/B reruns (`36` vs `40`) likewise preserved discovery invariants while throughput-tail behavior diverged.
