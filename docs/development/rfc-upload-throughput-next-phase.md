@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default switched to `65_536` via risk acceptance; monitor transport-reset reliability)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` re-validated by 3x bounded soak runs after transport-reset hardening; next focus is throughput variance reduction)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -181,6 +181,10 @@ Rollback:
 11. [x] Add stack-headroom diagnostics around upload begin/route + SD begin and capture panic-focused evidence (`feat(telemetry): add stack headroom probes for upload panic triage`).
 12. [x] Reduce default touch trace pressure to recover stack headroom and rerun `65_536` bounded soak (`fix(touch): reduce trace channel buffers to reclaim stack headroom` + pass at `logs/wifi_regression_gate_65536_postfix_20260303_141406`).
 13. [x] Waive extended soak (24h profile) and proceed with default switch at `SD_UPLOAD_CHUNK_MAX=65_536` (owner risk acceptance, 2026-03-03).
+14. [x] Harden upload read-body reset recovery (`54e952f`) with immediate socket abort + `req_read_body_reset` telemetry counter.
+15. [x] Re-run default `65_536` regression gate (with soak=10) three times and confirm all stages pass with no panic/reboot markers (`logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611`, `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943`, `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315`).
+16. [x] Add host acceptance guardrail step `assert_upload_metrics` to fail if `METRICS UPLOAD req_read_body_reset` increases beyond configured delta (`HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA`, default `0`).
+17. [x] Mark `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` as stable for bounded soak gate and move to variance-reduction A/B planning.
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -328,3 +332,39 @@ Rollback:
 
 - Operational note:
   - keep `MEDITAMER_SD_UPLOAD_CHUNK_MAX` override available for quick rollback to `49_152` if field behavior regresses.
+
+## 11.7 2026-03-03 Transport-Reset Hardening + 3x Regression Gate
+
+- Hardening commit:
+  - `54e952f` (`fix(upload): harden read-body reset recovery and add reset metrics`)
+  - runtime behavior changes:
+    - immediate socket abort on `read body` / `incomplete body` request paths.
+    - bounded read-body abort wait (`1.5s`) before recovery return.
+    - new upload metric counter: `req_read_body_reset`.
+
+- Re-validation runs (default feature set, `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536`, soak=10):
+  - `logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611`
+  - `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943`
+  - `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315`
+
+- Result:
+  - all three runs: `final_status=passed`
+  - all stages passed in each run: `discovery_debug`, `acceptance_1_cycle`,
+    `acceptance_3_cycle`, `acceptance_soak`
+  - panic/reboot markers: none (`panic_detected=false`, `unexpected_reboot_detected=false`)
+  - no `ConnectionReset` / `request err=read body` / `body read err` signature matches
+    in stage logs.
+
+## 11.8 Phase Handoff: Throughput Variance Reduction
+
+- Completion decision:
+  - treat default `65_536` upload chunking as stable for the bounded soak gate under the current hardening set.
+
+- Next A/B step (specific, codebase-aligned):
+  - run a bounded variance A/B sweep of SD SPI data clock while keeping pipeline/default chunking unchanged:
+    - A: default (`MEDITAMER_SD_SPI_DATA_MHZ=36`)
+    - B: variant (`MEDITAMER_SD_SPI_DATA_MHZ=40`)
+  - execute `scripts/tests/hw/test_wifi_regression_gate.sh` with soak enabled for both variants and compare:
+    - stage pass/fail and panic/reboot markers
+    - upload request timing spread (`req_ms` / `sd_ms` / `read_wait_ms` from `upload_http: upload stats`)
+    - throughput drift across repeated runs.

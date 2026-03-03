@@ -121,6 +121,9 @@ Pipeline A/B regression gate runs (`off` vs `on`) both passed discovery and acce
 - `logs/wifi_regression_gate_chunk_ab_65536_20260303_124328/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`)
 - `logs/wifi_regression_gate_chunk_ab_65536_soak10_clean_20260303_130052/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`, soak stage failed with runtime panic)
 - `logs/wifi_regression_gate_65536_postfix_20260303_141406/report.json` (`SD_UPLOAD_CHUNK_MAX=65_536`, post-mitigation soak stage passed)
+- `logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
+- `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
+- `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315/report.json` (post transport-reset hardening, default `65_536`, soak stage passed)
 
 Observed discovery outcome in all listed runs:
 
@@ -131,3 +134,4 @@ Observed discovery outcome in all listed runs:
 Conclusion:
 
 - Enabling upload chunk pipeline by default did not reintroduce the zero-discovery regression signature in this validation pass.
+- Three additional post-hardening reruns (`connresetfix_r1..r3`) also preserved the same discovery invariants with full soak-stage passes.

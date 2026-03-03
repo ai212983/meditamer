@@ -523,3 +523,46 @@ Rollback path:
 - override firmware chunk size at build time with:
   - `MEDITAMER_SD_UPLOAD_CHUNK_MAX=49152`
   - (fallback env key: `SD_UPLOAD_CHUNK_MAX`)
+
+## 2026-03-03: transport-reset hardening + 3x default regression reruns
+
+Hardening commit:
+
+- `54e952f`: `fix(upload): harden read-body reset recovery and add reset metrics`
+
+Behavioral changes:
+
+- immediate socket abort on upload `read body` / `incomplete body` request errors.
+- bounded abort wait around read-body reset path (`1.5s`).
+- new upload metrics key: `req_read_body_reset`.
+
+Re-validation artifacts (default build, default chunking `65_536`, soak=10):
+
+- `logs/wifi_regression_gate_default65536_connresetfix_r1_20260303_144611`
+- `logs/wifi_regression_gate_default65536_connresetfix_r2_20260303_144943`
+- `logs/wifi_regression_gate_default65536_connresetfix_r3_20260303_145315`
+
+Results:
+
+- all three runs: `final_status=passed`.
+- all three runs passed every stage:
+  - `discovery_debug`
+  - `acceptance_1_cycle`
+  - `acceptance_3_cycle`
+  - `acceptance_soak`
+- panic/reboot flags stayed false in all reports.
+- no `ConnectionReset`, `request err=read body`, or `body read err` signature matches in stage logs.
+
+Decision impact:
+
+- promote `SD_UPLOAD_CHUNK_MAX_DEFAULT=65_536` from risk-accepted default to stable-for-bounded-soak default under current mitigation set.
+
+## Next variance-reduction A/B target
+
+Use existing build-time SD SPI clock override (no new codepath) and compare:
+
+- A: `MEDITAMER_SD_SPI_DATA_MHZ=36` (current default)
+- B: `MEDITAMER_SD_SPI_DATA_MHZ=40`
+
+Run the same regression gate shape with soak enabled for each variant and compare
+timing spread (`req_ms`, `sd_ms`, `read_wait_ms`) plus throughput drift across repeated runs.

@@ -442,7 +442,7 @@ Response lines:
 ```text
 METRICS MARBLE_REDRAW_MS=<n> MAX_MS=<n>
 METRICS WIFI attempt=<n> success=<n> failure=<n> no_ap=<n> scan_runs=<n> scan_empty=<n> scan_hits=<n>
-METRICS UPLOAD accept_ok=<n> accept_err=<n> request_err=<n> req_hdr_to=<n> req_read_body=<n> req_sd_busy=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n> sess_timeout_abort=<n> sess_mode_off_abort=<n>
+METRICS UPLOAD accept_ok=<n> accept_err=<n> request_err=<n> req_hdr_to=<n> req_read_body=<n> req_read_body_reset=<n> req_sd_busy=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n> sess_timeout_abort=<n> sess_mode_off_abort=<n>
 METRICS UPLOAD_PHASE req=<n> bytes=<n> body_ms=<n> body_max=<n> sd_ms=<n> sd_max=<n> req_ms=<n> req_max=<n>
 METRICS UPLOAD_DECOMP copy_ms=<n> copy_max=<n> sdq_ms=<n> sdq_max=<n> sdtask_ms=<n> sdtask_max=<n> commit_ms=<n> commit_max=<n> chunk_p50_max=<n> chunk_p95_max=<n> chunk_max=<n> chunk_samples=<n> chunk_drop=<n>
 METRICS UPLOAD_RTT begin_n=<n> begin_ms=<n> begin_max=<n> chunk_n=<n> chunk_ms=<n> chunk_max=<n> commit_n=<n> commit_ms=<n> commit_max=<n> abort_n=<n> abort_ms=<n> abort_max=<n> mkdir_n=<n> mkdir_ms=<n> mkdir_max=<n> rm_n=<n> rm_ms=<n> rm_max=<n>
@@ -702,6 +702,7 @@ Optional regression-gate env vars:
 - `HOSTCTL_NET_PANIC_CONTEXT_LINES` (`80` default)
 - `HOSTCTL_NET_PANIC_EXCERPT_PATH` (optional override path)
 - `HOSTCTL_NET_REGRESSION_REPORT_PATH` (optional override path)
+- `HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA` (`0` default; fail run if `METRICS UPLOAD req_read_body_reset` increases more than this delta)
 
 Wi-Fi workflow guardrail env vars:
 
