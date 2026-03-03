@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size A/B complete; soak follow-up open)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size A/B complete; panic mitigation landed; extended soak confirmation pending)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -178,6 +178,9 @@ Rollback:
 8. [x] Re-run regression gate with pipeline enabled in default feature set (`logs/wifi_regression_gate_default_confirm_20260303_121014`).
 9. [x] Run next A/B: make upload chunk size build-tunable, then compare `SD_UPLOAD_CHUNK_MAX=49_152` vs `65_536` under the same regression gate (2026-03-03 chunk-size A/B run).
 10. [x] Run bounded soak at `SD_UPLOAD_CHUNK_MAX=65_536` before default switch (2026-03-03: failed due runtime panic in acceptance soak).
+11. [x] Add stack-headroom diagnostics around upload begin/route + SD begin and capture panic-focused evidence (`feat(telemetry): add stack headroom probes for upload panic triage`).
+12. [x] Reduce default touch trace pressure to recover stack headroom and rerun `65_536` bounded soak (`fix(touch): reduce trace channel buffers to reclaim stack headroom` + pass at `logs/wifi_regression_gate_65536_postfix_20260303_141406`).
+13. [ ] Run extended soak (24h profile) at `SD_UPLOAD_CHUNK_MAX=65_536` before default switch.
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -290,4 +293,26 @@ Rollback:
 
 - Decision:
   - keep default `SD_UPLOAD_CHUNK_MAX=49_152` for now.
-  - treat `65_536` as experimental override only until panic root cause is fixed and soak passes.
+  - treat `65_536` as experimental override until panic mitigation evidence is repeated in extended soak.
+
+## 11.5 2026-03-03 Panic-Focused Mitigation + `65_536` Re-Validation
+
+- Mitigation commits:
+  - `dd9eaf7` (`feat(telemetry): add stack headroom probes for upload panic triage`)
+  - `912fb02` (`fix(touch): reduce trace channel buffers to reclaim stack headroom`)
+
+- Regression gate rerun (`SD_UPLOAD_CHUNK_MAX=65_536`, soak=10):
+  - output: `logs/wifi_regression_gate_65536_postfix_20260303_141406`
+  - result: passed (`discovery_debug`, acceptance 1-cycle, acceptance 3-cycle, acceptance soak)
+  - panic markers: none (`panic_detected=false`)
+
+- Stack evidence from the pass run:
+  - `stack_diag: tag=sd_upload_begin_entry ... headroom=11160 ... total=43492`
+  - `stack_diag: tag=http_upload_route_entry ... headroom=36024 ... total=43492`
+  - observed minimum headroom in this run: `11160` bytes.
+
+- Additional observation:
+  - a separate instrumentation run (`logs/wifi_regression_gate_stackdiag_postfix_20260303_140801`) failed soak on a transport-level body read reset (`ConnectionReset`) without panic/reboot signatures.
+
+- Next decision gate:
+  - keep default chunk size at `49_152` until extended soak repeats panic-free behavior at `65_536`.

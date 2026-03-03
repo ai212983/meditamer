@@ -452,3 +452,52 @@ Decision impact:
 
 - keep default upload chunk size at `49_152` for now.
 - keep `65_536` as opt-in override until soak is stable.
+
+## 2026-03-03: panic-focused mitigation and `65_536` soak rerun
+
+Mitigation commits:
+
+- `dd9eaf7`: `feat(telemetry): add stack headroom probes for upload panic triage`
+- `912fb02`: `fix(touch): reduce trace channel buffers to reclaim stack headroom`
+
+Validation shape:
+
+```bash
+MEDITAMER_SD_UPLOAD_CHUNK_MAX=65536 \
+ESPFLASH_PORT=/dev/cu.usbserial-510 \
+scripts/device/flash.sh debug
+
+HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
+HOSTCTL_NET_BAUD=115200 \
+HOSTCTL_NET_POLICY_PATH=tools/hostctl/scenarios/wifi-policy.default.json \
+HOSTCTL_NET_SOAK_CYCLES=10 \
+HOSTCTL_NET_REGRESSION_OUTPUT_DIR=logs/wifi_regression_gate_65536_postfix_<timestamp> \
+scripts/tests/hw/test_wifi_regression_gate.sh
+```
+
+Artifacts:
+
+- pass run: `logs/wifi_regression_gate_65536_postfix_20260303_141406`
+- non-panic transport failure run: `logs/wifi_regression_gate_stackdiag_postfix_20260303_140801`
+
+`65_536` rerun result:
+
+- discovery debug: passed
+- acceptance 1-cycle: passed
+- acceptance 3-cycle: passed
+- acceptance soak (10 cycles): passed
+- panic markers: none
+
+Stack headroom evidence (`stack_diag`, pass run):
+
+- `http_upload_route_entry`: `headroom=36024`, `total=43492`
+- `sd_upload_begin_entry`: `headroom=11160`, `total=43492` (minimum observed)
+
+Additional note:
+
+- One intermediate instrumentation run failed with upload body read `ConnectionReset` and subsequent health-check timeout, while `NET_STATUS` stayed `Ready` and no panic/reboot markers were emitted.
+
+Decision impact:
+
+- panic signature (`stack guard write`) did not reproduce in the post-mitigation `65_536` soak rerun.
+- keep default chunk size at `49_152` until extended soak repeats this result.
