@@ -129,6 +129,9 @@ Pipeline A/B regression gate runs (`off` vs `on`) both passed discovery and acce
 - `logs/wifi_regression_gate_sdspi36_appenddiag_r1b_20260303_163755/report.json` (`36 MHz`, append-path diagnostics enabled, full gate + soak passed)
 - `logs/wifi_regression_gate_sdspi36_appenddiag_r2_20260303_164229/report.json` (`36 MHz`, append-path diagnostics enabled, full gate + soak passed)
 - `logs/wifi_regression_gate_sdspi36_appenddiag_r3_20260303_164631/report.json` (`36 MHz`, append-path diagnostics enabled, full gate + soak passed)
+- `logs/wifi_regression_gate_sdspi36_queuebridge_r1_20260303_170129/report.json` (`36 MHz`, queue-boundary diagnostics enabled, full gate + soak passed)
+- `logs/wifi_regression_gate_sdspi36_queuebridge_r2b_20260303_170808/report.json` (`36 MHz`, queue-boundary diagnostics enabled, full gate + soak passed)
+- `logs/wifi_regression_gate_sdspi36_queuebridge_r3_20260303_171241/report.json` (`36 MHz`, queue-boundary diagnostics enabled, full gate + soak passed)
 
 Observed discovery outcome in all listed runs:
 

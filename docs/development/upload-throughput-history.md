@@ -686,12 +686,58 @@ Correlation summary:
   - residual wait outside append remains material (`sd_task_ms/chunk -
     chunk_append_ms_avg` roughly `150..191 ms` in these runs).
 
+## 2026-03-03: queue-boundary diagnostics + 3x soak correlation
+
+Instrumentation commit:
+
+- `e85f2a7`: `feat(upload): add chunk queue-boundary residual diagnostics`
+- key additions:
+  - `SdUploadRequest.enqueued_at_ms`
+  - per-chunk response timings: `chunk_queue_wait_ms`, `chunk_handler_ms`
+  - `upload_http: upload stats` fields:
+    - `sd_task_queue_wait_ms`
+    - `sd_task_handler_ms`
+    - `sd_task_residual_ms`
+  - `sd_upload: write_metrics` fields:
+    - `chunk_queue_wait_ms_*`
+    - `chunk_non_append_ms_*`
+    - `chunk_residual_ms_*`
+
+Runs:
+
+- selected:
+  - `logs/wifi_regression_gate_sdspi36_queuebridge_r1_20260303_170129`
+  - `logs/wifi_regression_gate_sdspi36_queuebridge_r2b_20260303_170808`
+  - `logs/wifi_regression_gate_sdspi36_queuebridge_r3_20260303_171241`
+- excluded:
+  - `logs/wifi_regression_gate_sdspi36_queuebridge_r2_20260303_170602`
+    (`acceptance_1_cycle` failed with `net_wait_ready: listener timeout`)
+
+Selected-set summary (`n=30` uploads):
+
+- `req_ms avg=3060.8`, range `2933..3752`, `req_ms > 3400`: `1/30`
+- `chunk_max_ms avg=364.7`, range `318..666`, `chunk_max_ms > 400`: `6/30`
+- `chunk_append_ms_avg` stayed stable at `126.2 ms`
+- queue/handler/residual decomposition (`upload_http: upload stats`):
+  - `sd_task_queue_wait_ms avg=47.0`
+  - `sd_task_handler_ms avg=1017.6`
+  - `sd_task_residual_ms avg=1239.0`
+- high-tail sample:
+  - `chunk_max_ms=666` with `sd_task_handler_ms=1027`,
+    `sd_task_residual_ms=1845`
+
+Interpretation:
+
+- queue wait is present but not dominant.
+- handler time is stable and consistent with FAT append timings.
+- the dominant unexplained component is post-handler residual wait
+  (`sd_task_residual_ms`).
+
 ## Next step
 
-Shift root-cause work to SD bridge/task-queue residual timing:
+Shift root-cause work to post-handler residual split:
 
-- instrument queue-to-handler start latency and handler-to-response latency for
-  `SdUploadCommand::Chunk`.
-- preserve append diagnostics and correlate residual wait fields with high
-  `chunk_max_ms` uploads (`>400 ms`).
-- rerun bounded 3x `36 MHz` soak after queue-boundary instrumentation.
+- instrument SD task chunk completion-to-publish timing and SD bridge
+  publish-to-receive timing to split `sd_task_residual_ms` into concrete legs.
+- correlate those subcomponents with `chunk_max_ms > 400` uploads.
+- rerun bounded 3x `36 MHz` soak with the split-residual instrumentation.

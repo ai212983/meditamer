@@ -1,6 +1,6 @@
 # RFC: Upload Throughput Next Phase (Pipeline + Latency Decomposition)
 
-- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; CMD25 + FAT append diagnostics completed; next focus is SD bridge/task-queue residual chunk-latency root cause)
+- Status: In Progress (Phases A-B complete; Phase C deferred; chunk-size default `65_536` stable under current bounded soak gate; SD SPI variance A/B complete with `36 MHz` retained; CMD25 + FAT append + queue-boundary diagnostics completed; next focus is post-handler chunk residual path root cause)
 - Owner: Firmware/Host Tooling
 - Date: 2026-03-01
 - Last Updated: 2026-03-03
@@ -191,6 +191,8 @@ Rollback:
 21. [x] Run 3x `36 MHz` bounded soak regression gates with burst diagnostics and correlate request timing with CMD25 wait metrics (`logs/wifi_regression_gate_sdspi36_burstdiag_r1_20260303_161323`, `logs/wifi_regression_gate_sdspi36_burstdiag_r2_20260303_161645`, `logs/wifi_regression_gate_sdspi36_burstdiag_r3b_20260303_162537`).
 22. [x] Add per-chunk FAT append timing diagnostics (`ensure_capacity_ms`, `write_data_ms`, chunk boundary totals) to upload write metrics (`64f6da6`).
 23. [x] Run 3x `36 MHz` bounded soak regression gates with append diagnostics and correlate high `chunk_max_ms` against append-path timing fields (`logs/wifi_regression_gate_sdspi36_appenddiag_r1b_20260303_163755`, `logs/wifi_regression_gate_sdspi36_appenddiag_r2_20260303_164229`, `logs/wifi_regression_gate_sdspi36_appenddiag_r3_20260303_164631`).
+24. [x] Add queue-boundary chunk timing diagnostics (`enqueued_at_ms`, chunk queue-wait/handler timing in response, `sd_task_*` decomposition in HTTP upload stats) (`e85f2a7`).
+25. [x] Run 3x `36 MHz` bounded soak regression gates with queue-boundary diagnostics and correlate high `chunk_max_ms` against queue/handler/residual fields (`logs/wifi_regression_gate_sdspi36_queuebridge_r1_20260303_170129`, `logs/wifi_regression_gate_sdspi36_queuebridge_r2b_20260303_170808`, `logs/wifi_regression_gate_sdspi36_queuebridge_r3_20260303_171241`).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -460,12 +462,50 @@ Rollback:
   - conclusion: current upper-tail `chunk_max_ms` spread is not dominated by
     `fat::append_session_write` execution time.
 
-## 11.12 Next Step (Specific)
+## 11.12 2026-03-03 Queue-Boundary Diagnostics + 3x Soak Correlation
 
-- Shift root-cause focus from FAT append internals to SD bridge/task-queue residual wait:
-  - instrument queue-to-handler latency and handler-to-response timing around
-    `SdUploadCommand::Chunk` dispatch/response boundaries.
-  - compute per-upload residual explicitly (`sd_task_ms/chunk - chunk_append_ms_avg`)
-    and correlate with high `chunk_max_ms` uploads (`>400 ms`).
-  - validate with another bounded 3x `36 MHz` soak set after queue-boundary
-    instrumentation.
+- Instrumentation commit:
+  - `e85f2a7` (`feat(upload): add chunk queue-boundary residual diagnostics`)
+  - `SdUploadRequest` now carries `enqueued_at_ms`; chunk responses include
+    `chunk_queue_wait_ms` and `chunk_handler_ms`.
+  - `upload_http: upload stats` now emits:
+    - `sd_task_queue_wait_ms`
+    - `sd_task_handler_ms`
+    - `sd_task_residual_ms`
+  - `sd_upload: write_metrics` now emits queue/residual fields:
+    - `chunk_queue_wait_ms_*`
+    - `chunk_non_append_ms_*`
+    - `chunk_residual_ms_*`
+
+- 3x `36 MHz` bounded soak runs:
+  - selected set:
+    - `logs/wifi_regression_gate_sdspi36_queuebridge_r1_20260303_170129`
+    - `logs/wifi_regression_gate_sdspi36_queuebridge_r2b_20260303_170808`
+    - `logs/wifi_regression_gate_sdspi36_queuebridge_r3_20260303_171241`
+  - excluded run:
+    - `logs/wifi_regression_gate_sdspi36_queuebridge_r2_20260303_170602`
+      (`acceptance_1_cycle` failed with `net_wait_ready: listener timeout`).
+
+- Correlation result (selected 30 uploads):
+  - `req_ms avg=3060.8`, range `2933..3752`, `req_ms > 3400`: `1/30`.
+  - `chunk_max_ms avg=364.7`, range `318..666`, `chunk_max_ms > 400`: `6/30`.
+  - `chunk_append_ms_avg` remained stable at `126.2 ms`.
+  - queue/handler decomposition:
+    - `sd_task_queue_wait_ms avg=47.0 ms`
+    - `sd_task_handler_ms avg=1017.6 ms`
+    - `sd_task_residual_ms avg=1239.0 ms`
+  - high-`chunk_max_ms` samples aligned with elevated residual, not handler growth:
+    - example: `chunk_max_ms=666` with `sd_task_handler_ms=1027`,
+      `sd_task_residual_ms=1845`.
+  - conclusion: current upper tail is not dominated by queue wait or handler
+    execution; post-handler residual wait remains the dominant unexplained term.
+
+## 11.13 Next Step (Specific)
+
+- Shift root-cause focus to post-handler residual path:
+  - stamp chunk completion-to-response timing explicitly (publish edge in SD task
+    and receive edge in SD bridge) to split `sd_task_residual_ms` into:
+    - SD-task post-handler pre-publish delay
+    - response transit/receive delay
+  - correlate these new subcomponents against `chunk_max_ms > 400` uploads.
+  - rerun bounded 3x `36 MHz` soak after this split-residual instrumentation.
