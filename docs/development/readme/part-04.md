@@ -164,6 +164,8 @@ scripts/tests/hw/test_wifi_acceptance.sh
 - before any new A/B knob run, perform novelty preflight to avoid duplicate experiments:
   - `docs/development/wifi-upload-decision-ledger.md` (quick decision check)
   - `rg -n "<knob>|<value>" docs/development/rfc-upload-throughput-next-phase docs/development/upload-throughput-history`
+- acceptance/regression wrappers enforce a novelty guard for known decided knobs:
+  - set `HOSTCTL_EXPERIMENT_NOVELTY_OVERRIDE=1` only for explicit reconfirmation reruns
 - upload chunk pipeline A/B: default build now enables the pipeline feature.
 - to force baseline (pipeline off) for comparison, use:
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/build/build.sh debug`
@@ -223,6 +225,8 @@ Wi-Fi workflow guardrail env vars:
 - `HOSTCTL_NET_LOCK_WAIT_SEC` (`0` default; fail-fast lock)
 - `HOSTCTL_NET_ALLOW_LOG_APPEND` (`0` default; enforce unique log path)
 - `HOSTCTL_NET_ENFORCE_POLICY_FLOORS` (`1` default)
+- `HOSTCTL_EXPERIMENT_NOVELTY_GUARD` (`1` default; set `0` to bypass decision-ledger guard)
+- `HOSTCTL_EXPERIMENT_NOVELTY_OVERRIDE` (`0` default; set `1` to allow intentional reruns of already-decided knobs)
 
 ## Hostctl Workflow Authoring
 

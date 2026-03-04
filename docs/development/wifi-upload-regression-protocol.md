@@ -21,6 +21,9 @@ rg -n "<knob>|<value>" \
 
 3. If prior result is marked `reject`, `do not promote`, or checklist `[x]`, do not rerun by default.
 4. Only rerun if there is explicit new rationale (new firmware path, changed baseline, or user-requested reconfirmation), and record that rationale before execution.
+5. Script guardrails:
+   - `HOSTCTL_EXPERIMENT_NOVELTY_GUARD=1` (default) blocks known decided non-default knobs.
+   - use `HOSTCTL_EXPERIMENT_NOVELTY_OVERRIDE=1` only for explicit reconfirmation runs.
 
 ## Trigger Conditions
 
