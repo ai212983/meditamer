@@ -270,3 +270,28 @@ Decision:
 
 - do not promote adaptive mode to default.
 - keep `HTTP_INGRESS_ADAPTIVE_FAIRNESS` as non-default diagnostics knob.
+
+## 11.38 2026-03-04 Listener Readiness Regression Closure (`Ready + listener=false`)
+
+Pre-fix behavior:
+- repeated `acceptance_1_cycle` pre-upload failures with `listener_not_ready`
+  (attempt budget exhausted).
+- logs showed `NET_STATUS` in `Ready/ListenerWait` with `listener=false` while
+  listener gate was enabled.
+
+Fixes applied:
+- host: `wait_ready` deadline reset on attempt advance + pre-start recover when
+  status is `Ready + ipv4 + listener_enabled + listener=false`.
+- firmware: HTTP listener gate aligned to lease readiness
+  (`wifi_link_connected + non-zero DHCP lease`; `LinkDown` only when lease absent).
+
+Validation:
+- flash target: `/dev/cu.usbserial-510`.
+- bounded regression gate pass:
+  `logs/wifi_regression_gate_link_gate_relax_20260304_192653/report.json`
+- bounded soak gate pass (`soak=10`):
+  `logs/wifi_regression_gate_link_gate_relax_soak10_20260304_192924/report.json`
+  (all stages passed, no panic markers, no listener-timeout regression class).
+
+Decision: keep these host + firmware changes as hardened defaults for
+startup/listener readiness under AP-dense contention.

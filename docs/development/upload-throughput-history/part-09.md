@@ -270,3 +270,31 @@ Decision:
 
 - adaptive mode did not improve ingress waits and increased variability.
 - keep `HTTP_INGRESS_ADAPTIVE_FAIRNESS` as non-default diagnostic mode.
+
+## 2026-03-04: listener readiness regression fix (`Ready + listener=false` churn)
+Observed pre-fix:
+- repeated `acceptance_1_cycle` pre-upload failures with
+  `failure_class=listener_not_ready`, `attempt=12`,
+  `trigger=attempt_budget_exhausted`.
+- `NET_STATUS` remained `Ready/ListenerWait` with `listener=false` while
+  listener gate stayed enabled.
+- failing reports:
+  - `logs/wifi_regression_gate_waitready_attempt_reset_20260304_190253/report.json`
+  - `logs/wifi_regression_gate_ready_listener_guard_20260304_191237/report.json`
+
+Fixes:
+- host: reset `net_wait_ready` post-connect deadline when firmware `attempt`
+  advances; force pre-start recover for `Ready + ipv4 + listener_enabled + !listener`.
+- firmware: align HTTP listener gate with lease readiness in
+  `src/firmware/storage/upload/http/diagnostics.rs`
+  (`wifi_link_connected + non-zero DHCP lease`; `LinkDown` only when lease absent).
+
+Validation:
+- flashed on `/dev/cu.usbserial-510`.
+- bounded gate pass:
+  `logs/wifi_regression_gate_link_gate_relax_20260304_192653/report.json`
+- bounded soak pass (`soak=10`):
+  `logs/wifi_regression_gate_link_gate_relax_soak10_20260304_192924/report.json`
+  (all stages passed; no panic/reboot markers; no listener-timeout classing).
+Outcome: listener/DHCP readiness instability in this regression shape is
+currently resolved under the same AP-dense environment.
