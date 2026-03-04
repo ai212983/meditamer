@@ -250,3 +250,44 @@ Conclusion:
   host-send-gap / firmware-empty-queue wait spikes without retries.
 - next optimization target: non-retry ingress starvation (request-body scheduling
   cadence), not additional retry policy changes.
+
+## 2026-03-04: direct stream burst sender (64 KiB writes) + pacing guard
+
+Change:
+
+- implemented true direct-stream `PUT /upload` sender for
+  `HOSTCTL_UPLOAD_DIRECT_BURST_SENDER=1` in host uploader:
+  - contiguous `TcpStream` body writes (`HOSTCTL_UPLOAD_DIRECT_BURST_BYTES`)
+  - reqwest body pull path bypassed for this mode
+- host diagnostics now show expected cadence in burst mode:
+  - `body_read_calls=8`, `body_bytes_per_read=65536` for 512 KiB payload.
+
+Observed A/B:
+
+- burst stream with no pacing guard:
+  - run: `logs/wifi_streamab_on_hostout_20260304_141346.log`
+  - repeated first-attempt `Connection refused` retries (`attempts=2` in most
+    cycles), `avg_kib_s=117.20`.
+- burst stream with `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=120`:
+  - run: `logs/wifi_streamab_on_preput120_hostout_20260304_141538.log`
+  - retry outliers disappeared in sampled cycles (`attempts=1`) but one later
+    run hit unrelated host `/stat` timeout before summary.
+- direct non-burst control remained faster:
+  - `logs/wifi_streamab_off_hostout_20260304_141242.log`
+  - `avg_kib_s=150.61`.
+
+Hardening applied:
+
+- set burst-mode default pre-put pacing guard in host uploader:
+  - `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS` default now `120` when
+    `HOSTCTL_UPLOAD_DIRECT_BURST_SENDER=1` (still overrideable).
+- post-guard burst sanity:
+  - `logs/wifi_streamab_on_defaultguard_sanity3_hostout_20260304_142126.log`
+  - stable `attempts=1` across 3 cycles, `avg_kib_s=129.56`.
+
+Decision:
+
+- keep direct stream burst sender as experimental (non-default).
+- keep throughput acceptance default on non-burst path.
+- retain burst default pacing guard to suppress retry-outlier explosions when
+  burst mode is explicitly enabled for diagnostics.

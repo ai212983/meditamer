@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 mod client;
+mod direct_stream;
 mod pathing;
 mod run;
 mod transfer;

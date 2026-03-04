@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use reqwest::{blocking::Client, Method};
 
-use super::UploadRetryPolicy;
+use super::{direct_stream::request_raw_timed_direct_stream, UploadRetryPolicy};
 use crate::env_utils;
 
 #[derive(Clone, Copy)]
@@ -54,6 +54,7 @@ const BODY_READ_GAP_OVER_50MS: u32 = 50;
 const DIRECT_BURST_BYTES_DEFAULT: usize = 64 * 1024;
 const DIRECT_BURST_BYTES_MIN: usize = 4 * 1024;
 const DIRECT_BURST_BYTES_MAX: usize = 256 * 1024;
+const DIRECT_BURST_PRE_PUT_DELAY_MS_DEFAULT: u64 = 120;
 const TRANSPORT_RESET_RECOVERY_POLL_SEC: f64 = 0.2;
 const TRANSPORT_RESET_BACKOFF_MS_STEP: u64 = 75;
 const TRANSPORT_RESET_BACKOFF_MS_MAX: u64 = 600;
@@ -93,7 +94,12 @@ fn upload_tcp_nodelay_enabled() -> Result<bool> {
 }
 
 fn upload_pre_put_delay_ms() -> Result<u64> {
-    env_utils::parse_env_u64("HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS", 0)
+    let default = if upload_direct_burst_mode_active() {
+        DIRECT_BURST_PRE_PUT_DELAY_MS_DEFAULT
+    } else {
+        0
+    };
+    env_utils::parse_env_u64("HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS", default)
 }
 
 fn host_diag_log_path() -> Option<PathBuf> {
@@ -325,6 +331,38 @@ pub(super) fn request_raw_timed(
     } else {
         None
     };
+    if let Some(burst_bytes) = burst_read_cap {
+        let payload = body.unwrap_or_default();
+        let tcp_nodelay = upload_tcp_nodelay_enabled()?;
+        let timed = request_raw_timed_direct_stream(
+            &method,
+            url,
+            &payload,
+            token,
+            timeout_s,
+            burst_bytes,
+            tcp_nodelay,
+        )?;
+        return Ok(TimedResponse {
+            body: timed.body,
+            timing: RequestTiming {
+                body_bytes: payload.len(),
+                send_ms: timed.send_ms,
+                response_read_ms: timed.response_read_ms,
+                total_ms: timed.total_ms,
+                body_cadence: RequestBodyCadence {
+                    read_calls: timed.body_cadence.read_calls,
+                    short_reads: timed.body_cadence.short_reads,
+                    read_bytes: timed.body_cadence.read_bytes,
+                    read_gap_ms_total: timed.body_cadence.read_gap_ms_total,
+                    read_gap_ms_max: timed.body_cadence.read_gap_ms_max,
+                    read_gap_over_10ms: timed.body_cadence.read_gap_over_10ms,
+                    read_gap_over_50ms: timed.body_cadence.read_gap_over_50ms,
+                },
+            },
+            attempts: 1,
+        });
+    }
 
     let mut req = client.request(method.clone(), url);
     req = req.timeout(Duration::from_secs_f64(timeout_s.max(0.1)));
@@ -555,10 +593,13 @@ pub(super) fn request_sd_busy_aware_timed(
                     );
                 }
 
-                let mut health_successes =
-                    ctx.retry_policy.net_recovery_consecutive_health_successes.max(1);
+                let mut health_successes = ctx
+                    .retry_policy
+                    .net_recovery_consecutive_health_successes
+                    .max(1);
                 let mut recovery_poll_override = None;
-                let default_backoff_ms = (attempt as u64 * RETRY_BACKOFF_MS_STEP).min(RETRY_BACKOFF_MS_MAX);
+                let default_backoff_ms =
+                    (attempt as u64 * RETRY_BACKOFF_MS_STEP).min(RETRY_BACKOFF_MS_MAX);
                 let mut retry_backoff_ms = default_backoff_ms;
                 if is_transport_reset {
                     retry_client = Some(make_client(ctx.timeout_sec)?);
