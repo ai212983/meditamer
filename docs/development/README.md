@@ -15,6 +15,7 @@ The development guide is sharded to keep Markdown files under the documentation 
 - Add new content to the matching part file under `docs/development/readme/`.
 - Start a new part when a file approaches `220` LOC.
 - Keep this file as an index only. Do not append long-form operational content here.
+- For Wi-Fi/upload tuning preflight, check `docs/development/wifi-upload-decision-ledger.md` first.
 
 ## Editing Sharded Docs
 

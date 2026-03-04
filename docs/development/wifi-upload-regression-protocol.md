@@ -6,6 +6,22 @@ As of: 2026-03-03
 
 Define deterministic handling for Wi-Fi/upload regressions, with stack panic and unexpected reboot treated as highest-priority signals.
 
+## Experiment Novelty Preflight (Required for Any New A/B)
+
+Before running a new Wi-Fi/upload A/B or tuning variant, first confirm the knob/value has not already been tested and decided in docs history.
+
+1. Check `docs/development/wifi-upload-decision-ledger.md` first.
+2. Search both RFC checklist/history shards for the exact knob/value pair:
+
+```bash
+rg -n "<knob>|<value>" \
+  docs/development/rfc-upload-throughput-next-phase \
+  docs/development/upload-throughput-history
+```
+
+3. If prior result is marked `reject`, `do not promote`, or checklist `[x]`, do not rerun by default.
+4. Only rerun if there is explicit new rationale (new firmware path, changed baseline, or user-requested reconfirmation), and record that rationale before execution.
+
 ## Trigger Conditions
 
 Open a regression incident when any condition is true:

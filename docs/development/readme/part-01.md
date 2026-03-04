@@ -14,6 +14,7 @@ The firmware now targets `esp-hal` (`xtensa-esp32-none-elf`) as the primary and 
 - `reliability-issues.md`: Current ranked reliability risks, evidence, and mitigation gates.
 - `wifi-discovery-regression-guardrails.md`: Why zero-discovery can regress and how to prevent it.
 - `wifi-upload-regression-protocol.md`: Panic-first containment, triage, artifact, and closure protocol for Wi-Fi/upload regressions.
+- `wifi-upload-decision-ledger.md`: quick lookup for promoted/rejected/non-default Wi-Fi/upload tuning decisions before running new A/B experiments.
 - `troubleshoot-agent.md`: Agent-first runbook for the Serverless Workflow troubleshooting script.
 
 ## Git Hooks

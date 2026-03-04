@@ -5,6 +5,8 @@
 |development/README.md: Sharded development guide index (build/flash/monitor/time-sync/soak instructions live in `development/readme/part-*.md`)
 |development/upload-throughput-history.md: Sharded index; append new throughput entries to the latest `development/upload-throughput-history/part-*.md`
 |development/rfc-upload-throughput-next-phase.md: Sharded index; append new RFC updates to the latest `development/rfc-upload-throughput-next-phase/part-*.md`
+|development/wifi-upload-decision-ledger.md: Fast decision ledger for promoted/rejected/non-default Wi-Fi/upload knobs; check this first before proposing/rerunning A/B experiments
+|MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `development/rfc-upload-throughput-next-phase/` and `development/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
 |Flash policy: Prefer `scripts/device/flash.sh` over raw `espflash`; use its timeout/fallback diagnostics before deeper debugging
 |development/event-engine-guide.md: Practical guide for tuning/modifying the event engine
 |development/statig-event-engine-plan.md: Plan for statig-based sensor-event engine

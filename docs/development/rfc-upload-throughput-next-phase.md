@@ -14,5 +14,7 @@ This RFC is sharded to keep Markdown files under the documentation LOC policy.
 
 ## Notes
 
+- Decision summary and preflight shortcut:
+  `docs/development/wifi-upload-decision-ledger.md`.
 - Keep checklist updates and experiment logs in the latest part.
 - Start a new part once a file approaches `220` LOC.

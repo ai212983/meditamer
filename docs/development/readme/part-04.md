@@ -161,6 +161,9 @@ scripts/tests/hw/test_wifi_acceptance.sh
 - strategy execution is declarative (`tools/hostctl/scenarios/wifi-acceptance.sw.yaml`) with primitive hostctl actions.
 - consumes only `HOSTCTL_NET_*` environment contract.
 - readiness uses structured firmware frames (`NET_STATUS {...}`), not monitor-tail text parsing.
+- before any new A/B knob run, perform novelty preflight to avoid duplicate experiments:
+  - `docs/development/wifi-upload-decision-ledger.md` (quick decision check)
+  - `rg -n "<knob>|<value>" docs/development/rfc-upload-throughput-next-phase docs/development/upload-throughput-history`
 - upload chunk pipeline A/B: default build now enables the pipeline feature.
 - to force baseline (pipeline off) for comparison, use:
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/build/build.sh debug`
@@ -227,4 +230,3 @@ Wi-Fi workflow guardrail env vars:
   `docs/development/hostctl-workflow-authoring.md`
 - Scenario files live in `tools/hostctl/scenarios/*.sw.yaml`.
 - Keep retry/branch strategy in YAML; keep Rust runtime actions primitive.
-
