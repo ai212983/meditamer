@@ -151,3 +151,122 @@ Closure note:
   intent is satisfied at auth-reject class level with deterministic live logs.
 - retain opportunistic collection of fresh `210` samples during future
   contention runs, without blocking the current phase.
+
+## 2026-03-04: adaptive ingress fairness mode implementation (A/B blocked)
+
+Goal:
+
+- reduce non-retry per-cycle outliers by adapting ingress fairness yield
+  thresholds during empty-queue starvation bursts.
+
+Firmware changes:
+
+- added optional adaptive mode in upload ingress loop:
+  - `src/firmware/storage/upload/http/connection/body.rs`
+  - `src/firmware/storage/upload/http/connection/fairness.rs`
+- new build-time knob:
+  - `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS` (fallback
+    `HTTP_INGRESS_ADAPTIVE_FAIRNESS`)
+  - default `0` (off), variant `1` (on).
+- new upload stats fields:
+  - `ingress_adapt_enabled`
+  - `ingress_adapt_switches`
+  - `ingress_adapt_level_max`
+  - `ingress_read_empty_streak_max`
+
+Build evidence:
+
+- default build passed: `scripts/build/build.sh debug`
+- adaptive-on build passed:
+  - `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=1 scripts/build/build.sh debug`
+
+Live validation status:
+
+- blocked by current discovery instability in this environment:
+  - repeated `failure_class=discovery_empty` (`code=201`)
+  - `post_recover_stall` (`code=251`) and transport recovery churn
+- no upload cycles completed in blocking captures:
+  - `logs/wifi_adaptfairness_recover_discovery_20260304_174510.log`
+  - `logs/wifi_adaptfairness_sanity1_base_20260304_180323.log`
+
+Next run shape once discovery is stable:
+
+- matched direct A/B with absolute log paths:
+  - baseline: adaptive off
+  - variant: adaptive on
+  - `HOSTCTL_UPLOAD_MODE=direct`
+  - `HOSTCTL_UPLOAD_DIRECT_BURST_SENDER=0`
+  - `HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0`
+  - `HOSTCTL_NET_CYCLES=10` (promote to `20` after clean pair)
+
+## 2026-03-04: AP-dense discovery masking fix + bounded regression gate pass
+
+Observed regression shape (before fix):
+
+- high-AP scans returned non-zero AP counts while target SSID candidates
+  remained empty.
+- recovery logic treated non-zero scans as progress and reset discovery-empty
+  streaks too aggressively, contributing to repeated pre-upload instability.
+
+Firmware mitigation:
+
+- make scan/recovery progression target-aware:
+  - probe fallback now keys on target-candidate visibility (`saw_target_candidate`)
+    instead of generic non-zero scan count.
+  - discovery sweep exhaustion streak reset now requires target candidate
+    visibility (not merely unrelated AP visibility).
+- changed files:
+  - `src/firmware/storage/upload/wifi/scan.rs`
+  - `src/firmware/storage/upload/wifi/connect/prepare/prepare_scan.rs`
+  - `src/firmware/storage/upload/wifi/connect/error.rs`
+  - `src/firmware/storage/upload/wifi/connect/error/error_recovery/main.rs`
+  - `src/firmware/storage/upload/wifi/connect/error/error_recovery/discovery.rs`
+  - `src/firmware/storage/upload/wifi.rs`
+
+Validation evidence:
+
+- build: `scripts/build/build.sh debug` passed.
+- flash: `scripts/device/flash.sh debug` on `/dev/cu.usbserial-510`.
+- bounded gate pass (discovery + acceptance 1-cycle + acceptance 3-cycle, soak
+  skipped):
+  - `logs/wifi_regression_gate_apdense_targetfix_20260304_182226/report.json`
+  - `final_status=passed`
+  - `failure_class=null`, `failure_code=null`
+  - `panic_detected=false`
+- prior blocking classes did not recur in this run:
+  - `discovery_empty` (`201`)
+  - `post_recover_stall` (`251`)
+  - `start_nomem` (`253`)
+
+Outcome:
+
+- discovery/readiness instability is currently cleared for proceeding with
+  adaptive ingress fairness matched A/B (step 56).
+
+## 2026-03-04: adaptive ingress fairness matched A/B after discovery fix
+
+Runs:
+
+- adaptive off (default): `logs/wifi_adaptfairness_targetfix_ab_off_20260304_182643.log`
+- adaptive on: `logs/wifi_adaptfairness_targetfix_ab_on_20260304_182854.log`
+- shared profile: direct upload mode, burst sender off, boot discovery gate off,
+  `cycles=10`.
+
+Per-upload results (`upload_http: upload stats`, `n=10`):
+
+- adaptive off:
+  - `req_ms avg=3001.4`, `p95=3043`, `p99=3043`
+  - derived throughput (`512000 / req_ms`) `avg=170.60 KiB/s`, `stddev=1.63`
+  - `read_wait_ms avg=2315.1`, `ingress_read_wait_empty_q_ms avg=2310.6`
+- adaptive on:
+  - `req_ms avg=3032.7`, `p95=3147`, `p99=3147`
+  - derived throughput (`512000 / req_ms`) `avg=168.89 KiB/s`, `stddev=3.20`
+  - `read_wait_ms avg=2320.0`, `ingress_read_wait_empty_q_ms avg=2314.8`
+  - adaptation telemetry confirms mode activity:
+    - `ingress_adapt_switches avg=3`
+    - `ingress_adapt_level_max avg=3`
+
+Decision:
+
+- adaptive mode did not improve ingress waits and increased variability.
+- keep `HTTP_INGRESS_ADAPTIVE_FAIRNESS` as non-default diagnostic mode.

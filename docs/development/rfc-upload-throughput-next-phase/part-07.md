@@ -145,3 +145,128 @@ Decision:
 - post-promotion sanity run:
   - `logs/wifi_acceptance_ingressdrain_default2_sanity3_20260304_133613.log`
   - `cycles=3`, `avg_kib_s=149.07`, no `req_read_body_reset` guard regressions.
+
+## 11.35 2026-03-04 Adaptive Ingress Fairness Mode (Implemented; Validation Blocked)
+
+Change:
+
+- added optional adaptive fairness mode in upload-body ingress loop:
+  - file: `src/firmware/storage/upload/http/connection/body.rs`
+  - helper: `src/firmware/storage/upload/http/connection/fairness.rs`
+  - knob: `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS` (fallback
+    `HTTP_INGRESS_ADAPTIVE_FAIRNESS`), `0` default / `1` enable.
+- adaptation behavior:
+  - when repeated empty-queue waits are observed, temporarily lowers yield
+    thresholds so the net runner gets scheduled more aggressively during
+    subsequent ready-read bursts.
+  - when non-empty reads stabilize, thresholds relax back toward baseline.
+- added per-upload telemetry fields:
+  - `ingress_adapt_enabled`
+  - `ingress_adapt_switches`
+  - `ingress_adapt_level_max`
+  - `ingress_read_empty_streak_max`
+
+Build validation:
+
+- default build: `scripts/build/build.sh debug` passed.
+- adaptive-on build:
+  - `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=1 scripts/build/build.sh debug`
+  - passed.
+
+Live run status:
+
+- matched A/B acceptance runs could not be completed because the current
+  environment repeatedly fails before upload with discovery/recovery instability:
+  - `failure_class=discovery_empty` / `failure_code=201`
+  - `failure_class=post_recover_stall` / `failure_code=251`
+- blocking logs:
+  - `logs/wifi_adaptfairness_recover_discovery_20260304_174510.log`
+  - `logs/wifi_adaptfairness_sanity1_base_20260304_180323.log`
+
+Next execution gate:
+
+- recover stable discovery first, then run matched direct A/B with absolute log
+  paths:
+  - baseline: `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=0`
+  - variant: `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=1`
+  - profile: `HOSTCTL_UPLOAD_MODE=direct`, `HOSTCTL_UPLOAD_DIRECT_BURST_SENDER=0`,
+    `HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0`, `HOSTCTL_NET_CYCLES=10` (or
+    `20` once stable).
+
+## 11.36 2026-03-04 AP-Dense Discovery/Readiness Regression Mitigation
+
+Root-cause refinement:
+
+- in AP-dense environments, scan rounds can report non-zero AP counts while the
+  target SSID candidate set is still empty.
+- previous fallback/escalation checks keyed off `any AP seen`, which can mask
+  `target missing` state and delay/derail discovery-empty recovery.
+
+Firmware changes:
+
+- scan fallback gating now keys off target-candidate visibility, not generic
+  non-zero scan counts:
+  - `src/firmware/storage/upload/wifi/scan.rs`
+  - new `ScanOutcome` field: `saw_target_candidate`
+- discovery-exhaustion streak resets now require target candidate visibility:
+  - `src/firmware/storage/upload/wifi/connect/prepare/prepare_scan.rs`
+  - `src/firmware/storage/upload/wifi/connect/error.rs`
+  - `src/firmware/storage/upload/wifi/connect/error/error_recovery/main.rs`
+  - `src/firmware/storage/upload/wifi/connect/error/error_recovery/discovery.rs`
+- connect-error diagnostics now report both scan dimensions:
+  - `scan_any_seen`
+  - `scan_target_seen`
+
+Validation:
+
+- flashed debug firmware on `/dev/cu.usbserial-510`.
+- bounded regression gate (discovery + acceptance 1-cycle + acceptance 3-cycle;
+  soak skipped) passed:
+  - run dir:
+    `logs/wifi_regression_gate_apdense_targetfix_20260304_182226`
+  - report:
+    `logs/wifi_regression_gate_apdense_targetfix_20260304_182226/report.json`
+  - `final_status=passed`, `failure_class=null`, `panic_detected=false`
+- no recurrence of prior blocking classes in this run:
+  - `discovery_empty` (`201`)
+  - `post_recover_stall` (`251`)
+  - `start_nomem` (`253`)
+
+Result:
+
+- discovery/readiness instability is currently unblocked for next-step adaptive
+  ingress fairness A/B execution.
+
+## 11.37 2026-03-04 Adaptive Ingress Fairness Matched A/B (Not Promoted)
+
+Setup:
+
+- baseline firmware: `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=0` (default)
+- variant firmware: `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=1` (flashed)
+- shared profile:
+  - `HOSTCTL_UPLOAD_MODE=direct`
+  - `HOSTCTL_UPLOAD_DIRECT_BURST_SENDER=0`
+  - `HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0`
+  - `HOSTCTL_NET_CYCLES=10`
+- artifacts:
+  - `logs/wifi_adaptfairness_targetfix_ab_off_20260304_182643.log`
+  - `logs/wifi_adaptfairness_targetfix_ab_on_20260304_182854.log`
+
+Measured deltas (per-upload `upload_http: upload stats` samples, `n=10`):
+
+- `adaptive=0`:
+  - `req_ms avg=3001.4`, `p95=3043`, `p99=3043`
+  - derived throughput (`512000 / req_ms`) `avg=170.60 KiB/s`, `stddev=1.63`
+  - `read_wait_ms avg=2315.1`, `p95=2375`
+  - `ingress_read_wait_empty_q_ms avg=2310.6`, `p95=2372`
+- `adaptive=1`:
+  - `req_ms avg=3032.7`, `p95=3147`, `p99=3147`
+  - derived throughput (`512000 / req_ms`) `avg=168.89 KiB/s`, `stddev=3.20`
+  - `read_wait_ms avg=2320.0`, `p95=2461`
+  - `ingress_read_wait_empty_q_ms avg=2314.8`, `p95=2458`
+  - adaptation telemetry active (`ingress_adapt_switches avg=3`, `level_max avg=3`)
+
+Decision:
+
+- do not promote adaptive mode to default.
+- keep `HTTP_INGRESS_ADAPTIVE_FAIRNESS` as non-default diagnostics knob.
