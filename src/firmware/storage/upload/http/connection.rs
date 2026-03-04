@@ -7,6 +7,7 @@ use super::super::super::super::types::SD_PATH_MAX;
 use super::helpers::target_path;
 
 mod body;
+mod fairness;
 mod request;
 mod routes;
 
