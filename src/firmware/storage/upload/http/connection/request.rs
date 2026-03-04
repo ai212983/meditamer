@@ -142,3 +142,21 @@ pub(super) async fn parse_content_length_or_http_error(
         }
     }
 }
+
+pub(super) fn connection_close_requested(header: &str) -> bool {
+    for line in header.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !name.eq_ignore_ascii_case("connection") {
+            continue;
+        }
+        if value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("close"))
+        {
+            return true;
+        }
+    }
+    false
+}

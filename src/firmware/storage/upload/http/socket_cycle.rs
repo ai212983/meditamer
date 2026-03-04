@@ -46,8 +46,20 @@ async fn serve_connection_cycle(
         )
         .await
         {
-            RequestHandling::Handled(route_kind) => {
+            RequestHandling::Handled {
+                route_kind,
+                connection_close_requested,
+            } => {
                 last_route = Some(route_kind);
+                if connection_close_requested {
+                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                        esp_println::println!(
+                            "upload_http: close requested by client after route={}",
+                            route_kind.as_str()
+                        );
+                    }
+                    break;
+                }
                 header_timeout_ms = connection::HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS;
             }
             RequestHandling::PeerClosed => {
@@ -117,9 +129,12 @@ async fn handle_connection_request(
 ) -> RequestHandling {
     log_http_mem_diag("request_begin");
     match connection::handle_connection(socket, chunk_buf, header_buf, header_timeout_ms).await {
-        Ok(route_kind) => {
+        Ok(handled) => {
             log_http_mem_diag("request_ok");
-            RequestHandling::Handled(route_kind)
+            RequestHandling::Handled {
+                route_kind: handled.route_kind,
+                connection_close_requested: handled.connection_close_requested,
+            }
         }
         Err(err) => {
             if matches!(
@@ -153,7 +168,10 @@ async fn handle_connection_request(
 }
 
 enum RequestHandling {
-    Handled(connection::RequestRouteKind),
+    Handled {
+        route_kind: connection::RequestRouteKind,
+        connection_close_requested: bool,
+    },
     PeerClosed,
     RequestError,
 }

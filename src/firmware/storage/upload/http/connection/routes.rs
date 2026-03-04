@@ -23,20 +23,24 @@ pub(super) async fn dispatch_request(
     request: &RequestContext<'_>,
 ) -> Result<RequestRouteKind, &'static str> {
     let (route_kind, outcome) = match (request.method, request.request_path) {
-        ("GET", "/health") => (RequestRouteKind::Health, handle_health(socket, request).await),
+        ("GET", "/health") => (
+            RequestRouteKind::Health,
+            handle_health(socket, request).await,
+        ),
         ("GET", "/stat") => (RequestRouteKind::Stat, handle_stat(socket, request).await),
         ("POST", "/mkdir") => (RequestRouteKind::Mkdir, handle_mkdir(socket, request).await),
-        ("DELETE", "/rm") => (RequestRouteKind::Remove, handle_delete(socket, request).await),
+        ("DELETE", "/rm") => (
+            RequestRouteKind::Remove,
+            handle_delete(socket, request).await,
+        ),
         ("POST", "/upload_begin") => (
             RequestRouteKind::UploadBegin,
             handle_upload_begin(socket, request).await,
         ),
-        ("PUT", "/upload_chunk") => {
-            (
-                RequestRouteKind::UploadChunk,
-                handle_upload_chunk(socket, chunk_buf, header_buf, request).await,
-            )
-        }
+        ("PUT", "/upload_chunk") => (
+            RequestRouteKind::UploadChunk,
+            handle_upload_chunk(socket, chunk_buf, header_buf, request).await,
+        ),
         ("POST", "/upload_commit") => (
             RequestRouteKind::UploadCommit,
             handle_upload_commit(socket, request).await,
@@ -49,7 +53,10 @@ pub(super) async fn dispatch_request(
             RequestRouteKind::Upload,
             handle_upload(socket, chunk_buf, header_buf, request).await,
         ),
-        _ => (RequestRouteKind::NotFound, handle_not_found(socket, request).await),
+        _ => (
+            RequestRouteKind::NotFound,
+            handle_not_found(socket, request).await,
+        ),
     };
     outcome.map(|_| route_kind)
 }
@@ -146,7 +153,9 @@ async fn handle_upload_chunk(
     let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, false)
             .await;
-    socket.set_timeout(Some(Duration::from_secs(super::super::HTTP_SOCKET_TIMEOUT_SECS)));
+    socket.set_timeout(Some(Duration::from_secs(
+        super::super::HTTP_SOCKET_TIMEOUT_SECS,
+    )));
     let stats = body_result?;
 
     telemetry::record_upload_http_upload_phase(
@@ -164,7 +173,13 @@ async fn handle_upload_chunk(
         stats.sd_wait_ms,
         elapsed_ms_u32(request_started_at),
     );
-    log_upload_stats("upload_chunk", &stats, stats.sd_wait_ms, request_started_at, 0);
+    log_upload_stats(
+        "upload_chunk",
+        &stats,
+        stats.sd_wait_ms,
+        request_started_at,
+        0,
+    );
 
     write_response(socket, b"200 OK", b"chunk ok").await;
     Ok(())
@@ -229,7 +244,9 @@ async fn handle_upload(
     let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, true)
             .await;
-    socket.set_timeout(Some(Duration::from_secs(super::super::HTTP_SOCKET_TIMEOUT_SECS)));
+    socket.set_timeout(Some(Duration::from_secs(
+        super::super::HTTP_SOCKET_TIMEOUT_SECS,
+    )));
     let stats = body_result?;
 
     let commit_started_at = Instant::now();
@@ -257,7 +274,13 @@ async fn handle_upload(
         total_sd_wait_ms,
         elapsed_ms_u32(request_started_at),
     );
-    log_upload_stats("upload", &stats, total_sd_wait_ms, request_started_at, commit_ms);
+    log_upload_stats(
+        "upload",
+        &stats,
+        total_sd_wait_ms,
+        request_started_at,
+        commit_ms,
+    );
 
     write_response(socket, b"201 Created", b"upload ok").await;
     Ok(())

@@ -56,17 +56,23 @@ pub(super) struct RequestContext<'a> {
     body_bytes_in_buffer: usize,
 }
 
+pub(super) struct HandledRequest {
+    pub(super) route_kind: RequestRouteKind,
+    pub(super) connection_close_requested: bool,
+}
+
 pub(super) async fn handle_connection(
     socket: &mut TcpSocket<'_>,
     chunk_buf: &mut [u8],
     header_buf: &mut [u8],
     header_timeout_ms: u64,
-) -> Result<RequestRouteKind, &'static str> {
+) -> Result<HandledRequest, &'static str> {
     socket.set_timeout(Some(Duration::from_millis(header_timeout_ms)));
     let header_result = request::read_header(socket, header_buf).await;
     socket.set_timeout(Some(Duration::from_secs(super::HTTP_SOCKET_TIMEOUT_SECS)));
     let (filled, header_end) = header_result?;
     let header = core::str::from_utf8(&header_buf[..header_end]).map_err(|_| "header utf8")?;
+    let connection_close_requested = request::connection_close_requested(header);
     let (method, target) = super::helpers::parse_request_line(header).ok_or("bad request line")?;
     let content_length = request::parse_content_length_or_http_error(socket, header).await?;
     let request = RequestContext {
@@ -87,5 +93,9 @@ pub(super) async fn handle_connection(
     }
 
     request::authorize_request(socket, header, &request).await?;
-    routes::dispatch_request(socket, chunk_buf, header_buf, &request).await
+    let route_kind = routes::dispatch_request(socket, chunk_buf, header_buf, &request).await?;
+    Ok(HandledRequest {
+        route_kind,
+        connection_close_requested,
+    })
 }
