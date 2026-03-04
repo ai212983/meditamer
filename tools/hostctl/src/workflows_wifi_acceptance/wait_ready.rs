@@ -53,6 +53,7 @@ struct WaitReadyState {
     started: Instant,
     post_connect_window_ms: u32,
     post_connect_deadline: Option<Instant>,
+    last_attempt: Option<u64>,
     first_connect_ms: Option<u32>,
     last_nonterminal_failure: Option<NetStatus>,
     overall_deadline: Instant,
@@ -69,6 +70,7 @@ impl WaitReadyState {
             started,
             post_connect_window_ms,
             post_connect_deadline: None,
+            last_attempt: None,
             first_connect_ms: None,
             last_nonterminal_failure: None,
             overall_deadline,
@@ -98,6 +100,17 @@ impl WaitReadyState {
     fn update_connect_timing(&mut self, status: &NetStatus) {
         let state = status.state.as_deref().unwrap_or("");
         let linked = status.link.unwrap_or(false);
+        if let (Some(prev), Some(current)) = (self.last_attempt, status.attempt) {
+            if current > prev {
+                // Firmware advanced to a new ladder attempt; restart host listener window
+                // so we do not fail before the new attempt can complete DHCP/listener stages.
+                self.post_connect_deadline = None;
+            }
+        }
+        self.last_attempt = status.attempt;
+        if self.should_reset_post_connect_deadline(state) {
+            self.post_connect_deadline = None;
+        }
         if linked {
             if self.first_connect_ms.is_none() {
                 self.first_connect_ms = Some(self.elapsed_ms());
@@ -107,10 +120,6 @@ impl WaitReadyState {
                     Instant::now() + Duration::from_millis(self.post_connect_window_ms as u64),
                 );
             }
-            return;
-        }
-        if self.should_reset_post_connect_deadline(state) {
-            self.post_connect_deadline = None;
         }
     }
 
@@ -240,8 +249,11 @@ mod tests {
     use serialport::{SerialPort, TTYPort};
     use tempfile::tempdir;
 
-    use super::{wait_ready, wait_state_progress};
-    use crate::{serial_console::SerialConsole, workflows_wifi_common::NetPolicy};
+    use super::{wait_ready, wait_state_progress, WaitReadyState};
+    use crate::{
+        serial_console::SerialConsole,
+        workflows_wifi_common::{NetPolicy, NetStatus},
+    };
 
     fn open_pty_pair() -> Result<(TTYPort, TTYPort)> {
         TTYPort::pair().map_err(|err| anyhow!("TTYPort::pair failed: {err}"))
@@ -343,5 +355,41 @@ mod tests {
             .join()
             .map_err(|_| anyhow!("status panic responder thread panicked"))?;
         Ok(())
+    }
+
+    #[test]
+    fn wait_ready_resets_post_connect_window_when_attempt_advances() {
+        let mut state = WaitReadyState::new(Instant::now(), NetPolicy::default());
+        state.update_connect_timing(&NetStatus {
+            state: Some("ListenerWait".to_string()),
+            link: Some(true),
+            ipv4: Some("0.0.0.0".to_string()),
+            listener: Some(false),
+            listener_enabled: Some(true),
+            failure_class: Some("none".to_string()),
+            failure_code: Some(0),
+            ladder_step: Some("retry_same".to_string()),
+            attempt: Some(1),
+            uptime_ms: Some(1_000),
+        });
+        let first_deadline = state.post_connect_deadline.expect("first deadline");
+        thread::sleep(Duration::from_millis(10));
+        state.update_connect_timing(&NetStatus {
+            attempt: Some(2),
+            ..NetStatus {
+                state: Some("DhcpWait".to_string()),
+                link: Some(true),
+                ipv4: Some("0.0.0.0".to_string()),
+                listener: Some(false),
+                listener_enabled: Some(true),
+                failure_class: Some("none".to_string()),
+                failure_code: Some(0),
+                ladder_step: Some("retry_same".to_string()),
+                attempt: Some(1),
+                uptime_ms: Some(2_000),
+            }
+        });
+        let reset_deadline = state.post_connect_deadline.expect("reset deadline");
+        assert!(reset_deadline > first_deadline);
     }
 }

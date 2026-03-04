@@ -205,6 +205,12 @@ impl WifiAcceptanceRuntime<'_> {
                 .info("net_start: skip NET START because listener is already ready");
             return Ok(true);
         }
+        if is_ready_without_listener(&status) {
+            self.force_recover_before_start(
+                "state=Ready with listener=false while listener gate is enabled".to_string(),
+            )?;
+            return Ok(false);
+        }
         if matches!(status.state.as_deref(), Some("Ready"))
             && status.link.unwrap_or(false)
             && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
@@ -359,6 +365,14 @@ fn should_force_recover_before_start(status: &NetStatus) -> bool {
     )
 }
 
+fn is_ready_without_listener(status: &NetStatus) -> bool {
+    matches!(status.state.as_deref(), Some("Ready"))
+        && status.link.unwrap_or(false)
+        && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
+        && status.listener_enabled.unwrap_or(true)
+        && !status.listener.unwrap_or(false)
+}
+
 fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
     if window.is_empty() {
         return None;
@@ -426,7 +440,9 @@ fn format_health_status_error(status: StatusCode) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_health_status_error, should_force_recover_before_start};
+    use super::{
+        format_health_status_error, is_ready_without_listener, should_force_recover_before_start,
+    };
     use crate::workflows_wifi_common::NetStatus;
     use reqwest::StatusCode;
 
@@ -479,5 +495,18 @@ mod tests {
             format_health_status_error(StatusCode::SERVICE_UNAVAILABLE),
             "HTTP 503"
         );
+    }
+
+    #[test]
+    fn ready_without_listener_is_detected() {
+        let mut status = net_status(Some("Ready"));
+        status.link = Some(true);
+        status.ipv4 = Some("192.168.1.5".to_string());
+        status.listener_enabled = Some(true);
+        status.listener = Some(false);
+        assert!(is_ready_without_listener(&status));
+
+        status.listener = Some(true);
+        assert!(!is_ready_without_listener(&status));
     }
 }

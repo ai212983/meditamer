@@ -1,15 +1,21 @@
 fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPipelineGate> {
-    if !telemetry::wifi_link_connected() || !stack.is_link_up() {
-        if !telemetry::wifi_link_connected() {
-            return Err(telemetry::NetPipelineGate::WifiDown);
-        }
-        return Err(telemetry::NetPipelineGate::LinkDown);
+    // Use Wi-Fi task connectivity + non-zero DHCP lease as the listener gate.
+    // `stack.is_link_up()` can transiently lag reconnect state and block listener
+    // arming even when connect+lease have already recovered.
+    if !telemetry::wifi_link_connected() {
+        return Err(telemetry::NetPipelineGate::WifiDown);
     }
-    stack
+    if let Some(ip) = stack
         .config_v4()
         .map(|cfg| cfg.address.address().octets())
         .filter(|ip| *ip != [0, 0, 0, 0])
-        .ok_or(telemetry::NetPipelineGate::NoIpv4)
+    {
+        return Ok(ip);
+    }
+    if !stack.is_link_up() {
+        return Err(telemetry::NetPipelineGate::LinkDown);
+    }
+    Err(telemetry::NetPipelineGate::NoIpv4)
 }
 
 fn elapsed_ms_u32(started_at: Instant) -> u32 {
