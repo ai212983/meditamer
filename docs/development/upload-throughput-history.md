@@ -1368,3 +1368,47 @@ Interpretation:
   new host/device failure-class regressions.
 - the known first-cycle startup/listener outlier remains visible, while
   steady-state cycle variance is low.
+
+## 2026-03-04: listener/dhcp readiness instability fix and gate validation
+
+Pre-fix failure evidence:
+
+- full gate run `logs/wifi_regression_gate_ingressfairness_default_20260304_113541`
+  failed at `acceptance_1_cycle` before soak.
+- serial trace showed repeated `ListenerWait` loops and recurring
+  `listener_timeout` recovery despite active link.
+
+Root cause:
+
+- listener readiness timeout was measured from `dhcp_wait_started_at` (session
+  connect-entry timestamp), not from the start of the current listener wait.
+- after long-lived connected sessions, a temporary listener-off window could
+  immediately exceed timeout budget and force reconnect churn.
+
+Fix:
+
+- `src/firmware/storage/upload/wifi/connect/success.rs`
+- `src/firmware/storage/upload/wifi/connect/success/success_progress.rs`
+- added `listener_wait_started_at` and switched listener timeout accounting to
+  this dedicated wait-window baseline.
+- reset baseline when listener is disabled, when listener becomes ready, or
+  when lease is absent.
+
+Validation:
+
+- focused check:
+  - `logs/wifi_acceptance_listenerfix_1cycle_20260304_114536.log`
+  - pass; no repeated listener-timeout churn signatures.
+- full regression gate with soak:
+  - `logs/wifi_regression_gate_listenerfix_20260304_114631/report.json`
+  - `discovery_debug`: passed (`110224 ms`)
+  - `acceptance_1_cycle`: passed (`7049 ms`)
+  - `acceptance_3_cycle`: passed (`52818 ms`)
+  - `acceptance_soak` (10 cycles): passed (`54907 ms`)
+  - soak summary: `avg_upload_s=3.43`, `avg_kib_s=149.35`
+
+Conclusion:
+
+- stale listener-timeout baseline was the primary trigger for the pre-soak
+  listener/DHCP readiness instability in this campaign.
+- with per-wait listener timeout baseline, the full gate shape is stable again.

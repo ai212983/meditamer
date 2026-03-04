@@ -12,6 +12,7 @@ pub(super) async fn handle_connect_success(
 ) {
     let mut dhcp_lease_observed = has_ipv4_lease(&stack);
     let dhcp_wait_started_at = Instant::now();
+    let mut listener_wait_started_at = None;
     loop {
         if !service_mode::upload_enabled() {
             telemetry::set_wifi_link_connected(false);
@@ -124,10 +125,15 @@ pub(super) async fn handle_connect_success(
             state,
             &mut dhcp_lease_observed,
             dhcp_wait_started_at,
+            &mut listener_wait_started_at,
         )
         .await
         {
             break;
+        }
+
+        if let Ok(rssi_dbm) = controller.rssi() {
+            telemetry::record_wifi_link_rssi(rssi_dbm);
         }
 
         Timer::after(Duration::from_millis(WIFI_CONNECTED_WATCHDOG_MS)).await;

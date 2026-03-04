@@ -210,6 +210,7 @@ Rollback:
 40. [x] Focus next optimization on firmware ingress empty-queue `read_wait_ms` dominance (implemented cooperative read-loop fairness yield in firmware and captured bounded validation, 2026-03-04).
 41. [x] Re-run extended direct acceptance (`cycles=10`) with ingress fairness yield enabled and tune yield thresholds (`bytes`/`reads`) for throughput vs variance (2026-03-04).
 42. [x] Run bounded soak with promoted ingress fairness thresholds to confirm failure-class stability and long-run variance behavior (`logs/wifi_acceptance_ingressfairness_soak10_20260304_113208.log`).
+43. [x] Fix listener/DHCP readiness instability caused by stale listener-timeout baseline on long-lived connections; validate with full regression gate including soak (`logs/wifi_regression_gate_listenerfix_20260304_114631/report.json`).
 
 ## 11.1 2026-03-03 A/B Execution Result
 
@@ -1166,3 +1167,52 @@ Interpretation:
   not introduce new failure classes.
 - first-cycle startup/listener timing remains a separate known outlier source;
   steady-state upload cycles show low variance.
+
+## 11.29 2026-03-04 Listener/DHCP Readiness Stability Fix (Stale Listener Timeout Baseline)
+
+Observed failure mode:
+
+- regression gate run `logs/wifi_regression_gate_ingressfairness_default_20260304_113541`
+  failed in `acceptance_1_cycle` before soak.
+- serial evidence showed repeated `ListenerWait` loops with eventual
+  `listener_timeout` recovery (`reason=8` disconnect churn) despite link being
+  active.
+
+Root cause:
+
+- listener readiness timeout used `dhcp_wait_started_at` (set once at connect
+  success entry), so on long-lived connections any later listener-off period
+  (for example after discovery/listener gate toggles) inherited a stale elapsed
+  baseline and could trip `listener_timeout` almost immediately.
+
+Firmware fix:
+
+- files:
+  - `src/firmware/storage/upload/wifi/connect/success.rs`
+  - `src/firmware/storage/upload/wifi/connect/success/success_progress.rs`
+- introduced dedicated `listener_wait_started_at` timer scoped to actual
+  listener wait windows:
+  - set when transitioning `DhcpWait -> ListenerWait` (`dhcp_ready`);
+  - reset when listener is disabled, listener becomes ready, or lease is absent;
+  - apply `listener_timeout_ms` against this timer instead of
+    `dhcp_wait_started_at`.
+
+Validation:
+
+- focused acceptance check:
+  - `logs/wifi_acceptance_listenerfix_1cycle_20260304_114536.log`
+  - result: pass (`connect_ms=19636`, `upload_ms=3512`) without repeated
+    `listener_timeout` churn markers in serial log.
+- full regression gate:
+  - `logs/wifi_regression_gate_listenerfix_20260304_114631/report.json`
+  - stage results:
+    - `discovery_debug`: passed (`110224 ms`)
+    - `acceptance_1_cycle`: passed (`7049 ms`)
+    - `acceptance_3_cycle`: passed (`52818 ms`)
+    - `acceptance_soak` (`10 cycles`): passed (`54907 ms`)
+  - soak summary: `avg_upload_s=3.43`, `avg_kib_s=149.35`
+
+Outcome:
+
+- listener/DHCP readiness instability observed pre-soak is no longer
+  reproducible in the same gate shape after the timer-baseline fix.
