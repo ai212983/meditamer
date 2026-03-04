@@ -46,6 +46,8 @@ jobs:
         run: cargo install --locked rust-code-analysis-cli --version 0.0.25
       - name: Install rust-analyzer component
         run: rustup component add rust-analyzer
+      - name: Markdown LOC guard
+        run: scripts/ci/check_markdown_loc.sh
       - name: Run host config regression suite
         run: scripts/tests/host/test_event_config_host.sh
       - name: Run host event engine suite

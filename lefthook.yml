@@ -5,6 +5,8 @@ pre-commit:
       glob: "{src/**/*.rs,tools/**/*.rs,build.rs}"
       run: cargo fmt --all
       stage_fixed: true
+    markdown-loc:
+      run: scripts/ci/check_markdown_loc.sh --staged
     markdown-links:
       run: scripts/ci/check_markdown_links.sh
     secrets:

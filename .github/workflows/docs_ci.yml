@@ -1,0 +1,27 @@
+name: Docs Guard
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "scripts/ci/check_markdown_loc.sh"
+      - ".github/workflows/docs_ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown-loc:
+    name: Markdown LOC Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Markdown LOC guard
+        run: scripts/ci/check_markdown_loc.sh
