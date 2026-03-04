@@ -733,11 +733,638 @@ Interpretation:
 - the dominant unexplained component is post-handler residual wait
   (`sd_task_residual_ms`).
 
-## Next step
+## 2026-03-03: post-handler residual split instrumentation
 
-Shift root-cause work to post-handler residual split:
+Implemented split-residual instrumentation in firmware upload path:
 
-- instrument SD task chunk completion-to-publish timing and SD bridge
-  publish-to-receive timing to split `sd_task_residual_ms` into concrete legs.
-- correlate those subcomponents with `chunk_max_ms > 400` uploads.
-- rerun bounded 3x `36 MHz` soak with the split-residual instrumentation.
+- SD task now stamps chunk handler completion and publish edge timing.
+- SD bridge stamps receive edge and computes publish-to-receive delay.
+- `upload_http: upload stats` now emits:
+  - `sd_task_post_handler_ms`
+  - `sd_task_publish_to_receive_ms`
+  - `sd_task_residual_other_ms`
+- existing `sd_task_residual_ms` is preserved for continuity and now decomposes
+  into:
+  - `sd_task_post_handler_ms`
+  - `sd_task_publish_to_receive_ms`
+  - `sd_task_residual_other_ms`
+
+Smoke verification:
+
+- run: `logs/wifi_acceptance_split_residual_smoke_20260303_173818.log`
+- sample upload stats:
+  - `sd_task_residual_ms=1291`
+  - `sd_task_post_handler_ms=1`
+  - `sd_task_publish_to_receive_ms=1290`
+  - `sd_task_residual_other_ms=0`
+- interpretation:
+  - in this sample, residual is dominated by publish-to-receive delay rather
+    than SD-task post-handler pre-publish delay.
+
+Next step:
+
+- run bounded 3x `36 MHz` regression gates with split-residual instrumentation.
+- correlate `chunk_max_ms > 400` uploads against the new split fields to
+  identify which post-handler leg dominates.
+
+## 2026-03-03: split-residual correlation (3x bounded soak)
+
+Runs used:
+
+- `logs/wifi_acceptance_splitresidual_soak_r1_20260303_175924.log`
+- `logs/wifi_acceptance_splitresidual_soak_r2_20260303_180053.log`
+- `logs/wifi_acceptance_splitresidual_soak_r3_20260303_180239.log`
+
+Notes:
+
+- full regression-gate attempts in the same window hit non-upload
+  acceptance-stage failures (listener/boot-discovery gating), so split-residual
+  correlation used direct bounded soak acceptance runs.
+- one `upload_http: upload stats` line in `r3` was serial-concatenated and was
+  excluded from aggregate parsing.
+
+Correlation summary (`upload_http: upload stats`, valid `n=29`):
+
+- `req_ms avg=3135.1`
+- `chunk_max_ms avg=401.4`
+- `chunk_max_ms > 400`: `9/29`
+- decomposition means:
+  - `sd_task_queue_wait_ms avg=43.7`
+  - `sd_task_handler_ms avg=1035.4`
+  - `sd_task_residual_ms avg=1259.9`
+- residual split means:
+  - `sd_task_post_handler_ms avg=0.4`
+  - `sd_task_publish_to_receive_ms avg=1259.5`
+  - `sd_task_residual_other_ms avg=0.0`
+- outlier (`chunk_max_ms > 400`) residual split:
+  - `sd_task_residual_ms avg=1429.2`
+  - `sd_task_publish_to_receive_ms avg=1429.0`
+  - `sd_task_post_handler_ms avg=0.2`
+  - `sd_task_residual_other_ms avg=0.0`
+
+Interpretation:
+
+- split confirms post-handler residual is not SD-task post-handler delay.
+- residual is almost entirely bridge publish-to-receive delay in this campaign.
+
+Next root-cause focus:
+
+- investigate bridge receive cadence during pipelined body ingest to determine
+  how much of publish-to-receive is expected overlap accounting versus avoidable
+  receive lag affecting request tail behavior.
+
+## 2026-03-03: bridge non-blocking inflight drain mitigation
+
+Mitigation implemented:
+
+- bridge now tries to drain completed inflight SD chunk results non-blockingly
+  during body ingest (between socket reads), instead of waiting only at explicit
+  queue-boundary flush points.
+
+Validation runs:
+
+- `logs/wifi_acceptance_splitresidual_trydrain_soak_r1_20260303_180926.log`
+- `logs/wifi_acceptance_splitresidual_trydrain_soak_r2_20260303_181048.log`
+
+Aggregate comparison (pre-fix split-residual set vs post-fix trydrain set):
+
+- pre-fix (`n=29`):
+  - `req_ms avg=3135.1`
+  - `chunk_max_ms avg=401.4`, `chunk_max_ms > 400`: `9`
+  - `sd_task_residual_ms avg=1259.9`
+  - `sd_task_publish_to_receive_ms avg=1259.5`
+- post-fix (`n=20`):
+  - `req_ms avg=3175.6`
+  - `chunk_max_ms avg=172.4`, `chunk_max_ms > 400`: `0`
+  - `sd_task_residual_ms avg=40.0`
+  - `sd_task_publish_to_receive_ms avg=39.7`
+
+Interpretation:
+
+- dominant residual leg (`publish_to_receive`) drops by ~`96.8%` in this sample.
+- chunk roundtrip tail (`chunk_max_ms`) collapses accordingly.
+- request-time mean remained in the same multi-second band; requires further
+  gate-scale validation before concluding net throughput benefit.
+
+Next step:
+
+- run full 1/3/soak regression gates on this mitigation and confirm reliability
+  plus request-time behavior under bounded soak.
+
+## 2026-03-03: host transport A/B for ingress isolation (`direct` vs `chunked`)
+
+Host-tooling change:
+
+- added `HOSTCTL_UPLOAD_MODE` in hostctl upload flow:
+  - `auto` (default): try direct `PUT /upload`, fallback to chunked
+  - `direct`: force direct `PUT /upload` only
+  - `chunked`: force `/upload_begin` + `/upload_chunk` + `/upload_commit`
+
+10-cycle acceptance runs:
+
+- direct mode:
+  - `logs/wifi_acceptance_ingress_ab_direct_20260303_191416.log`
+  - summary: `avg_upload_s=6.27`, `avg_kib_s=82.64`
+- chunked mode:
+  - `logs/wifi_acceptance_ingress_ab_chunked_20260303_191605.log`
+  - summary: `avg_upload_s=17.88`, `avg_kib_s=28.93`
+
+Normalization method:
+
+- used `METRICS UPLOAD_PHASE` delta (last-first) in each run to compare equal
+  transferred bytes while avoiding serial-line sampling bias.
+- both runs transferred `5.0 MiB` total (`10` acceptance uploads).
+
+`METRICS UPLOAD_PHASE` delta comparison (per `512 KiB` payload):
+
+- direct (`reqs_per_512KiB=1.0`):
+  - `body_ms=2457.3`
+  - `sd_ms=1563.8`
+  - `req_ms=3156.3`
+- chunked (`reqs_per_512KiB=8.0`):
+  - `body_ms=1685.0`
+  - `sd_ms=1056.6`
+  - `req_ms=2923.6`
+
+Interpretation:
+
+- chunked transport reduces server-side per-byte timing inside individual
+  requests, but total upload throughput is much worse because the multi-request
+  orchestration dominates wall-clock time.
+- optimization should remain on direct `PUT /upload` and target ingress pacing
+  within that path.
+- `HOSTCTL_UPLOAD_MODE` is retained as a deterministic A/B switch for future
+  experiments.
+
+## 2026-03-03: direct-path HTTP RX buffer A/B (`65_536` vs `131_072`)
+
+Firmware change:
+
+- added compile-time HTTP RX socket buffer tuning (PSRAM upload builds):
+  - preferred env: `MEDITAMER_HTTP_RX_BUF_TARGET`
+  - fallback env: `HTTP_RX_BUF_TARGET`
+  - accepted range: `8192..262144` (default `65536`)
+
+Runs (`HOSTCTL_UPLOAD_MODE=direct`, `HOSTCTL_NET_CYCLES=10`):
+
+- baseline (`65_536`, default build):
+  - `logs/wifi_acceptance_ingress_rxbuf65536_direct10_20260303_192929.log`
+  - runtime confirms: `upload_http: http_rx buffer placement=Psram bytes=65536`
+- variant (`131_072`):
+  - `logs/wifi_acceptance_ingress_rxbuf131072_direct10_20260303_193224.log`
+  - runtime confirms: `upload_http: http_rx buffer placement=Psram bytes=131072`
+
+`upload_http: upload stats` aggregates (`n=10` each):
+
+- baseline:
+  - `read_wait_ms avg=2398.9`
+  - `req_ms avg=3093.5`
+  - `ingress_pre_read_q_total avg=36347.6` (`~413.0 bytes/read`)
+  - `ingress_read_wait_over_50ms avg=7.8` (`8.9%` reads)
+- variant:
+  - `read_wait_ms avg=2802.6`
+  - `req_ms avg=3491.6`
+  - `ingress_pre_read_q_total avg=58205.2` (`~937.3 bytes/read`)
+  - `ingress_read_wait_over_50ms avg=16.8` (`27.1%` reads)
+
+`METRICS UPLOAD_PHASE` delta normalization (equal `5.0 MiB` transferred):
+
+- baseline:
+  - `body_ms=2398.9 ms/512KiB`
+  - `sd_ms=1566.3 ms/512KiB`
+  - `req_ms=3093.5 ms/512KiB`
+- variant:
+  - `body_ms=2802.6 ms/512KiB`
+  - `sd_ms=1684.6 ms/512KiB`
+  - `req_ms=3491.4 ms/512KiB`
+
+Host throughput summary:
+
+- baseline: `avg_kib_s=97.83`
+- variant: `avg_kib_s=80.26`
+
+Decision:
+
+- retain default `HTTP_RX_BUF_TARGET=65_536`.
+- do not promote `131_072`; this bounded direct-mode A/B worsens latency and
+  throughput.
+
+Next focus:
+
+- ingress pacing root-cause in direct upload (host send cadence / burst-idle
+  pattern correlation against firmware `read_wait_ms`).
+
+## 2026-03-03: host send diagnostics + retry-class probe matrix (direct path)
+
+Host-tooling changes:
+
+- added host direct-upload diagnostics:
+  - `host_upload_send_diag` (attempts, send/total ms, optional body cadence)
+  - `host_upload_retry_diag` (retry class flags including `transport_reset`)
+- added sidecar log persistence:
+  - default `<HOSTCTL_NET_LOG_PATH>.hostdiag`
+  - optional `HOSTCTL_UPLOAD_SEND_DIAG_PATH`
+- added retry hardening knob:
+  - `HOSTCTL_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH`
+
+Primary correlation run (`direct`, cycles=10):
+
+- `logs/wifi_acceptance_senddiag2_direct10_20260303_194248.log`
+- `logs/wifi_acceptance_senddiag2_direct10_20260303_194248.log.hostdiag`
+
+Aggregate (`n=10`):
+
+- firmware:
+  - `read_wait_ms avg=2475.9`
+  - `req_ms avg=3150.0`
+- host:
+  - `send_ms avg=3326.4`
+  - `avg_attempts=2.00`
+  - `corr(send_ms, read_wait_ms)=0.944`
+
+Retry-class probes:
+
+- pool A/B:
+  - off: `logs/wifi_acceptance_poolab_off_direct5_20260303_194538.log`
+  - on: `logs/wifi_acceptance_poolab_on_direct5_20260303_194625.log`
+  - `read_wait_ms avg`: `2439.6 -> 2395.0`
+  - `req_ms avg`: `3116.2 -> 3084.8`
+- connection-close A/B:
+  - off: `logs/wifi_acceptance_conncloseab_off_direct3_20260303_195201.log`
+  - on: `logs/wifi_acceptance_conncloseab_on_direct3_20260303_195228.log`
+  - `read_wait_ms avg`: `2541.3 -> 2419.0`
+  - `req_ms avg`: `3204.3 -> 3080.0`
+  - retry count increased in this sample (`1 -> 3`)
+- fresh-client A/B:
+  - off: `logs/wifi_acceptance_freshclientab_off_direct3_20260303_195342.log`
+  - on: `logs/wifi_acceptance_freshclientab_on_direct3_20260303_195414.log`
+  - near-neutral latency deltas; retries unchanged (`3 -> 3`)
+
+Interpretation:
+
+- host send timing remains tightly coupled with firmware `read_wait_ms`.
+- no host transport toggle consistently eliminates `transport_reset` first-attempt
+  retries.
+
+## 2026-03-03: `HOSTCTL_UPLOAD_TCP_NODELAY` A/B (`1` vs `0`)
+
+Change:
+
+- added host knob `HOSTCTL_UPLOAD_TCP_NODELAY` (`1` default).
+
+Runs (`direct`, cycles=5):
+
+- `TCP_NODELAY=1`:
+  - `logs/wifi_acceptance_nodelayab_on_direct5_20260303_195857.log`
+  - summary: `avg_upload_s=5.56`, `avg_kib_s=93.23`
+- `TCP_NODELAY=0`:
+  - `logs/wifi_acceptance_nodelayab_off_direct5_20260303_200015.log`
+  - summary: `avg_upload_s=5.91`, `avg_kib_s=87.59`
+
+`upload_http: upload stats` aggregates (`n=5`):
+
+- `TCP_NODELAY=1`:
+  - `read_wait_ms avg=2289.4`
+  - `req_ms avg=2960.0`
+  - `ingress_pre_read_q_total avg=31602.2`
+- `TCP_NODELAY=0`:
+  - `read_wait_ms avg=2397.6`
+  - `req_ms avg=3060.4`
+  - `ingress_pre_read_q_total avg=35916.2`
+
+Decision:
+
+- keep `HOSTCTL_UPLOAD_TCP_NODELAY=1` default; disabling it regressed bounded
+  throughput and request timing.
+
+## 2026-03-03: ingress wait split telemetry (`empty_q` vs `nonempty_q`)
+
+Firmware change:
+
+- added upload stats fields:
+  - `ingress_read_wait_empty_q_ms`
+  - `ingress_read_wait_nonempty_q_ms`
+
+Validation run:
+
+- `logs/wifi_acceptance_ingress_waitsplit_direct3_20260303_200511.log`
+- `logs/wifi_acceptance_ingress_waitsplit_direct3_20260303_200511.log.hostdiag`
+
+Aggregate (`n=3`):
+
+- `read_wait_ms avg=2355.7`
+- `ingress_read_wait_empty_q_ms avg=2351.3`
+- `ingress_read_wait_nonempty_q_ms avg=4.3`
+- empty-queue share of `read_wait_ms`: `~99.8%`
+
+Conclusion:
+
+- current ingress bottleneck is almost entirely no-data wait at socket read
+  points; this is not a buffered-data drain delay.
+
+## 2026-03-04: Wi-Fi RSSI context added to ingress diagnostics
+
+Implementation:
+
+- connected watchdog now samples STA RSSI (`WifiController::rssi()`).
+- telemetry now emits:
+  - `METRICS WIFI_LINK rssi_last_dbm=... rssi_min_dbm=... rssi_max_dbm=... rssi_samples=... rssi_low_samples=...`
+- upload request stats now include Wi-Fi RSSI context:
+  - `wifi_rssi_last_dbm`
+  - `wifi_rssi_min_dbm`
+  - `wifi_rssi_max_dbm`
+  - `wifi_rssi_samples`
+  - `wifi_rssi_low_samples`
+
+Validation runs:
+
+- guarded post-flash acceptance attempt:
+  - `logs/wifi_acceptance_ingress_rssi_direct3_20260304_082811.log`
+  - failed at boot discovery gate (`ready=false`, zero discovery evidence)
+- discovery recovery proof:
+  - `logs/wifi_discovery_rssi_recover_20260304_083129.log`
+  - summary: `ready_rounds=8`, `zero_discovery_rounds=0`,
+    `total_scan_nonzero_events=1`
+- bounded direct correlation run:
+  - `logs/wifi_acceptance_ingress_rssi_direct10_20260304_083419.log`
+  - `logs/wifi_acceptance_ingress_rssi_direct10_20260304_083419.log.hostdiag`
+
+Direct 10-cycle aggregate (`n=10`):
+
+- request timing:
+  - `read_wait_ms avg=2532.8`
+  - `req_ms avg=3227.5`
+  - `ingress_read_wait_empty_q_ms avg=2528.2`
+  - `ingress_read_wait_nonempty_q_ms avg=4.6`
+- Wi-Fi RSSI context:
+  - `wifi_rssi_last_dbm avg=-62.5` (range `-68..-59`)
+  - `wifi_rssi_min_dbm avg=-71.0`
+  - `wifi_rssi_low_samples avg=1.0`
+- host/firmware coupling:
+  - `host retry_count=10`, `avg_attempts=2.00`
+  - `corr(send_ms, read_wait_ms)=0.991`
+  - `corr(rssi_last, read_wait_ms)=0.056`
+
+Interpretation:
+
+- ingress wait remains empty-queue dominated (~`99.8%` of read-wait).
+- within this RSSI band, signal strength variation was not the primary driver of
+  request-time variance.
+- dominant coupling remains host send cadence and first-attempt transport-reset
+  retry behavior.
+
+## 2026-03-04: host retry cause-chain diagnostics + pre-PUT pacing A/B
+
+Host tooling changes:
+
+- expanded `host_upload_retry_diag` with typed reqwest/IO flags and compact
+  full cause chain (`err_chain`).
+- added `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS` (`0` default), applied before each
+  direct `PUT /upload` attempt.
+- added host failure class `host_transport_connect_refused` for better
+  post-run classification.
+
+Runs (`HOSTCTL_UPLOAD_MODE=direct`, `HOSTCTL_UPLOAD_SEND_DIAG=1`, cycles=5):
+
+- baseline (`HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=0`):
+  - `logs/wifi_acceptance_preputdelay_off_direct5_20260304_084754.log`
+  - `logs/wifi_acceptance_preputdelay_off_direct5_20260304_084754.log.hostdiag`
+  - summary: `avg_upload_s=6.45`, `avg_kib_s=79.72`
+- variant (`HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=120`):
+  - `logs/wifi_acceptance_preputdelay_on120_direct5_20260304_084843.log`
+  - `logs/wifi_acceptance_preputdelay_on120_direct5_20260304_084843.log.hostdiag`
+  - summary: `avg_upload_s=5.11`, `avg_kib_s=103.96`
+
+Hostdiag aggregate:
+
+- baseline:
+  - retries: `5/5`
+  - `avg_attempts=2.00`
+  - repeated first-attempt chain:
+    `client error (Connect) <- tcp connect error <- Connection refused (os error 61)`
+- variant:
+  - retries: `0/5`
+  - `avg_attempts=1.00`
+  - no first-attempt retry lines observed.
+
+Firmware upload-stats aggregate (`n=5`, last five upload requests per run):
+
+- baseline:
+  - `read_wait_ms avg=2546.8`
+  - `req_ms avg=3224.6`
+  - `ingress_read_wait_empty_q_ms avg=2541.4`
+  - `ingress_read_wait_nonempty_q_ms avg=5.4`
+- variant:
+  - `read_wait_ms avg=2602.8`
+  - `req_ms avg=3285.8`
+  - `ingress_read_wait_empty_q_ms avg=2598.2`
+  - `ingress_read_wait_nonempty_q_ms avg=4.6`
+
+Interpretation:
+
+- primary retry signature is now explicit and stable: first-attempt connect
+  refused on direct `PUT /upload`.
+- short host pre-PUT delay suppresses this class in bounded A/B and improves
+  end-to-end throughput by avoiding retries.
+- per-success ingress wait remains empty-queue dominated; next optimization
+  target stays listener/accept readiness around the `mkdir -> upload` boundary.
+
+## 2026-03-04: `NET_ACCEPT` microsecond gap evidence + firmware keep-alive fix candidate
+
+Instrumentation change:
+
+- upgraded listener re-arm telemetry to microseconds:
+  - `METRICS NET_ACCEPT arm_gap_n arm_gap_us arm_gap_us_max arm_gap_after_mkdir_n arm_gap_after_mkdir_us arm_gap_after_mkdir_us_max`
+
+Validation run (pre-fix evidence, direct mode):
+
+- `logs/wifi_acceptance_acceptarmgapus_direct3b_20260304_090920.log`
+- `logs/wifi_acceptance_acceptarmgapus_direct3b_20260304_090920.log.hostdiag`
+- host summary:
+  - `avg_upload_s=5.72`, `avg_kib_s=90.68`
+  - retries: `3/3` (`avg_attempts=2.00`)
+  - each first-attempt failure chain includes:
+    `client error (Connect) <- tcp connect error <- Connection refused (os error 61)`
+- firmware (last `METRICS NET_ACCEPT` line in run):
+  - `arm_gap_n=22`
+  - `arm_gap_us=4832` (aggregate)
+  - `arm_gap_us_max=233`
+  - `arm_gap_after_mkdir_n=3`
+  - `arm_gap_after_mkdir_us=672` (aggregate)
+  - `arm_gap_after_mkdir_us_max=226`
+
+Interpretation:
+
+- the observed listener re-arm window is sub-millisecond and still sufficient to
+  race immediate reconnects in this direct path.
+- this supports a protocol/connection-lifecycle fix over coarse delay-only
+  mitigation.
+
+Firmware fix candidate implemented (awaiting live validation):
+
+- switched HTTP responses to `HTTP/1.1` keep-alive semantics (removed forced
+  `Connection: close` behavior).
+- updated listener socket cycle to serve multiple requests per accepted socket.
+- added keep-alive idle guard (`500 ms` header timeout after first request) to
+  avoid one idle peer blocking accepts.
+
+Validation status:
+
+- on-device validation blocked after flash attempt failed with serial transport
+  loss (`Broken pipe`, then `Serial port not found`); USB serial node was absent
+  on host (`/dev/cu.*`).
+- next action is to restore serial visibility and rerun bounded direct acceptance
+  at `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=0`.
+
+## 2026-03-04: keep-alive validation + host cross-cycle client reuse
+
+Validation context:
+
+- serial recovered on USB and firmware was flashed/validated in direct mode.
+- acceptance runs used `HOSTCTL_UPLOAD_MODE=direct`,
+  `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=0`, `HOSTCTL_UPLOAD_SEND_DIAG=1`.
+- acceptance profile currently pins `HOSTCTL_NET_LOG_PATH=acceptance_3_cycle`;
+  evidence below is from appended run segments in that stream.
+
+Firmware keep-alive validation:
+
+- keep-alive ON (cycles=3): `avg_upload_s=3.62`, `avg_kib_s=141.86`
+- forced close (cycles=3): `avg_upload_s=3.40`, `avg_kib_s=150.67`
+- keep-alive ON repeat (cycles=3): `avg_upload_s=3.53`, `avg_kib_s=145.39`
+- matched warmed pair (cycles=3):
+  - forced close: `avg_kib_s=149.52`
+  - keep-alive ON: `avg_kib_s=147.06`
+- matched warmed pair (cycles=6):
+  - keep-alive ON: `avg_upload_s=3.45`, `avg_kib_s=148.58`
+  - forced close: `avg_upload_s=3.45`, `avg_kib_s=148.30`
+
+Interpretation:
+
+- keep-alive behavior is stable in bounded acceptance.
+- throughput delta is small and inconsistent; practical outcome is near parity.
+
+Host cross-cycle client reuse experiment:
+
+- host tooling now supports reusable client path for wifi-acceptance:
+  - `HOSTCTL_NET_REUSE_UPLOAD_CLIENT=1` (default `0`).
+- strict-guard 6-cycle reuse run (`max_delta=0`) hit one first-attempt timeout:
+  - `HOST_FAILURE class=host_transport_send_fail` on cycle 3,
+  - retry recovered upload,
+  - guard failed on `req_read_body_reset delta=1`.
+- reuse run with relaxed guard (`max_delta=2`) completed:
+  - keep-alive ON: `avg_upload_s=3.64`, `avg_kib_s=142.61`
+  - forced close: `avg_upload_s=3.50`, `avg_kib_s=146.36`
+- default mode (reuse off) sanity run (cycles=3) remained stable:
+  - `avg_upload_s=3.49`, `avg_kib_s=146.90`
+
+Decision:
+
+- do not promote host cross-cycle client reuse as a default throughput
+  optimization.
+- retain it as opt-in for diagnostics while primary root-cause focus remains
+  firmware ingress empty-queue `read_wait_ms`.
+
+## 2026-03-04: firmware ingress empty-queue mitigation via cooperative read fairness
+
+Firmware change:
+
+- in `src/firmware/storage/upload/http/connection/body.rs`, added periodic
+  cooperative yield while draining immediately-ready socket reads:
+  - initial bounded-run thresholds: `12 KiB` / `24 reads`
+  - later promoted to configurable firmware defaults via
+    `HTTP_INGRESS_COOP_YIELD_{BYTES,READS}`.
+- intent: give the net runner scheduling opportunities during long ready-read
+  bursts so RX queue refill cadence improves and empty-queue stalls shrink.
+
+Bounded validation (`direct`, `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=0`, cycles=3):
+
+- baseline (pre-change):
+  - summary: `avg_upload_s=3.53`, `avg_kib_s=145.27`
+  - last three `upload_http: upload stats` `read_wait_ms`: `2368`, `2389`, `2493`
+  - last three `ingress_read_wait_empty_q_ms`: `2362`, `2383`, `2483`
+- post-change run A:
+  - summary: `avg_upload_s=3.43`, `avg_kib_s=149.33`
+  - `read_wait_ms`: `2304`, `2295`, `2293`
+  - `ingress_read_wait_empty_q_ms`: `2302`, `2291`, `2285`
+- post-change run B (immediate confirmation):
+  - summary: `avg_upload_s=3.42`, `avg_kib_s=149.57`
+  - `read_wait_ms`: `2280`, `2397`, `2255`
+  - `ingress_read_wait_empty_q_ms`: `2276`, `2391`, `2247`
+
+Observed bounded deltas:
+
+- throughput improved by about `+2.8..+3.0%` in the two post-change runs.
+- compared sample-average `read_wait_ms` moved:
+  - pre: `2416.7`
+  - post: `2304.0` (`-4.7%`)
+
+Interpretation:
+
+- cooperative fairness in the firmware read loop appears to reduce empty-queue
+  ingress wait in short bounded runs, with corresponding throughput lift.
+- next step is longer-cycle and soak confirmation to separate persistent effect
+  from RF variance.
+
+## 2026-03-04: ingress fairness threshold tuning and default promotion
+
+Tuning setup:
+
+- threshold knobs made build-time configurable:
+  - `MEDITAMER_HTTP_INGRESS_COOP_YIELD_BYTES` / fallback
+    `HTTP_INGRESS_COOP_YIELD_BYTES`
+  - `MEDITAMER_HTTP_INGRESS_COOP_YIELD_READS` / fallback
+    `HTTP_INGRESS_COOP_YIELD_READS`
+- mode: direct upload (`HOSTCTL_UPLOAD_MODE=direct`)
+
+Bounded matrix (cycles=6):
+
+- `4096/16`: `avg_kib_s=148.05`, `stddev=3.24`
+- `6144/20`: `avg_kib_s=147.81`, `stddev=4.01`
+- `8192/24`: `avg_kib_s=149.05`, `stddev=3.51`
+
+Extended confirmation (cycles=10):
+
+- `4096/16`: `avg_kib_s=147.78`, `stddev=4.09`
+- `8192/24`: `avg_kib_s=149.67`, `stddev=2.30`
+
+Decision:
+
+- promoted firmware defaults to `8192/24` in `src/firmware/types/base.rs`:
+  - `HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT = 8 * 1024`
+  - `HTTP_INGRESS_COOP_YIELD_READS_DEFAULT = 24`
+- reason: in longer A/B, `8192/24` produced both higher throughput and lower
+  variance than `4096/16`.
+
+## 2026-03-04: bounded soak validation for promoted ingress fairness defaults
+
+Artifact:
+
+- `logs/wifi_acceptance_ingressfairness_soak10_20260304_113208.log`
+
+Run profile:
+
+- direct upload mode (`HOSTCTL_UPLOAD_MODE=direct`)
+- `HOSTCTL_NET_CYCLES=10`
+- `HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE=0`
+- `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS=0`
+- promoted defaults under test:
+  - `HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT = 8 * 1024`
+  - `HTTP_INGRESS_COOP_YIELD_READS_DEFAULT = 24`
+
+Observed:
+
+- summary: `avg_upload_s=3.47`, `avg_kib_s=147.71`, `total_s=68.75`
+- per-cycle throughput (`n=10`): mean/stddev `147.72 ± 3.89 KiB/s`
+  (min/max `136.57 / 150.59`)
+- warmed-cycle view (`cycles 2..10`): `148.95 ± 1.21 KiB/s`
+- failure class / guard signal:
+  - no `HOST_FAILURE` markers
+  - no listener-not-ready or host health/send-failure markers
+  - `req_read_body_reset delta=0` across cycles
+
+Interpretation:
+
+- promoted ingress fairness defaults stay stable through bounded soak with no
+  new host/device failure-class regressions.
+- the known first-cycle startup/listener outlier remains visible, while
+  steady-state cycle variance is low.
