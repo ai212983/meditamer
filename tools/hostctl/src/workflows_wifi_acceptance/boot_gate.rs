@@ -134,6 +134,13 @@ fn run_boot_discovery_loop(
             ));
             return Ok(());
         }
+        if state.reached_ready_ssid_fallback() {
+            logger.info(format!(
+                "boot discovery gate: pass via ready+ssid fallback ready={} scan_nonzero_events={} ssid_seen_events={}",
+                state.ready, state.scan_nonzero_events, state.ssid_seen_events
+            ));
+            return Ok(());
+        }
         if state.should_fallback(&cfg) {
             logger
                 .info("boot discovery gate: pass via ready-only fallback (no fresh scan evidence)");
@@ -161,6 +168,7 @@ struct BootDiscoveryLoopState {
     scan_nonzero_events: u32,
     ssid_seen_events: u32,
     ready_only_fallback_after: Duration,
+    ready_ssid_fallback_after: Duration,
 }
 
 impl BootDiscoveryLoopState {
@@ -174,6 +182,7 @@ impl BootDiscoveryLoopState {
             scan_nonzero_events: 0,
             ssid_seen_events: 0,
             ready_only_fallback_after: Duration::from_millis(8_000),
+            ready_ssid_fallback_after: Duration::from_millis(2_500),
         }
     }
 
@@ -208,6 +217,13 @@ impl BootDiscoveryLoopState {
 
     fn reached_success(&self) -> bool {
         self.ready && self.scan_nonzero_events > 0 && self.ssid_seen_events > 0
+    }
+
+    fn reached_ready_ssid_fallback(&self) -> bool {
+        self.ready
+            && self.ssid_seen_events > 0
+            && self.scan_nonzero_events == 0
+            && self.gate_started.elapsed() >= self.ready_ssid_fallback_after
     }
 
     fn should_fallback(&self, cfg: &BootDiscoveryGateConfig) -> bool {
@@ -274,5 +290,15 @@ mod tests {
         state.ready_only_fallback_after = Duration::from_millis(0);
         assert!(state.should_fallback(&cfg(true)));
         assert!(!state.should_fallback(&cfg(false)));
+    }
+
+    #[test]
+    fn ready_ssid_fallback_allows_missing_scan_count() {
+        let mut state = BootDiscoveryLoopState::new(cfg(false));
+        state.ready = true;
+        state.ssid_seen_events = 2;
+        state.scan_nonzero_events = 0;
+        state.ready_ssid_fallback_after = Duration::from_millis(0);
+        assert!(state.reached_ready_ssid_fallback());
     }
 }

@@ -36,6 +36,28 @@ async fn handle_observed_ap_paths(
             .position(|candidate| candidate.hint.bssid == selected_bssid)
             .unwrap_or(0);
         state.ap_candidates = observed_candidates;
+        if is_auth_disconnect_reason(disconnect_reason) {
+            if let Some(hinted_bssid) = state.bssid_hint {
+                if let Some(hinted_idx) = state
+                    .ap_candidates
+                    .iter()
+                    .position(|candidate| candidate.hint.bssid == hinted_bssid)
+                {
+                    let hinted_candidate = state.ap_candidates[hinted_idx];
+                    state.ap_candidate_idx = hinted_idx;
+                    state.channel_hint = Some(hinted_candidate.hint.channel);
+                    diag_reassoc!(
+                        "upload_http: auth-reject preserving hinted candidate idx={} channel_hint={} bssid_hint={} selected_bssid={} count={}",
+                        state.ap_candidate_idx,
+                        hinted_candidate.hint.channel,
+                        format_bssid(hinted_candidate.hint.bssid),
+                        format_bssid(selected_ap.hint.bssid),
+                        state.ap_candidates.len(),
+                    );
+                    return false;
+                }
+            }
+        }
         if disconnect_reason == WIFI_REASON_OTHER && state.other_disconnect_streak >= 2 {
             state.channel_hint = Some(selected_ap.hint.channel);
             state.bssid_hint = None;
