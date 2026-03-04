@@ -36,6 +36,12 @@ const HTTP_INGRESS_COOP_YIELD_READS_MIN: usize = 4;
 #[cfg(feature = "asset-upload-http")]
 const HTTP_INGRESS_COOP_YIELD_READS_MAX: usize = 128;
 #[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_DEFAULT: usize = 2;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_MIN: usize = 1;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_MAX: usize = 32;
+#[cfg(feature = "asset-upload-http")]
 const fn parse_ascii_usize(value: &str) -> Option<usize> {
     let bytes = value.as_bytes();
     if bytes.is_empty() {
@@ -133,6 +139,26 @@ const fn configured_http_ingress_coop_yield_reads() -> u32 {
         _ => HTTP_INGRESS_COOP_YIELD_READS_DEFAULT as u32,
     }
 }
+#[cfg(feature = "asset-upload-http")]
+const fn configured_http_ingress_try_drain_interval_reads() -> u32 {
+    let configured = match option_env!("MEDITAMER_HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS") {
+        Some(v) => Some(v),
+        None => option_env!("HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS"),
+    };
+    let parsed = match configured {
+        Some(v) => parse_ascii_usize(v),
+        None => None,
+    };
+    match parsed {
+        Some(reads)
+            if reads >= HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_MIN
+                && reads <= HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_MAX =>
+        {
+            reads as u32
+        }
+        _ => HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS_DEFAULT as u32,
+    }
+}
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 // Larger upload chunks reduce per-chunk SD roundtrip overhead and improve
 // sustained HTTP upload throughput when PSRAM is available.
@@ -156,6 +182,11 @@ pub(crate) const HTTP_INGRESS_COOP_YIELD_BYTES: usize = configured_http_ingress_
 // Override at build time via MEDITAMER_HTTP_INGRESS_COOP_YIELD_READS
 // (fallback HTTP_INGRESS_COOP_YIELD_READS).
 pub(crate) const HTTP_INGRESS_COOP_YIELD_READS: u32 = configured_http_ingress_coop_yield_reads();
+#[cfg(feature = "asset-upload-http")]
+// Override at build time via MEDITAMER_HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS
+// (fallback HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS).
+pub(crate) const HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS: u32 =
+    configured_http_ingress_try_drain_interval_reads();
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const SD_ASSET_READ_MAX: usize = 1024;
 #[cfg(not(feature = "asset-upload-http"))]

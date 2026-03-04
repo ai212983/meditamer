@@ -1,4 +1,12 @@
 pub(crate) fn snapshot() -> Snapshot {
+    fn decode_rssi_dbm(encoded: u32) -> i32 {
+        if encoded == u32::MAX {
+            0
+        } else {
+            encoded as i32 - 128
+        }
+    }
+
     let upload_http_ipv4_raw = UPLOAD_HTTP_IPV4.load(Ordering::Relaxed);
     let upload_http_ipv4 = if upload_http_ipv4_raw == 0 {
         None
@@ -124,6 +132,18 @@ pub(crate) fn snapshot() -> Snapshot {
         net_pipeline_accept_wait_ms_total: NET_PIPELINE_ACCEPT_WAIT_MS_TOTAL
             .load(Ordering::Relaxed),
         net_pipeline_accept_wait_ms_max: NET_PIPELINE_ACCEPT_WAIT_MS_MAX.load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_count: NET_PIPELINE_ACCEPT_ARM_GAP_COUNT
+            .load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_us_total: NET_PIPELINE_ACCEPT_ARM_GAP_US_TOTAL
+            .load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_us_max: NET_PIPELINE_ACCEPT_ARM_GAP_US_MAX
+            .load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_after_mkdir_count:
+            NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_COUNT.load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_after_mkdir_us_total:
+            NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_TOTAL.load(Ordering::Relaxed),
+        net_pipeline_accept_arm_gap_after_mkdir_us_max:
+            NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_MAX.load(Ordering::Relaxed),
         sd_upload_errors: SD_UPLOAD_ERRORS.load(Ordering::Relaxed),
         sd_upload_busy: SD_UPLOAD_BUSY.load(Ordering::Relaxed),
         sd_upload_timeouts: SD_UPLOAD_TIMEOUTS.load(Ordering::Relaxed),
@@ -151,6 +171,11 @@ pub(crate) fn snapshot() -> Snapshot {
         sd_upload_rtt_remove_ms_total: SD_UPLOAD_RTT_REMOVE_MS_TOTAL.load(Ordering::Relaxed),
         sd_upload_rtt_remove_ms_max: SD_UPLOAD_RTT_REMOVE_MS_MAX.load(Ordering::Relaxed),
         boot_reset_reason_code: BOOT_RESET_REASON_CODE.load(Ordering::Relaxed) as u8,
+        wifi_link_rssi_last_dbm: decode_rssi_dbm(WIFI_LINK_RSSI_LAST_DBM.load(Ordering::Relaxed)),
+        wifi_link_rssi_min_dbm: decode_rssi_dbm(WIFI_LINK_RSSI_MIN_DBM.load(Ordering::Relaxed)),
+        wifi_link_rssi_max_dbm: decode_rssi_dbm(WIFI_LINK_RSSI_MAX_DBM.load(Ordering::Relaxed)),
+        wifi_link_rssi_samples: WIFI_LINK_RSSI_SAMPLES.load(Ordering::Relaxed),
+        wifi_link_rssi_low_samples: WIFI_LINK_RSSI_LOW_SAMPLES.load(Ordering::Relaxed),
         wifi_link_connected: WIFI_LINK_CONNECTED.load(Ordering::Relaxed),
         upload_http_listening: UPLOAD_HTTP_LISTENING.load(Ordering::Relaxed),
         upload_http_ipv4,

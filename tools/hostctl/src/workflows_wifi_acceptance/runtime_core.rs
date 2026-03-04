@@ -212,42 +212,34 @@ impl WifiAcceptanceRuntime<'_> {
             return Ok(true);
         }
         if self.is_stuck_listener_wait(&status) {
-            self.logger.info(format!(
-                "net_start: state={} with ipv4=0.0.0.0; forcing NET RECOVER",
+            self.force_recover_before_start(format!(
+                "state={} with ipv4=0.0.0.0",
                 status.state.as_deref().unwrap_or("unknown")
-            ));
-            wait_net_ack(&mut self.console, "NET RECOVER")?;
-            thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
-            return Ok(true);
+            ))?;
+            return Ok(false);
         }
-        if self.is_active_state(&status) {
-            self.logger.info(format!(
-                "net_start: skip NET START because state is already active ({})",
+        if should_force_recover_before_start(&status) {
+            self.force_recover_before_start(format!(
+                "state={} is transitional/non-ready",
                 status.state.as_deref().unwrap_or("unknown")
-            ));
-            return Ok(true);
+            ))?;
+            return Ok(false);
         }
         Ok(false)
+    }
+
+    fn force_recover_before_start(&mut self, reason: String) -> Result<()> {
+        self.logger.info(format!(
+            "net_start: {reason}; forcing NET RECOVER before NET START"
+        ));
+        wait_net_ack(&mut self.console, "NET RECOVER")?;
+        thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
+        Ok(())
     }
 
     fn is_stuck_listener_wait(&self, status: &NetStatus) -> bool {
         let ipv4_zero = status.ipv4.as_deref().is_none_or(|ip| ip == "0.0.0.0");
         matches!(status.state.as_deref(), Some("ListenerWait" | "DhcpWait")) && ipv4_zero
-    }
-
-    fn is_active_state(&self, status: &NetStatus) -> bool {
-        matches!(
-            status.state.as_deref(),
-            Some(
-                "Ready"
-                    | "Recovering"
-                    | "Starting"
-                    | "Scanning"
-                    | "Associating"
-                    | "DhcpWait"
-                    | "ListenerWait"
-            )
-        )
     }
 
     fn ensure_net_start_ack(&mut self) -> Result<()> {
@@ -279,6 +271,21 @@ impl WifiAcceptanceRuntime<'_> {
     }
 }
 
+fn should_force_recover_before_start(status: &NetStatus) -> bool {
+    matches!(
+        status.state.as_deref(),
+        Some(
+            "Recovering"
+                | "Starting"
+                | "Scanning"
+                | "Associating"
+                | "DhcpWait"
+                | "ListenerWait"
+                | "Failed"
+        )
+    )
+}
+
 fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
     if window.is_empty() {
         return None;
@@ -290,4 +297,53 @@ fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
             .collect::<Vec<_>>()
             .join(" | "),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_force_recover_before_start;
+    use crate::workflows_wifi_common::NetStatus;
+
+    fn net_status(state: Option<&str>) -> NetStatus {
+        NetStatus {
+            state: state.map(ToOwned::to_owned),
+            link: None,
+            ipv4: None,
+            listener: None,
+            listener_enabled: None,
+            failure_class: None,
+            failure_code: None,
+            ladder_step: None,
+            attempt: None,
+            uptime_ms: None,
+        }
+    }
+
+    #[test]
+    fn transitional_states_force_recover_before_start() {
+        for state in [
+            "Recovering",
+            "Starting",
+            "Scanning",
+            "Associating",
+            "DhcpWait",
+            "ListenerWait",
+            "Failed",
+        ] {
+            assert!(
+                should_force_recover_before_start(&net_status(Some(state))),
+                "state={state} should force recover"
+            );
+        }
+    }
+
+    #[test]
+    fn stable_or_unknown_states_do_not_force_recover_before_start() {
+        for state in [Some("Ready"), Some("Idle"), None] {
+            assert!(
+                !should_force_recover_before_start(&net_status(state)),
+                "state={state:?} should not force recover"
+            );
+        }
+    }
 }

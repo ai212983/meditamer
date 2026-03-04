@@ -89,6 +89,8 @@ async fn read_header_chunk(
                 Err("read header reset empty")
             } else if matches!(err, TcpError::ConnectionReset) {
                 Err("read header reset")
+            } else if filled == 0 {
+                Err("read header empty")
             } else {
                 Err("read header")
             }

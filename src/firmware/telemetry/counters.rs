@@ -94,6 +94,12 @@ static NET_PIPELINE_LISTENER_OFF: AtomicU32 = AtomicU32::new(0);
 static NET_PIPELINE_ACCEPT_WAIT_COUNT: AtomicU32 = AtomicU32::new(0);
 static NET_PIPELINE_ACCEPT_WAIT_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
 static NET_PIPELINE_ACCEPT_WAIT_MS_MAX: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_COUNT: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_US_TOTAL: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_US_MAX: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_COUNT: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_TOTAL: AtomicU32 = AtomicU32::new(0);
+static NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_MAX: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_ERRORS: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_BUSY: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
@@ -120,6 +126,12 @@ static SD_UPLOAD_RTT_REMOVE_COUNT: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_RTT_REMOVE_MS_TOTAL: AtomicU32 = AtomicU32::new(0);
 static SD_UPLOAD_RTT_REMOVE_MS_MAX: AtomicU32 = AtomicU32::new(0);
 static BOOT_RESET_REASON_CODE: AtomicU32 = AtomicU32::new(0);
+// Encoded as dBm+128 (0..255); u32::MAX means "unknown/no samples".
+static WIFI_LINK_RSSI_LAST_DBM: AtomicU32 = AtomicU32::new(u32::MAX);
+static WIFI_LINK_RSSI_MIN_DBM: AtomicU32 = AtomicU32::new(u32::MAX);
+static WIFI_LINK_RSSI_MAX_DBM: AtomicU32 = AtomicU32::new(u32::MAX);
+static WIFI_LINK_RSSI_SAMPLES: AtomicU32 = AtomicU32::new(0);
+static WIFI_LINK_RSSI_LOW_SAMPLES: AtomicU32 = AtomicU32::new(0);
 static WIFI_LINK_CONNECTED: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_LISTENING: AtomicBool = AtomicBool::new(false);
 static UPLOAD_HTTP_IPV4: AtomicU32 = AtomicU32::new(0);
@@ -250,6 +262,12 @@ pub(crate) struct Snapshot {
     pub(crate) net_pipeline_accept_wait_count: u32,
     pub(crate) net_pipeline_accept_wait_ms_total: u32,
     pub(crate) net_pipeline_accept_wait_ms_max: u32,
+    pub(crate) net_pipeline_accept_arm_gap_count: u32,
+    pub(crate) net_pipeline_accept_arm_gap_us_total: u32,
+    pub(crate) net_pipeline_accept_arm_gap_us_max: u32,
+    pub(crate) net_pipeline_accept_arm_gap_after_mkdir_count: u32,
+    pub(crate) net_pipeline_accept_arm_gap_after_mkdir_us_total: u32,
+    pub(crate) net_pipeline_accept_arm_gap_after_mkdir_us_max: u32,
     pub(crate) sd_upload_errors: u32,
     pub(crate) sd_upload_busy: u32,
     pub(crate) sd_upload_timeouts: u32,
@@ -276,6 +294,11 @@ pub(crate) struct Snapshot {
     pub(crate) sd_upload_rtt_remove_ms_total: u32,
     pub(crate) sd_upload_rtt_remove_ms_max: u32,
     pub(crate) boot_reset_reason_code: u8,
+    pub(crate) wifi_link_rssi_last_dbm: i32,
+    pub(crate) wifi_link_rssi_min_dbm: i32,
+    pub(crate) wifi_link_rssi_max_dbm: i32,
+    pub(crate) wifi_link_rssi_samples: u32,
+    pub(crate) wifi_link_rssi_low_samples: u32,
     pub(crate) wifi_link_connected: bool,
     pub(crate) upload_http_listening: bool,
     pub(crate) upload_http_ipv4: Option<[u8; 4]>,

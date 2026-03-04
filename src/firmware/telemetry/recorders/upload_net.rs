@@ -119,3 +119,20 @@ pub(crate) fn record_net_pipeline_accept_wait(elapsed_ms: u32) {
     saturating_add_u32(&NET_PIPELINE_ACCEPT_WAIT_MS_TOTAL, elapsed_ms);
     update_max_u32(&NET_PIPELINE_ACCEPT_WAIT_MS_MAX, elapsed_ms);
 }
+
+pub(crate) fn record_net_pipeline_accept_arm_gap(elapsed_us: u32, after_mkdir: bool) {
+    NET_PIPELINE_ACCEPT_ARM_GAP_COUNT.fetch_add(1, Ordering::Relaxed);
+    saturating_add_u32(&NET_PIPELINE_ACCEPT_ARM_GAP_US_TOTAL, elapsed_us);
+    update_max_u32(&NET_PIPELINE_ACCEPT_ARM_GAP_US_MAX, elapsed_us);
+    if after_mkdir {
+        NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_COUNT.fetch_add(1, Ordering::Relaxed);
+        saturating_add_u32(
+            &NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_TOTAL,
+            elapsed_us,
+        );
+        update_max_u32(
+            &NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_MAX,
+            elapsed_us,
+        );
+    }
+}

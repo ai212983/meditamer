@@ -6,7 +6,7 @@ mod connection;
 mod helpers;
 
 #[cfg(feature = "psram-alloc")]
-use super::super::super::types::SD_UPLOAD_CHUNK_MAX;
+use super::super::super::types::{HTTP_RX_BUF_TARGET_BYTES, SD_UPLOAD_CHUNK_MAX};
 use crate::firmware::psram;
 use crate::firmware::runtime::service_mode;
 use crate::firmware::telemetry;
@@ -25,7 +25,7 @@ const HTTP_RW_BUF_FALLBACK: usize = 2048;
 #[cfg(feature = "psram-alloc")]
 // Keep a large RX window in PSRAM so /upload can continue receiving while the
 // SD writer is busy; this trims body-read stalls between chunk roundtrips.
-const HTTP_RX_BUF_TARGET: usize = 65_536;
+const HTTP_RX_BUF_TARGET: usize = HTTP_RX_BUF_TARGET_BYTES;
 #[cfg(feature = "psram-alloc")]
 // TX path is response-only for this listener, so a smaller buffer is enough.
 const HTTP_TX_BUF_TARGET: usize = 4_096;
@@ -108,6 +108,8 @@ struct HttpServerLoopState {
     listener_gate_last_enabled: bool,
     listener_gate_last_seq: u32,
     listener_gate_disabled_logged: bool,
+    last_request_closed_at: Option<Instant>,
+    last_request_route: Option<connection::RequestRouteKind>,
 }
 
 impl HttpServerLoopState {
@@ -120,6 +122,8 @@ impl HttpServerLoopState {
             listener_gate_last_enabled: service_mode::upload_http_listener_enabled(),
             listener_gate_last_seq: service_mode::upload_http_listener_set_seq(),
             listener_gate_disabled_logged: false,
+            last_request_closed_at: None,
+            last_request_route: None,
         }
     }
 
@@ -128,6 +132,8 @@ impl HttpServerLoopState {
         self.waiting_dhcp_logged = false;
         self.dhcp_wait_started_at = None;
         self.dhcp_ready = false;
+        self.last_request_closed_at = None;
+        self.last_request_route = None;
     }
 
     fn reset_link_state(&mut self) {

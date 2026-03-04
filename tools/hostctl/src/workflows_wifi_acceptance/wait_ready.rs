@@ -123,7 +123,10 @@ impl WaitReadyState {
 
     fn extract_listener_ip(&self, status: &NetStatus) -> Option<String> {
         let ipv4 = status.ipv4.as_deref()?;
-        if !status.listener.unwrap_or(false) || !status.listener_enabled.unwrap_or(true) || ipv4 == "0.0.0.0" {
+        if !status.listener.unwrap_or(false)
+            || !status.listener_enabled.unwrap_or(true)
+            || ipv4 == "0.0.0.0"
+        {
             return None;
         }
         Some(ipv4.to_string())
@@ -293,8 +296,9 @@ mod tests {
                         b"NET_STATUS {\"state\":\"Idle\",\"link\":false,\"ipv4\":\"0.0.0.0\",\"listener\":false,\"listener_enabled\":false,\"failure_class\":\"none\"}\r\n",
                     );
                     if !emitted_panic {
-                        let _ = master
-                            .write_all(b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n");
+                        let _ = master.write_all(
+                            b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n",
+                        );
                         emitted_panic = true;
                     }
                     let _ = master.flush();

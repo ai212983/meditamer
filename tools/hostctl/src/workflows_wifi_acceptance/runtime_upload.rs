@@ -56,18 +56,45 @@ impl WifiAcceptanceRuntime<'_> {
         let upload_timeout_sec =
             env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
         let retry_policy = resolve_net_upload_retry_policy()?;
-        let result = workflows_upload::upload_file_direct_fast(
-            self.logger,
-            workflows_upload::DirectUploadOptions {
-                host: &ip,
-                port: 8080,
-                timeout_sec: upload_timeout_sec,
-                src: &self.payload_path,
-                dst_root: &cycle_root,
-                token: self.token.as_deref(),
-                retry_policy,
-            },
-        );
+        let result = if self.reuse_upload_client {
+            if self.upload_client.is_none() {
+                self.upload_client = Some(workflows_upload::make_direct_upload_client(
+                    upload_timeout_sec,
+                )?);
+            }
+            let client = self
+                .upload_client
+                .as_ref()
+                .ok_or_else(|| anyhow!("missing upload client"))?;
+            workflows_upload::upload_file_direct_fast_with_client(
+                self.logger,
+                client,
+                workflows_upload::DirectUploadOptions {
+                    host: &ip,
+                    port: 8080,
+                    timeout_sec: upload_timeout_sec,
+                    src: &self.payload_path,
+                    dst_root: &cycle_root,
+                    token: self.token.as_deref(),
+                    retry_policy,
+                },
+            )
+        } else {
+            let client = workflows_upload::make_direct_upload_client(upload_timeout_sec)?;
+            workflows_upload::upload_file_direct_fast_with_client(
+                self.logger,
+                &client,
+                workflows_upload::DirectUploadOptions {
+                    host: &ip,
+                    port: 8080,
+                    timeout_sec: upload_timeout_sec,
+                    src: &self.payload_path,
+                    dst_root: &cycle_root,
+                    token: self.token.as_deref(),
+                    retry_policy,
+                },
+            )
+        };
         let upload_ms = started.elapsed().as_millis() as u32;
         ctx_set_u32(context, "upload_ms", upload_ms)?;
         match result {
@@ -76,6 +103,10 @@ impl WifiAcceptanceRuntime<'_> {
                 ctx_set_string(context, "upload_error", "")?;
             }
             Err(err) => {
+                if self.reuse_upload_client {
+                    // Drop pooled sockets after a failed cycle so retries/recovery start cleanly.
+                    self.upload_client = None;
+                }
                 let mut detail = err.to_string();
                 if detail.contains("health check failed: GET") {
                     let diag_message = append_health_fail_net_status(
@@ -96,6 +127,11 @@ impl WifiAcceptanceRuntime<'_> {
                     ctx_set_bool(context, "upload_done", false)?;
                     ctx_set_string(context, "upload_error", &detail)?;
                     return Err(anyhow!("{detail}"));
+                }
+
+                if let Some(class) = classify_host_upload_failure(&detail) {
+                    self.logger
+                        .info(format!("HOST_FAILURE class={class} detail={detail}"));
                 }
 
                 ctx_set_bool(context, "upload_done", false)?;
@@ -138,6 +174,10 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     pub(super) fn handle_net_recover_once(&mut self) -> Result<()> {
+        if self.reuse_upload_client {
+            // Network recovery may invalidate pooled sockets.
+            self.upload_client = None;
+        }
         self.send_net_command_best_effort("NET RECOVER");
         self.wait_recover_ready();
         if !self.is_recover_ready() {
@@ -274,6 +314,8 @@ fn resolve_net_upload_retry_policy() -> Result<workflows_upload::UploadRetryPoli
         env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_TIMEOUT_SEC", 8.0)?.max(0.1);
     let default_net_recovery_poll_s =
         env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_POLL_SEC", 0.8)?.max(0.05);
+    let default_net_recovery_consecutive_health =
+        env_utils::parse_env_u32("HOSTCTL_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH", 2)?.max(1);
     Ok(workflows_upload::UploadRetryPolicy {
         sd_busy_total_retry_sec: env_utils::parse_env_f64(
             "HOSTCTL_NET_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC",
@@ -290,6 +332,11 @@ fn resolve_net_upload_retry_policy() -> Result<workflows_upload::UploadRetryPoli
             default_net_recovery_poll_s,
         )?
         .max(0.05),
+        net_recovery_consecutive_health_successes: env_utils::parse_env_u32(
+            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH",
+            default_net_recovery_consecutive_health,
+        )?
+        .max(1),
     })
 }
 
@@ -311,6 +358,28 @@ fn append_health_fail_net_status(
             format!("health_fail_diag: NET_STATUS query failed ({err})")
         }
     }
+}
+
+fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("health check failed: get")
+        && (lower.contains("send failed")
+            || lower.contains("connection reset")
+            || lower.contains("connection refused")
+            || lower.contains("error sending request"))
+    {
+        return Some("host_health_send_fail");
+    }
+    if lower.contains("connection refused") {
+        return Some("host_transport_connect_refused");
+    }
+    if lower.contains("send failed") || lower.contains("error sending request") {
+        return Some("host_transport_send_fail");
+    }
+    if lower.contains("connection reset") || lower.contains("broken pipe") {
+        return Some("host_transport_connection_reset");
+    }
+    None
 }
 
 fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>) -> bool {
@@ -343,7 +412,8 @@ fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_health_fail_net_status, append_panic_signal_context, parse_metrics_key_u32,
+        append_health_fail_net_status, append_panic_signal_context, classify_host_upload_failure,
+        parse_metrics_key_u32,
     };
     use crate::workflows_wifi_common::detect_panic_signal;
 
@@ -381,5 +451,30 @@ mod tests {
         assert_eq!(parse_metrics_key_u32(line, "req_read_body_reset"), Some(1));
         assert_eq!(parse_metrics_key_u32(line, "req_read_body"), Some(1));
         assert_eq!(parse_metrics_key_u32(line, "missing"), None);
+    }
+
+    #[test]
+    fn classify_host_upload_failure_signatures() {
+        assert_eq!(
+            classify_host_upload_failure(
+                "health check failed: GET http://10.0.0.8:8080/health last_error=GET ... send failed"
+            ),
+            Some("host_health_send_fail")
+        );
+        assert_eq!(
+            classify_host_upload_failure(
+                "PUT http://10.0.0.8:8080/upload send failed; connection refused (os error 61)"
+            ),
+            Some("host_transport_connect_refused")
+        );
+        assert_eq!(
+            classify_host_upload_failure("PUT http://10.0.0.8:8080/upload send failed"),
+            Some("host_transport_send_fail")
+        );
+        assert_eq!(
+            classify_host_upload_failure("connection reset by peer"),
+            Some("host_transport_connection_reset")
+        );
+        assert_eq!(classify_host_upload_failure("remote verify failed"), None);
     }
 }

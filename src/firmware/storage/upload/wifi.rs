@@ -83,6 +83,9 @@ const WIFI_DHCP_LEASE_REACQUIRE_MAX_ATTEMPTS: u8 = 2;
 // Backoff between lease-reacquire attempts; short by design to keep retries
 // responsive without hot-looping the driver.
 const WIFI_DHCP_LEASE_REACQUIRE_BACKOFF_MS: u64 = 800;
+// If lease drops while already in ListenerWait, escalate quickly through the
+// DHCP/no-IPv4 recovery path instead of waiting the full listener timeout.
+const WIFI_LISTENER_LEASE_LOSS_GRACE_MS: u64 = 2_500;
 // If we keep stalling on the same candidate twice, force hard restart/rescan.
 const WIFI_DHCP_SAME_CANDIDATE_RESTART_STREAK: u8 = 2;
 // Escalate recurring reason=2/auth-expire disconnects into hard recover after 3 hits.

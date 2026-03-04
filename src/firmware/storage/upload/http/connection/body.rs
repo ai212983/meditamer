@@ -14,6 +14,7 @@ use super::super::helpers::{write_response, write_roundtrip_error_response};
 use crate::firmware::telemetry;
 use crate::firmware::types::{
     SdUploadCommand, HTTP_INGRESS_COOP_YIELD_BYTES, HTTP_INGRESS_COOP_YIELD_READS,
+    HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS,
 };
 
 pub(super) struct UploadBodyStats {
@@ -242,6 +243,7 @@ async fn forward_upload_body(
     let mut ingress_read_wait_over_50ms = 0u32;
     let mut ingress_read_bytes_since_yield = 0usize;
     let mut ingress_read_ops_since_yield = 0u32;
+    let mut ingress_read_ops_since_try_drain = 0u32;
     let mut inflight: Option<InflightChunk> = None;
     let mut chunk_samples = ChunkLatencySamples {
         values: [0; CHUNK_LATENCY_SAMPLE_CAP],
@@ -288,7 +290,11 @@ async fn forward_upload_body(
     }
 
     while consumed < content_length {
-        if UPLOAD_CHUNK_PIPELINE_ENABLED {
+        let pre_read_queue = usize_to_u32_saturating(socket.recv_queue());
+        if UPLOAD_CHUNK_PIPELINE_ENABLED
+            && (pre_read_queue == 0
+                || ingress_read_ops_since_try_drain >= HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS)
+        {
             try_drain_inflight_chunk(
                 &mut inflight,
                 &mut payload_copy_ms,
@@ -306,12 +312,12 @@ async fn forward_upload_body(
                 &mut max_chunk_bytes,
                 &mut chunk_samples,
             )?;
+            ingress_read_ops_since_try_drain = 0;
         }
         let want = min(
             chunk_buf.len().saturating_sub(pending),
             content_length - consumed,
         );
-        let pre_read_queue = usize_to_u32_saturating(socket.recv_queue());
         ingress_read_calls = ingress_read_calls.saturating_add(1);
         ingress_read_pre_queue_bytes_total =
             ingress_read_pre_queue_bytes_total.saturating_add(pre_read_queue);
@@ -358,6 +364,7 @@ async fn forward_upload_body(
         }
         pending += n;
         consumed += n;
+        ingress_read_ops_since_try_drain = ingress_read_ops_since_try_drain.saturating_add(1);
         if pre_read_queue > 0 {
             ingress_read_bytes_since_yield = ingress_read_bytes_since_yield.saturating_add(n);
             ingress_read_ops_since_yield = ingress_read_ops_since_yield.saturating_add(1);

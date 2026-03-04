@@ -164,7 +164,15 @@ fn run_directory_upload(
     Ok(())
 }
 
-pub fn upload_file_direct_fast(logger: &mut Logger, opts: DirectUploadOptions<'_>) -> Result<()> {
+pub fn make_direct_upload_client(timeout_sec: f64) -> Result<reqwest::blocking::Client> {
+    make_client(timeout_sec)
+}
+
+pub fn upload_file_direct_fast_with_client(
+    logger: &mut Logger,
+    client: &reqwest::blocking::Client,
+    opts: DirectUploadOptions<'_>,
+) -> Result<()> {
     if !opts.src.exists() {
         return Err(anyhow!(
             "Source path does not exist: {}",
@@ -172,9 +180,8 @@ pub fn upload_file_direct_fast(logger: &mut Logger, opts: DirectUploadOptions<'_
         ));
     }
 
-    let client = make_client(opts.timeout_sec)?;
     // Keep wifi-acceptance failures bounded when host->device HTTP path is broken.
-    require_health_check(&client, opts.host, opts.port, opts.timeout_sec, 3, 250)?;
+    require_health_check(client, opts.host, opts.port, opts.timeout_sec, 3, 250)?;
     let skip_mkdir = env_utils::parse_env_bool01("HOSTCTL_UPLOAD_SKIP_MKDIR", false)?;
     let upload_target = UploadRunTarget {
         request_ctx: RequestContext {
@@ -188,7 +195,7 @@ pub fn upload_file_direct_fast(logger: &mut Logger, opts: DirectUploadOptions<'_
         skip_mkdir,
     };
 
-    run_single_file_upload(logger, &client, upload_target, opts.src)
+    run_single_file_upload(logger, client, upload_target, opts.src)
 }
 
 pub fn stat_remote_file(
@@ -234,6 +241,11 @@ fn retry_policy_from_general_env() -> Result<UploadRetryPolicy> {
             "HOSTCTL_UPLOAD_NET_RECOVERY_POLL_SEC",
             0.8,
         )?,
+        net_recovery_consecutive_health_successes: env_utils::parse_env_u32(
+            "HOSTCTL_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH",
+            2,
+        )?
+        .max(1),
     })
 }
 

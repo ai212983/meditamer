@@ -139,6 +139,9 @@ pub(crate) struct SdUploadResult {
     pub(crate) bytes_written: u32,
     pub(crate) chunk_queue_wait_ms: u32,
     pub(crate) chunk_handler_ms: u32,
+    pub(crate) chunk_post_handler_ms: u32,
+    pub(crate) chunk_published_at_ms: u32,
+    pub(crate) chunk_handler_done_at_ms: u32,
 }
 
 #[derive(Clone, Copy)]

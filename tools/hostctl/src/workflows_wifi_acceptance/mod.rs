@@ -50,6 +50,8 @@ struct WifiAcceptanceRuntime<'a> {
     panic_first: Option<PanicSignal>,
     req_read_body_reset_max_delta: u32,
     req_read_body_reset_baseline: Option<u32>,
+    upload_client: Option<reqwest::blocking::Client>,
+    reuse_upload_client: bool,
 }
 
 pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> Result<()> {
@@ -94,6 +96,8 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     let operation_retries = env_utils::parse_env_u32("HOSTCTL_NET_OPERATION_RETRIES", 3)?.max(1);
     let req_read_body_reset_max_delta =
         env_utils::parse_env_u32("HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA", 0)?;
+    let reuse_upload_client =
+        env_utils::parse_env_bool01("HOSTCTL_NET_REUSE_UPLOAD_CLIENT", false)?;
     let require_boot_discovery_gate =
         env_utils::parse_env_bool01("HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE", true)?;
     let boot_discovery_cfg = BootDiscoveryGateConfig {
@@ -150,6 +154,8 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         panic_first: None,
         req_read_body_reset_max_delta,
         req_read_body_reset_baseline: None,
+        upload_client: None,
+        reuse_upload_client,
     };
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())

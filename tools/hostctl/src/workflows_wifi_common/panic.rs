@@ -83,9 +83,7 @@ fn classify_panic_line(line: &str) -> Option<PanicClass> {
     }
     // Keep abort-based panic detection, but avoid matching telemetry keys like
     // `sess_timeout_abort=<n>` in METRICS lines.
-    if lower.contains("abort()")
-        || lower.contains("abort was called")
-        || lower.contains("aborted")
+    if lower.contains("abort()") || lower.contains("abort was called") || lower.contains("aborted")
     {
         return Some(PanicClass::PanicOther);
     }
@@ -132,8 +130,8 @@ mod tests {
 
     #[test]
     fn detects_abort_signature_without_false_metric_match() {
-        let signal = detect_panic_signal("abort() was called at PC 0x40000000", 7)
-            .expect("must detect");
+        let signal =
+            detect_panic_signal("abort() was called at PC 0x40000000", 7).expect("must detect");
         assert_eq!(signal.class, PanicClass::PanicOther);
     }
 

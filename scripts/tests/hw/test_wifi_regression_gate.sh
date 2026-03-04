@@ -7,6 +7,7 @@ repo_root="$(cd "$script_dir/../../.." && pwd)"
 # shellcheck source=../../lib/run_hostctl.sh
 source "$script_dir/../../lib/run_hostctl.sh"
 load_repo_env_file_if_present ".env.local"
+ensure_hostctl_net_port "test_wifi_regression_gate.sh"
 
 reject_legacy_env_vars "test_wifi_regression_gate.sh" \
     HOSTCTL_PORT \
@@ -200,6 +201,53 @@ extract_failure_from_log() {
         if [[ -n "$parsed_code" ]]; then
             failure_code="$parsed_code"
         fi
+    fi
+
+    if [[ -z "$failure_class" || "$failure_class" == "none" ]]; then
+        local inferred_host_class
+        inferred_host_class="$(infer_host_failure_class_from_log "$log_path")"
+        if [[ -n "$inferred_host_class" ]]; then
+            failure_class="$inferred_host_class"
+            if [[ -z "$failure_code" ]]; then
+                case "$failure_class" in
+                    host_health_send_fail) failure_code="9001" ;;
+                    host_transport_send_fail) failure_code="9002" ;;
+                    host_transport_connection_reset) failure_code="9003" ;;
+                    host_transport_connect_refused) failure_code="9004" ;;
+                esac
+            fi
+        fi
+    fi
+}
+
+infer_host_failure_class_from_log() {
+    local log_path="$1"
+    if [[ ! -f "$log_path" ]]; then
+        return
+    fi
+
+    local marker_class
+    marker_class="$(grep -Eo 'HOST_FAILURE class=[A-Za-z0-9_]+' "$log_path" | tail -n1 | sed -E 's/.*class=//' || true)"
+    if [[ -n "$marker_class" ]]; then
+        printf '%s\n' "$marker_class"
+        return
+    fi
+
+    if grep -Eiq 'health check failed: GET .*send failed|health check failed: GET .*connection reset|health check failed: GET .*connection refused|health check failed: GET .*error sending request' "$log_path"; then
+        printf 'host_health_send_fail\n'
+        return
+    fi
+    if grep -Eiq 'connection refused|connect error.*refused' "$log_path"; then
+        printf 'host_transport_connect_refused\n'
+        return
+    fi
+    if grep -Eiq 'send failed|error sending request' "$log_path"; then
+        printf 'host_transport_send_fail\n'
+        return
+    fi
+    if grep -Eiq 'connection reset|broken pipe|body read err=ConnectionReset' "$log_path"; then
+        printf 'host_transport_connection_reset\n'
+        return
     fi
 }
 

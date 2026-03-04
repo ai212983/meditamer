@@ -6,6 +6,9 @@ fn disabled_upload_result() -> SdUploadResult {
         bytes_written: 0,
         chunk_queue_wait_ms: 0,
         chunk_handler_ms: 0,
+        chunk_post_handler_ms: 0,
+        chunk_published_at_ms: 0,
+        chunk_handler_done_at_ms: 0,
     }
 }
 

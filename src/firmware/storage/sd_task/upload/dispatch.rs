@@ -61,11 +61,18 @@ async fn process_upload_stream_request(
         }
         UploadStreamCommand::Chunk { data_len } => {
             let handler_started_at = Instant::now();
-            let mut result =
-                handle_chunk(data_len, queue_wait_ms, session, sd_probe, powered, upload_mounted)
-                    .await;
+            let mut result = handle_chunk(
+                data_len,
+                queue_wait_ms,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+            )
+            .await;
             result.chunk_queue_wait_ms = queue_wait_ms;
             result.chunk_handler_ms = elapsed_ms_u32(handler_started_at);
+            result.chunk_handler_done_at_ms = now_ms_u32();
             result
         }
         UploadStreamCommand::Commit => {

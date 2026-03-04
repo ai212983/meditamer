@@ -41,6 +41,44 @@ pub(crate) fn record_wifi_scan(result_count: usize, target_found: bool) {
     );
 }
 
+pub(crate) fn record_wifi_link_rssi(rssi_dbm: i32) {
+    const RSSI_LOW_THRESHOLD_DBM: i32 = -70;
+
+    let clamped = rssi_dbm.clamp(-128, 127);
+    let encoded = (clamped + 128) as u32;
+    WIFI_LINK_RSSI_LAST_DBM.store(encoded, Ordering::Relaxed);
+    WIFI_LINK_RSSI_SAMPLES.fetch_add(1, Ordering::Relaxed);
+    if clamped <= RSSI_LOW_THRESHOLD_DBM {
+        WIFI_LINK_RSSI_LOW_SAMPLES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    loop {
+        let current = WIFI_LINK_RSSI_MIN_DBM.load(Ordering::Relaxed);
+        if current != u32::MAX && current <= encoded {
+            break;
+        }
+        if WIFI_LINK_RSSI_MIN_DBM
+            .compare_exchange(current, encoded, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            break;
+        }
+    }
+
+    loop {
+        let current = WIFI_LINK_RSSI_MAX_DBM.load(Ordering::Relaxed);
+        if current != u32::MAX && current >= encoded {
+            break;
+        }
+        if WIFI_LINK_RSSI_MAX_DBM
+            .compare_exchange(current, encoded, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            break;
+        }
+    }
+}
+
 pub(crate) fn record_wifi_reassoc_stage(stage: u8) {
     WIFI_REASSOC_LAST_STAGE.store(stage as u32, Ordering::Relaxed);
 }

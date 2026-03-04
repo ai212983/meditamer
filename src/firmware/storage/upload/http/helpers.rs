@@ -243,10 +243,10 @@ pub(super) async fn write_response(socket: &mut TcpSocket<'_>, status: &[u8], bo
         }
     }
 
-    let _ = socket.write_all(b"HTTP/1.0 ").await;
+    let _ = socket.write_all(b"HTTP/1.1 ").await;
     let _ = socket.write_all(status).await;
     let _ = socket
-        .write_all(b"\r\nConnection: close\r\nContent-Length: ")
+        .write_all(b"\r\nConnection: keep-alive\r\nContent-Length: ")
         .await;
     let _ = socket.write_all(&content_length[idx..]).await;
     let _ = socket.write_all(b"\r\n\r\n").await;

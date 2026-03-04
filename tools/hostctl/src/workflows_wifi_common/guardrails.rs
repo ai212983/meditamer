@@ -140,9 +140,20 @@ fn acquire_port_lock_with(port: &str, lock_path: PathBuf, wait_sec: f64) -> Resu
 }
 
 fn default_lock_path(port: &str) -> PathBuf {
-    PathBuf::from("logs")
+    default_repo_root()
+        .join("logs")
         .join("locks")
         .join(format!("wifi_{}.lock", sanitize_port_for_lock_name(port)))
+}
+
+fn default_repo_root() -> PathBuf {
+    // tools/hostctl/src/... -> repo root is three levels up from CARGO_MANIFEST_DIR.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn sanitize_port_for_lock_name(port: &str) -> String {

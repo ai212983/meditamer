@@ -36,6 +36,18 @@ pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
     );
     let _ = uart_write_all(uart, wifi_line.as_bytes()).await;
 
+    let mut wifi_link_line = heapless::String::<192>::new();
+    let _ = write!(
+        &mut wifi_link_line,
+        "METRICS WIFI_LINK rssi_last_dbm={} rssi_min_dbm={} rssi_max_dbm={} rssi_samples={} rssi_low_samples={}\r\n",
+        snapshot.wifi_link_rssi_last_dbm,
+        snapshot.wifi_link_rssi_min_dbm,
+        snapshot.wifi_link_rssi_max_dbm,
+        snapshot.wifi_link_rssi_samples,
+        snapshot.wifi_link_rssi_low_samples,
+    );
+    let _ = uart_write_all(uart, wifi_link_line.as_bytes()).await;
+
     let mut wifi_reassoc_line = heapless::String::<512>::new();
     let _ = write!(
         &mut wifi_reassoc_line,
@@ -236,6 +248,19 @@ pub(super) async fn write_metrics_net_lines(uart: &mut SerialUart) {
         snapshot.net_pipeline_accept_wait_ms_max,
     );
     let _ = uart_write_all(uart, net_pipeline_line.as_bytes()).await;
+
+    let mut net_accept_line = heapless::String::<320>::new();
+    let _ = write!(
+        &mut net_accept_line,
+        "METRICS NET_ACCEPT arm_gap_n={} arm_gap_us={} arm_gap_us_max={} arm_gap_after_mkdir_n={} arm_gap_after_mkdir_us={} arm_gap_after_mkdir_us_max={}\r\n",
+        snapshot.net_pipeline_accept_arm_gap_count,
+        snapshot.net_pipeline_accept_arm_gap_us_total,
+        snapshot.net_pipeline_accept_arm_gap_us_max,
+        snapshot.net_pipeline_accept_arm_gap_after_mkdir_count,
+        snapshot.net_pipeline_accept_arm_gap_after_mkdir_us_total,
+        snapshot.net_pipeline_accept_arm_gap_after_mkdir_us_max,
+    );
+    let _ = uart_write_all(uart, net_accept_line.as_bytes()).await;
 }
 
 pub(super) async fn write_telemetry_status_line(uart: &mut SerialUart) {

@@ -1,7 +1,7 @@
 use core::cmp::min;
 
 use embassy_net::tcp::TcpSocket;
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
 use esp_println::println;
 
 use super::super::super::sd_bridge::{roundtrip_error_log, sd_upload_roundtrip};
@@ -12,7 +12,7 @@ use super::super::helpers::{
 use super::body::{
     elapsed_ms_u32, forward_upload_body_or_http_error, log_upload_stats, usize_to_u32_saturating,
 };
-use super::{RequestContext, SdPath};
+use super::{RequestContext, RequestRouteKind, SdPath};
 use crate::firmware::telemetry;
 use crate::firmware::types::SdUploadCommand;
 
@@ -21,21 +21,37 @@ pub(super) async fn dispatch_request(
     chunk_buf: &mut [u8],
     header_buf: &[u8],
     request: &RequestContext<'_>,
-) -> Result<(), &'static str> {
-    match (request.method, request.request_path) {
-        ("GET", "/health") => handle_health(socket, request).await,
-        ("GET", "/stat") => handle_stat(socket, request).await,
-        ("POST", "/mkdir") => handle_mkdir(socket, request).await,
-        ("DELETE", "/rm") => handle_delete(socket, request).await,
-        ("POST", "/upload_begin") => handle_upload_begin(socket, request).await,
+) -> Result<RequestRouteKind, &'static str> {
+    let (route_kind, outcome) = match (request.method, request.request_path) {
+        ("GET", "/health") => (RequestRouteKind::Health, handle_health(socket, request).await),
+        ("GET", "/stat") => (RequestRouteKind::Stat, handle_stat(socket, request).await),
+        ("POST", "/mkdir") => (RequestRouteKind::Mkdir, handle_mkdir(socket, request).await),
+        ("DELETE", "/rm") => (RequestRouteKind::Remove, handle_delete(socket, request).await),
+        ("POST", "/upload_begin") => (
+            RequestRouteKind::UploadBegin,
+            handle_upload_begin(socket, request).await,
+        ),
         ("PUT", "/upload_chunk") => {
-            handle_upload_chunk(socket, chunk_buf, header_buf, request).await
+            (
+                RequestRouteKind::UploadChunk,
+                handle_upload_chunk(socket, chunk_buf, header_buf, request).await,
+            )
         }
-        ("POST", "/upload_commit") => handle_upload_commit(socket, request).await,
-        ("POST", "/upload_abort") => handle_upload_abort(socket, request).await,
-        ("PUT", "/upload") => handle_upload(socket, chunk_buf, header_buf, request).await,
-        _ => handle_not_found(socket, request).await,
-    }
+        ("POST", "/upload_commit") => (
+            RequestRouteKind::UploadCommit,
+            handle_upload_commit(socket, request).await,
+        ),
+        ("POST", "/upload_abort") => (
+            RequestRouteKind::UploadAbort,
+            handle_upload_abort(socket, request).await,
+        ),
+        ("PUT", "/upload") => (
+            RequestRouteKind::Upload,
+            handle_upload(socket, chunk_buf, header_buf, request).await,
+        ),
+        _ => (RequestRouteKind::NotFound, handle_not_found(socket, request).await),
+    };
+    outcome.map(|_| route_kind)
 }
 
 async fn handle_health(
@@ -124,9 +140,14 @@ async fn handle_upload_chunk(
     let content_length = required_content_length(socket, request.content_length).await?;
     let request_started_at = Instant::now();
     let prefetched = prefetched_body_slice(header_buf, request, content_length);
-    let stats =
+    socket.set_timeout(Some(Duration::from_millis(
+        super::HTTP_UPLOAD_BODY_READ_TIMEOUT_MS,
+    )));
+    let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, false)
-            .await?;
+            .await;
+    socket.set_timeout(Some(Duration::from_secs(super::super::HTTP_SOCKET_TIMEOUT_SECS)));
+    let stats = body_result?;
 
     telemetry::record_upload_http_upload_phase(
         usize_to_u32_saturating(stats.sent_bytes),
@@ -202,9 +223,14 @@ async fn handle_upload(
     sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(begin_started_at));
 
     let prefetched = prefetched_body_slice(header_buf, request, content_length);
-    let stats =
+    socket.set_timeout(Some(Duration::from_millis(
+        super::HTTP_UPLOAD_BODY_READ_TIMEOUT_MS,
+    )));
+    let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, true)
-            .await?;
+            .await;
+    socket.set_timeout(Some(Duration::from_secs(super::super::HTTP_SOCKET_TIMEOUT_SECS)));
+    let stats = body_result?;
 
     let commit_started_at = Instant::now();
     if let Err(err) = sd_upload_roundtrip(SdUploadCommand::Commit).await {

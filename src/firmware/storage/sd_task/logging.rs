@@ -26,7 +26,13 @@ pub(super) fn publish_result(result: SdResult) {
     let _ = SD_DIAG_RESULTS.try_send(result);
 }
 
-pub(super) fn publish_upload_result(result: SdUploadResult) {
+pub(super) fn publish_upload_result(mut result: SdUploadResult) {
+    if result.chunk_handler_done_at_ms != 0 {
+        result.chunk_published_at_ms = now_ms_u32();
+        result.chunk_post_handler_ms = result
+            .chunk_published_at_ms
+            .wrapping_sub(result.chunk_handler_done_at_ms);
+    }
     if SD_UPLOAD_RESULTS.try_send(result).is_err() {
         esp_println::println!(
             "sdtask: upload_result_drop ok={} code={} bytes_written={}",
@@ -111,6 +117,15 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
         SdUploadResultCode::InitFailed => "init_failed",
         SdUploadResultCode::DirectoryFull => "directory_full",
         SdUploadResultCode::OperationFailed => "operation_failed",
+    }
+}
+
+fn now_ms_u32() -> u32 {
+    let now_ms = embassy_time::Instant::now().as_millis();
+    if now_ms > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        now_ms as u32
     }
 }
 

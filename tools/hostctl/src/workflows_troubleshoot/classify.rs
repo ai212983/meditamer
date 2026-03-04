@@ -27,8 +27,7 @@ pub(super) fn classify_failure(stage: &str, detail: &str) -> String {
         return "flash".to_string();
     }
 
-    if runtime_subclass(detail).is_some()
-    {
+    if runtime_subclass(detail).is_some() {
         return "runtime".to_string();
     }
 

@@ -71,7 +71,8 @@ fn restore_listener_gate(logger: &mut Logger, console: &mut SerialConsole) -> Re
         thread::sleep(Duration::from_millis(180));
     }
 
-    logger.info("boot discovery gate: listener_enabled stayed false after NET LISTENER ON; retrying");
+    logger
+        .info("boot discovery gate: listener_enabled stayed false after NET LISTENER ON; retrying");
     wait_net_ack(console, "NET LISTENER ON")?;
     let confirm_deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < confirm_deadline {

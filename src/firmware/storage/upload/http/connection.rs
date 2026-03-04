@@ -11,7 +11,40 @@ mod request;
 mod routes;
 
 pub(super) const HTTP_HEADER_READ_TIMEOUT_MS: u64 = 10_000;
+pub(super) const HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS: u64 = 500;
+pub(super) const HTTP_UPLOAD_BODY_READ_TIMEOUT_MS: u64 = 6_000;
 type SdPath = ([u8; SD_PATH_MAX], u8);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RequestRouteKind {
+    Health,
+    Stat,
+    Mkdir,
+    Remove,
+    UploadBegin,
+    UploadChunk,
+    UploadCommit,
+    UploadAbort,
+    Upload,
+    NotFound,
+}
+
+impl RequestRouteKind {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Health => "health",
+            Self::Stat => "stat",
+            Self::Mkdir => "mkdir",
+            Self::Remove => "rm",
+            Self::UploadBegin => "upload_begin",
+            Self::UploadChunk => "upload_chunk",
+            Self::UploadCommit => "upload_commit",
+            Self::UploadAbort => "upload_abort",
+            Self::Upload => "upload",
+            Self::NotFound => "not_found",
+        }
+    }
+}
 
 pub(super) struct RequestContext<'a> {
     method: &'a str,
@@ -27,8 +60,9 @@ pub(super) async fn handle_connection(
     socket: &mut TcpSocket<'_>,
     chunk_buf: &mut [u8],
     header_buf: &mut [u8],
-) -> Result<(), &'static str> {
-    socket.set_timeout(Some(Duration::from_millis(HTTP_HEADER_READ_TIMEOUT_MS)));
+    header_timeout_ms: u64,
+) -> Result<RequestRouteKind, &'static str> {
+    socket.set_timeout(Some(Duration::from_millis(header_timeout_ms)));
     let header_result = request::read_header(socket, header_buf).await;
     socket.set_timeout(Some(Duration::from_secs(super::HTTP_SOCKET_TIMEOUT_SECS)));
     let (filled, header_end) = header_result?;

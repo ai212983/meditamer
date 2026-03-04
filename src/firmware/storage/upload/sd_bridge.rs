@@ -28,10 +28,17 @@ pub(crate) struct SdUploadChunkInFlight {
     _lock: MutexGuard<'static, CriticalSectionRawMutex, ()>,
 }
 
+pub(crate) enum SdUploadChunkTryFinish {
+    Pending(SdUploadChunkInFlight),
+    Finished(SdUploadChunkFinish),
+}
+
 pub(crate) struct SdUploadChunkFinish {
     pub(crate) roundtrip_ms: u32,
     pub(crate) queue_wait_ms: u32,
     pub(crate) handler_ms: u32,
+    pub(crate) post_handler_ms: u32,
+    pub(crate) publish_to_receive_ms: u32,
 }
 
 pub(crate) async fn sd_upload_chunk_start(
@@ -97,12 +104,50 @@ pub(crate) async fn sd_upload_chunk_finish(
         telemetry::record_sd_upload_roundtrip_code(result.code);
         return Err(SdUploadRoundtripError::Device(result.code));
     }
+    let receive_at_ms = now_ms_u32();
+    let publish_to_receive_ms = if result.chunk_published_at_ms == 0 {
+        0
+    } else {
+        receive_at_ms.wrapping_sub(result.chunk_published_at_ms)
+    };
 
     Ok(SdUploadChunkFinish {
         roundtrip_ms,
         queue_wait_ms: result.chunk_queue_wait_ms,
         handler_ms: result.chunk_handler_ms,
+        post_handler_ms: result.chunk_post_handler_ms,
+        publish_to_receive_ms,
     })
+}
+
+pub(crate) fn sd_upload_chunk_try_finish(
+    inflight: SdUploadChunkInFlight,
+) -> Result<SdUploadChunkTryFinish, SdUploadRoundtripError> {
+    let started_at = inflight.started_at;
+    let Ok(result) = SD_UPLOAD_RESULTS.try_receive() else {
+        return Ok(SdUploadChunkTryFinish::Pending(inflight));
+    };
+    telemetry::record_sd_upload_roundtrip_timing(
+        telemetry::SdUploadRoundtripPhase::Chunk,
+        elapsed_ms_u32(started_at),
+    );
+    if !result.ok {
+        telemetry::record_sd_upload_roundtrip_code(result.code);
+        return Err(SdUploadRoundtripError::Device(result.code));
+    }
+    let receive_at_ms = now_ms_u32();
+    let publish_to_receive_ms = if result.chunk_published_at_ms == 0 {
+        0
+    } else {
+        receive_at_ms.wrapping_sub(result.chunk_published_at_ms)
+    };
+    Ok(SdUploadChunkTryFinish::Finished(SdUploadChunkFinish {
+        roundtrip_ms: elapsed_ms_u32(started_at),
+        queue_wait_ms: result.chunk_queue_wait_ms,
+        handler_ms: result.chunk_handler_ms,
+        post_handler_ms: result.chunk_post_handler_ms,
+        publish_to_receive_ms,
+    }))
 }
 
 pub(crate) async fn sd_upload_roundtrip(
