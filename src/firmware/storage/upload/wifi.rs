@@ -146,6 +146,7 @@ struct ScanOutcome {
     candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
     hit_nomem: bool,
     saw_nonzero_results: bool,
+    saw_target_candidate: bool,
 }
 
 mod connect;

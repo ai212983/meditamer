@@ -62,6 +62,7 @@ pub(super) async fn handle_connect_error(
     let mut observed_ap = None;
     let mut observed_scan_nomem = false;
     let mut observed_scan_nonzero = false;
+    let mut observed_target_candidate = false;
     if should_scan {
         let mut target_ssid = heapless::String::<WIFI_SSID_MAX>::new();
         if let Some(credentials) = state.credentials {
@@ -83,13 +84,14 @@ pub(super) async fn handle_connect_error(
             state.force_full_channel_probe_next_scan = false;
             observed_scan_nomem = scan_outcome.hit_nomem;
             observed_scan_nonzero = scan_outcome.saw_nonzero_results;
+            observed_target_candidate = scan_outcome.saw_target_candidate;
             observed_candidates = scan_outcome.candidates;
             observed_ap = observed_candidates.first().copied();
         }
     }
     let auth_method = WIFI_AUTH_METHODS[state.auth_method_idx];
     diag_reassoc!(
-        "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} bssid_hint={} observed_channel={:?} observed_bssid={} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} scan_nomem={} probe_idx={}",
+        "upload_http: wifi connect err={:?} auth={:?} channel_hint={:?} bssid_hint={} observed_channel={:?} observed_bssid={} reason={} (0x{:02x} {}) discovery_reason={} should_scan={} scan_nomem={} scan_any_seen={} scan_target_seen={} probe_idx={}",
         err,
         auth_method,
         state.channel_hint,
@@ -102,9 +104,11 @@ pub(super) async fn handle_connect_error(
         discovery_reason,
         should_scan,
         observed_scan_nomem,
+        observed_scan_nonzero,
+        observed_target_candidate,
         state.channel_probe_idx,
     );
-    if observed_scan_nonzero {
+    if observed_target_candidate {
         state.discovery_sweep_exhausted_streak = 0;
         state.zero_discovery_hard_guard_restarts = 0;
         state.force_full_channel_probe_next_scan = false;
@@ -213,7 +217,7 @@ pub(super) async fn handle_connect_error(
         auth_reason,
         observed_candidates,
         observed_ap,
-        observed_scan_nonzero,
+        observed_target_candidate,
     )
     .await;
 }

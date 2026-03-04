@@ -3,7 +3,7 @@ async fn handle_discovery_reason_paths(
     state: &mut WifiTaskState,
     disconnect_reason: u8,
     discovery_reason: bool,
-    observed_scan_nonzero: bool,
+    observed_target_candidate: bool,
 ) -> bool {
     if !discovery_reason {
         return false;
@@ -25,7 +25,7 @@ async fn handle_discovery_reason_paths(
         Timer::after(Duration::from_millis(WIFI_RECOVERY_RETRY_BACKOFF_MS)).await;
         return true;
     }
-    if !observed_scan_nonzero {
+    if !observed_target_candidate {
         state.discovery_sweep_exhausted_streak =
             state.discovery_sweep_exhausted_streak.saturating_add(1);
     } else {

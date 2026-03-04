@@ -69,7 +69,7 @@ pub(super) async fn prepare_scan_candidates(
                 return true;
             }
             let scanned_candidates = scan_outcome.candidates;
-            if scan_outcome.saw_nonzero_results {
+            if scan_outcome.saw_target_candidate {
                 state.discovery_sweep_exhausted_streak = 0;
                 state.zero_discovery_hard_guard_restarts = 0;
             }

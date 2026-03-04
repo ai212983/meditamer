@@ -12,12 +12,14 @@ pub(super) async fn scan_target_candidates(
     let probe_timeout_ms = zero_discovery_probe_timeout_ms(runtime_policy);
     let probe_timeout = Duration::from_millis(probe_timeout_ms);
     let mut any_nonzero_results = false;
+    let mut saw_target_candidate = false;
     let mut scan_context = ScanStageContext {
         controller,
         runtime_policy,
         target_ssid,
         candidates: &mut candidates,
         saw_nonzero_results: &mut any_nonzero_results,
+        saw_target_candidate: &mut saw_target_candidate,
     };
 
     for stage in [
@@ -32,7 +34,9 @@ pub(super) async fn scan_target_candidates(
         }
     }
 
-    if !*scan_context.saw_nonzero_results {
+    // In AP-dense environments, unrelated SSIDs can keep scan counts non-zero while
+    // the target SSID is still absent. Probe fallback should key on target visibility.
+    if !*scan_context.saw_target_candidate {
         let probe_channels: &[u8] = if force_full_channel_probe {
             &WIFI_CHANNEL_PROBE_SEQUENCE
         } else {
@@ -55,6 +59,7 @@ pub(super) async fn scan_target_candidates(
     }
 
     let saw_nonzero_results = *scan_context.saw_nonzero_results;
+    let saw_target_candidate = *scan_context.saw_target_candidate;
     let candidates = core::mem::take(scan_context.candidates);
     if let Some(outcome) =
         scan_stage_outcome_if_available(target_ssid, &candidates, saw_nonzero_results)
@@ -67,6 +72,7 @@ pub(super) async fn scan_target_candidates(
         candidates,
         hit_nomem: false,
         saw_nonzero_results,
+        saw_target_candidate,
     }
 }
 
@@ -95,6 +101,7 @@ struct ScanStageContext<'a> {
     target_ssid: &'a str,
     candidates: &'a mut heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
     saw_nonzero_results: &'a mut bool,
+    saw_target_candidate: &'a mut bool,
 }
 
 async fn run_scan_stage(
@@ -159,6 +166,7 @@ async fn run_scan_stage(
                 );
             }
             collect_scan_results(label, context.target_ssid, &results, context.candidates);
+            *context.saw_target_candidate |= !context.candidates.is_empty();
             telemetry::record_wifi_reassoc_scan(
                 phase,
                 results.len(),
@@ -171,6 +179,7 @@ async fn run_scan_stage(
                     candidates: context.candidates.clone(),
                     hit_nomem: false,
                     saw_nonzero_results: *context.saw_nonzero_results,
+                    saw_target_candidate: *context.saw_target_candidate,
                 });
             }
         }
@@ -197,6 +206,7 @@ async fn run_scan_stage(
                     candidates: context.candidates.clone(),
                     hit_nomem: true,
                     saw_nonzero_results: *context.saw_nonzero_results,
+                    saw_target_candidate: *context.saw_target_candidate,
                 });
             }
             telemetry::record_wifi_reassoc_scan(phase, 0, false, elapsed_ms_u32(started_at), None);
@@ -233,5 +243,6 @@ fn scan_stage_outcome_if_available(
         candidates: candidates.clone(),
         hit_nomem: false,
         saw_nonzero_results,
+        saw_target_candidate: true,
     })
 }

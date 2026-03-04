@@ -6,7 +6,7 @@ pub(super) async fn handle_error_recovery_paths(
     auth_reason: bool,
     observed_candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
     observed_ap: Option<TargetApCandidate>,
-    observed_scan_nonzero: bool,
+    observed_target_candidate: bool,
 ) {
     if handle_observed_ap_paths(state, disconnect_reason, observed_candidates, observed_ap).await {
         return;
@@ -17,7 +17,7 @@ pub(super) async fn handle_error_recovery_paths(
         state,
         disconnect_reason,
         discovery_reason,
-        observed_scan_nonzero,
+        observed_target_candidate,
     )
     .await
     {
