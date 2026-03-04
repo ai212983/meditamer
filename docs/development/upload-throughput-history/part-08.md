@@ -188,3 +188,65 @@ Decision:
 - flashed promoted default and ran sanity check:
   - `logs/wifi_acceptance_ingressdrain_default2_sanity3_20260304_133613.log`
   - `cycles=3`, `avg_kib_s=149.07`, no `req_read_body_reset` guard deltas.
+
+## 2026-03-04: high-AP per-cycle outlier investigation + retry-tail hardening
+
+Investigation goal:
+
+- focus on per-cycle outliers under AP-dense conditions (not mean-only shifts).
+
+Baseline capture (direct path, burst sender OFF):
+
+- run: `logs/wifi_outlierbaseline20_hostout_20260304_135616.log`
+- serial: `logs/wifi_outlierbaseline20_serial_20260304_135616.log`
+- summary (`n=20`):
+  - `avg_kib_s=148.41`, `stddev=4.57`
+  - min cycle: `133.93 KiB/s` (`cycle 7`)
+  - `avg_upload_ms=3453.4`, max `3823 ms` (`cycle 7`)
+- outlier signature:
+  - no retry loops (`attempts=1` in host diagnostics)
+  - cycle-7 spike aligned across host + firmware:
+    - host `send_ms=3470`, `body_gap_ms_total=1713`
+    - firmware `read_wait_ms=2605`, `ingress_read_wait_empty_q_ms=2602`
+
+Burst stress A/B for retry-tail behavior:
+
+- pre-hardening (burst enabled):
+  - `logs/wifi_outlierab_burst32k_hostout_20260304_135903.log`
+  - repeated `host_upload_retry_diag` transport-reset on first attempt
+  - summary (`n=7`): `avg_kib_s=82.39`, `avg_upload_ms=6273.4`
+- key finding:
+  - `HOSTCTL_UPLOAD_DIRECT_BURST_BYTES=32768` did not reduce body read call
+    count (`body_read_calls` remained `64`), so reqwest body pull cadence still
+    behaved as `8 KiB` reads in this path.
+
+Hardening change:
+
+- file: `tools/hostctl/src/workflows_storage/upload/client.rs`
+- for transport-reset retries:
+  - faster recovery poll (`0.2s`)
+  - single-success health gate for retry path
+  - shorter retry backoff ramp (`75ms` step, capped `600ms`)
+  - conservative fallback to legacy backoff when recovery probe does not pass
+
+Post-hardening burst stress:
+
+- run: `logs/wifi_outlierpost_retryhardening_hostout_20260304_140330.log`
+- summary (`n=7`):
+  - `avg_kib_s=113.28` (vs `82.39`, `+37%`)
+  - `avg_upload_ms=4564.1` (vs `6273.4`, `-27%`)
+  - max upload cycle `5539 ms` (vs `7038 ms`)
+
+Direct-path safety check after hardening:
+
+- run: `logs/wifi_outlierpost_nonburst10_hostout_20260304_140537.log`
+- summary (`n=10`): `avg_kib_s=144.60`, one transient low outlier
+  (`cycle 3: 118.27 KiB/s`), no retry markers.
+
+Conclusion:
+
+- retry-tail hardening reduced transport-reset outlier cost substantially.
+- dominant remaining outlier class on direct non-burst path is still
+  host-send-gap / firmware-empty-queue wait spikes without retries.
+- next optimization target: non-retry ingress starvation (request-body scheduling
+  cadence), not additional retry policy changes.

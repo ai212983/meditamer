@@ -54,6 +54,11 @@ const BODY_READ_GAP_OVER_50MS: u32 = 50;
 const DIRECT_BURST_BYTES_DEFAULT: usize = 64 * 1024;
 const DIRECT_BURST_BYTES_MIN: usize = 4 * 1024;
 const DIRECT_BURST_BYTES_MAX: usize = 256 * 1024;
+const TRANSPORT_RESET_RECOVERY_POLL_SEC: f64 = 0.2;
+const TRANSPORT_RESET_BACKOFF_MS_STEP: u64 = 75;
+const TRANSPORT_RESET_BACKOFF_MS_MAX: u64 = 600;
+const RETRY_BACKOFF_MS_STEP: u64 = 250;
+const RETRY_BACKOFF_MS_MAX: u64 = 3000;
 
 fn upload_send_diag_enabled() -> bool {
     env_utils::parse_env_bool01("HOSTCTL_UPLOAD_SEND_DIAG", false).unwrap_or(false)
@@ -391,8 +396,11 @@ fn wait_network_recovery(
     client: &Client,
     ctx: RequestContext<'_>,
     consecutive_health_successes: u32,
+    poll_sec_override: Option<f64>,
 ) -> bool {
-    let poll_sec = ctx.retry_policy.net_recovery_poll_sec.max(0.05);
+    let poll_sec = poll_sec_override
+        .unwrap_or(ctx.retry_policy.net_recovery_poll_sec)
+        .max(0.05);
     let target_successes = consecutive_health_successes.max(1);
     let deadline = Instant::now()
         + Duration::from_secs_f64(
@@ -547,15 +555,32 @@ pub(super) fn request_sd_busy_aware_timed(
                     );
                 }
 
-                let mut health_successes = 1u32;
+                let mut health_successes =
+                    ctx.retry_policy.net_recovery_consecutive_health_successes.max(1);
+                let mut recovery_poll_override = None;
+                let default_backoff_ms = (attempt as u64 * RETRY_BACKOFF_MS_STEP).min(RETRY_BACKOFF_MS_MAX);
+                let mut retry_backoff_ms = default_backoff_ms;
                 if is_transport_reset {
                     retry_client = Some(make_client(ctx.timeout_sec)?);
-                    health_successes = ctx.retry_policy.net_recovery_consecutive_health_successes;
+                    // Under AP contention, transport resets are often brief. Probe with a faster
+                    // poll and a shorter backoff to limit single-cycle tail latency inflation.
+                    health_successes = 1;
+                    recovery_poll_override = Some(TRANSPORT_RESET_RECOVERY_POLL_SEC);
+                    retry_backoff_ms = (attempt as u64 * TRANSPORT_RESET_BACKOFF_MS_STEP)
+                        .min(TRANSPORT_RESET_BACKOFF_MS_MAX);
                 }
 
                 let recovery_client = retry_client.as_ref().unwrap_or(client);
-                let _ = wait_network_recovery(recovery_client, ctx, health_successes);
-                thread::sleep(Duration::from_millis((attempt as u64 * 250).min(3000)));
+                let recovered = wait_network_recovery(
+                    recovery_client,
+                    ctx,
+                    health_successes,
+                    recovery_poll_override,
+                );
+                if !recovered {
+                    retry_backoff_ms = default_backoff_ms;
+                }
+                thread::sleep(Duration::from_millis(retry_backoff_ms));
             }
         }
     }
