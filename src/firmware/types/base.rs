@@ -18,6 +18,24 @@ const SD_UPLOAD_CHUNK_MAX_MIN: usize = 4_096;
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 const SD_UPLOAD_CHUNK_MAX_MAX: usize = 65_536;
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const HTTP_RX_BUF_TARGET_DEFAULT: usize = 65_536;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const HTTP_RX_BUF_TARGET_MIN: usize = 8_192;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const HTTP_RX_BUF_TARGET_MAX: usize = 262_144;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT: usize = 8 * 1024;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_BYTES_MIN: usize = 1024;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_BYTES_MAX: usize = 64 * 1024;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_READS_DEFAULT: usize = 24;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_READS_MIN: usize = 4;
+#[cfg(feature = "asset-upload-http")]
+const HTTP_INGRESS_COOP_YIELD_READS_MAX: usize = 128;
+#[cfg(feature = "asset-upload-http")]
 const fn parse_ascii_usize(value: &str) -> Option<usize> {
     let bytes = value.as_bytes();
     if bytes.is_empty() {
@@ -61,6 +79,61 @@ const fn configured_sd_upload_chunk_max() -> usize {
     }
 }
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+const fn configured_http_rx_buf_target() -> usize {
+    let configured = match option_env!("MEDITAMER_HTTP_RX_BUF_TARGET") {
+        Some(v) => Some(v),
+        None => option_env!("HTTP_RX_BUF_TARGET"),
+    };
+    let parsed = match configured {
+        Some(v) => parse_ascii_usize(v),
+        None => None,
+    };
+    match parsed {
+        Some(bytes) if bytes >= HTTP_RX_BUF_TARGET_MIN && bytes <= HTTP_RX_BUF_TARGET_MAX => bytes,
+        _ => HTTP_RX_BUF_TARGET_DEFAULT,
+    }
+}
+#[cfg(feature = "asset-upload-http")]
+const fn configured_http_ingress_coop_yield_bytes() -> usize {
+    let configured = match option_env!("MEDITAMER_HTTP_INGRESS_COOP_YIELD_BYTES") {
+        Some(v) => Some(v),
+        None => option_env!("HTTP_INGRESS_COOP_YIELD_BYTES"),
+    };
+    let parsed = match configured {
+        Some(v) => parse_ascii_usize(v),
+        None => None,
+    };
+    match parsed {
+        Some(bytes)
+            if bytes >= HTTP_INGRESS_COOP_YIELD_BYTES_MIN
+                && bytes <= HTTP_INGRESS_COOP_YIELD_BYTES_MAX =>
+        {
+            bytes
+        }
+        _ => HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT,
+    }
+}
+#[cfg(feature = "asset-upload-http")]
+const fn configured_http_ingress_coop_yield_reads() -> u32 {
+    let configured = match option_env!("MEDITAMER_HTTP_INGRESS_COOP_YIELD_READS") {
+        Some(v) => Some(v),
+        None => option_env!("HTTP_INGRESS_COOP_YIELD_READS"),
+    };
+    let parsed = match configured {
+        Some(v) => parse_ascii_usize(v),
+        None => None,
+    };
+    match parsed {
+        Some(reads)
+            if reads >= HTTP_INGRESS_COOP_YIELD_READS_MIN
+                && reads <= HTTP_INGRESS_COOP_YIELD_READS_MAX =>
+        {
+            reads as u32
+        }
+        _ => HTTP_INGRESS_COOP_YIELD_READS_DEFAULT as u32,
+    }
+}
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 // Larger upload chunks reduce per-chunk SD roundtrip overhead and improve
 // sustained HTTP upload throughput when PSRAM is available.
 // Override at build time via MEDITAMER_SD_UPLOAD_CHUNK_MAX (fallback SD_UPLOAD_CHUNK_MAX).
@@ -69,6 +142,20 @@ pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = configured_sd_upload_chunk_max();
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 4096;
 #[cfg(not(feature = "asset-upload-http"))]
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
+#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+// Override at build time via MEDITAMER_HTTP_RX_BUF_TARGET
+// (fallback HTTP_RX_BUF_TARGET).
+pub(crate) const HTTP_RX_BUF_TARGET_BYTES: usize = configured_http_rx_buf_target();
+#[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
+pub(crate) const HTTP_RX_BUF_TARGET_BYTES: usize = 2048;
+#[cfg(feature = "asset-upload-http")]
+// Override at build time via MEDITAMER_HTTP_INGRESS_COOP_YIELD_BYTES
+// (fallback HTTP_INGRESS_COOP_YIELD_BYTES).
+pub(crate) const HTTP_INGRESS_COOP_YIELD_BYTES: usize = configured_http_ingress_coop_yield_bytes();
+#[cfg(feature = "asset-upload-http")]
+// Override at build time via MEDITAMER_HTTP_INGRESS_COOP_YIELD_READS
+// (fallback HTTP_INGRESS_COOP_YIELD_READS).
+pub(crate) const HTTP_INGRESS_COOP_YIELD_READS: u32 = configured_http_ingress_coop_yield_reads();
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const SD_ASSET_READ_MAX: usize = 1024;
 #[cfg(not(feature = "asset-upload-http"))]

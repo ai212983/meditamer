@@ -13,7 +13,10 @@ pub(crate) use base::{
     SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX,
 };
 #[cfg(feature = "asset-upload-http")]
-pub(crate) use base::{WIFI_CONFIG_FILE_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX};
+pub(crate) use base::{
+    HTTP_INGRESS_COOP_YIELD_BYTES, HTTP_INGRESS_COOP_YIELD_READS, HTTP_RX_BUF_TARGET_BYTES,
+    WIFI_CONFIG_FILE_MAX, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
+};
 pub(crate) use modes::AppStateApplyAck;
 pub(crate) use sd::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdCommand, SdCommandKind,
