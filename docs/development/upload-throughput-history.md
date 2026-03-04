@@ -12,9 +12,10 @@ This history is sharded to keep Markdown files under the documentation LOC polic
 - [Part 06](./upload-throughput-history/part-06.md)
 - [Part 07](./upload-throughput-history/part-07.md)
 - [Part 08](./upload-throughput-history/part-08.md)
+- [Part 09](./upload-throughput-history/part-09.md)
 
 ## Notes
 
 - New entries should be appended to the latest part file in
-  `docs/development/upload-throughput-history/`.
+  `docs/development/upload-throughput-history/` (currently `part-09.md`).
 - If a part file approaches `220` LOC, start a new next part.
