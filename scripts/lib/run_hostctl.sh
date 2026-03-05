@@ -10,15 +10,35 @@ _run_hostctl_repo_root() {
     cd "$_RUN_HOSTCTL_LIB_DIR/../.." && pwd
 }
 
+_run_hostctl_abs_path() {
+    local repo_root="$1"
+    local raw_path="$2"
+    if [[ "$raw_path" == /* ]]; then
+        printf '%s\n' "$raw_path"
+    else
+        printf '%s/%s\n' "$repo_root" "${raw_path#./}"
+    fi
+}
+
+_run_hostctl_normalize_path_env_vars() {
+    local repo_root name raw_path abs_path
+    repo_root="$(_run_hostctl_repo_root)"
+    for name in "$@"; do
+        raw_path="${!name:-}"
+        if [[ -z "$raw_path" ]]; then
+            continue
+        fi
+        abs_path="$(_run_hostctl_abs_path "$repo_root" "$raw_path")"
+        printf -v "$name" '%s' "$abs_path"
+        export "$name"
+    done
+}
+
 _run_hostctl_port_cache_path() {
     local repo_root raw_path
     repo_root="$(_run_hostctl_repo_root)"
     raw_path="${HOSTCTL_SERIAL_PORT_CACHE_PATH:-logs/.state/hostctl_last_usbserial_port}"
-    if [[ "$raw_path" == /* ]]; then
-        printf '%s\n' "$raw_path"
-    else
-        printf '%s/%s\n' "$repo_root" "$raw_path"
-    fi
+    _run_hostctl_abs_path "$repo_root" "$raw_path"
 }
 
 _run_hostctl_read_cached_port() {
@@ -118,6 +138,16 @@ run_hostctl() {
     repo_root="$(cd "$script_dir/../.." && pwd)"
     manifest_path="$repo_root/tools/hostctl/Cargo.toml"
     toolchain="${RUSTUP_TOOLCHAIN:-stable}"
+
+    # hostctl is intentionally launched from /tmp to avoid workspace-target
+    # bleed, so force repo-relative env paths to absolute first.
+    _run_hostctl_normalize_path_env_vars \
+        HOSTCTL_LOG_JSON_PATH \
+        HOSTCTL_NET_LOG_PATH \
+        HOSTCTL_NET_POLICY_PATH \
+        HOSTCTL_NET_DISCOVERY_PROFILE_PATH \
+        HOSTCTL_NET_LOCK_PATH \
+        HOSTCTL_UPLOAD_SEND_DIAG_PATH
 
     host_target="$(rustup run "$toolchain" rustc -vV | awk '/^host:/ {print $2}')"
     if [[ -z "$host_target" ]]; then
