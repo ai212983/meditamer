@@ -197,3 +197,33 @@ Conclusion:
 - repeated-reset fallback behavior is now covered by deterministic CI-friendly
   test evidence, reducing dependence on rare live RF turbulence for regression
   detection.
+
+## 2026-03-05: host send/reset refresh retry promoted for acceptance stability
+
+Problem:
+
+- residual acceptance failures still occurred in host-side transport turbulence
+  classes (`host_transport_send_fail`, `host_health_send_fail`, occasional
+  connection-reset signatures) while firmware `NET_STATUS` remained `Ready`.
+
+Change:
+
+- promote host upload fresh-client refresh retry to default-on in acceptance:
+  `HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE=1`.
+- expand refresh-eligible host failure classes to include
+  `host_transport_connection_reset` (existing send/health-send classes retained).
+- refresh retry remains bounded to one immediate same-cycle retry path and keeps
+  explicit classed logging (`HOST_FAILURE class=...` + refresh markers).
+
+Validation:
+
+- hostctl acceptance runtime unit tests updated:
+  `refresh_retry_eligibility_covers_send_and_reset_classes`.
+- hostctl targeted transfer fallback test still passes after change:
+  `cargo +stable test --target aarch64-apple-darwin workflows_storage::upload::transfer::tests -- --nocapture`.
+
+Conclusion:
+
+- host-side transient send/reset failures now get deterministic fresh-client
+  recovery by default, reducing avoidable cycle failures without changing
+  firmware behavior.

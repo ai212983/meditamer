@@ -435,11 +435,14 @@ fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
 }
 
 fn refresh_retry_eligible_host_failure(class: &str) -> bool {
-    matches!(class, "host_health_send_fail" | "host_transport_send_fail")
+    matches!(
+        class,
+        "host_health_send_fail" | "host_transport_send_fail" | "host_transport_connection_reset"
+    )
 }
 
 fn refresh_upload_client_on_failure_enabled() -> Result<bool> {
-    env_utils::parse_env_bool01("HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE", false)
+    env_utils::parse_env_bool01("HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE", true)
 }
 
 fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>) -> bool {
@@ -539,11 +542,14 @@ mod tests {
     }
 
     #[test]
-    fn refresh_retry_eligibility_is_limited_to_send_classes() {
+    fn refresh_retry_eligibility_covers_send_and_reset_classes() {
         assert!(refresh_retry_eligible_host_failure("host_health_send_fail"));
         assert!(refresh_retry_eligible_host_failure("host_transport_send_fail"));
-        assert!(!refresh_retry_eligible_host_failure(
+        assert!(refresh_retry_eligible_host_failure(
             "host_transport_connection_reset"
+        ));
+        assert!(!refresh_retry_eligible_host_failure(
+            "host_transport_connect_refused"
         ));
     }
 }
