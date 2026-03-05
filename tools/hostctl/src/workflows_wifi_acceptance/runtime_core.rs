@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
+use regex::Regex;
 use reqwest::StatusCode;
 use serde_json::Value;
 
@@ -11,6 +12,7 @@ use crate::{
     env_utils,
     logging::ensure_parent_dir,
     scenarios::WorkflowRuntime,
+    serial_console::AckStatus,
     workflows_wifi_common::{
         ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, detect_panic_signal,
         extract_context_window, fmt_min, is_ready, netcfg_set_payload, query_net_status,
@@ -126,6 +128,7 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
+        self.ensure_operating_upload_mode()?;
         ctx_set_u32(context, "cycle", 1)?;
         ctx_set_u32(context, "cycles", self.cycles)?;
         ctx_set_u32(context, "operation_retries", self.operation_retries)?;
@@ -134,6 +137,58 @@ impl WifiAcceptanceRuntime<'_> {
         self.panic_first = None;
         self.req_read_body_reset_baseline = Some(self.query_req_read_body_reset()?);
         Ok(())
+    }
+
+    fn ensure_operating_upload_mode(&mut self) -> Result<()> {
+        if !env_utils::parse_env_bool01("HOSTCTL_NET_ENSURE_OPERATING_MODE", true)? {
+            return Ok(());
+        }
+        self.send_state_command_with_ack("STATE SET upload=on")?;
+        self.send_state_command_with_ack("STATE DIAG kind=NONE targets=NONE")?;
+        let state_re = Regex::new(r"^STATE phase=").expect("state regex");
+        let mark = self.console.mark();
+        self.console.send_line("STATE GET")?;
+        if let Some(line) =
+            self.console
+                .wait_for_regex_since(mark, &state_re, Duration::from_secs(4))?
+        {
+            self.logger.info(format!("net_start state_probe: {line}"));
+        }
+        self.console.settle(200)?;
+        Ok(())
+    }
+
+    fn send_state_command_with_ack(&mut self, command: &str) -> Result<()> {
+        const ATTEMPTS: usize = 4;
+        for attempt in 1..=ATTEMPTS {
+            let mark = self.console.mark();
+            self.console.send_line(command)?;
+            let (status, line) =
+                self.console
+                    .wait_ack_since(mark, "STATE", Duration::from_secs(4))?;
+            match status {
+                AckStatus::Ok => return Ok(()),
+                AckStatus::Busy | AckStatus::None => {
+                    if attempt < ATTEMPTS {
+                        thread::sleep(Duration::from_millis(200));
+                        continue;
+                    }
+                    return Err(anyhow!(
+                        "state command did not ack after {} attempt(s): {}",
+                        ATTEMPTS,
+                        command
+                    ));
+                }
+                AckStatus::Err => {
+                    return Err(anyhow!(
+                        "state command failed: {} ({})",
+                        command,
+                        line.unwrap_or_else(|| "STATE ERR".to_string())
+                    ));
+                }
+            }
+        }
+        Err(anyhow!("unreachable state-ack retry path"))
     }
 
     fn handle_net_apply_config(&mut self) -> Result<()> {
@@ -199,6 +254,31 @@ impl WifiAcceptanceRuntime<'_> {
             }))
     }
 
+    fn listener_ready_grace_ms(&self) -> Result<u32> {
+        env_utils::parse_env_u32("HOSTCTL_NET_LISTENER_READY_GRACE_MS", 2_000)
+    }
+
+    fn wait_listener_ready_grace(&mut self, grace_ms: u32) -> Result<bool> {
+        if grace_ms == 0 {
+            return Ok(false);
+        }
+        let deadline = Instant::now() + Duration::from_millis(grace_ms as u64);
+        while Instant::now() < deadline {
+            if let Some(status) = query_net_status(&mut self.console)? {
+                if is_ready(&status, true) {
+                    return Ok(true);
+                }
+                if !is_ready_without_listener(&status) {
+                    // Network moved away from the ready-but-listener-off signature;
+                    // continue with normal recover/start path immediately.
+                    return Ok(false);
+                }
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        Ok(false)
+    }
+
     fn should_return_from_status(&mut self, status: NetStatus) -> Result<bool> {
         if is_ready(&status, true) {
             self.logger
@@ -206,6 +286,14 @@ impl WifiAcceptanceRuntime<'_> {
             return Ok(true);
         }
         if is_ready_without_listener(&status) {
+            let grace_ms = self.listener_ready_grace_ms()?;
+            if self.wait_listener_ready_grace(grace_ms)? {
+                self.logger.info(format!(
+                    "net_start: listener became ready within grace window ({} ms); skipping forced recover",
+                    grace_ms
+                ));
+                return Ok(true);
+            }
             self.force_recover_before_start(
                 "state=Ready with listener=false while listener gate is enabled".to_string(),
             )?;
@@ -243,6 +331,15 @@ impl WifiAcceptanceRuntime<'_> {
         self.logger.info(format!(
             "net_start: {reason}; forcing NET RECOVER before NET START"
         ));
+        if env_utils::parse_env_bool01("HOSTCTL_NET_FORCE_STOP_BEFORE_RECOVER", true)? {
+            if let Err(err) = wait_net_ack(&mut self.console, "NET STOP") {
+                self.logger.info(format!(
+                    "net_start: NET STOP ack not obtained ({err}); continuing with NET RECOVER"
+                ));
+            } else {
+                thread::sleep(Duration::from_millis(150));
+            }
+        }
         wait_net_ack(&mut self.console, "NET RECOVER")?;
         thread::sleep(Duration::from_millis(self.policy.cooldown_ms as u64));
         Ok(())

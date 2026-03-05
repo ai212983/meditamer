@@ -235,3 +235,40 @@ Conclusion:
   firmware behavior.
 - next root-cause focus shifts back to DHCP/listener readiness recurrence
   (`ListenerWait` persistence with `ipv4=0.0.0.0` in acceptance gate).
+
+## 2026-03-05: acceptance startup hardening closes listener-not-ready recurrence
+
+Problem:
+
+- bounded regression gate repeatedly failed pre-upload after discovery stage with
+  terminal `listener_not_ready` in acceptance cycle 1
+  (`logs/wifi_regression_gate_20260305_161739/report.json`,
+  `logs/wifi_regression_gate_20260305_163149/report.json`,
+  `logs/wifi_regression_gate_20260305_164144/report.json`).
+- failure signature: `Ready + listener=false` startup churn, then repeated
+  ladder attempts ending at `failure_class=listener_not_ready`.
+
+Change:
+
+- host acceptance startup now enforces operating upload mode before each run:
+  - `STATE SET upload=on`
+  - `STATE DIAG kind=NONE targets=NONE`
+  - plus `STATE GET` probe logging for traceability.
+- host `net_start` startup hardening:
+  - listener-ready grace window before forcing recover
+    (`HOSTCTL_NET_LISTENER_READY_GRACE_MS`, default `2000`).
+  - stronger forced recover sequence adds `NET STOP` before `NET RECOVER`
+    (`HOSTCTL_NET_FORCE_STOP_BEFORE_RECOVER`, default `1`).
+
+Validation:
+
+- hostctl unit tests pass for updated acceptance runtime core:
+  `cargo +stable test --target aarch64-apple-darwin workflows_wifi_acceptance::runtime_core::tests -- --nocapture`.
+- bounded regression gate now passes end-to-end (soak skipped by policy):
+  - `logs/wifi_regression_gate_20260305_165416/report.json`
+  - `logs/wifi_regression_gate_20260305_165808/report.json`.
+
+Conclusion:
+
+- listener-not-ready recurrence is currently mitigated in host startup control
+  path, with repeated bounded-gate validation green.
