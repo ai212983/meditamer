@@ -4,21 +4,27 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
+use regex::Regex;
 use serde_json::Value;
 
 use crate::{
     scenarios::WorkflowRuntime,
     workflows_wifi_common::{
         ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32,
-        detect_panic_signal, extract_context_window, fmt_min, netcfg_set_payload, wait_net_ack,
+        detect_panic_signal, extract_context_window, fmt_min, netcfg_set_payload, preflight,
+        wait_net_ack,
     },
 };
 
 use super::{
-    probe::{ProbeRoundState, RoundSample},
+    probe::{ProbeRoundState, RoundSample, WifiMetricsScanCounters},
     profile::recommended_round_timeout_ms,
     WifiDiscoveryRuntime,
 };
+
+const MAX_EXPECTED_SOFT_RESET_RECOVERIES_PER_ROUND: u32 = 1;
+const FORCE_STOP_SETTLE_MS: u64 = 300;
+const ACK_LOSS_RECOVERY_SETTLE_MS: u64 = 200;
 
 impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
@@ -43,13 +49,36 @@ impl WifiDiscoveryRuntime<'_> {
         ctx_set_string(context, "run_error", "")?;
         self.panic_first = None;
         if self.profile.disable_listener_during_probe_rounds {
-            wait_net_ack(&mut self.console, "NET LISTENER OFF")?;
+            self.run_control_command_with_guard(0, "NET LISTENER OFF", 0)?;
         }
         self.logger.info(format!(
             "wifi-discovery-debug: effective_round_timeout_ms={} (profile_round_timeout_ms={})",
             recommended_round_timeout_ms(&self.policy, &self.profile),
             self.profile.round_timeout_ms
         ));
+        self.last_wifi_metrics_scan_counters = None;
+        match self.query_wifi_scan_counters() {
+            Ok(Some(counters)) => {
+                self.last_wifi_metrics_scan_counters = Some(counters);
+                self.logger.info(format!(
+                    "wifi-discovery-debug: metrics baseline no_ap={} scan_runs={} scan_empty={} scan_hits={}",
+                    counters.no_ap_found,
+                    counters.scan_runs,
+                    counters.scan_empty,
+                    counters.scan_hits
+                ));
+            }
+            Ok(None) => {
+                self.logger.info(
+                    "wifi-discovery-debug: METRICS WIFI baseline unavailable (missing line)",
+                );
+            }
+            Err(err) => {
+                self.logger.info(format!(
+                    "wifi-discovery-debug: METRICS WIFI baseline query failed ({err})"
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -62,19 +91,16 @@ impl WifiDiscoveryRuntime<'_> {
         let round = ctx_get_u32(context, "round")?;
         let ssid_marker = format!("scan ap ssid={}", self.ssid);
         let require_listener = !self.profile.disable_listener_during_probe_rounds;
+        // Mark before optional pre-round recover so scan evidence generated during
+        // recover/start is attributed to this round.
+        let round_read_mark = self.console.mark();
 
-        if let Err(err) = self.maybe_recover_before_round(round) {
-            self.logger.info(format!(
-                "round {round}: NET RECOVER before probe failed ({err})"
-            ));
-        }
-        self.prepare_probe_round(round);
-        if let Err(err) = wait_net_ack(&mut self.console, "NET START") {
-            self.logger
-                .info(format!("round {round}: NET START ack not obtained ({err})"));
-        }
+        self.maybe_force_stop_before_round(round)?;
+        self.maybe_recover_before_round(round)?;
+        self.prepare_probe_round(round)?;
+        self.run_control_command_with_guard(round, "NET START", 0)?;
 
-        let mut state = self.new_probe_round_state();
+        let mut state = self.new_probe_round_state(round_read_mark);
         while Instant::now() < state.deadline {
             state = self.collect_probe_round_lines(state, &ssid_marker, require_listener)?;
             if state.panic_signal.is_some() {
@@ -113,28 +139,34 @@ impl WifiDiscoveryRuntime<'_> {
         Ok(())
     }
 
-    fn maybe_recover_before_round(&mut self, _round: u32) -> Result<()> {
+    fn maybe_recover_before_round(&mut self, round: u32) -> Result<()> {
         if !self.profile.recover_before_round {
             return Ok(());
         }
-        wait_net_ack(&mut self.console, "NET RECOVER")?;
-        self.console.settle(self.profile.recover_settle_ms as u64)?;
-        Ok(())
+        self.run_control_command_with_guard(
+            round,
+            "NET RECOVER",
+            self.profile.recover_settle_ms as u64,
+        )
     }
 
-    fn prepare_probe_round(&mut self, round: u32) {
+    fn maybe_force_stop_before_round(&mut self, round: u32) -> Result<()> {
+        if !self.profile.force_stop_before_round {
+            return Ok(());
+        }
+        self.run_control_command_with_guard(round, "NET STOP", FORCE_STOP_SETTLE_MS)
+    }
+
+    fn prepare_probe_round(&mut self, round: u32) -> Result<()> {
         if !self.profile.disable_listener_during_probe_rounds {
-            return;
+            return Ok(());
         }
-        if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER OFF") {
-            self.logger
-                .info(format!("round {round}: NET LISTENER OFF failed ({err})"));
-        }
+        self.run_control_command_with_guard(round, "NET LISTENER OFF", 0)
     }
 
-    fn new_probe_round_state(&self) -> ProbeRoundState {
+    fn new_probe_round_state(&self, read_mark: usize) -> ProbeRoundState {
         ProbeRoundState::new(
-            self.console.mark(),
+            read_mark,
             Instant::now()
                 + Duration::from_millis(recommended_round_timeout_ms(&self.policy, &self.profile)),
         )
@@ -153,14 +185,44 @@ impl WifiDiscoveryRuntime<'_> {
             self.mem_diag.record_line(&line);
             state.round_mem_diag.record_line(&line);
             if state.panic_signal.is_none() {
-                state.panic_signal = detect_panic_signal(&line, line_index);
+                if let Some(signal) = detect_panic_signal(&line, line_index) {
+                    if state.should_suppress_expected_soft_reset_reboot(&signal)
+                        && state.expected_soft_reset_recoveries
+                            < MAX_EXPECTED_SOFT_RESET_RECOVERIES_PER_ROUND
+                    {
+                        state.expected_soft_reset_recoveries =
+                            state.expected_soft_reset_recoveries.saturating_add(1);
+                    } else {
+                        state.panic_signal = Some(signal);
+                    }
+                }
             }
             state.ingest_line(&line, ssid_marker, require_listener);
+            if state.expected_soft_reset_reboot_seen {
+                self.handle_expected_soft_reset_reboot(&mut state)?;
+            }
             if state.panic_signal.is_some() {
                 break;
             }
         }
         Ok(state)
+    }
+
+    fn handle_expected_soft_reset_reboot(&mut self, state: &mut ProbeRoundState) -> Result<()> {
+        state.expected_soft_reset_reboot_seen = false;
+        self.logger.info(format!(
+            "expected_soft_reset_reboot_detected: reapplying NETCFG/NET START (recovery={}/{})",
+            state.expected_soft_reset_recoveries, MAX_EXPECTED_SOFT_RESET_RECOVERIES_PER_ROUND
+        ));
+        // Allow boot banner + task init to settle before re-provisioning config.
+        thread::sleep(Duration::from_millis(1200));
+        let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
+        wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))?;
+        if self.profile.disable_listener_during_probe_rounds {
+            let _ = wait_net_ack(&mut self.console, "NET LISTENER OFF");
+        }
+        let _ = wait_net_ack(&mut self.console, "NET START");
+        Ok(())
     }
 
     fn send_status_poll_if_ready(&mut self, state: &mut ProbeRoundState) {
@@ -171,52 +233,160 @@ impl WifiDiscoveryRuntime<'_> {
         }
     }
 
-    fn maybe_recover_after_round(&mut self, round: u32) -> Result<()> {
-        wait_net_ack(&mut self.console, "NET RECOVER")
-            .map_err(|err| anyhow!("round {round}: NET RECOVER after probe failed ({err})"))?;
+    fn run_control_command_with_guard(
+        &mut self,
+        round: u32,
+        command: &str,
+        settle_ms: u64,
+    ) -> Result<()> {
+        let first_err = match wait_net_ack(&mut self.console, command) {
+            Ok(()) => {
+                if settle_ms > 0 {
+                    self.console.settle(settle_ms)?;
+                }
+                return Ok(());
+            }
+            Err(err) => err,
+        };
+        let command_token = control_command_token(command);
+        self.logger.info(format!(
+            "round {round}: control_ack_loss command={command_token} err={first_err}; attempting recovery"
+        ));
+
+        self.recover_control_channel_after_ack_loss(round, command_token, command, &first_err)?;
+        wait_net_ack(&mut self.console, command).map_err(|retry_err| {
+            let detail = format!(
+                "round {round}: control ack lost command={command_token} first_err={first_err} retry_err={retry_err}"
+            );
+            self.logger.info(format!(
+                "HOST_FAILURE class=host_transport_control_ack_loss command={command_token} round={round} stage=retry detail={retry_err}"
+            ));
+            anyhow!("{detail}")
+        })?;
+
+        self.logger.info(format!(
+            "round {round}: control_ack_recovered command={command_token}"
+        ));
+        if settle_ms > 0 {
+            self.console.settle(settle_ms)?;
+        }
+        Ok(())
+    }
+
+    fn recover_control_channel_after_ack_loss(
+        &mut self,
+        round: u32,
+        command_token: &str,
+        command: &str,
+        first_err: &anyhow::Error,
+    ) -> Result<()> {
+        self.console.settle(ACK_LOSS_RECOVERY_SETTLE_MS)?;
+        preflight(&mut self.console).map_err(|preflight_err| {
+            self.logger.info(format!(
+                "HOST_FAILURE class=host_transport_control_ack_loss command={command_token} round={round} stage=preflight detail={preflight_err}"
+            ));
+            anyhow!(
+                "round {round}: control ack lost command={command_token} first_err={first_err} preflight_err={preflight_err}"
+            )
+        })?;
+
+        if command.trim_start().starts_with("NET RECOVER") {
+            return Ok(());
+        }
+
+        wait_net_ack(&mut self.console, "NET RECOVER").map_err(|recover_err| {
+            self.logger.info(format!(
+                "HOST_FAILURE class=host_transport_control_ack_loss command={command_token} round={round} stage=recover detail={recover_err}"
+            ));
+            anyhow!(
+                "round {round}: control ack lost command={command_token} first_err={first_err} recover_err={recover_err}"
+            )
+        })?;
         self.console.settle(self.profile.recover_settle_ms as u64)?;
         Ok(())
     }
 
+    fn maybe_recover_after_round(&mut self, round: u32) -> Result<()> {
+        self.run_control_command_with_guard(
+            round,
+            "NET RECOVER",
+            self.profile.recover_settle_ms as u64,
+        )
+    }
+
     fn record_round_results(&mut self, round: u32, state: &ProbeRoundState, zero_discovery: bool) {
+        let mut scan_zero_events = state.scan_zero_events;
+        let mut scan_nonzero_events = state.scan_nonzero_events;
+        let mut no_ap_found_events = state.no_ap_found_events;
+        let mut ssid_seen_events = state.ssid_seen_events;
+        let mut scan_runs_delta = 0u32;
+
+        match self.query_wifi_scan_counters() {
+            Ok(Some(counters)) => {
+                if let Some(previous) = self.last_wifi_metrics_scan_counters {
+                    scan_runs_delta = counters.scan_runs.saturating_sub(previous.scan_runs);
+                    let scan_empty_delta = counters.scan_empty.saturating_sub(previous.scan_empty);
+                    let scan_hits_delta = counters.scan_hits.saturating_sub(previous.scan_hits);
+                    let no_ap_found_delta =
+                        counters.no_ap_found.saturating_sub(previous.no_ap_found);
+                    scan_zero_events = scan_zero_events.saturating_add(scan_empty_delta);
+                    scan_nonzero_events = scan_nonzero_events.saturating_add(scan_hits_delta);
+                    no_ap_found_events = no_ap_found_events.saturating_add(no_ap_found_delta);
+                    ssid_seen_events = ssid_seen_events.saturating_add(scan_hits_delta);
+                }
+                self.last_wifi_metrics_scan_counters = Some(counters);
+            }
+            Ok(None) => {
+                self.logger
+                    .info(format!("round {round}: METRICS WIFI unavailable"));
+            }
+            Err(err) => {
+                self.logger
+                    .info(format!("round {round}: METRICS WIFI query failed ({err})"));
+            }
+        }
+
         if state.ready {
             self.ready_rounds = self.ready_rounds.saturating_add(1);
         }
         if zero_discovery {
             self.zero_discovery_rounds = self.zero_discovery_rounds.saturating_add(1);
         }
-        if state.ssid_seen_events > 0 {
+        if ssid_seen_events > 0 {
             self.ssid_seen_rounds = self.ssid_seen_rounds.saturating_add(1);
         }
         self.total_scan_zero_events = self
             .total_scan_zero_events
-            .saturating_add(state.scan_zero_events);
+            .saturating_add(scan_zero_events);
         self.total_scan_nonzero_events = self
             .total_scan_nonzero_events
-            .saturating_add(state.scan_nonzero_events);
+            .saturating_add(scan_nonzero_events);
+        self.total_scan_runs_delta = self.total_scan_runs_delta.saturating_add(scan_runs_delta);
         self.total_no_ap_found_events = self
             .total_no_ap_found_events
-            .saturating_add(state.no_ap_found_events);
+            .saturating_add(no_ap_found_events);
 
         self.samples.push(RoundSample {
             round,
             ready: state.ready,
             zero_discovery,
-            scan_zero_events: state.scan_zero_events,
-            scan_nonzero_events: state.scan_nonzero_events,
-            no_ap_found_events: state.no_ap_found_events,
-            ssid_seen_events: state.ssid_seen_events,
+            scan_zero_events,
+            scan_nonzero_events,
+            scan_runs_delta,
+            no_ap_found_events,
+            ssid_seen_events,
             failure_class: state.last_failure_class.clone(),
         });
         self.logger.info(format!(
-            "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={} min_internal_free={} min_total_free={} nomem_stage_samples={}",
+            "round {}: ready={} zero_discovery={} scan_zero={} scan_nonzero={} scan_runs_delta={} no_ap_found={} ssid_seen={} failure_class={} min_internal_free={} min_total_free={} nomem_stage_samples={}",
             round,
             state.ready,
             zero_discovery,
-            state.scan_zero_events,
-            state.scan_nonzero_events,
-            state.no_ap_found_events,
-            state.ssid_seen_events,
+            scan_zero_events,
+            scan_nonzero_events,
+            scan_runs_delta,
+            no_ap_found_events,
+            ssid_seen_events,
             state.last_failure_class,
             fmt_min(&state.round_mem_diag.min_internal_free),
             fmt_min(&state.round_mem_diag.min_free),
@@ -257,12 +427,25 @@ impl WifiDiscoveryRuntime<'_> {
     fn handle_evaluate_results(&mut self, context: &mut Value) -> Result<()> {
         let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
         let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
+        let scan_evidence_rounds = self
+            .samples
+            .iter()
+            .filter(|sample| {
+                sample.scan_zero_events > 0
+                    || sample.scan_nonzero_events > 0
+                    || sample.scan_runs_delta > 0
+            })
+            .count() as u32;
+        let pass_scan_evidence = !self.profile.require_scan_evidence_each_round
+            || scan_evidence_rounds >= self.samples.len() as u32;
         let observed_scan_activity =
-            self.total_scan_zero_events > 0 || self.total_scan_nonzero_events > 0;
+            self.total_scan_zero_events > 0
+                || self.total_scan_nonzero_events > 0
+                || self.total_scan_runs_delta > 0;
         let require_ssid_evidence = observed_scan_activity || self.ready_rounds == 0;
         let pass_ssid =
             !require_ssid_evidence || self.ssid_seen_rounds >= self.profile.min_ssid_seen_rounds;
-        let passed = pass_zero && pass_ready && pass_ssid;
+        let passed = pass_zero && pass_ready && pass_scan_evidence && pass_ssid;
 
         let mut failures = Vec::new();
         if !pass_zero {
@@ -275,6 +458,13 @@ impl WifiDiscoveryRuntime<'_> {
             failures.push(format!(
                 "ready_rounds={} below min_ready_rounds={}",
                 self.ready_rounds, self.profile.min_ready_rounds
+            ));
+        }
+        if !pass_scan_evidence {
+            failures.push(format!(
+                "scan_evidence_rounds={} below required_rounds={} (require_scan_evidence_each_round=true)",
+                scan_evidence_rounds,
+                self.samples.len()
             ));
         }
         if !pass_ssid {
@@ -290,12 +480,24 @@ impl WifiDiscoveryRuntime<'_> {
     }
 
     fn handle_print_summary(&mut self) -> Result<()> {
+        let scan_evidence_rounds = self
+            .samples
+            .iter()
+            .filter(|sample| {
+                sample.scan_zero_events > 0
+                    || sample.scan_nonzero_events > 0
+                    || sample.scan_runs_delta > 0
+            })
+            .count() as u32;
         self.logger.info(format!(
-            "summary rounds={} ready_rounds={} zero_discovery_rounds={} ssid_seen_rounds={} total_scan_zero_events={} total_scan_nonzero_events={} total_no_ap_found_events={}",
+            "summary rounds={} ready_rounds={} zero_discovery_rounds={} ssid_seen_rounds={} scan_evidence_rounds={} require_scan_evidence_each_round={} total_scan_runs_delta={} total_scan_zero_events={} total_scan_nonzero_events={} total_no_ap_found_events={}",
             self.samples.len(),
             self.ready_rounds,
             self.zero_discovery_rounds,
             self.ssid_seen_rounds,
+            scan_evidence_rounds,
+            self.profile.require_scan_evidence_each_round,
+            self.total_scan_runs_delta,
             self.total_scan_zero_events,
             self.total_scan_nonzero_events,
             self.total_no_ap_found_events
@@ -321,12 +523,13 @@ impl WifiDiscoveryRuntime<'_> {
         }
         for sample in &self.samples {
             self.logger.info(format!(
-                "round {} detail ready={} zero_discovery={} scan_zero={} scan_nonzero={} no_ap_found={} ssid_seen={} failure_class={}",
+                "round {} detail ready={} zero_discovery={} scan_zero={} scan_nonzero={} scan_runs_delta={} no_ap_found={} ssid_seen={} failure_class={}",
                 sample.round,
                 sample.ready,
                 sample.zero_discovery,
                 sample.scan_zero_events,
                 sample.scan_nonzero_events,
+                sample.scan_runs_delta,
                 sample.no_ap_found_events,
                 sample.ssid_seen_events,
                 sample.failure_class
@@ -351,6 +554,51 @@ impl WifiDiscoveryRuntime<'_> {
         let detail = ctx_get_string(context, "run_error")
             .unwrap_or_else(|_| "wifi discovery debug failed".to_string());
         Err(anyhow!("{detail}"))
+    }
+
+    fn query_wifi_scan_counters(&mut self) -> Result<Option<WifiMetricsScanCounters>> {
+        let metrics_wifi_re = Regex::new(r"^METRICS WIFI ")?;
+        let line = self
+            .console
+            .command_wait_regex("METRICS", &metrics_wifi_re, Duration::from_secs(3))?;
+        Ok(line.and_then(|value| parse_wifi_scan_counters_line(&value)))
+    }
+}
+
+fn parse_wifi_scan_counters_line(line: &str) -> Option<WifiMetricsScanCounters> {
+    if !line.starts_with("METRICS WIFI ") {
+        return None;
+    }
+    Some(WifiMetricsScanCounters {
+        scan_runs: parse_metrics_key_u32(line, "scan_runs")?,
+        scan_empty: parse_metrics_key_u32(line, "scan_empty")?,
+        scan_hits: parse_metrics_key_u32(line, "scan_hits")?,
+        no_ap_found: parse_metrics_key_u32(line, "no_ap")?,
+    })
+}
+
+fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<u32>().ok())
+}
+
+fn control_command_token(command: &str) -> &'static str {
+    let trimmed = command.trim_start();
+    if trimmed.starts_with("NET STOP") {
+        "net_stop"
+    } else if trimmed.starts_with("NET RECOVER") {
+        "net_recover"
+    } else if trimmed.starts_with("NET LISTENER OFF") {
+        "net_listener_off"
+    } else if trimmed.starts_with("NET LISTENER ON") {
+        "net_listener_on"
+    } else if trimmed.starts_with("NET START") {
+        "net_start"
+    } else if trimmed.starts_with("NETCFG SET") {
+        "netcfg_set"
+    } else {
+        "net_control"
     }
 }
 
@@ -475,6 +723,7 @@ mod tests {
                 round_timeout_ms: 2_000,
                 poll_interval_ms: 30,
                 status_poll_ms: 120,
+                force_stop_before_round: false,
                 recover_before_round: false,
                 recover_after_round: false,
                 recover_settle_ms: 6_000,
@@ -482,6 +731,7 @@ mod tests {
                 max_zero_discovery_rounds: 0,
                 min_ready_rounds: 1,
                 min_ssid_seen_rounds: 1,
+                require_scan_evidence_each_round: false,
             },
             samples: Vec::new(),
             ready_rounds: 0,
@@ -489,7 +739,9 @@ mod tests {
             ssid_seen_rounds: 0,
             total_scan_zero_events: 0,
             total_scan_nonzero_events: 0,
+            total_scan_runs_delta: 0,
             total_no_ap_found_events: 0,
+            last_wifi_metrics_scan_counters: None,
             mem_diag: MemDiagSummary::default(),
             panic_first: None,
         };

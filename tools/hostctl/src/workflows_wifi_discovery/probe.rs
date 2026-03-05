@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::workflows_wifi_common::{
-    is_ready, parse_net_status_line, parse_scan_done_count, MemDiagSummary, PanicSignal,
+    is_ready, parse_net_status_line, parse_scan_done_count, MemDiagSummary, PanicClass, PanicSignal,
 };
 
 #[derive(Clone, Debug)]
@@ -11,9 +11,18 @@ pub(super) struct RoundSample {
     pub zero_discovery: bool,
     pub scan_zero_events: u32,
     pub scan_nonzero_events: u32,
+    pub scan_runs_delta: u32,
     pub no_ap_found_events: u32,
     pub ssid_seen_events: u32,
     pub failure_class: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct WifiMetricsScanCounters {
+    pub scan_runs: u32,
+    pub scan_empty: u32,
+    pub scan_hits: u32,
+    pub no_ap_found: u32,
 }
 
 pub(super) struct ProbeRoundState {
@@ -28,6 +37,9 @@ pub(super) struct ProbeRoundState {
     pub deadline: Instant,
     pub round_mem_diag: MemDiagSummary,
     pub panic_signal: Option<PanicSignal>,
+    pub expected_soft_reset_armed: bool,
+    pub expected_soft_reset_reboot_seen: bool,
+    pub expected_soft_reset_recoveries: u32,
 }
 
 impl Default for ProbeRoundState {
@@ -44,6 +56,9 @@ impl Default for ProbeRoundState {
             deadline: Instant::now(),
             round_mem_diag: MemDiagSummary::default(),
             panic_signal: None,
+            expected_soft_reset_armed: false,
+            expected_soft_reset_reboot_seen: false,
+            expected_soft_reset_recoveries: 0,
         }
     }
 }
@@ -85,9 +100,26 @@ impl ProbeRoundState {
                 }
             }
         }
+        if line.contains("zero_discovery_hard_guard software_reset=true")
+            || line.contains("zero_discovery_terminal software_reset=true")
+        {
+            self.expected_soft_reset_armed = true;
+        }
     }
 
     pub(super) fn is_zero_discovery(&self) -> bool {
         !self.ready && self.scan_zero_events > 0 && self.scan_nonzero_events == 0
+    }
+
+    pub(super) fn should_suppress_expected_soft_reset_reboot(
+        &mut self,
+        signal: &PanicSignal,
+    ) -> bool {
+        if signal.class != PanicClass::UnexpectedReboot || !self.expected_soft_reset_armed {
+            return false;
+        }
+        self.expected_soft_reset_armed = false;
+        self.expected_soft_reset_reboot_seen = true;
+        true
     }
 }

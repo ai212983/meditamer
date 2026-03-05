@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-use probe::RoundSample;
+use probe::{RoundSample, WifiMetricsScanCounters};
 use profile::DiscoveryProfile;
 
 #[derive(Clone, Debug)]
@@ -40,7 +40,9 @@ struct WifiDiscoveryRuntime<'a> {
     ssid_seen_rounds: u32,
     total_scan_zero_events: u32,
     total_scan_nonzero_events: u32,
+    total_scan_runs_delta: u32,
     total_no_ap_found_events: u32,
+    last_wifi_metrics_scan_counters: Option<WifiMetricsScanCounters>,
     mem_diag: MemDiagSummary,
     panic_first: Option<PanicSignal>,
 }
@@ -115,7 +117,9 @@ pub fn run_wifi_discovery_debug(
         ssid_seen_rounds: 0,
         total_scan_zero_events: 0,
         total_scan_nonzero_events: 0,
+        total_scan_runs_delta: 0,
         total_no_ap_found_events: 0,
+        last_wifi_metrics_scan_counters: None,
         mem_diag: MemDiagSummary::default(),
         panic_first: None,
     };

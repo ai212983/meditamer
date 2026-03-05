@@ -9,6 +9,7 @@ pub(super) struct DiscoveryProfile {
     pub round_timeout_ms: u32,
     pub poll_interval_ms: u32,
     pub status_poll_ms: u32,
+    pub force_stop_before_round: bool,
     pub recover_before_round: bool,
     pub recover_after_round: bool,
     pub recover_settle_ms: u32,
@@ -16,6 +17,7 @@ pub(super) struct DiscoveryProfile {
     pub max_zero_discovery_rounds: u32,
     pub min_ready_rounds: u32,
     pub min_ssid_seen_rounds: u32,
+    pub require_scan_evidence_each_round: bool,
 }
 
 impl Default for DiscoveryProfile {
@@ -25,6 +27,7 @@ impl Default for DiscoveryProfile {
             round_timeout_ms: 60_000,
             poll_interval_ms: 250,
             status_poll_ms: 1_000,
+            force_stop_before_round: false,
             recover_before_round: true,
             recover_after_round: false,
             recover_settle_ms: 6_000,
@@ -32,6 +35,7 @@ impl Default for DiscoveryProfile {
             max_zero_discovery_rounds: 0,
             min_ready_rounds: 1,
             min_ssid_seen_rounds: 1,
+            require_scan_evidence_each_round: false,
         }
     }
 }

@@ -13,11 +13,15 @@ This history is sharded to keep Markdown files under the documentation LOC polic
 - [Part 07](./upload-throughput-history/part-07.md)
 - [Part 08](./upload-throughput-history/part-08.md)
 - [Part 09](./upload-throughput-history/part-09.md)
+- [Part 10](./upload-throughput-history/part-10.md)
+- [Part 11](./upload-throughput-history/part-11.md)
+- [Part 12](./upload-throughput-history/part-12.md)
+- [Part 13](./upload-throughput-history/part-13.md)
 
 ## Notes
 
 - Preflight summary of durable decisions lives in
   `docs/development/wifi-upload-decision-ledger.md`.
 - New entries should be appended to the latest part file in
-  `docs/development/upload-throughput-history/` (currently `part-09.md`).
+  `docs/development/upload-throughput-history/` (currently `part-13.md`).
 - If a part file approaches `220` LOC, start a new next part.
