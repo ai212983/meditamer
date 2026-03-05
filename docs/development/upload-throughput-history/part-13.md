@@ -169,3 +169,31 @@ Conclusion:
 - next validation focus should be contention-targeted repro that exercises the
   fallback marker path live (for example longer AP-contention soak or forced
   transport-fault injection).
+
+## 2026-03-05: deterministic transport-reset fallback validation added
+
+Problem:
+
+- live repeated-reset streaks are contention-dependent and sporadic, so
+  fallback-path regressions could hide between gate runs.
+
+Change:
+
+- add deterministic host-side test for direct-mode fallback:
+  `workflows_storage::upload::transfer::tests::direct_mode_repeated_transport_reset_falls_back_to_chunked_upload`.
+- test harness runs a local mock server, force-closes first two direct
+  `PUT /upload` attempts, and verifies same-cycle degrade path:
+  `/upload_abort` -> `/upload_begin` -> `/upload_chunk` -> `/upload_commit`.
+- fallback path assertion includes the fresh-client handoff behavior now used in
+  production fallback handling.
+
+Validation:
+
+- targeted hostctl test pass:
+  `cargo +stable test --target aarch64-apple-darwin workflows_storage::upload::transfer::tests -- --nocapture`.
+
+Conclusion:
+
+- repeated-reset fallback behavior is now covered by deterministic CI-friendly
+  test evidence, reducing dependence on rare live RF turbulence for regression
+  detection.

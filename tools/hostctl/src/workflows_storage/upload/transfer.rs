@@ -297,3 +297,6 @@ fn upload_file_chunked(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
