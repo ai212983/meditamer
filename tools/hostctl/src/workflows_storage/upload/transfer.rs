@@ -11,7 +11,8 @@ use urlencoding::encode;
 use crate::env_utils;
 
 use super::client::{
-    make_client, request_raw, request_sd_busy_aware, request_sd_busy_aware_timed, RequestContext,
+    is_transport_reset_chunk_fallback_error, make_client, request_raw, request_sd_busy_aware,
+    request_sd_busy_aware_timed, RequestContext,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,39 +171,42 @@ pub(super) fn upload_file(
             encode(remote_path).replace("%2F", "/")
         );
         let send_diag = upload_send_diag_enabled()?;
-        if send_diag {
-            let put_result = request_sd_busy_aware_timed(
+        let put_err = if send_diag {
+            match request_sd_busy_aware_timed(
                 request_client,
                 Method::PUT,
                 &upload_url,
                 Some(data.clone()),
                 request_ctx,
-            );
-            match put_result {
+            ) {
                 Ok(timed) => {
                     log_direct_upload_diag(&timed, remote_path, request_ctx);
                     return Ok(());
                 }
-                Err(err) => {
-                    if mode == UploadTransportMode::Direct {
-                        return Err(err);
-                    }
-                }
+                Err(err) => err,
             }
         } else {
-            let put_result = request_sd_busy_aware(
+            match request_sd_busy_aware(
                 request_client,
                 Method::PUT,
                 &upload_url,
                 Some(data.clone()),
                 request_ctx,
-            );
-            if put_result.is_ok() {
-                return Ok(());
+            ) {
+                Ok(_) => return Ok(()),
+                Err(err) => err,
             }
-            if mode == UploadTransportMode::Direct {
-                return put_result.map(|_| ());
+        };
+        if mode == UploadTransportMode::Direct {
+            if is_transport_reset_chunk_fallback_error(&put_err) {
+                let line = format!(
+                    "host_upload_transport_fallback: mode=direct reason=transport_reset_streak path={remote_path}"
+                );
+                println!("{line}");
+                append_host_diag_line(&line);
+                return upload_file_chunked(request_client, request_ctx, &data, remote_path, true);
             }
+            return Err(put_err);
         }
         return upload_file_chunked(request_client, request_ctx, &data, remote_path, true);
     }

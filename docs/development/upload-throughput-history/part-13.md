@@ -119,3 +119,41 @@ Conclusion:
   without introducing new failure classes in matched 10-cycle diagnostics.
 - keep fast-retry enabled by default; continue monitoring for multi-reset
   streaks where fallback recovery wait still applies.
+
+## 2026-03-05: direct-mode repeated-reset now degrades to same-cycle chunked upload
+
+Problem:
+
+- fast retry hardens single-reset outliers, but direct-only mode still had a
+  residual failure risk if transport resets repeat beyond retry budget.
+
+Change:
+
+- add repeated-reset degradation guard in host uploader:
+  - `HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK=1` (default on)
+  - `HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK_STREAK=2` (default)
+- when direct `PUT /upload` reset streak exceeds limit, uploader now emits
+  marker context (`transport_reset_chunk_fallback_trigger`) and switches in the
+  same cycle to chunked upload path:
+  `/upload_begin` -> `/upload_chunk` -> `/upload_commit`.
+- host logs now emit explicit fallback marker:
+  `host_upload_transport_fallback: mode=direct reason=transport_reset_streak ...`
+
+Validation:
+
+- hostctl unit tests passed with new marker detection case:
+  `workflows_storage::upload::client::tests`.
+- direct-mode `10`-cycle smoke run completed without failures:
+  `logs/adhoc_directfallback10_20260305_1602.log`
+  and host sidecar:
+  `logs/adhoc_directfallback10_20260305_1602.log.hostdiag`.
+- this run did not reproduce repeated-reset streaks, so fallback marker did not
+  fire live; behavior remains gated to the repeated-reset class.
+
+Conclusion:
+
+- direct mode now has bounded degradation behavior under repeated transport
+  resets instead of hard cycle failure.
+- next validation focus should be contention-targeted repro that exercises the
+  fallback marker path live (for example longer AP-contention soak or forced
+  transport-fault injection).

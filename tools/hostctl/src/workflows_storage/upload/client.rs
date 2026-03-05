@@ -59,6 +59,8 @@ const TRANSPORT_RESET_RECOVERY_POLL_SEC: f64 = 0.2;
 const TRANSPORT_RESET_BACKOFF_MS_STEP: u64 = 75;
 const TRANSPORT_RESET_BACKOFF_MS_MAX: u64 = 600;
 const TRANSPORT_RESET_FAST_RETRY_STREAK_DEFAULT: u32 = 2;
+const TRANSPORT_RESET_CHUNK_FALLBACK_STREAK_DEFAULT: u32 = 2;
+const TRANSPORT_RESET_CHUNK_FALLBACK_MARKER: &str = "transport_reset_chunk_fallback_trigger";
 const RETRY_BACKOFF_MS_STEP: u64 = 250;
 const RETRY_BACKOFF_MS_MAX: u64 = 3000;
 
@@ -111,6 +113,18 @@ fn upload_transport_reset_fast_retry_streak_limit() -> Result<u32> {
     Ok(env_utils::parse_env_u32(
         "HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY_STREAK",
         TRANSPORT_RESET_FAST_RETRY_STREAK_DEFAULT,
+    )?
+    .max(1))
+}
+
+fn upload_transport_reset_chunk_fallback_enabled() -> Result<bool> {
+    env_utils::parse_env_bool01("HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK", true)
+}
+
+fn upload_transport_reset_chunk_fallback_streak_limit() -> Result<u32> {
+    Ok(env_utils::parse_env_u32(
+        "HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK_STREAK",
+        TRANSPORT_RESET_CHUNK_FALLBACK_STREAK_DEFAULT,
     )?
     .max(1))
 }
@@ -492,6 +506,11 @@ fn is_transport_reset_error(msg_lower: &str) -> bool {
         || msg_lower.contains("broken pipe")
 }
 
+pub(super) fn is_transport_reset_chunk_fallback_error(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().contains(TRANSPORT_RESET_CHUNK_FALLBACK_MARKER))
+}
+
 pub(super) fn request_sd_busy_aware(
     client: &Client,
     method: Method,
@@ -522,6 +541,9 @@ pub(super) fn request_sd_busy_aware_timed(
     let transport_reset_fast_retry = upload_transport_reset_fast_retry_enabled()?;
     let transport_reset_fast_retry_streak_limit =
         upload_transport_reset_fast_retry_streak_limit()?;
+    let transport_reset_chunk_fallback = upload_transport_reset_chunk_fallback_enabled()?;
+    let transport_reset_chunk_fallback_streak_limit =
+        upload_transport_reset_chunk_fallback_streak_limit()?;
 
     let mut attempt = 0usize;
     let mut transport_reset_streak = 0u32;
@@ -572,12 +594,16 @@ pub(super) fn request_sd_busy_aware_timed(
                 let skip_transport_reset_health_recovery = is_transport_reset
                     && transport_reset_fast_retry
                     && transport_reset_streak <= transport_reset_fast_retry_streak_limit;
+                let trigger_transport_reset_chunk_fallback = is_direct_upload_put
+                    && transport_reset_chunk_fallback
+                    && is_transport_reset
+                    && transport_reset_streak > transport_reset_chunk_fallback_streak_limit;
 
                 if emit_send_diag {
                     let compact_msg = compact_diag_text(&msg);
                     let compact_chain = format_error_chain(&err, 6);
                     let line = format!(
-                        "host_upload_retry_diag: attempt={} pre_put_delay_ms={} sd_busy={} timeout={} transport_reset={} transport_reset_streak={} skip_transport_reset_health_recovery={} transient={} reqwest_seen={} reqwest_timeout={} reqwest_connect={} reqwest_request={} reqwest_body={} io_conn_reset={} io_broken_pipe={} io_conn_aborted={} io_timed_out={} io_conn_refused={} io_not_connected={} err={} err_chain={}",
+                        "host_upload_retry_diag: attempt={} pre_put_delay_ms={} sd_busy={} timeout={} transport_reset={} transport_reset_streak={} skip_transport_reset_health_recovery={} transport_reset_chunk_fallback={} transient={} reqwest_seen={} reqwest_timeout={} reqwest_connect={} reqwest_request={} reqwest_body={} io_conn_reset={} io_broken_pipe={} io_conn_aborted={} io_timed_out={} io_conn_refused={} io_not_connected={} err={} err_chain={}",
                         attempt,
                         pre_put_delay_ms,
                         if is_sd_busy { 1 } else { 0 },
@@ -585,6 +611,11 @@ pub(super) fn request_sd_busy_aware_timed(
                         if is_transport_reset { 1 } else { 0 },
                         transport_reset_streak,
                         if skip_transport_reset_health_recovery { 1 } else { 0 },
+                        if trigger_transport_reset_chunk_fallback {
+                            1
+                        } else {
+                            0
+                        },
                         if is_transient { 1 } else { 0 },
                         if reqwest_flags.seen { 1 } else { 0 },
                         if reqwest_flags.timeout { 1 } else { 0 },
@@ -602,6 +633,15 @@ pub(super) fn request_sd_busy_aware_timed(
                     );
                     println!("{line}");
                     append_host_diag_line(&line);
+                }
+
+                if trigger_transport_reset_chunk_fallback {
+                    return Err(err.context(format!(
+                        "{TRANSPORT_RESET_CHUNK_FALLBACK_MARKER}: streak={} limit={} attempt={}",
+                        transport_reset_streak,
+                        transport_reset_chunk_fallback_streak_limit,
+                        attempt
+                    )));
                 }
 
                 if !(can_retry && (is_sd_busy || is_timeout || is_transient)) {
@@ -663,8 +703,9 @@ mod tests {
     use std::{io::ErrorKind, time::Duration};
 
     use super::{
-        format_error_chain, health_timeout_s, inspect_io_error_flags, inspect_reqwest_error_flags,
-        is_transport_reset_error,
+        format_error_chain, health_timeout_s, inspect_io_error_flags,
+        inspect_reqwest_error_flags, is_transport_reset_chunk_fallback_error,
+        is_transport_reset_error, TRANSPORT_RESET_CHUNK_FALLBACK_MARKER,
     };
     use anyhow::{anyhow, Context};
     use reqwest::blocking::Client;
@@ -718,5 +759,16 @@ mod tests {
         assert!(chain.contains("top upload wrapper"));
         assert!(chain.contains("mid request layer"));
         assert!(chain.contains("leaf network error"));
+    }
+
+    #[test]
+    fn transport_reset_chunk_fallback_marker_detection_is_explicit() {
+        let marked = anyhow!("send failed").context(format!(
+            "{}: streak=3 limit=2 attempt=4",
+            TRANSPORT_RESET_CHUNK_FALLBACK_MARKER
+        ));
+        assert!(is_transport_reset_chunk_fallback_error(&marked));
+        let plain = anyhow!("send failed without fallback marker");
+        assert!(!is_transport_reset_chunk_fallback_error(&plain));
     }
 }
