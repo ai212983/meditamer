@@ -65,3 +65,57 @@ Conclusion:
   new host ack-loss guard.
 - this closes the immediate discovery/readiness instability blocker for
   throughput-phase continuation.
+
+## 2026-03-05: transport-reset fast retry hardened upload outlier tail
+
+Problem observed:
+
+- under AP contention, first-attempt direct `PUT /upload` occasionally failed
+  with host transport reset (`Connection reset by peer` / receiver-gone class).
+- existing retry path waited for health recovery before retry, which preserved
+  eventual success but inflated per-cycle tail latency.
+
+Change implemented (host uploader):
+
+- add bounded fast-retry policy for transport-reset class:
+  - `HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY=1` (default on)
+  - `HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY_STREAK=2` (default)
+- behavior:
+  - on early reset streaks (`<=2`), rebuild client + short backoff retry
+    without long health-recovery wait.
+  - retain existing recovery wait path for longer streaks.
+- diagnostics now log:
+  `transport_reset_streak` and `skip_transport_reset_health_recovery`.
+
+Validation runs:
+
+- pre-change baseline:
+  `logs/adhoc_acceptance_diag10_20260305_1529.log` +
+  `logs/adhoc_acceptance_diag10_20260305_1529.log.hostdiag`
+- post-change fast-retry:
+  `logs/adhoc_acceptance_diag10_fastretry_20260305_1533.log` +
+  `logs/adhoc_acceptance_diag10_fastretry_20260305_1533.log.hostdiag`
+- strict bounded regression gate follow-up (`soak=10`) after merge:
+  `logs/wifi_regression_gate_20260305_153302/report.json`
+
+Observed:
+
+- both runs reproduced one transport-reset retry (`attempts=2`) and completed
+  all `10` cycles.
+- baseline cycle outlier: `cycle 8 upload_ms=21778`.
+- fast-retry cycle outlier on reproduced reset: `cycle 4 upload_ms=4505`.
+- run summaries:
+  - baseline: `avg_upload_s=5.72`, `avg_kib_s=119.98`
+  - fast-retry: `avg_upload_s=3.96`, `avg_kib_s=129.64`
+- host send diagnostics also tightened spread:
+  - baseline `send_ms` stddev `254.4` (`min=3401`, `max=4201`)
+  - fast-retry `send_ms` stddev `182.5` (`min=3409`, `max=3931`)
+- strict follow-up gate passed all stages (`discovery`, acceptance `1/3`, soak
+  `10`) with soak summary `avg_upload_s=3.89`, `avg_kib_s=131.68`.
+
+Conclusion:
+
+- bounded fast-retry materially hardens per-cycle transport-reset tail latency
+  without introducing new failure classes in matched 10-cycle diagnostics.
+- keep fast-retry enabled by default; continue monitoring for multi-reset
+  streaks where fallback recovery wait still applies.

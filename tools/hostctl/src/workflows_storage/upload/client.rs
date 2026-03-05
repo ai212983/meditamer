@@ -58,6 +58,7 @@ const DIRECT_BURST_PRE_PUT_DELAY_MS_DEFAULT: u64 = 120;
 const TRANSPORT_RESET_RECOVERY_POLL_SEC: f64 = 0.2;
 const TRANSPORT_RESET_BACKOFF_MS_STEP: u64 = 75;
 const TRANSPORT_RESET_BACKOFF_MS_MAX: u64 = 600;
+const TRANSPORT_RESET_FAST_RETRY_STREAK_DEFAULT: u32 = 2;
 const RETRY_BACKOFF_MS_STEP: u64 = 250;
 const RETRY_BACKOFF_MS_MAX: u64 = 3000;
 
@@ -100,6 +101,18 @@ fn upload_pre_put_delay_ms() -> Result<u64> {
         0
     };
     env_utils::parse_env_u64("HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS", default)
+}
+
+fn upload_transport_reset_fast_retry_enabled() -> Result<bool> {
+    env_utils::parse_env_bool01("HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY", true)
+}
+
+fn upload_transport_reset_fast_retry_streak_limit() -> Result<u32> {
+    Ok(env_utils::parse_env_u32(
+        "HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY_STREAK",
+        TRANSPORT_RESET_FAST_RETRY_STREAK_DEFAULT,
+    )?
+    .max(1))
 }
 
 fn host_diag_log_path() -> Option<PathBuf> {
@@ -506,8 +519,12 @@ pub(super) fn request_sd_busy_aware_timed(
     } else {
         0
     };
+    let transport_reset_fast_retry = upload_transport_reset_fast_retry_enabled()?;
+    let transport_reset_fast_retry_streak_limit =
+        upload_transport_reset_fast_retry_streak_limit()?;
 
     let mut attempt = 0usize;
+    let mut transport_reset_streak = 0u32;
     let mut retry_client: Option<Client> = None;
     loop {
         attempt += 1;
@@ -547,17 +564,27 @@ pub(super) fn request_sd_busy_aware_timed(
                     || msg_lower.contains("error sending request")
                     || reqwest_flags.transient()
                     || io_flags.transient();
+                if is_transport_reset {
+                    transport_reset_streak = transport_reset_streak.saturating_add(1);
+                } else {
+                    transport_reset_streak = 0;
+                }
+                let skip_transport_reset_health_recovery = is_transport_reset
+                    && transport_reset_fast_retry
+                    && transport_reset_streak <= transport_reset_fast_retry_streak_limit;
 
                 if emit_send_diag {
                     let compact_msg = compact_diag_text(&msg);
                     let compact_chain = format_error_chain(&err, 6);
                     let line = format!(
-                        "host_upload_retry_diag: attempt={} pre_put_delay_ms={} sd_busy={} timeout={} transport_reset={} transient={} reqwest_seen={} reqwest_timeout={} reqwest_connect={} reqwest_request={} reqwest_body={} io_conn_reset={} io_broken_pipe={} io_conn_aborted={} io_timed_out={} io_conn_refused={} io_not_connected={} err={} err_chain={}",
+                        "host_upload_retry_diag: attempt={} pre_put_delay_ms={} sd_busy={} timeout={} transport_reset={} transport_reset_streak={} skip_transport_reset_health_recovery={} transient={} reqwest_seen={} reqwest_timeout={} reqwest_connect={} reqwest_request={} reqwest_body={} io_conn_reset={} io_broken_pipe={} io_conn_aborted={} io_timed_out={} io_conn_refused={} io_not_connected={} err={} err_chain={}",
                         attempt,
                         pre_put_delay_ms,
                         if is_sd_busy { 1 } else { 0 },
                         if is_timeout { 1 } else { 0 },
                         if is_transport_reset { 1 } else { 0 },
+                        transport_reset_streak,
+                        if skip_transport_reset_health_recovery { 1 } else { 0 },
                         if is_transient { 1 } else { 0 },
                         if reqwest_flags.seen { 1 } else { 0 },
                         if reqwest_flags.timeout { 1 } else { 0 },
@@ -598,6 +625,7 @@ pub(super) fn request_sd_busy_aware_timed(
                     .net_recovery_consecutive_health_successes
                     .max(1);
                 let mut recovery_poll_override = None;
+                let mut skip_recovery_wait = false;
                 let default_backoff_ms =
                     (attempt as u64 * RETRY_BACKOFF_MS_STEP).min(RETRY_BACKOFF_MS_MAX);
                 let mut retry_backoff_ms = default_backoff_ms;
@@ -609,17 +637,20 @@ pub(super) fn request_sd_busy_aware_timed(
                     recovery_poll_override = Some(TRANSPORT_RESET_RECOVERY_POLL_SEC);
                     retry_backoff_ms = (attempt as u64 * TRANSPORT_RESET_BACKOFF_MS_STEP)
                         .min(TRANSPORT_RESET_BACKOFF_MS_MAX);
+                    skip_recovery_wait = skip_transport_reset_health_recovery;
                 }
 
                 let recovery_client = retry_client.as_ref().unwrap_or(client);
-                let recovered = wait_network_recovery(
-                    recovery_client,
-                    ctx,
-                    health_successes,
-                    recovery_poll_override,
-                );
-                if !recovered {
-                    retry_backoff_ms = default_backoff_ms;
+                if !skip_recovery_wait {
+                    let recovered = wait_network_recovery(
+                        recovery_client,
+                        ctx,
+                        health_successes,
+                        recovery_poll_override,
+                    );
+                    if !recovered {
+                        retry_backoff_ms = default_backoff_ms;
+                    }
                 }
                 thread::sleep(Duration::from_millis(retry_backoff_ms));
             }

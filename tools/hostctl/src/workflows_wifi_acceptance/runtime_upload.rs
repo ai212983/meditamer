@@ -18,6 +18,48 @@ use crate::{
 use super::WifiAcceptanceRuntime;
 
 impl WifiAcceptanceRuntime<'_> {
+    fn run_direct_upload_attempt(
+        &mut self,
+        ip: &str,
+        cycle_root: &str,
+        upload_timeout_sec: f64,
+        retry_policy: workflows_upload::UploadRetryPolicy,
+        force_fresh_client: bool,
+    ) -> Result<()> {
+        let opts = workflows_upload::DirectUploadOptions {
+            host: ip,
+            port: 8080,
+            timeout_sec: upload_timeout_sec,
+            src: &self.payload_path,
+            dst_root: cycle_root,
+            token: self.token.as_deref(),
+            retry_policy,
+        };
+        if self.reuse_upload_client && !force_fresh_client {
+            if self.upload_client.is_none() {
+                self.upload_client = Some(workflows_upload::make_direct_upload_client(
+                    upload_timeout_sec,
+                )?);
+            }
+            let client = self
+                .upload_client
+                .as_ref()
+                .ok_or_else(|| anyhow!("missing upload client"))?;
+            return workflows_upload::upload_file_direct_fast_with_client(self.logger, client, opts);
+        }
+
+        let fresh_client = workflows_upload::make_direct_upload_client(upload_timeout_sec)?;
+        let result = workflows_upload::upload_file_direct_fast_with_client(
+            self.logger,
+            &fresh_client,
+            opts,
+        );
+        if self.reuse_upload_client && force_fresh_client && result.is_ok() {
+            self.upload_client = Some(fresh_client);
+        }
+        result
+    }
+
     pub(super) fn handle_assert_upload_metrics(&mut self, context: &mut Value) -> Result<()> {
         let current = self.query_req_read_body_reset()?;
         let baseline = self.req_read_body_reset_baseline.unwrap_or(current);
@@ -56,45 +98,9 @@ impl WifiAcceptanceRuntime<'_> {
         let upload_timeout_sec =
             env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
         let retry_policy = resolve_net_upload_retry_policy()?;
-        let result = if self.reuse_upload_client {
-            if self.upload_client.is_none() {
-                self.upload_client = Some(workflows_upload::make_direct_upload_client(
-                    upload_timeout_sec,
-                )?);
-            }
-            let client = self
-                .upload_client
-                .as_ref()
-                .ok_or_else(|| anyhow!("missing upload client"))?;
-            workflows_upload::upload_file_direct_fast_with_client(
-                self.logger,
-                client,
-                workflows_upload::DirectUploadOptions {
-                    host: &ip,
-                    port: 8080,
-                    timeout_sec: upload_timeout_sec,
-                    src: &self.payload_path,
-                    dst_root: &cycle_root,
-                    token: self.token.as_deref(),
-                    retry_policy,
-                },
-            )
-        } else {
-            let client = workflows_upload::make_direct_upload_client(upload_timeout_sec)?;
-            workflows_upload::upload_file_direct_fast_with_client(
-                self.logger,
-                &client,
-                workflows_upload::DirectUploadOptions {
-                    host: &ip,
-                    port: 8080,
-                    timeout_sec: upload_timeout_sec,
-                    src: &self.payload_path,
-                    dst_root: &cycle_root,
-                    token: self.token.as_deref(),
-                    retry_policy,
-                },
-            )
-        };
+        let refresh_on_failure = refresh_upload_client_on_failure_enabled()?;
+        let result =
+            self.run_direct_upload_attempt(&ip, &cycle_root, upload_timeout_sec, retry_policy, false);
         let upload_ms = started.elapsed().as_millis() as u32;
         ctx_set_u32(context, "upload_ms", upload_ms)?;
         match result {
@@ -115,6 +121,52 @@ impl WifiAcceptanceRuntime<'_> {
                     );
                     self.logger.info(diag_message);
                 }
+                let mut host_failure_class = classify_host_upload_failure(&detail);
+                if refresh_on_failure
+                    && host_failure_class.is_some_and(refresh_retry_eligible_host_failure)
+                {
+                    self.logger.info(format!(
+                        "host_upload_refresh_retry: class={} cycle={} upload_attempt={} reuse_client={}",
+                        host_failure_class.unwrap_or("unknown"),
+                        ctx_get_u32(context, "cycle").unwrap_or(0),
+                        ctx_get_u32(context, "upload_attempt").unwrap_or(0),
+                        if self.reuse_upload_client { 1 } else { 0 },
+                    ));
+                    self.upload_client = None;
+                    match self.run_direct_upload_attempt(
+                        &ip,
+                        &cycle_root,
+                        upload_timeout_sec,
+                        retry_policy,
+                        true,
+                    ) {
+                        Ok(()) => {
+                            let retry_upload_ms = started.elapsed().as_millis() as u32;
+                            ctx_set_u32(context, "upload_ms", retry_upload_ms)?;
+                            ctx_set_bool(context, "upload_done", true)?;
+                            ctx_set_string(context, "upload_error", "")?;
+                            self.logger.info(
+                                "host_upload_refresh_retry: recovered upload with fresh client",
+                            );
+                            return Ok(());
+                        }
+                        Err(refresh_err) => {
+                            detail.push_str(&format!(
+                                "; refresh_retry_err={}",
+                                refresh_err
+                            ));
+                            if detail.contains("health check failed: GET") {
+                                let diag_message = append_health_fail_net_status(
+                                    &mut detail,
+                                    query_net_status_line(&mut self.console)
+                                        .map_err(|err| err.to_string()),
+                                );
+                                self.logger.info(diag_message);
+                            }
+                            host_failure_class = classify_host_upload_failure(&detail);
+                        }
+                    }
+                }
 
                 if let Err(panic_err) = self.capture_mem_diag_lines() {
                     detail.push_str(&format!("; {panic_err}"));
@@ -129,7 +181,7 @@ impl WifiAcceptanceRuntime<'_> {
                     return Err(anyhow!("{detail}"));
                 }
 
-                if let Some(class) = classify_host_upload_failure(&detail) {
+                if let Some(class) = host_failure_class {
                     self.logger
                         .info(format!("HOST_FAILURE class={class} detail={detail}"));
                 }
@@ -382,6 +434,14 @@ fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
     None
 }
 
+fn refresh_retry_eligible_host_failure(class: &str) -> bool {
+    matches!(class, "host_health_send_fail" | "host_transport_send_fail")
+}
+
+fn refresh_upload_client_on_failure_enabled() -> Result<bool> {
+    env_utils::parse_env_bool01("HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE", false)
+}
+
 fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>) -> bool {
     let Some(signal) = signal else {
         return false;
@@ -413,7 +473,7 @@ fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
 mod tests {
     use super::{
         append_health_fail_net_status, append_panic_signal_context, classify_host_upload_failure,
-        parse_metrics_key_u32,
+        parse_metrics_key_u32, refresh_retry_eligible_host_failure,
     };
     use crate::workflows_wifi_common::detect_panic_signal;
 
@@ -476,5 +536,14 @@ mod tests {
             Some("host_transport_connection_reset")
         );
         assert_eq!(classify_host_upload_failure("remote verify failed"), None);
+    }
+
+    #[test]
+    fn refresh_retry_eligibility_is_limited_to_send_classes() {
+        assert!(refresh_retry_eligible_host_failure("host_health_send_fail"));
+        assert!(refresh_retry_eligible_host_failure("host_transport_send_fail"));
+        assert!(!refresh_retry_eligible_host_failure(
+            "host_transport_connection_reset"
+        ));
     }
 }
