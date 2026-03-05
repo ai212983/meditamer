@@ -149,6 +149,18 @@ Validation:
   `logs/adhoc_directfallback10_20260305_1602.log.hostdiag`.
 - this run did not reproduce repeated-reset streaks, so fallback marker did not
   fire live; behavior remains gated to the repeated-reset class.
+- live bounded repro loop later reproduced fallback marker on run `4`:
+  `logs/live_fallback_repro_20260305_160002_r4.log.hostdiag`
+  (`host_upload_transport_fallback` present after two consecutive
+  transport-reset-class retries).
+- same run later failed on host send/health path during fallback-era turbulence,
+  so chunked handoff now uses a fresh client by default
+  (`fresh_client=1` marker field) before `upload_begin/chunk/commit`.
+- postfix bounded loop (`3x` direct `10`-cycle runs) remained stable and did not
+  re-hit repeated-reset streaks:
+  `logs/live_fallback_repro_postfix_20260305_160413_r1.log`,
+  `logs/live_fallback_repro_postfix_20260305_160514_r2.log`,
+  `logs/live_fallback_repro_postfix_20260305_160650_r3.log`.
 
 Conclusion:
 

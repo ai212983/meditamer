@@ -200,11 +200,18 @@ pub(super) fn upload_file(
         if mode == UploadTransportMode::Direct {
             if is_transport_reset_chunk_fallback_error(&put_err) {
                 let line = format!(
-                    "host_upload_transport_fallback: mode=direct reason=transport_reset_streak path={remote_path}"
+                    "host_upload_transport_fallback: mode=direct reason=transport_reset_streak path={remote_path} fresh_client=1"
                 );
                 println!("{line}");
                 append_host_diag_line(&line);
-                return upload_file_chunked(request_client, request_ctx, &data, remote_path, true);
+                let fallback_client = make_client(request_ctx.timeout_sec)?;
+                return upload_file_chunked(
+                    &fallback_client,
+                    request_ctx,
+                    &data,
+                    remote_path,
+                    true,
+                );
             }
             return Err(put_err);
         }
@@ -251,8 +258,6 @@ fn upload_file_chunked(
         request_ctx,
     )?;
 
-    // Keep fallback /upload_chunk requests coarse-grained to reduce per-request
-    // HTTP and SD roundtrip overhead on constrained Wi-Fi links.
     let chunk_size = env_utils::parse_env_u64("HOSTCTL_UPLOAD_CHUNK_SIZE", 65536)? as usize;
     for chunk in data.chunks(chunk_size.max(1)) {
         let chunk_url = format!(
