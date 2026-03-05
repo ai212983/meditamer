@@ -221,9 +221,17 @@ Validation:
   `refresh_retry_eligibility_covers_send_and_reset_classes`.
 - hostctl targeted transfer fallback test still passes after change:
   `cargo +stable test --target aarch64-apple-darwin workflows_storage::upload::transfer::tests -- --nocapture`.
+- bounded live regression gate attempt on `/dev/cu.usbserial-510` failed before
+  upload in acceptance stage (`listener_not_ready`), so new refresh path was not
+  exercised in this run:
+  `logs/wifi_regression_gate_20260305_161739/report.json`
+  (`acceptance_1_cycle.log` shows repeated `ListenerWait` with `ipv4=0.0.0.0`
+  then terminal `failure_class=listener_not_ready`).
 
 Conclusion:
 
 - host-side transient send/reset failures now get deterministic fresh-client
   recovery by default, reducing avoidable cycle failures without changing
   firmware behavior.
+- next root-cause focus shifts back to DHCP/listener readiness recurrence
+  (`ListenerWait` persistence with `ipv4=0.0.0.0` in acceptance gate).
