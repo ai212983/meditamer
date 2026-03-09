@@ -170,6 +170,8 @@ scripts/tests/hw/test_wifi_acceptance.sh
 - adaptive ingress fairness A/B (firmware build-time knob):
   - `MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS=1` (default `0`)
   - latest decision: keep non-default diagnostics only (not promoted)
+- additional Wi-Fi diagnostics, blackout probes, and regression-gate notes now
+  live in `docs/development/readme/part-06.md`.
 - to force baseline (pipeline off) for comparison, use:
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/build/build.sh debug`
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/device/flash.sh debug`

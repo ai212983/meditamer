@@ -25,6 +25,16 @@ fn legacy_task_entry_diag_enabled() -> bool {
 
 static IDLE_HOOK: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
+#[cfg(feature = "esp-radio")]
+fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
+    crate::esp_radio::legacy_preempt_builtin_timer_diag_enabled()
+}
+
+#[cfg(not(feature = "esp-radio"))]
+fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
+    false
+}
+
 pub(crate) extern "C" fn idle_hook() -> ! {
     loop {
         unsafe { core::arch::asm!("waiti 0") };
@@ -116,7 +126,17 @@ const SW_INTERRUPT: u32 = if cfg!(esp32) { 1 << 29 } else { 1 << 7 };
 
 pub(crate) fn setup_multitasking() {
     unsafe {
-        xtensa_lx::interrupt::enable_mask(SW_INTERRUPT);
+        if legacy_preempt_builtin_timer_diag_enabled() {
+            let enabled = xtensa_lx::interrupt::disable();
+            xtensa_lx::interrupt::enable_mask(
+                SW_INTERRUPT
+                    | xtensa_lx_rt::interrupt::CpuInterruptLevel::Level2.mask()
+                    | xtensa_lx_rt::interrupt::CpuInterruptLevel::Level6.mask()
+                    | enabled,
+            );
+        } else {
+            xtensa_lx::interrupt::enable_mask(SW_INTERRUPT);
+        }
     }
 }
 

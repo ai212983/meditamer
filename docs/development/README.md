@@ -9,6 +9,7 @@ The development guide is sharded to keep Markdown files under the documentation 
 - [Part 03: Runtime metrics](./readme/part-03.md)
 - [Part 04: Wi-Fi upload acceptance/regression workflow](./readme/part-04.md)
 - [Part 05: Troubleshoot workflow](./readme/part-05.md)
+- [Part 06: Advanced Wi-Fi diagnostics](./readme/part-06.md)
 
 ## Notes
 
@@ -21,7 +22,7 @@ The development guide is sharded to keep Markdown files under the documentation 
 
 - Throughput history updates:
   - append to the latest file in `docs/development/upload-throughput-history/part-*.md`
-    (currently `part-25.md`)
+    (currently `part-26.md`)
   - when the latest part approaches `220` LOC, create the next part and update
     `docs/development/upload-throughput-history.md` links
 - RFC updates:

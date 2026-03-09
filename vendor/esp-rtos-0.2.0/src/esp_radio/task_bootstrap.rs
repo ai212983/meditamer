@@ -1,6 +1,6 @@
 use portable_atomic::{AtomicU32, Ordering};
 
-use crate::{task, task::TaskPtr};
+use crate::{esp_radio::note_legacy_task_selected, task, task::TaskPtr};
 
 static WIFI_TASK_SELECTED_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -20,6 +20,7 @@ fn is_wifi_task(task: TaskPtr) -> bool {
 }
 
 pub(crate) fn note_task_selected(task: TaskPtr) {
+    note_legacy_task_selected(task);
     if is_wifi_task(task) {
         WIFI_TASK_SELECTED_COUNT.fetch_add(1, Ordering::Relaxed);
     }

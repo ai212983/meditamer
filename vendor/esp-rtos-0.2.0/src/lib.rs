@@ -253,6 +253,27 @@ pub extern "C" fn __esp_rtos_diag_task_create_last_effective_priority() -> u32 {
 #[cfg(feature = "esp-radio")]
 #[unsafe(no_mangle)]
 #[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_reset_legacy_task_model() {
+    crate::esp_radio::reset_legacy_task_model()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize {
+    crate::esp_radio::legacy_task_model_entry_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_current_index() -> usize {
+    crate::esp_radio::legacy_task_model_current_index()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
 pub extern "C" fn __esp_rtos_diag_queue_create_count() -> u32 {
     crate::esp_radio::queue_create_count()
 }

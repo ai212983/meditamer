@@ -23,7 +23,9 @@ use crate::{
 
 mod queue;
 mod bootstrap;
+mod legacy_builtin_scheduler;
 mod legacy_preempt;
+mod legacy_scheduler;
 mod task_bootstrap;
 mod timer_queue;
 
@@ -37,10 +39,39 @@ pub(crate) use timer_queue::{
 pub(crate) use queue::{
     queue_create_count, queue_create_last_capacity, queue_create_last_item_size,
 };
+pub(crate) use legacy_scheduler::pop_next_ready_override as pop_next_legacy_esp_radio_task;
+pub(crate) use legacy_scheduler::ready_count as legacy_ready_task_count;
+pub(crate) use legacy_scheduler::note_task_selected as note_legacy_task_selected;
+pub(crate) use legacy_scheduler::runtime_mode_enabled as legacy_runtime_mode_enabled;
+pub(crate) use legacy_builtin_scheduler::switch_task as legacy_builtin_scheduler_switch_task;
 
 static TASK_CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
 static TASK_CREATE_LAST_REQUESTED_PRIORITY: AtomicU32 = AtomicU32::new(0);
 static TASK_CREATE_LAST_EFFECTIVE_PRIORITY: AtomicU32 = AtomicU32::new(0);
+
+fn legacy_builtin_scheduler_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_BUILTIN_SCHEDULER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RTOS_USE_LEGACY_BUILTIN_SCHEDULER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+pub(crate) fn legacy_builtin_scheduler_runtime_mode_enabled() -> bool {
+    legacy_builtin_scheduler_diag_enabled()
+}
+
+pub(crate) fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_PREEMPT_BUILTIN_TIMER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RTOS_USE_LEGACY_PREEMPT_BUILTIN_TIMER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
 
 fn create_trace_enabled() -> bool {
     matches!(
@@ -88,10 +119,12 @@ impl esp_radio_rtos_driver::Scheduler for Scheduler {
     }
 
     fn yield_task(&self) {
+        legacy_scheduler::yield_override();
         task::yield_task();
     }
 
     fn yield_task_from_isr(&self) {
+        legacy_scheduler::yield_override();
         task::yield_task();
     }
 
@@ -108,6 +141,7 @@ impl esp_radio_rtos_driver::Scheduler for Scheduler {
         pin_to_core: Option<u32>,
         task_stack_size: usize,
     ) -> *mut c_void {
+        legacy_scheduler::initialize_main_if_enabled();
         let effective_priority = if name == "wifi" && legacy_wifi_task_priority_model_diag_enabled()
         {
             0
@@ -125,6 +159,10 @@ impl esp_radio_rtos_driver::Scheduler for Scheduler {
         TASK_CREATE_COUNT.fetch_add(1, Ordering::Relaxed);
         TASK_CREATE_LAST_REQUESTED_PRIORITY.store(priority, Ordering::Relaxed);
         TASK_CREATE_LAST_EFFECTIVE_PRIORITY.store(effective_priority, Ordering::Relaxed);
+        if legacy_builtin_scheduler_diag_enabled() {
+            legacy_builtin_scheduler::allocate_main_task();
+            return legacy_builtin_scheduler::task_create(task, param, task_stack_size);
+        }
         let task_ptr = self.create_task(
             name,
             task,
@@ -141,26 +179,51 @@ impl esp_radio_rtos_driver::Scheduler for Scheduler {
                 }
             }),
         );
+        legacy_scheduler::note_created_task(name, task_ptr);
         maybe_handoff_to_wifi_task(name);
         task_ptr.as_ptr().cast()
     }
 
     fn current_task(&self) -> *mut c_void {
-        self.current_task().as_ptr().cast()
+        if legacy_builtin_scheduler_diag_enabled() {
+            legacy_builtin_scheduler::allocate_main_task();
+            return legacy_builtin_scheduler::current_task()
+                .map(|task| task.as_ptr().cast())
+                .unwrap_or(core::ptr::null_mut());
+        }
+        legacy_scheduler::current_task_override()
+            .unwrap_or_else(|| self.current_task())
+            .as_ptr()
+            .cast()
     }
 
     fn schedule_task_deletion(&self, task_handle: *mut c_void) {
+        if legacy_builtin_scheduler_diag_enabled() {
+            legacy_builtin_scheduler::schedule_task_deletion(task_handle);
+            return;
+        }
+        legacy_scheduler::note_deleted_task(NonNull::new(task_handle.cast::<Task>()));
         task::schedule_task_deletion(task_handle as *mut Task)
     }
 
     fn current_task_thread_semaphore(&self) -> SemaphorePtr {
-        task::with_current_task(|task| {
+        if legacy_builtin_scheduler_diag_enabled() {
+            legacy_builtin_scheduler::allocate_main_task();
+            return NonNull::new(legacy_builtin_scheduler::current_task_thread_semaphore_ptr())
+                .unwrap()
+                .cast();
+        }
+        let task_ptr =
+            legacy_scheduler::current_task_override().unwrap_or_else(|| self.current_task());
+        unsafe {
+            let task = task_ptr.as_ptr();
             NonNull::from(
-                task.thread_semaphore
+                (*task)
+                    .thread_semaphore
                     .get_or_insert_with(|| Semaphore::new_counting(0, 1)),
             )
             .cast()
-        })
+        }
     }
 
     fn usleep(&self, us: u32) {
@@ -256,4 +319,16 @@ pub(crate) fn task_create_last_requested_priority() -> u32 {
 
 pub(crate) fn task_create_last_effective_priority() -> u32 {
     TASK_CREATE_LAST_EFFECTIVE_PRIORITY.load(Ordering::Relaxed)
+}
+
+pub(crate) fn legacy_task_model_entry_count() -> usize {
+    legacy_scheduler::entry_count()
+}
+
+pub(crate) fn legacy_task_model_current_index() -> usize {
+    legacy_scheduler::current_index()
+}
+
+pub(crate) fn reset_legacy_task_model() {
+    legacy_scheduler::reset()
 }

@@ -15,6 +15,7 @@ use esp_sync::NonReentrantMutex;
 
 use crate::{
     SCHEDULER,
+    esp_radio::legacy_scheduler,
     task::{TaskExt, TaskPtr},
 };
 
@@ -105,6 +106,7 @@ pub fn ensure_timer_task() {
         if q.task.is_none() {
             let task_ptr =
                 SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
+            legacy_scheduler::note_created_task("timer", task_ptr);
             q.task = Some(task_ptr);
             q.next_wakeup = u64::MAX;
         }
@@ -165,6 +167,7 @@ impl TimerQueueInner {
             // create the timer task
             let task_ptr =
                 SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
+            legacy_scheduler::note_created_task("timer", task_ptr);
             self.task = Some(task_ptr);
             self.next_wakeup = due;
         }

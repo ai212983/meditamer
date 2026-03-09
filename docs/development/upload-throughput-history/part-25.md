@@ -212,3 +212,65 @@ Why this matters:
   - legacy-like zero-priority `wifi` task creation
 - the remaining scheduler gap is no longer simple task entry, priority, or first-handoff behavior
 - the next real step would be a deeper run-queue / circular-scheduler model port, not another local knob
+
+## 2026-03-09: corrected three-task legacy task model still does not restore RX visibility
+
+- Extended the vendored legacy task-model port to register the internal `timer` task too:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/timer_queue.rs`
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/legacy_scheduler.rs`
+
+What changed:
+- the `timer` task is now inserted into the legacy task-model ring at both current creation sites
+- the `wifi`-task selection bug was fixed so creating `wifi` no longer hardcodes `CURRENT_INDEX=1`; it now selects the actual index of the new `wifi` task in the ring
+
+Validation:
+- isolated current standalone comparator with:
+  - `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_ESP_RADIO_TASK_MODEL_DIAG=1`
+- summary artifact:
+  - `logs/esp_radio_nostd_wifi_control_legacytaskmodel_timerfix_20260309_berlin/summary.txt`
+
+Observed result:
+- after `wifi_new`:
+  - `legacy_task_model_entry_count=3`
+  - `legacy_task_model_current_index=2`
+- recent `task_get_current_task` samples now resolve to `wifi`, not `timer`
+- after scan, queue send/recv first+last roles also resolve to `wifi`
+- pre-scan promisc still stayed zero on channels `8/1/6/11`
+- wrapped scan still ended at:
+  - `scan=ok count=0`
+
+Why this matters:
+- the earlier timer-dominance result was a real shim bug, and it is now corrected
+- even with a corrected three-task ring (`main`/`timer`/`wifi`) and blob-facing task identity pinned to `wifi` as intended, RX visibility still does not return
+- this closes the legacy task-model bookkeeping branch and leaves the deeper circular/run-queue scheduler behavior as the next remaining scheduler-level target
+
+## 2026-03-09: legacy task insertion order still does not restore RX visibility
+
+- Extended the vendored legacy task-model port so newly created tasks are inserted immediately after the current task, matching the legacy circular scheduler semantics:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/legacy_scheduler.rs`
+
+What changed:
+- instead of appending new tasks to the end of the diagnostic ring, `note_created_task()` now inserts the new task at `current_index + 1`
+- with `main` already present and `timer` precreated, later `wifi` creation now yields the legacy-style ring order:
+  - `main -> wifi -> timer`
+
+Validation:
+- isolated current standalone comparator with:
+  - `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_ESP_RADIO_TASK_MODEL_DIAG=1`
+- summary artifact:
+  - `logs/esp_radio_nostd_wifi_control_legacytaskmodel_insert_20260309_berlin/summary.txt`
+
+Observed result:
+- after `wifi_new`:
+  - `legacy_task_model_entry_count=3`
+  - `legacy_task_model_current_index=1`
+- recent `task_get_current_task` samples still resolve to `wifi`
+- after scan, queue send/recv first+last roles still resolve to `wifi`
+- pre-scan promisc still stayed zero on channels `8/1/6/11`
+- wrapped scan still ended at:
+  - `scan=ok count=0`
+
+Why this matters:
+- the task ring now matches the legacy insertion order, not just the legacy membership set
+- RX visibility still does not return, so the remaining scheduler gap is deeper than ring order alone
+- this closes the task-ring ordering branch and leaves the actual run-queue scheduler behavior as the next remaining scheduler-level target

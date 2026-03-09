@@ -184,11 +184,18 @@ impl SchedulerState {
         rtos_trace::trace::task_new(task_ptr.rtos_trace_id());
 
         self.all_tasks.push(task_ptr);
-        match self.run_queue.mark_task_ready(&self.per_cpu, task_ptr) {
-            RunSchedulerOn::DontRun => {}
-            RunSchedulerOn::CurrentCore => task::yield_task(),
-            #[cfg(multi_core)]
-            RunSchedulerOn::OtherCore => task::schedule_other_core(),
+        #[cfg(feature = "esp-radio")]
+        let legacy_runtime_mode = crate::esp_radio::legacy_runtime_mode_enabled();
+        #[cfg(not(feature = "esp-radio"))]
+        let legacy_runtime_mode = false;
+
+        if !legacy_runtime_mode {
+            match self.run_queue.mark_task_ready(&self.per_cpu, task_ptr) {
+                RunSchedulerOn::DontRun => {}
+                RunSchedulerOn::CurrentCore => task::yield_task(),
+                #[cfg(multi_core)]
+                RunSchedulerOn::OtherCore => task::schedule_other_core(),
+            }
         }
 
         debug!("Task '{}' created: {:?}", name, task_ptr);
@@ -237,10 +244,14 @@ impl SchedulerState {
         }
 
         let current_task = self.per_cpu[current_cpu].current_task;
+        #[cfg(feature = "esp-radio")]
+        let legacy_runtime_mode = crate::esp_radio::legacy_runtime_mode_enabled();
+        #[cfg(not(feature = "esp-radio"))]
+        let legacy_runtime_mode = false;
         if let Some(current_task) = current_task {
             unsafe { current_task.as_ref().ensure_no_stack_overflow() };
 
-            if current_task.state() == TaskState::Ready {
+            if !legacy_runtime_mode && current_task.state() == TaskState::Ready {
                 // Current task is still ready, mark it as such.
                 debug!("re-queueing current task: {:?}", current_task);
                 self.run_queue.mark_task_ready(&self.per_cpu, current_task);
@@ -248,6 +259,10 @@ impl SchedulerState {
         };
 
         let mut arm_next_timeslice_tick = false;
+        #[cfg(feature = "esp-radio")]
+        let next_task = crate::esp_radio::pop_next_legacy_esp_radio_task(&mut self.run_queue)
+            .or_else(|| self.run_queue.pop());
+        #[cfg(not(feature = "esp-radio"))]
         let next_task = self.run_queue.pop();
         if next_task != current_task {
             #[cfg(feature = "esp-radio")]
@@ -290,6 +305,12 @@ impl SchedulerState {
                 // tick.
                 let new_core_priority = next.priority(&mut self.run_queue);
                 arm_next_timeslice_tick = !self.run_queue.is_level_empty(new_core_priority);
+                #[cfg(feature = "esp-radio")]
+                {
+                    if crate::esp_radio::legacy_ready_task_count() > 1 {
+                        arm_next_timeslice_tick = true;
+                    }
+                }
 
                 unsafe { &raw mut (*next.as_ptr()).cpu_context }
             } else {
@@ -358,6 +379,14 @@ impl SchedulerState {
     }
 
     pub(crate) fn switch_task(&mut self, #[cfg(xtensa)] trap_frame: &mut CpuContext) {
+        #[cfg(feature = "esp-radio")]
+        if crate::esp_radio::legacy_builtin_scheduler_runtime_mode_enabled() {
+            crate::esp_radio::legacy_builtin_scheduler_switch_task(
+                #[cfg(xtensa)]
+                trap_frame,
+            );
+            return;
+        }
         self.run_scheduler(|current_context, next_context| {
             trace!(
                 "Task switch: {:x} -> {:x}",
@@ -401,12 +430,21 @@ impl SchedulerState {
     pub(crate) fn resume_task(&mut self, task: TaskPtr) {
         let timer_queue = unwrap!(self.time_driver.as_mut());
         timer_queue.timer_queue.remove(task);
+        #[cfg(feature = "esp-radio")]
+        let legacy_runtime_mode = crate::esp_radio::legacy_runtime_mode_enabled();
+        #[cfg(not(feature = "esp-radio"))]
+        let legacy_runtime_mode = false;
 
-        match self.run_queue.mark_task_ready(&self.per_cpu, task) {
-            RunSchedulerOn::DontRun => {}
-            RunSchedulerOn::CurrentCore => task::yield_task(),
-            #[cfg(multi_core)]
-            RunSchedulerOn::OtherCore => task::schedule_other_core(),
+        if legacy_runtime_mode {
+            task.set_state(TaskState::Ready);
+            task::yield_task();
+        } else {
+            match self.run_queue.mark_task_ready(&self.per_cpu, task) {
+                RunSchedulerOn::DontRun => {}
+                RunSchedulerOn::CurrentCore => task::yield_task(),
+                #[cfg(multi_core)]
+                RunSchedulerOn::OtherCore => task::schedule_other_core(),
+            }
         }
     }
 

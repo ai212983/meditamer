@@ -11,9 +11,12 @@ use esp_println::println;
 use esp_radio::wifi::{ScanConfig, WifiMode};
 
 unsafe extern "C" {
+    fn __esp_rtos_diag_reset_legacy_task_model();
     fn __esp_rtos_diag_task_create_count() -> u32;
     fn __esp_rtos_diag_task_create_last_requested_priority() -> u32;
     fn __esp_rtos_diag_task_create_last_effective_priority() -> u32;
+    fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_current_index() -> usize;
     fn __esp_rtos_diag_queue_create_count() -> u32;
     fn __esp_rtos_diag_queue_create_last_capacity() -> u32;
     fn __esp_rtos_diag_queue_create_last_item_size() -> u32;
@@ -34,16 +37,21 @@ fn print_rtos_create_diag(label: &str) {
         unsafe { __esp_rtos_diag_task_create_last_requested_priority() };
     let task_create_last_effective_priority =
         unsafe { __esp_rtos_diag_task_create_last_effective_priority() };
+    let legacy_task_model_entry_count = unsafe { __esp_rtos_diag_legacy_task_model_entry_count() };
+    let legacy_task_model_current_index =
+        unsafe { __esp_rtos_diag_legacy_task_model_current_index() };
     let queue_create_count = unsafe { __esp_rtos_diag_queue_create_count() };
     let queue_last_capacity = unsafe { __esp_rtos_diag_queue_create_last_capacity() };
     let queue_last_item_size = unsafe { __esp_rtos_diag_queue_create_last_item_size() };
     let wifi_task_selected_count = unsafe { __esp_rtos_diag_wifi_task_selected_count() };
     println!(
-        "nostd_wifi_control: rtos_create_diag label={} task_create_count={} task_create_last_requested_priority={} task_create_last_effective_priority={} queue_create_count={} queue_last_capacity={} queue_last_item_size={} wifi_task_selected_count={}",
+        "nostd_wifi_control: rtos_create_diag label={} task_create_count={} task_create_last_requested_priority={} task_create_last_effective_priority={} legacy_task_model_entry_count={} legacy_task_model_current_index={} queue_create_count={} queue_last_capacity={} queue_last_item_size={} wifi_task_selected_count={}",
         label,
         task_create_count,
         task_create_last_requested_priority,
         task_create_last_effective_priority,
+        legacy_task_model_entry_count,
+        legacy_task_model_current_index,
         queue_create_count,
         queue_last_capacity,
         queue_last_item_size,
@@ -319,6 +327,9 @@ fn print_wifi_os_diag(label: &str) {
 
 #[esp_hal::main]
 fn main() -> ! {
+    unsafe {
+        __esp_rtos_diag_reset_legacy_task_model();
+    }
     let peripherals = esp_hal::init(esp_hal::Config::default());
     esp_alloc::heap_allocator!(size: 64 * 1024);
 

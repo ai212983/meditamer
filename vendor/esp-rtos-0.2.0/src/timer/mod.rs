@@ -21,6 +21,16 @@ pub(crate) mod embassy;
 
 const TIMESLICE_DURATION: Duration = Rate::from_hz(TICK_RATE).as_duration();
 
+#[cfg(feature = "esp-radio")]
+fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
+    crate::esp_radio::legacy_preempt_builtin_timer_diag_enabled()
+}
+
+#[cfg(not(feature = "esp-radio"))]
+fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
+    false
+}
+
 pub(crate) struct TimerQueue {
     queue: TaskQueue<TaskTimerQueueElement>,
     next_wakeup: u64,
@@ -125,11 +135,17 @@ impl TimeDriver {
         timer.set_interrupt_handler(handler);
         timer.listen();
 
-        Self {
+        let mut driver = Self {
             timer,
             timer_queue: TimerQueue::new(),
             current_alarm: u64::MAX,
+        };
+
+        if legacy_preempt_builtin_timer_diag_enabled() {
+            driver.arm_legacy_periodic_tick(crate::now());
         }
+
+        driver
     }
 
     pub(crate) fn handle_alarm(&mut self, now: u64, on_task_ready: impl FnMut(TaskPtr)) {
@@ -183,6 +199,11 @@ impl TimeDriver {
                 Err(e) => panic!("Failed to schedule timer: {:?}", e),
             }
         }
+    }
+
+    pub(crate) fn arm_legacy_periodic_tick(&mut self, now: u64) {
+        self.current_alarm = now + TIMESLICE_DURATION.as_micros();
+        unwrap!(self.timer.schedule(TIMESLICE_DURATION));
     }
 
     pub(crate) fn schedule_wakeup(&mut self, mut current_task: TaskPtr, at: Instant) -> bool {
@@ -286,11 +307,15 @@ extern "C" fn timer_tick_handler() {
             crate::task::schedule_other_core();
         }
 
-        // Re-arm the timer. This should be relatively cheap, and ensures that the timer will keep
-        // ticking even if the interrupt doesn't trigger a context switch.
-        // FIXME: this SHOULD be relatively cheap, but arming the timer involves u64 division.
-        time_driver.current_alarm = u64::MAX;
-        time_driver.arm_next_wakeup(now);
+        if legacy_preempt_builtin_timer_diag_enabled() {
+            time_driver.arm_legacy_periodic_tick(now);
+        } else {
+            // Re-arm the timer. This should be relatively cheap, and ensures that the timer will keep
+            // ticking even if the interrupt doesn't trigger a context switch.
+            // FIXME: this SHOULD be relatively cheap, but arming the timer involves u64 division.
+            time_driver.current_alarm = u64::MAX;
+            time_driver.arm_next_wakeup(now);
+        }
     });
 
     #[cfg(feature = "rtos-trace")]
