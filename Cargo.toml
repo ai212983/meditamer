@@ -46,14 +46,15 @@ telemetry-defmt = ["dep:defmt", "esp-println/defmt-espflash"]
 asset-upload-http = [
     "dep:embassy-net",
     "dep:embedded-io-async",
-    "dep:esp-radio",
     "dep:static_cell",
     "dep:esp-alloc",
     "esp-rtos/esp-radio",
     "esp-rtos/esp-alloc",
+    "wifi-backend-esp-radio",
 ]
 asset-upload-http-pipeline = []
 asset-upload-http-uploader = ["asset-upload-http"]
+wifi-backend-esp-radio = ["dep:esp-radio"]
 
 [dependencies]
 esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
@@ -63,12 +64,14 @@ esp-alloc = { version = "0.9.0", optional = true, default-features = false, feat
 esp-println = { version = "0.16.1", default-features = false, features = ["esp32", "log-04", "uart"] }
 esp-backtrace = { version = "0.18.1", default-features = false, features = ["esp32", "panic-handler", "println"] }
 defmt = { version = "1.0.1", optional = true }
+esp-wifi-sys = { version = "0.8.1", default-features = false, features = ["esp32"] }
 embassy-executor = "0.9.0"
 embassy-time = "0.5.0"
 embassy-sync = "0.7.0"
 embassy-futures = "0.1.2"
 embassy-net = { version = "0.8.0", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
 embedded-io-async = { version = "0.7.0", optional = true }
+enumset = { version = "1.1", default-features = false }
 esp-radio = { version = "0.17.0", optional = true, default-features = false, features = ["esp32", "wifi", "log-04", "unstable"] }
 static_cell = { version = "2.1.0", optional = true }
 
@@ -84,3 +87,7 @@ sdcard = { path = "packages/sdcard" }
 
 [build-dependencies]
 event_config_compiler = { path = "tools/event_config_compiler" }
+
+[patch.crates-io]
+esp-radio = { path = "vendor/esp-radio-0.17.0" }
+esp-rtos = { path = "vendor/esp-rtos-0.2.0" }

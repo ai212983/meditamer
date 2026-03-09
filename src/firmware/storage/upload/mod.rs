@@ -5,12 +5,26 @@ pub(crate) mod wifi;
 use embassy_net::{Runner, Stack, StackResources};
 use esp_hal::rng::Rng;
 use esp_println::println;
-use esp_radio::wifi::{WifiController, WifiDevice};
 use static_cell::StaticCell;
 
+use self::wifi::{WifiController, WifiDevice};
 use super::super::types::WifiCredentials;
 
 const UPLOAD_NET_STACK_SOCKETS: usize = 4;
+
+fn wifi_setup_stage_trace_enabled() -> bool {
+    match option_env!("MEDITAMER_WIFI_SETUP_STAGE_TRACE") {
+        Some(raw) if raw != "0" => true,
+        Some(_) => false,
+        None => matches!(option_env!("WIFI_SETUP_STAGE_TRACE"), Some(raw) if raw != "0"),
+    }
+}
+
+fn wifi_setup_stage_trace(stage: &str) {
+    if wifi_setup_stage_trace_enabled() {
+        println!("upload_http: wifi_setup_stage stage={stage}");
+    }
+}
 
 pub(crate) struct UploadHttpRuntime {
     pub(crate) wifi_controller: WifiController<'static>,
@@ -22,37 +36,26 @@ pub(crate) struct UploadHttpRuntime {
 pub(crate) fn setup(
     wifi: esp_hal::peripherals::WIFI<'static>,
 ) -> Result<UploadHttpRuntime, &'static str> {
+    wifi_setup_stage_trace("setup.begin");
+    println!("upload_http: wifi_backend name={}", wifi::BACKEND_NAME);
     let initial_credentials = wifi::compiled_wifi_credentials();
 
-    static RADIO_CTRL: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
     static STACK_RESOURCES: StaticCell<StackResources<UPLOAD_NET_STACK_SOCKETS>> =
         StaticCell::new();
 
-    let radio_ctrl = match esp_radio::init() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            println!("asset-upload-http: esp_radio::init err={:?}", err);
-            return Err("asset-upload-http: esp_radio::init failed");
-        }
-    };
-    let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
-    let (wifi_controller, ifaces) =
-        match esp_radio::wifi::new(radio_ctrl, wifi, wifi::wifi_runtime_config()) {
-            Ok(parts) => parts,
-            Err(err) => {
-                println!("asset-upload-http: wifi init err={:?}", err);
-                return Err("asset-upload-http: wifi init failed");
-            }
-        };
+    let (wifi_controller, sta_device) = wifi::initialize_runtime_sta(wifi)?;
+    wifi::apply_runtime_setup_overrides_and_log();
     let rng = Rng::new();
     let seed = (rng.random() as u64) << 32 | rng.random() as u64;
 
+    wifi_setup_stage_trace("embassy_net_new.before");
     let (stack, net_runner) = embassy_net::new(
-        ifaces.sta,
+        sta_device,
         embassy_net::Config::dhcpv4(Default::default()),
         STACK_RESOURCES.init(StackResources::<UPLOAD_NET_STACK_SOCKETS>::new()),
         seed,
     );
+    wifi_setup_stage_trace("embassy_net_new.after");
 
     Ok(UploadHttpRuntime {
         wifi_controller,

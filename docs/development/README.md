@@ -21,6 +21,7 @@ The development guide is sharded to keep Markdown files under the documentation 
 
 - Throughput history updates:
   - append to the latest file in `docs/development/upload-throughput-history/part-*.md`
+    (currently `part-25.md`)
   - when the latest part approaches `220` LOC, create the next part and update
     `docs/development/upload-throughput-history.md` links
 - RFC updates:

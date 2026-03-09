@@ -1,4 +1,4 @@
-use std::{thread, time::Duration};
+use std::{sync::OnceLock, thread, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
@@ -98,7 +98,14 @@ fn ack_line_matches_op(line: Option<&str>, expected_op: &str) -> bool {
         // Backward-compatible path for firmware that only prints `NET OK`.
         return true;
     }
-    line.contains(&format!("op={expected_op}"))
+    let Some(op_start) = line.find("op=") else {
+        return false;
+    };
+    let op_value = &line[op_start + 3..];
+    let token_len = op_value
+        .find([' ', '\t', '\r'])
+        .unwrap_or(op_value.len());
+    &op_value[..token_len] == expected_op
 }
 
 pub fn parse_net_status_line(line: &str) -> Result<NetStatus> {
@@ -109,10 +116,17 @@ pub fn parse_net_status_line(line: &str) -> Result<NetStatus> {
 }
 
 pub fn query_net_status_line(console: &mut SerialConsole) -> Result<Option<String>> {
-    let status_re = Regex::new(r"^NET_STATUS \{")?;
+    let status_re = net_status_line_re();
     let mark = console.mark();
     console.send_line("NET STATUS")?;
-    console.wait_for_regex_since(mark, &status_re, Duration::from_secs(2))
+    console.wait_for_regex_since(mark, status_re, Duration::from_secs(2))
+}
+
+pub fn net_status_line_re() -> &'static Regex {
+    static STATUS_RE: OnceLock<Regex> = OnceLock::new();
+    STATUS_RE.get_or_init(|| {
+        Regex::new(r"^NET_STATUS \{").expect("failed to compile NET_STATUS regex")
+    })
 }
 
 pub fn query_net_status(console: &mut SerialConsole) -> Result<Option<NetStatus>> {

@@ -11,7 +11,7 @@ use crate::{
     env_utils, workflows_upload,
     workflows_wifi_common::{
         ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, is_ready,
-        query_net_status, query_net_status_line, PanicSignal,
+        net_status_line_re, query_net_status, query_net_status_line, PanicSignal,
     },
 };
 
@@ -213,12 +213,12 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     pub(super) fn handle_net_collect_diag(&mut self) -> Result<()> {
-        let status_re = Regex::new(r"^NET_STATUS \{")?;
+        let status_re = net_status_line_re();
         let mark = self.console.mark();
         self.console.send_line("NET STATUS")?;
         if let Some(line) =
             self.console
-                .wait_for_regex_since(mark, &status_re, Duration::from_secs(2))?
+                .wait_for_regex_since(mark, status_re, Duration::from_secs(2))?
         {
             self.logger.info(format!("diag: {line}"));
         }

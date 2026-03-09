@@ -742,8 +742,6 @@ dependencies = [
 [[package]]
 name = "esp-radio"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "684c4de2f8907b73c9b891fbda65286a86d34fced4b856f36a7896c211f2f265"
 dependencies = [
  "allocator-api2",
  "cfg-if",
@@ -803,8 +801,6 @@ dependencies = [
 [[package]]
 name = "esp-rtos"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "162ec711c8d06e79c67b75d01595539e86b0aac209643af98ca87a12250428b3"
 dependencies = [
  "allocator-api2",
  "cfg-if",
@@ -1181,6 +1177,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-io-async 0.7.0",
  "embedded-storage",
+ "enumset",
  "esp-alloc",
  "esp-backtrace",
  "esp-hal",
@@ -1188,6 +1185,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "esp-storage",
+ "esp-wifi-sys",
  "esp32",
  "event_config_compiler",
  "fixed",

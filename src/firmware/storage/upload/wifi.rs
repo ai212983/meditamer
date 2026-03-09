@@ -12,34 +12,31 @@ use super::super::super::{
 };
 use core::{
     fmt::Write as _,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_println::println;
-use esp_radio::wifi::{
-    event::{self, EventExt},
-    AccessPointInfo, AuthMethod, ClientConfig, Config as WifiDriverConfig, InternalWifiError,
-    ModeConfig, PowerSaveMode, ScanMethod, WifiController, WifiError,
+mod backend;
+mod backend_legacy_port;
+mod runtime_init;
+use backend::{event, AccessPointInfo, AuthMethod, EventExt, ModeConfig};
+pub(crate) use backend::{
+    init_radio, new_runtime, wifi_active_scan_config, wifi_channel_active_scan_config,
+    wifi_client_mode_config, wifi_connect_async, wifi_directed_active_scan_config,
+    wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_started, wifi_passive_scan_config,
+    wifi_power_save_none, wifi_raw_broad_scan_config, wifi_rssi, wifi_scan_with_config_async,
+    wifi_set_config, wifi_set_mode, wifi_set_power_saving, wifi_set_protocol, wifi_sta_mode,
+    wifi_standard_bgn_protocols, wifi_start_async, wifi_stop_async, RadioController, ScanConfig,
+    WifiController, WifiDevice, NAME as BACKEND_NAME,
 };
-
-// Cap scan result set to keep telemetry and candidate rotation bounded.
+pub(crate) use runtime_init::{apply_runtime_setup_overrides_and_log, initialize_runtime_sta};
+type WifiError = backend::WifiError;
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
-// Keep top-N BSSID candidates by RSSI for deterministic rotate-candidate recovery.
 const WIFI_AP_CANDIDATE_MAX: usize = 8;
-// Probe channel 8 first (lab/default AP channel), then sweep full 2.4GHz set.
-// Channel universe rationale: IEEE 802.11 country-plan channels are represented
-// by `wifi_country_t.schann/nchan` in Espressif Wi-Fi API.
-// Source: https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32/api-reference/network/esp_wifi.html
 const WIFI_CHANNEL_PROBE_SEQUENCE: [u8; 13] = [8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13];
-// Bounded fallback for repeated all-channel zero-result scans.
 const WIFI_ZERO_DISCOVERY_SCAN_PROBE_CHANNELS: [u8; 4] = [8, 1, 6, 11];
-// Hard guard against zero-discovery loops: after two consecutive full-sweep
-// zero-result cycles, force hard restart and full-channel probe escalation.
-// Keep this separate from policy knobs so refactors/tuning cannot accidentally
-// disable the safety path.
 const WIFI_ZERO_DISCOVERY_HARD_GUARD_STREAK: u8 = 2;
-// Bound hard-restart escalations before declaring terminal discovery failure.
 const WIFI_ZERO_DISCOVERY_HARD_GUARD_MAX_RESTARTS: u8 = 2;
 const WIFI_AUTH_METHODS: [AuthMethod; 5] = [
     AuthMethod::WpaWpa2Personal,
@@ -61,22 +58,15 @@ const WIFI_REASON_CONNECTION_FAIL: u8 = 205;
 const WIFI_REASON_NO_AP_FOUND_COMPAT_SECURITY: u8 = 210;
 const WIFI_REASON_NO_AP_FOUND_AUTHMODE_THRESHOLD: u8 = 211;
 const WIFI_REASON_NO_AP_FOUND_RSSI_THRESHOLD: u8 = 212;
+const WIFI_REASON_CONNECT_LOW_INTERNAL_MEM: u8 = 249;
 const WIFI_REASON_DHCP_NO_IPV4_STALL: u8 = 250;
 const WIFI_REASON_POST_HARD_RECOVER_CONNECT_STALL: u8 = 251;
 const WIFI_REASON_CONNECT_ATTEMPT_TIMEOUT: u8 = 252;
 const WIFI_REASON_START_NOMEM: u8 = 253;
 const WIFI_REASON_SCAN_NOMEM: u8 = 254;
-// Upper bound for driver control calls in recovery paths; prevents indefinite
-// task stalls if the radio stack stops responding.
-// Chosen so stop/disconnect can complete under transient RF contention while
-// still bounding host-observed NET_STATUS staleness.
 const WIFI_DRIVER_CONTROL_TIMEOUT_MS: u64 = 5_000;
-// Stop can transiently report timeout while the driver is unwinding
-// internal work; retry with short backoff before declaring failure.
 const WIFI_DRIVER_STOP_RETRIES: u8 = 2;
 const WIFI_DRIVER_STOP_RETRY_BACKOFF_MS: u64 = 300;
-// Poll cadence while connected to detect disconnect/lease/listener transitions
-// without creating hot-loop UART noise.
 const WIFI_CONNECTED_WATCHDOG_MS: u64 = 2_000;
 // Two bounded same-link reacquire attempts before escalating to candidate/auth rotation.
 const WIFI_DHCP_LEASE_REACQUIRE_MAX_ATTEMPTS: u8 = 2;
@@ -104,13 +94,61 @@ const WIFI_RECOVERY_RETRY_BACKOFF_MS: u64 = 2_000;
 const WIFI_NOMEM_RECOVERY_BACKOFF_MS: u64 = 5_000;
 // Settle delay after successful start before connect/scan to avoid immediate
 // post-start flakiness in early driver transition window.
-const WIFI_POST_START_SETTLE_MS: u64 = 800;
-// Settle after disconnect event to let stop/disconnect complete before re-entering connect path.
+const WIFI_POST_START_SETTLE_MS_DEFAULT: u64 = 800;
+const WIFI_POST_START_SETTLE_MS_MIN: u64 = 100;
+const WIFI_POST_START_SETTLE_MS_MAX: u64 = 10_000;
+const WIFI_POST_START_SETTLE_MS: u64 = {
+    let configured = match option_env!("MEDITAMER_WIFI_POST_START_SETTLE_MS") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_POST_START_SETTLE_MS"),
+    };
+    match configured {
+        Some(raw) => match parse_ascii_u64(raw) {
+            Some(value)
+                if value >= WIFI_POST_START_SETTLE_MS_MIN
+                    && value <= WIFI_POST_START_SETTLE_MS_MAX =>
+            {
+                value
+            }
+            _ => WIFI_POST_START_SETTLE_MS_DEFAULT,
+        },
+        None => WIFI_POST_START_SETTLE_MS_DEFAULT,
+    }
+};
+const WIFI_START_RAW_SCAN_DIAG_TIMEOUT_MS: u64 = 12_000;
+const WIFI_START_RAW_SCAN_DIAG: bool =
+    parse_nonzero_flag(match option_env!("MEDITAMER_WIFI_START_RAW_SCAN_DIAG") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_START_RAW_SCAN_DIAG"),
+    });
+const WIFI_START_READINESS_PROBE: bool =
+    parse_nonzero_flag(match option_env!("MEDITAMER_WIFI_START_READINESS_PROBE") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_START_READINESS_PROBE"),
+    });
+const WIFI_FORCE_STOP_BEFORE_START: bool = parse_nonzero_flag(
+    match option_env!("MEDITAMER_WIFI_FORCE_STOP_BEFORE_START") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_FORCE_STOP_BEFORE_START"),
+    },
+);
+const WIFI_COUNTRY_US_OVERRIDE: bool =
+    parse_nonzero_flag(match option_env!("MEDITAMER_WIFI_COUNTRY_US_OVERRIDE") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_COUNTRY_US_OVERRIDE"),
+    });
+const WIFI_START_READINESS_PROBE_STEPS_MS: [u64; 3] = [0, 200, 800];
 const WIFI_POST_DISCONNECT_SETTLE_MS: u64 = 1_200;
 
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 static WIFI_DISCONNECTED_EVENT: AtomicBool = AtomicBool::new(false);
+static WIFI_LAST_STA_START_AT_MS: AtomicU32 = AtomicU32::new(0);
+static WIFI_LAST_STA_STOP_AT_MS: AtomicU32 = AtomicU32::new(0);
+static WIFI_LAST_SCAN_DONE_AT_MS: AtomicU32 = AtomicU32::new(0);
+static WIFI_LAST_SCAN_DONE_COUNT: AtomicU32 = AtomicU32::new(0);
+static WIFI_LAST_SCAN_DONE_ID: AtomicU32 = AtomicU32::new(0);
+static WIFI_LAST_SCAN_DONE_STATUS: AtomicU32 = AtomicU32::new(0);
 const DIAG_WIFI: u32 = telemetry::DIAG_DOMAIN_WIFI;
 const DIAG_REASSOC: u32 = telemetry::DIAG_DOMAIN_REASSOC;
 
@@ -128,6 +166,28 @@ macro_rules! diag_reassoc {
             println!($($arg)*);
         }
     };
+}
+
+const fn parse_ascii_u64(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut idx = 0;
+    let mut parsed = 0u64;
+    while idx < bytes.len() {
+        let ch = bytes[idx];
+        if ch < b'0' || ch > b'9' {
+            return None;
+        }
+        parsed = parsed.saturating_mul(10).saturating_add((ch - b'0') as u64);
+        idx += 1;
+    }
+    Some(parsed)
+}
+
+const fn parse_nonzero_flag(value: Option<&str>) -> bool {
+    matches!(value, Some(raw) if matches!(parse_ascii_u64(raw), Some(parsed) if parsed > 0))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,8 +252,8 @@ pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     })
 }
 
-pub(super) fn wifi_runtime_config() -> WifiDriverConfig {
-    WifiDriverConfig::default()
+pub(super) fn wifi_runtime_config() -> backend::WifiDriverConfig {
+    backend::wifi_runtime_config(WIFI_COUNTRY_US_OVERRIDE)
 }
 
 pub(crate) struct NetConfigSnapshotView {
