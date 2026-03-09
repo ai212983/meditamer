@@ -60,3 +60,34 @@ Optional soak env vars:
 ## Wokwi
 
 `wokwi.toml` points to the `xtensa-esp32-none-elf` debug binary.
+
+## Rust ESP-IDF Wi-Fi Control Probe
+
+Standalone Rust-on-ESP-IDF scan probe:
+
+```bash
+IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
+IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+scripts/device/wifi_control_idf_rust.sh build
+```
+
+Flash and monitor:
+
+```bash
+IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
+IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+ESPFLASH_PORT=/dev/cu.usbserial-540 \
+scripts/device/wifi_control_idf_rust.sh flash
+
+IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
+IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+ESPFLASH_PORT=/dev/cu.usbserial-540 \
+scripts/device/wifi_control_idf_rust.sh monitor
+```
+
+Notes:
+
+- current crate set (`esp-idf-svc 0.51`, `esp-idf-hal 0.45.2`) requires a
+  supported ESP-IDF 5.3.x install for this probe
+- ESP-IDF 5.5.2 currently fails this Rust probe build in `esp-idf-hal` on TWAI
+  bindings, so use `v5.3.4` for the comparison path

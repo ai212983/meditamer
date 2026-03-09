@@ -24,13 +24,13 @@ const HTTP_RX_BUF_TARGET_MIN: usize = 8_192;
 #[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
 const HTTP_RX_BUF_TARGET_MAX: usize = 262_144;
 #[cfg(feature = "asset-upload-http")]
-const HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT: usize = 32 * 1024;
+const HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT: usize = 16 * 1024;
 #[cfg(feature = "asset-upload-http")]
 const HTTP_INGRESS_COOP_YIELD_BYTES_MIN: usize = 1024;
 #[cfg(feature = "asset-upload-http")]
 const HTTP_INGRESS_COOP_YIELD_BYTES_MAX: usize = 64 * 1024;
 #[cfg(feature = "asset-upload-http")]
-const HTTP_INGRESS_COOP_YIELD_READS_DEFAULT: usize = 64;
+const HTTP_INGRESS_COOP_YIELD_READS_DEFAULT: usize = 32;
 #[cfg(feature = "asset-upload-http")]
 const HTTP_INGRESS_COOP_YIELD_READS_MIN: usize = 4;
 #[cfg(feature = "asset-upload-http")]

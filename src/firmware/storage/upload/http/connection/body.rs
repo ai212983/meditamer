@@ -15,8 +15,7 @@ use super::fairness::IngressFairnessAdaptive;
 use crate::firmware::telemetry;
 use crate::firmware::types::{
     SdUploadCommand, HTTP_INGRESS_ADAPTIVE_FAIRNESS, HTTP_INGRESS_COOP_YIELD_BYTES,
-    HTTP_INGRESS_COOP_YIELD_READS,
-    HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS,
+    HTTP_INGRESS_COOP_YIELD_READS, HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS,
 };
 
 pub(super) struct UploadBodyStats {
@@ -49,6 +48,12 @@ pub(super) struct UploadBodyStats {
     pub(super) ingress_read_wait_nonempty_q_ms: u32,
     pub(super) ingress_read_wait_over_10ms: u32,
     pub(super) ingress_read_wait_over_50ms: u32,
+    pub(super) ingress_read_wait_over_100ms: u32,
+    pub(super) ingress_read_wait_empty_q_over_10ms: u32,
+    pub(super) ingress_read_wait_empty_q_over_50ms: u32,
+    pub(super) ingress_read_wait_empty_q_over_100ms: u32,
+    pub(super) ingress_read_wait_empty_q_max_ms: u32,
+    pub(super) ingress_read_empty_streak_ms_max: u32,
     pub(super) ingress_adapt_enabled: u32,
     pub(super) ingress_adapt_switches: u32,
     pub(super) ingress_adapt_level_max: u32,
@@ -79,6 +84,7 @@ const UPLOAD_CHUNK_PIPELINE_ENABLED: bool = cfg!(feature = "asset-upload-http-pi
 const UPLOAD_ABORT_RECOVERY_TIMEOUT_MS: u64 = 1_500;
 const INGRESS_READ_WAIT_OVER_10MS: u32 = 10;
 const INGRESS_READ_WAIT_OVER_50MS: u32 = 50;
+const INGRESS_READ_WAIT_OVER_100MS: u32 = 100;
 
 struct ChunkLatencySamples {
     values: [u16; CHUNK_LATENCY_SAMPLE_CAP],
@@ -150,7 +156,7 @@ pub(super) fn log_upload_stats(
         };
         let snapshot = telemetry::snapshot();
         println!(
-            "upload_http: {} stats pipeline={} bytes={} chunks={} avg_chunk={} max_chunk={} read_wait_ms={} copy_ms={} sd_queue_ms={} sd_task_ms={} sd_task_queue_wait_ms={} sd_task_handler_ms={} sd_task_residual_ms={} sd_task_post_handler_ms={} sd_task_publish_to_receive_ms={} sd_task_residual_other_ms={} sd_ms={} chunk_p50_ms={} chunk_p95_ms={} chunk_max_ms={} chunk_samples={} chunk_samples_dropped={} ingress_flush_wait_ms={} ingress_read_calls={} ingress_pre_read_q_total={} ingress_pre_read_q_max={} ingress_pre_read_q_empty_calls={} ingress_read_short_calls={} ingress_read_wait_empty_q_ms={} ingress_read_wait_nonempty_q_ms={} ingress_read_wait_over_10ms={} ingress_read_wait_over_50ms={} ingress_adapt_enabled={} ingress_adapt_switches={} ingress_adapt_level_max={} ingress_read_empty_streak_max={} wifi_rssi_last_dbm={} wifi_rssi_min_dbm={} wifi_rssi_max_dbm={} wifi_rssi_samples={} wifi_rssi_low_samples={} commit_ms={} req_ms={}",
+            "upload_http: {} stats pipeline={} bytes={} chunks={} avg_chunk={} max_chunk={} read_wait_ms={} copy_ms={} sd_queue_ms={} sd_task_ms={} sd_task_queue_wait_ms={} sd_task_handler_ms={} sd_task_residual_ms={} sd_task_post_handler_ms={} sd_task_publish_to_receive_ms={} sd_task_residual_other_ms={} sd_ms={} chunk_p50_ms={} chunk_p95_ms={} chunk_max_ms={} chunk_samples={} chunk_samples_dropped={} ingress_flush_wait_ms={} ingress_read_calls={} ingress_pre_read_q_total={} ingress_pre_read_q_max={} ingress_pre_read_q_empty_calls={} ingress_read_short_calls={} ingress_read_wait_empty_q_ms={} ingress_read_wait_nonempty_q_ms={} ingress_read_wait_over_10ms={} ingress_read_wait_over_50ms={} ingress_read_wait_over_100ms={} ingress_read_wait_empty_q_over_10ms={} ingress_read_wait_empty_q_over_50ms={} ingress_read_wait_empty_q_over_100ms={} ingress_read_wait_empty_q_max_ms={} ingress_read_empty_streak_ms_max={} ingress_adapt_enabled={} ingress_adapt_switches={} ingress_adapt_level_max={} ingress_read_empty_streak_max={} wifi_rssi_last_dbm={} wifi_rssi_min_dbm={} wifi_rssi_max_dbm={} wifi_rssi_samples={} wifi_rssi_low_samples={} commit_ms={} req_ms={}",
             phase,
             if UPLOAD_CHUNK_PIPELINE_ENABLED {
                 "on"
@@ -187,6 +193,12 @@ pub(super) fn log_upload_stats(
             stats.ingress_read_wait_nonempty_q_ms,
             stats.ingress_read_wait_over_10ms,
             stats.ingress_read_wait_over_50ms,
+            stats.ingress_read_wait_over_100ms,
+            stats.ingress_read_wait_empty_q_over_10ms,
+            stats.ingress_read_wait_empty_q_over_50ms,
+            stats.ingress_read_wait_empty_q_over_100ms,
+            stats.ingress_read_wait_empty_q_max_ms,
+            stats.ingress_read_empty_streak_ms_max,
             stats.ingress_adapt_enabled,
             stats.ingress_adapt_switches,
             stats.ingress_adapt_level_max,
@@ -251,6 +263,13 @@ async fn forward_upload_body(
     let mut ingress_read_wait_nonempty_q_ms = 0u32;
     let mut ingress_read_wait_over_10ms = 0u32;
     let mut ingress_read_wait_over_50ms = 0u32;
+    let mut ingress_read_wait_over_100ms = 0u32;
+    let mut ingress_read_wait_empty_q_over_10ms = 0u32;
+    let mut ingress_read_wait_empty_q_over_50ms = 0u32;
+    let mut ingress_read_wait_empty_q_over_100ms = 0u32;
+    let mut ingress_read_wait_empty_q_max_ms = 0u32;
+    let mut ingress_read_empty_streak_ms = 0u32;
+    let mut ingress_read_empty_streak_ms_max = 0u32;
     let mut ingress_read_bytes_since_yield = 0usize;
     let mut ingress_read_ops_since_yield = 0u32;
     let mut ingress_read_ops_since_try_drain = 0u32;
@@ -360,15 +379,36 @@ async fn forward_upload_body(
         if pre_read_queue == 0 {
             ingress_read_wait_empty_q_ms =
                 ingress_read_wait_empty_q_ms.saturating_add(read_wait_ms);
+            ingress_read_wait_empty_q_max_ms = ingress_read_wait_empty_q_max_ms.max(read_wait_ms);
+            ingress_read_empty_streak_ms =
+                ingress_read_empty_streak_ms.saturating_add(read_wait_ms);
+            ingress_read_empty_streak_ms_max =
+                ingress_read_empty_streak_ms_max.max(ingress_read_empty_streak_ms);
+            if read_wait_ms >= INGRESS_READ_WAIT_OVER_10MS {
+                ingress_read_wait_empty_q_over_10ms =
+                    ingress_read_wait_empty_q_over_10ms.saturating_add(1);
+            }
+            if read_wait_ms >= INGRESS_READ_WAIT_OVER_50MS {
+                ingress_read_wait_empty_q_over_50ms =
+                    ingress_read_wait_empty_q_over_50ms.saturating_add(1);
+            }
+            if read_wait_ms >= INGRESS_READ_WAIT_OVER_100MS {
+                ingress_read_wait_empty_q_over_100ms =
+                    ingress_read_wait_empty_q_over_100ms.saturating_add(1);
+            }
         } else {
             ingress_read_wait_nonempty_q_ms =
                 ingress_read_wait_nonempty_q_ms.saturating_add(read_wait_ms);
+            ingress_read_empty_streak_ms = 0;
         }
         if read_wait_ms >= INGRESS_READ_WAIT_OVER_10MS {
             ingress_read_wait_over_10ms = ingress_read_wait_over_10ms.saturating_add(1);
         }
         if read_wait_ms >= INGRESS_READ_WAIT_OVER_50MS {
             ingress_read_wait_over_50ms = ingress_read_wait_over_50ms.saturating_add(1);
+        }
+        if read_wait_ms >= INGRESS_READ_WAIT_OVER_100MS {
+            ingress_read_wait_over_100ms = ingress_read_wait_over_100ms.saturating_add(1);
         }
         ingress_adapt.observe_read(pre_read_queue == 0, read_wait_ms);
         if n == 0 {
@@ -474,6 +514,12 @@ async fn forward_upload_body(
         ingress_read_wait_nonempty_q_ms,
         ingress_read_wait_over_10ms,
         ingress_read_wait_over_50ms,
+        ingress_read_wait_over_100ms,
+        ingress_read_wait_empty_q_over_10ms,
+        ingress_read_wait_empty_q_over_50ms,
+        ingress_read_wait_empty_q_over_100ms,
+        ingress_read_wait_empty_q_max_ms,
+        ingress_read_empty_streak_ms_max,
         ingress_adapt_enabled: if ingress_adapt_snapshot.enabled { 1 } else { 0 },
         ingress_adapt_switches: ingress_adapt_snapshot.switches,
         ingress_adapt_level_max: ingress_adapt_snapshot.level_max as u32,

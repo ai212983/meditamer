@@ -110,6 +110,10 @@ async fn run_scan_stage(
     timeout: Duration,
 ) -> Option<ScanOutcome> {
     let timeout_ms = timeout.as_millis();
+    let probe_channel = match stage {
+        ScanStage::Probe(channel) => i16::from(channel),
+        _ => -1,
+    };
     let (label, phase, config) = match stage {
         ScanStage::ActiveBroad => (
             "active_broad",
@@ -134,6 +138,19 @@ async fn run_scan_stage(
                 .with_max(WIFI_SCAN_DIAG_MAX_APS),
         ),
     };
+    diag_reassoc!(
+        "upload_http: scan_stage begin label={} probe_channel={} timeout_ms={} target_ssid={} active_min_ms={} active_max_ms={} passive_ms={} candidate_count_before={} saw_nonzero_before={} saw_target_before={}",
+        label,
+        probe_channel,
+        timeout_ms,
+        context.target_ssid,
+        context.runtime_policy.scan_active_min_ms,
+        context.runtime_policy.scan_active_max_ms,
+        context.runtime_policy.scan_passive_ms,
+        context.candidates.len(),
+        *context.saw_nonzero_results,
+        *context.saw_target_candidate,
+    );
     log_radio_mem_diag(match stage {
         ScanStage::ActiveBroad => "scan_active_broad_before",
         ScanStage::ActiveDirected => "scan_active_directed_before",
@@ -141,7 +158,12 @@ async fn run_scan_stage(
         ScanStage::Probe(_) => "scan_probe_before",
     });
     let started_at = Instant::now();
-    match with_timeout(timeout, context.controller.scan_with_config_async(config)).await {
+    match with_timeout(
+        timeout,
+        wifi_scan_with_config_async(context.controller, config),
+    )
+    .await
+    {
         Ok(Ok(results)) => {
             log_radio_mem_diag(match stage {
                 ScanStage::ActiveBroad => "scan_active_broad_ok",
@@ -167,11 +189,22 @@ async fn run_scan_stage(
             }
             collect_scan_results(label, context.target_ssid, &results, context.candidates);
             *context.saw_target_candidate |= !context.candidates.is_empty();
+            let elapsed_ms = elapsed_ms_u32(started_at);
+            diag_reassoc!(
+                "upload_http: scan_stage end label={} probe_channel={} outcome=ok elapsed_ms={} result_count={} candidate_count_after={} saw_nonzero_after={} saw_target_after={}",
+                label,
+                probe_channel,
+                elapsed_ms,
+                results.len(),
+                context.candidates.len(),
+                *context.saw_nonzero_results,
+                *context.saw_target_candidate,
+            );
             telemetry::record_wifi_reassoc_scan(
                 phase,
                 results.len(),
                 !context.candidates.is_empty(),
-                elapsed_ms_u32(started_at),
+                elapsed_ms,
                 context.candidates.first().map(|ap| ap.hint.channel),
             );
             if !context.candidates.is_empty() {
@@ -184,11 +217,22 @@ async fn run_scan_stage(
             }
         }
         Ok(Err(err)) => {
+            let elapsed_ms = elapsed_ms_u32(started_at);
             diag_reassoc!(
                 "upload_http: scan {} err={:?} target_ssid={}",
                 label,
                 err,
                 context.target_ssid
+            );
+            diag_reassoc!(
+                "upload_http: scan_stage end label={} probe_channel={} outcome=err elapsed_ms={} candidate_count_after={} saw_nonzero_after={} saw_target_after={} err={:?}",
+                label,
+                probe_channel,
+                elapsed_ms,
+                context.candidates.len(),
+                *context.saw_nonzero_results,
+                *context.saw_target_candidate,
+                err,
             );
             if is_no_mem_wifi_error(&err) {
                 diag_reassoc!(
@@ -209,16 +253,27 @@ async fn run_scan_stage(
                     saw_target_candidate: *context.saw_target_candidate,
                 });
             }
-            telemetry::record_wifi_reassoc_scan(phase, 0, false, elapsed_ms_u32(started_at), None);
+            telemetry::record_wifi_reassoc_scan(phase, 0, false, elapsed_ms, None);
         }
         Err(_) => {
+            let elapsed_ms = elapsed_ms_u32(started_at);
             diag_reassoc!(
                 "upload_http: scan {} timeout={}ms target_ssid={}",
                 label,
                 timeout_ms,
                 context.target_ssid
             );
-            telemetry::record_wifi_reassoc_scan(phase, 0, false, elapsed_ms_u32(started_at), None);
+            diag_reassoc!(
+                "upload_http: scan_stage end label={} probe_channel={} outcome=timeout elapsed_ms={} timeout_ms={} candidate_count_after={} saw_nonzero_after={} saw_target_after={}",
+                label,
+                probe_channel,
+                elapsed_ms,
+                timeout_ms,
+                context.candidates.len(),
+                *context.saw_nonzero_results,
+                *context.saw_target_candidate,
+            );
+            telemetry::record_wifi_reassoc_scan(phase, 0, false, elapsed_ms, None);
         }
     }
     None

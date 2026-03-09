@@ -18,6 +18,14 @@ fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPip
     Err(telemetry::NetPipelineGate::NoIpv4)
 }
 
+fn net_pipeline_gate_reason_str(reason: telemetry::NetPipelineGate) -> &'static str {
+    match reason {
+        telemetry::NetPipelineGate::WifiDown => "wifi_down",
+        telemetry::NetPipelineGate::LinkDown => "link_down",
+        telemetry::NetPipelineGate::NoIpv4 => "no_ipv4",
+    }
+}
+
 fn elapsed_ms_u32(started_at: Instant) -> u32 {
     let elapsed = started_at.elapsed().as_millis();
     if elapsed > u32::MAX as u64 {

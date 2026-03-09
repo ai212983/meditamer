@@ -1,37 +1,87 @@
-use embassy_time::Duration;
-use esp_radio::wifi::{ScanConfig, ScanTypeConfig};
+use crate::firmware::{
+    storage::upload::wifi::{
+        wifi_active_scan_config, wifi_channel_active_scan_config, wifi_directed_active_scan_config,
+        wifi_passive_scan_config, wifi_raw_broad_scan_config, ScanConfig,
+    },
+    types::WifiRuntimePolicy,
+};
 
-use crate::firmware::types::WifiRuntimePolicy;
+const WIFI_SCAN_RESULT_MAX_DEFAULT: usize = 64;
+const WIFI_SCAN_RESULT_MAX_MIN: usize = 4;
+const WIFI_SCAN_RESULT_MAX: usize = {
+    let configured = match option_env!("MEDITAMER_WIFI_SCAN_RESULT_MAX") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_SCAN_RESULT_MAX"),
+    };
+    match configured {
+        Some(raw) => match parse_ascii_usize(raw) {
+            Some(value)
+                if value >= WIFI_SCAN_RESULT_MAX_MIN && value <= WIFI_SCAN_RESULT_MAX_DEFAULT =>
+            {
+                value
+            }
+            _ => WIFI_SCAN_RESULT_MAX_DEFAULT,
+        },
+        None => WIFI_SCAN_RESULT_MAX_DEFAULT,
+    }
+};
+
+const fn parse_ascii_usize(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut idx = 0;
+    let mut parsed = 0usize;
+    while idx < bytes.len() {
+        let ch = bytes[idx];
+        if ch < b'0' || ch > b'9' {
+            return None;
+        }
+        parsed = parsed
+            .saturating_mul(10)
+            .saturating_add((ch - b'0') as usize);
+        idx += 1;
+    }
+    Some(parsed)
+}
 
 pub(super) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
-    ScanConfig::default()
-        .with_show_hidden(true)
-        .with_max(64)
-        .with_scan_type(ScanTypeConfig::Active {
-            min: Duration::from_millis(policy.scan_active_min_ms as u64).into(),
-            max: Duration::from_millis(policy.scan_active_max_ms as u64).into(),
-        })
+    wifi_active_scan_config(
+        WIFI_SCAN_RESULT_MAX,
+        policy.scan_active_min_ms as u64,
+        policy.scan_active_max_ms as u64,
+    )
 }
 
 pub(super) fn directed_active_scan_config(
     target_ssid: &str,
     policy: WifiRuntimePolicy,
 ) -> ScanConfig<'_> {
-    active_scan_config(policy).with_ssid(target_ssid)
+    wifi_directed_active_scan_config(
+        target_ssid,
+        WIFI_SCAN_RESULT_MAX,
+        policy.scan_active_min_ms as u64,
+        policy.scan_active_max_ms as u64,
+    )
 }
 
 pub(super) fn channel_active_scan_config(
     channel: u8,
     policy: WifiRuntimePolicy,
 ) -> ScanConfig<'static> {
-    active_scan_config(policy).with_channel(channel)
+    wifi_channel_active_scan_config(
+        channel,
+        WIFI_SCAN_RESULT_MAX,
+        policy.scan_active_min_ms as u64,
+        policy.scan_active_max_ms as u64,
+    )
 }
 
 pub(super) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
-    ScanConfig::default()
-        .with_show_hidden(true)
-        .with_max(64)
-        .with_scan_type(ScanTypeConfig::Passive(
-            Duration::from_millis(policy.scan_passive_ms as u64).into(),
-        ))
+    wifi_passive_scan_config(WIFI_SCAN_RESULT_MAX, policy.scan_passive_ms as u64)
+}
+
+pub(super) fn raw_broad_scan_config() -> ScanConfig<'static> {
+    wifi_raw_broad_scan_config(WIFI_SCAN_RESULT_MAX)
 }

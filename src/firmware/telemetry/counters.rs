@@ -161,7 +161,7 @@ pub(crate) enum WifiScanPhase {
     Passive,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NetPipelineGate {
     WifiDown,
     LinkDown,

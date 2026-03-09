@@ -2,6 +2,10 @@
 
 This project targets **Inkplate 4 TEMPERA** (`src/main.rs` prints this explicitly), and the parent Arduino reference library confirms the onboard sensor/peripheral set.
 
+Hardware module note:
+
+- MCU module: ESP32-WROVER-E ([CNX Software, 2023-10-04](https://www.cnx-software.com/2023/10/04/inkplate-4-tempera-epaper-display-supports-esphome-arduino-and-micropython/))
+
 ## Onboard sensor inventory
 
 | Sensor area | Chip / controller | Typical I2C address | Data exposed |

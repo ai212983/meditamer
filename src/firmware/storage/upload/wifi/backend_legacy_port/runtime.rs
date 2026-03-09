@@ -1,9 +1,7 @@
 use super::{
-    runtime_bootstrap_status, LEGACY_BOOTSTRAP_SEQUENCE, LEGACY_INIT_CONFIG_CONTRACT,
-    LEGACY_SCHEDULER_CONTRACT, LEGACY_WIFI_TASK_CONTRACT,
-};
-use crate::firmware::storage::upload::wifi::backend::{
-    init_radio, new_runtime, RadioController, WifiController, WifiDevice, WifiDriverConfig,
+    legacy_runtime_config, runtime_bootstrap_status, RadioController, WifiController, WifiDevice,
+    LEGACY_BOOTSTRAP_SEQUENCE, LEGACY_INIT_CONFIG_CONTRACT, LEGACY_SCHEDULER_CONTRACT,
+    LEGACY_WIFI_TASK_CONTRACT,
 };
 use esp_hal::peripherals::WIFI;
 use esp_println::println;
@@ -43,8 +41,9 @@ fn log_legacy_runtime_contract() {
 fn log_bootstrap_status() {
     let status = runtime_bootstrap_status();
     println!(
-        "upload_http: legacy_port_bootstrap scheduler_initialized={} timer_task_precreated={} timer_task_started={} yielded_once={}",
+        "upload_http: legacy_port_bootstrap scheduler_initialized={} current_core_initialized={} timer_task_precreated={} timer_task_started={} yielded_once={}",
         status.scheduler_initialized,
+        status.current_core_initialized,
         status.timer_task_precreated,
         status.timer_task_started,
         status.yielded_once,
@@ -53,14 +52,14 @@ fn log_bootstrap_status() {
 
 pub(crate) fn initialize_runtime_sta_legacy_port(
     wifi: WIFI<'static>,
-    config: WifiDriverConfig,
+    country_us_override: bool,
 ) -> Result<(WifiController<'static>, WifiDevice<'static>), &'static str> {
     static RADIO_CTRL: StaticCell<RadioController> = StaticCell::new();
 
     log_legacy_runtime_contract();
     log_bootstrap_status();
 
-    let radio_ctrl = match init_radio() {
+    let radio_ctrl = match esp_radio::init() {
         Ok(ctrl) => ctrl,
         Err(err) => {
             println!("upload_http: legacy_port esp_radio::init err={:?}", err);
@@ -68,8 +67,9 @@ pub(crate) fn initialize_runtime_sta_legacy_port(
         }
     };
     let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
+    let config = legacy_runtime_config(country_us_override);
 
-    match new_runtime(radio_ctrl, wifi, config) {
+    match esp_radio::wifi::new(radio_ctrl, wifi, config) {
         Ok((controller, ifaces)) => {
             println!("upload_http: legacy_port runtime_init result=ok");
             Ok((controller, ifaces.sta))

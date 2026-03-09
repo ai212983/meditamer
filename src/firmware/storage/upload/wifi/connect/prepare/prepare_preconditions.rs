@@ -36,9 +36,10 @@ pub(super) async fn prepare_preconditions(
             state.dhcp_same_candidate_timeout_streak = 0;
             state.dhcp_lease_reacquire_attempts = 0;
             state.other_disconnect_streak = 0;
-            if state.hard_recover_watchdog_started_at.is_none() {
-                state.hard_recover_watchdog_started_at = Some(Instant::now());
-            }
+            state.discovery_sweep_exhausted_streak = 0;
+            state.zero_discovery_hard_guard_restarts = 0;
+            state.force_full_channel_probe_next_scan = false;
+            state.start_hard_recover_watchdog("host_recover");
             state.escalated_auth_sweep_attempts_left = 0;
             state.terminal_fail_latched = false;
             state.net_attempt = 0;
@@ -85,7 +86,7 @@ pub(super) async fn prepare_preconditions(
             state.discovery_sweep_exhausted_streak = 0;
             state.zero_discovery_hard_guard_restarts = 0;
             state.force_full_channel_probe_next_scan = false;
-            state.hard_recover_watchdog_started_at = None;
+            state.clear_hard_recover_watchdog("upload_off_pause");
             state.escalated_auth_sweep_attempts_left = 0;
             state.terminal_fail_latched = false;
             state.net_attempt = 0;
@@ -142,11 +143,21 @@ pub(super) async fn prepare_preconditions(
             telemetry::record_wifi_reassoc_disconnect_event(
                 WIFI_REASON_POST_HARD_RECOVER_CONNECT_STALL,
             );
+            let last_scan_age_ms =
+                WifiTaskState::point_age_ms(state.hard_recover_watchdog_last_scan_completed_at);
+            let last_connect_begin_age_ms =
+                WifiTaskState::point_age_ms(state.hard_recover_watchdog_last_connect_begin_at);
             println!(
-                "upload_http: post-hard-recover-connect-stall elapsed_ms={} watchdog_timeout_ms={} connect_timeout_ms={} forcing full restart",
+                "upload_http: post-hard-recover-connect-stall elapsed_ms={} watchdog_timeout_ms={} connect_timeout_ms={} start_reason={} scan_rounds={} zero_scan_rounds={} connect_begins={} last_scan_age_ms={} last_connect_begin_age_ms={} forcing full restart",
                 elapsed_ms,
                 watchdog_timeout_ms,
-                state.runtime_policy.connect_timeout_ms
+                state.runtime_policy.connect_timeout_ms,
+                state.hard_recover_watchdog_start_reason,
+                state.hard_recover_watchdog_scan_rounds,
+                state.hard_recover_watchdog_zero_scan_rounds,
+                state.hard_recover_watchdog_connect_begins,
+                last_scan_age_ms,
+                last_connect_begin_age_ms,
             );
             disconnect_and_stop_with_timeout(controller, "post_recover_watchdog").await;
             telemetry::set_wifi_link_connected(false);
@@ -164,7 +175,8 @@ pub(super) async fn prepare_preconditions(
             state.discovery_sweep_exhausted_streak = 0;
             state.zero_discovery_hard_guard_restarts = 0;
             state.force_full_channel_probe_next_scan = false;
-            state.hard_recover_watchdog_started_at = Some(Instant::now());
+            state.clear_hard_recover_watchdog("post_recover_watchdog_trip");
+            state.start_hard_recover_watchdog("post_recover_watchdog_restart_cycle");
             state.escalated_auth_sweep_attempts_left = WIFI_ESCALATED_AUTH_SWEEP_ATTEMPTS;
             state.ladder_step = RecoveryLadderStep::DriverRestart;
             state.failure_class = NetFailureClass::PostRecoverStall;
@@ -187,10 +199,11 @@ pub(super) async fn prepare_preconditions(
                 state.started_at.elapsed().as_millis() as u32,
             );
             println!(
-                "upload_http: post-hard-recover-escalated-scan begin attempts={} watchdog_timeout_ms={} connect_timeout_ms={}",
+                "upload_http: post-hard-recover-escalated-scan begin attempts={} watchdog_timeout_ms={} connect_timeout_ms={} start_reason={}",
                 state.escalated_auth_sweep_attempts_left,
                 watchdog_timeout_ms,
-                state.runtime_policy.connect_timeout_ms
+                state.runtime_policy.connect_timeout_ms,
+                state.hard_recover_watchdog_start_reason,
             );
             Timer::after(Duration::from_millis(
                 state.runtime_policy.driver_restart_backoff_ms as u64,
@@ -218,7 +231,7 @@ pub(super) async fn prepare_preconditions(
         state.discovery_sweep_exhausted_streak = 0;
         state.zero_discovery_hard_guard_restarts = 0;
         state.force_full_channel_probe_next_scan = false;
-        state.hard_recover_watchdog_started_at = None;
+        state.clear_hard_recover_watchdog("credentials_updated");
         state.escalated_auth_sweep_attempts_left = 0;
         state.net_attempt = 0;
         state.terminal_fail_latched = false;
@@ -248,7 +261,7 @@ pub(super) async fn prepare_preconditions(
                 state.discovery_sweep_exhausted_streak = 0;
                 state.zero_discovery_hard_guard_restarts = 0;
                 state.force_full_channel_probe_next_scan = false;
-                state.hard_recover_watchdog_started_at = None;
+                state.clear_hard_recover_watchdog("credentials_received");
                 state.escalated_auth_sweep_attempts_left = 0;
                 state.net_attempt = 0;
                 state.terminal_fail_latched = false;

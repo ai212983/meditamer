@@ -23,18 +23,6 @@ mod esp_radio_backend {
 
     pub(crate) const NAME: &str = "esp-radio";
 
-    fn legacy_sync_start_scan_enabled() -> bool {
-        backend_legacy_port::legacy_port_runtime_enabled()
-            || matches!(
-                option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_SYNC_START_SCAN_DIAG"),
-                Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-            )
-            || matches!(
-                option_env!("WIFI_BACKEND_LEGACY_SYNC_START_SCAN_DIAG"),
-                Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-            )
-    }
-
     pub(crate) fn init_radio() -> Result<RadioController, InitializationError> {
         esp_radio::init()
     }
@@ -196,8 +184,8 @@ mod esp_radio_backend {
         controller: &mut WifiController<'_>,
         config: ScanConfig<'_>,
     ) -> Result<self::alloc::vec::Vec<AccessPointInfo>, WifiError> {
-        if legacy_sync_start_scan_enabled() {
-            esp_radio::wifi::WifiController::scan_with_config(controller, config)
+        if backend_legacy_port::legacy_port_runtime_enabled() {
+            backend_legacy_port::controller_scan_with_config(controller, config).await
         } else {
             esp_radio::wifi::WifiController::scan_with_config_async(controller, config).await
         }
@@ -206,8 +194,8 @@ mod esp_radio_backend {
     pub(crate) async fn wifi_start_async(
         controller: &mut WifiController<'_>,
     ) -> Result<(), WifiError> {
-        if legacy_sync_start_scan_enabled() {
-            esp_radio::wifi::WifiController::start(controller)
+        if backend_legacy_port::legacy_port_runtime_enabled() {
+            backend_legacy_port::controller_start(controller).await
         } else {
             esp_radio::wifi::WifiController::start_async(controller).await
         }
@@ -216,8 +204,8 @@ mod esp_radio_backend {
     pub(crate) async fn wifi_stop_async(
         controller: &mut WifiController<'_>,
     ) -> Result<(), WifiError> {
-        if legacy_sync_start_scan_enabled() {
-            esp_radio::wifi::WifiController::stop(controller)
+        if backend_legacy_port::legacy_port_runtime_enabled() {
+            backend_legacy_port::controller_stop(controller).await
         } else {
             esp_radio::wifi::WifiController::stop_async(controller).await
         }

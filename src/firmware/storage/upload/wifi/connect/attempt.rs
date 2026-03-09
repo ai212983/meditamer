@@ -7,14 +7,14 @@ pub(super) async fn perform_connect_attempt(
     let connect_started_at = Instant::now();
     match with_timeout(
         Duration::from_millis(state.runtime_policy.connect_timeout_ms as u64),
-        controller.connect_async(),
+        wifi_connect_async(controller),
     )
     .await
     {
         Ok(Ok(())) => {
             telemetry::record_wifi_connect_success();
             telemetry::record_wifi_reassoc_connect_success(elapsed_ms_u32(connect_started_at));
-            state.hard_recover_watchdog_started_at = None;
+            state.clear_hard_recover_watchdog("connect_ok");
             state.discovery_sweep_exhausted_streak = 0;
             state.zero_discovery_hard_guard_restarts = 0;
             state.force_full_channel_probe_next_scan = false;

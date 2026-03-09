@@ -102,6 +102,7 @@ impl ProbeRoundState {
         }
         if line.contains("zero_discovery_hard_guard software_reset=true")
             || line.contains("zero_discovery_terminal software_reset=true")
+            || line.contains("post_start_promisc_diag software_reset=true")
         {
             self.expected_soft_reset_armed = true;
         }

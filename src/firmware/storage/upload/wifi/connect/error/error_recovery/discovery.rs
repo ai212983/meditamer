@@ -75,7 +75,13 @@ async fn handle_discovery_reason_paths(
                 disconnect_and_stop_with_timeout(controller, "zero_discovery_guard_terminal").await;
                 telemetry::set_wifi_link_connected(false);
                 telemetry::set_upload_http_listener(false, None);
-                state.hard_recover_watchdog_started_at = None;
+                state.clear_hard_recover_watchdog("zero_discovery_guard_terminal");
+                maybe_software_reset_on_zero_discovery_terminal(
+                    "zero_discovery_guard_terminal",
+                    state.discovery_sweep_exhausted_streak,
+                    state.zero_discovery_hard_guard_restarts,
+                )
+                .await;
                 return true;
             }
             state.zero_discovery_hard_guard_restarts =
@@ -113,9 +119,14 @@ async fn handle_discovery_reason_paths(
             .await;
         telemetry::set_wifi_link_connected(false);
         telemetry::set_upload_http_listener(false, None);
-        if state.hard_recover_watchdog_started_at.is_none() {
-            state.hard_recover_watchdog_started_at = Some(Instant::now());
-        }
+        maybe_software_reset_on_zero_discovery_hard_guard(
+            "discovery_sweep_exhausted_driver_restart",
+            hard_guard_trip,
+            state.discovery_sweep_exhausted_streak,
+            state.zero_discovery_hard_guard_restarts,
+        )
+        .await;
+        state.start_hard_recover_watchdog("discovery_sweep_exhausted_driver_restart");
         Timer::after(Duration::from_millis(
             state.runtime_policy.driver_restart_backoff_ms as u64,
         ))

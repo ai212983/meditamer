@@ -104,7 +104,10 @@ struct HttpServerLoopState {
     listening_logged: bool,
     waiting_dhcp_logged: bool,
     dhcp_wait_started_at: Option<Instant>,
+    dhcp_gate_started_at: Option<Instant>,
+    dhcp_gate_last_reason: Option<telemetry::NetPipelineGate>,
     dhcp_ready: bool,
+    transfers_pause_started_at: Option<Instant>,
     listener_gate_last_enabled: bool,
     listener_gate_last_seq: u32,
     listener_gate_disabled_logged: bool,
@@ -118,7 +121,10 @@ impl HttpServerLoopState {
             listening_logged: false,
             waiting_dhcp_logged: false,
             dhcp_wait_started_at: None,
+            dhcp_gate_started_at: None,
+            dhcp_gate_last_reason: None,
             dhcp_ready: false,
+            transfers_pause_started_at: None,
             listener_gate_last_enabled: service_mode::upload_http_listener_enabled(),
             listener_gate_last_seq: service_mode::upload_http_listener_set_seq(),
             listener_gate_disabled_logged: false,
@@ -131,6 +137,8 @@ impl HttpServerLoopState {
         self.listening_logged = false;
         self.waiting_dhcp_logged = false;
         self.dhcp_wait_started_at = None;
+        self.dhcp_gate_started_at = None;
+        self.dhcp_gate_last_reason = None;
         self.dhcp_ready = false;
         self.last_request_closed_at = None;
         self.last_request_route = None;
@@ -139,6 +147,8 @@ impl HttpServerLoopState {
     fn reset_link_state(&mut self) {
         self.listening_logged = false;
         self.waiting_dhcp_logged = false;
+        self.dhcp_gate_started_at = None;
+        self.dhcp_gate_last_reason = None;
         self.dhcp_ready = false;
     }
 }

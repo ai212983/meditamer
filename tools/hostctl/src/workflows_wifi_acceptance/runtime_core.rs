@@ -363,7 +363,29 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     fn handle_net_wait_ready(&mut self, context: &mut Value) -> Result<()> {
-        let (mut connect_ms, mut listen_ms, mut ip) = wait_ready(&mut self.console, self.policy)?;
+        let max_recover_retries =
+            env_utils::parse_env_u32("HOSTCTL_NET_WAIT_READY_RECOVER_RETRIES", 1)?;
+        let mut recover_attempt = 0u32;
+        let (mut connect_ms, mut listen_ms, mut ip) = loop {
+            match wait_ready(&mut self.console, self.policy) {
+                Ok(result) => break result,
+                Err(err)
+                    if recover_attempt < max_recover_retries
+                        && should_retry_wait_ready_after_recover(&err.to_string()) =>
+                {
+                    recover_attempt = recover_attempt.saturating_add(1);
+                    self.logger.info(format!(
+                        "net_wait_ready: retryable readiness failure; recover retry {}/{} err={}",
+                        recover_attempt,
+                        max_recover_retries,
+                        err
+                    ));
+                    self.handle_net_recover_once()?;
+                    self.handle_net_start()?;
+                }
+                Err(err) => return Err(err),
+            }
+        };
         if ctx_get_u32(context, "cycle")? == 1 {
             let (stabilized_connect_ms, stabilized_listen_ms, stabilized_ip) =
                 self.enforce_startup_health_hysteresis(connect_ms, listen_ms, &ip)?;
@@ -483,6 +505,15 @@ fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
     )
 }
 
+fn should_retry_wait_ready_after_recover(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("failure class=listener_not_ready")
+        || lower.contains("dhcp_no_ipv4_stall")
+        || lower.contains("dhcp/no-ipv4 stall")
+        || lower.contains("net_wait_ready: listener timeout")
+        || lower.contains("listener timeout")
+}
+
 fn wait_startup_health_streak(
     ip: &str,
     required_streak: u32,
@@ -539,6 +570,7 @@ fn format_health_status_error(status: StatusCode) -> String {
 mod tests {
     use super::{
         format_health_status_error, is_ready_without_listener, should_force_recover_before_start,
+        should_retry_wait_ready_after_recover,
     };
     use crate::workflows_wifi_common::NetStatus;
     use reqwest::StatusCode;
@@ -605,5 +637,28 @@ mod tests {
 
         status.listener = Some(true);
         assert!(!is_ready_without_listener(&status));
+    }
+
+    #[test]
+    fn wait_ready_retry_classifier_matches_listener_and_dhcp_stalls() {
+        assert!(should_retry_wait_ready_after_recover(
+            "network failure class=listener_not_ready code=1 state=Some(\"Failed\")"
+        ));
+        assert!(should_retry_wait_ready_after_recover(
+            "net_wait_ready: listener timeout"
+        ));
+        assert!(should_retry_wait_ready_after_recover(
+            "dhcp/no-ipv4 stall: connected-without-ipv4 observed"
+        ));
+    }
+
+    #[test]
+    fn wait_ready_retry_classifier_ignores_non_retryable_failures() {
+        assert!(!should_retry_wait_ready_after_recover(
+            "panic_detected class=guru line_index=42"
+        ));
+        assert!(!should_retry_wait_ready_after_recover(
+            "net_wait_ready: overall timeout"
+        ));
     }
 }

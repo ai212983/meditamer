@@ -48,6 +48,7 @@ pub(super) async fn prepare_connection_attempt(
         state.failure_code,
         state.started_at.elapsed().as_millis() as u32,
     );
+    state.note_hard_recover_connect_begin();
     telemetry::record_wifi_reassoc_connect_begin(
         state.auth_method_idx,
         state.channel_hint,

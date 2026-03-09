@@ -143,7 +143,7 @@ pub(crate) fn initialize_runtime_sta(
     if backend_legacy_port::legacy_port_runtime_enabled() {
         return backend_legacy_port::initialize_runtime_sta_legacy_port(
             wifi,
-            wifi_runtime_config(),
+            country_us_override_enabled(),
         );
     }
 

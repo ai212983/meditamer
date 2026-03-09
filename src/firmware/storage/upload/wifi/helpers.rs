@@ -40,7 +40,7 @@ pub(super) fn elapsed_ms_u32(started_at: Instant) -> u32 {
 }
 
 pub(super) fn is_no_mem_wifi_error(err: &WifiError) -> bool {
-    matches!(err, WifiError::InternalError(InternalWifiError::NoMem))
+    wifi_error_is_no_mem(err)
 }
 
 pub(super) fn log_radio_mem_diag(stage: &str) {

@@ -5,6 +5,7 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 ## Environment
 
 - Board: Inkplate 4 TEMPERA (ESP32)
+- MCU module: ESP32-WROVER-E ([CNX Software, 2023-10-04](https://www.cnx-software.com/2023/10/04/inkplate-4-tempera-epaper-display-supports-esphome-arduino-and-micropython/))
 - Port: hostctl wrappers use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
 - Firmware: current `debug` build from `scripts/device/flash.sh debug`
 

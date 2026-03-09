@@ -88,37 +88,90 @@ async fn accept_connection(
     stack: &Stack<'static>,
     state: &mut HttpServerLoopState,
 ) -> bool {
+    const ACCEPT_POLL_MS: u64 = 500;
     log_http_mem_diag("accept_before");
     let accept_started_at = Instant::now();
-    let accepted = socket
-        .accept(IpListenEndpoint {
-            addr: None,
-            port: UPLOAD_HTTP_PORT,
-        })
-        .await;
-    telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
-
-    if let Err(err) = accepted {
-        telemetry::record_upload_http_accept_error();
+    loop {
+        if !service_mode::upload_transfers_enabled() {
+            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            state.reset_all();
+            telemetry::set_upload_http_listener(false, None);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!(
+                    "upload_http: accept paused while transfers are disabled; re-arm later"
+                );
+            }
+            socket.abort();
+            return false;
+        }
+        if !service_mode::upload_http_listener_enabled() {
+            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            state.reset_all();
+            telemetry::set_upload_http_listener(false, None);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!(
+                    "upload_http: accept paused while listener gate is disabled; re-arm later"
+                );
+            }
+            socket.abort();
+            return false;
+        }
         if dhcp_ipv4_status(stack).is_err() {
+            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
             telemetry::record_upload_http_accept_link_reset();
             state.reset_link_state();
+            telemetry::set_upload_http_listener(false, None);
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                esp_println::println!(
+                    "upload_http: accept paused due to connectivity gate loss; re-arm later"
+                );
+            }
+            log_http_mem_diag("accept_gate_loss");
+            socket.abort();
+            return false;
         }
-        telemetry::set_upload_http_listener(false, None);
-        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
-            esp_println::println!("upload_http: accept err={:?}", err);
-        }
-        log_http_mem_diag("accept_err");
-        socket.abort();
-        return false;
-    }
 
-    telemetry::record_upload_http_accept();
-    log_http_mem_diag("accept_ok");
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-        esp_println::println!("upload_http: accepted connection");
+        let endpoint = IpListenEndpoint {
+            addr: None,
+            port: UPLOAD_HTTP_PORT,
+        };
+        match embassy_time::with_timeout(
+            Duration::from_millis(ACCEPT_POLL_MS),
+            socket.accept(endpoint),
+        )
+        .await
+        {
+            Ok(Ok(())) => {
+                telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+                telemetry::record_upload_http_accept();
+                log_http_mem_diag("accept_ok");
+                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                    esp_println::println!("upload_http: accepted connection");
+                }
+                return true;
+            }
+            Ok(Err(err)) => {
+                telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+                telemetry::record_upload_http_accept_error();
+                if dhcp_ipv4_status(stack).is_err() {
+                    telemetry::record_upload_http_accept_link_reset();
+                    state.reset_link_state();
+                }
+                telemetry::set_upload_http_listener(false, None);
+                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                    esp_println::println!("upload_http: accept err={:?}", err);
+                }
+                log_http_mem_diag("accept_err");
+                socket.abort();
+                return false;
+            }
+            Err(_) => {
+                // Poll link/gate state on timeout so reconnect/disconnect transitions
+                // do not leave accept() parked on stale sockets indefinitely.
+                continue;
+            }
+        }
     }
-    true
 }
 
 async fn handle_connection_request(

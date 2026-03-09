@@ -1,0 +1,6 @@
+pub(crate) type RadioController = esp_radio::Controller<'static>;
+pub(crate) type WifiController<'a> = esp_radio::wifi::WifiController<'a>;
+pub(crate) type WifiDevice<'a> = esp_radio::wifi::WifiDevice<'a>;
+pub(crate) type WifiError = esp_radio::wifi::WifiError;
+pub(crate) type AccessPointInfo = esp_radio::wifi::AccessPointInfo;
+pub(crate) type ScanConfig<'a> = esp_radio::wifi::ScanConfig<'a>;

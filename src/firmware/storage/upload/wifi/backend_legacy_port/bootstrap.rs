@@ -21,6 +21,7 @@ pub(crate) struct LegacySchedulerContract {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct LegacyBootstrapRuntimeStatus {
     pub(crate) scheduler_initialized: bool,
+    pub(crate) current_core_initialized: bool,
     pub(crate) timer_task_precreated: bool,
     pub(crate) timer_task_started: bool,
     pub(crate) yielded_once: bool,
@@ -45,9 +46,10 @@ pub(crate) const LEGACY_BOOTSTRAP_SEQUENCE: &[LegacyBootstrapStep] = &[
 ];
 
 pub(crate) fn runtime_bootstrap_status() -> LegacyBootstrapRuntimeStatus {
-    let status = esp_rtos::bootstrap_legacy_wifi_contract_shim();
+    let status = esp_rtos::legacy_preempt_bootstrap_compat();
     LegacyBootstrapRuntimeStatus {
         scheduler_initialized: status.scheduler_initialized,
+        current_core_initialized: status.current_core_initialized,
         timer_task_precreated: status.timer_task_precreated,
         timer_task_started: status.timer_task_started,
         yielded_once: status.yielded_once,

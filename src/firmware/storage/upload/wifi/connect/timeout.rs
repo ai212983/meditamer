@@ -42,9 +42,7 @@ pub(super) async fn handle_connect_timeout(
     state.auth_method_idx = 0;
     state.dhcp_same_candidate_timeout_streak = 0;
     state.other_disconnect_streak = 0;
-    if state.hard_recover_watchdog_started_at.is_none() {
-        state.hard_recover_watchdog_started_at = Some(Instant::now());
-    }
+    state.start_hard_recover_watchdog("connect_timeout");
     diag_reassoc!(
         "upload_http: wifi connect timeout after {}ms; forcing driver restart and full discovery reset",
         state.runtime_policy.connect_timeout_ms

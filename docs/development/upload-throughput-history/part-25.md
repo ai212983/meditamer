@@ -54,3 +54,161 @@ Why this matters:
 - the next port step must move below the firmware layer and either:
   - vendor/recreate the missing scheduler bootstrap semantics, or
   - expose equivalent hooks from the current runtime generation
+
+## 2026-03-09: explicit legacy-preempt compatibility surface is wired, but still insufficient
+
+- Added a deeper vendored runtime compatibility surface:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/legacy_preempt.rs`
+- Re-exported it through:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/mod.rs`
+  - `vendor/esp-rtos-0.2.0/src/lib.rs`
+- Switched the legacy-port firmware path to use that explicit compatibility status:
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/bootstrap.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/runtime.rs`
+- Validated the unified firmware path with:
+  - `MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG=1`
+  - boot-scan comparators and pre-scan promisc enabled
+
+Validation:
+- Flash log:
+  - `logs/boot_scan_backend_legacy_port_preemptcompat_20260309_173535/flash.log`
+- Boot log:
+  - `logs/boot_scan_backend_legacy_port_preemptcompat_20260309_173535/monitor.log`
+- Key runtime lines:
+  - `legacy_port_runtime name=backend-legacy-port ... requires_enable=true requires_task_bootstrap=true requires_initial_yield=true`
+  - `legacy_port_bootstrap scheduler_initialized=true current_core_initialized=true timer_task_precreated=true timer_task_started=true yielded_once=true`
+  - `legacy_port runtime_init result=ok`
+
+Observed result:
+- pre-scan promisc still stayed fully dark:
+  - `boot_scan_only_promisc_diag ... total=0`
+- direct IDF `NULL` scan still returned zero:
+  - `idf_compare=ok ... ap_num=0`
+- direct IDF explicit broad scan still returned zero:
+  - `idf_explicit_compare=ok ... ap_num=0`
+- wrapped backend scan still returned zero:
+  - `scan=ok elapsed_ms=206 result_count=0`
+
+Why this matters:
+- the deeper compatibility surface is now real and exercised, not just a bootstrap shim note
+- but even the stronger legacy-preempt approximation is still insufficient
+- this closes the branch "current runtime can be made legacy-equivalent with bootstrap compatibility alone"
+- the next remaining work is the deeper source-level legacy runtime/backend port, not more nearby compatibility toggles
+
+## 2026-03-09: `backend_legacy_port` now owns controller `start/scan/stop`
+
+- Added:
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/controller.rs`
+- Re-exported through:
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/mod.rs`
+- Switched the generic backend glue to delegate legacy-port controller behavior into that module:
+  - `src/firmware/storage/upload/wifi/backend.rs`
+
+Validation:
+- `cargo check` passes cleanly.
+
+Why this matters:
+- the legacy backend port now owns both:
+  - runtime bootstrap/init selection
+  - controller `start/scan/stop` semantics
+- that removes another chunk of legacy behavior from generic `backend.rs` and keeps the source-level port concentrated under `backend_legacy_port`
+- the next deeper port step can now focus on legacy runtime/init semantics without re-spreading controller behavior back into generic backend glue
+
+## 2026-03-09: `backend_legacy_port` now owns its runtime config, direct init path, and local types
+
+- Added:
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/config.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/types.rs`
+- Updated:
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/runtime.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/controller.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/mod.rs`
+  - `src/firmware/storage/upload/wifi/runtime_init.rs`
+
+Validation:
+- `cargo check` passes cleanly.
+
+What changed:
+- the legacy-port runtime path now builds its own runtime config instead of receiving generic backend config plumbing
+- the legacy-port runtime path now calls `esp_radio::init()` / `esp_radio::wifi::new(...)` directly inside the port module
+- the legacy-port module now owns local type aliases for:
+  - `RadioController`
+  - `WifiController`
+  - `WifiDevice`
+  - `WifiError`
+  - `AccessPointInfo`
+  - `ScanConfig`
+
+Why this matters:
+- this is a deeper source-level port step than the earlier seam extraction
+- generic `backend.rs` is now more clearly the current backend shim, while `backend_legacy_port` owns its own direct runtime/controller surface
+- the remaining blocker is no longer module ownership; it is the missing deeper legacy runtime behavior itself
+
+## 2026-03-09: legacy-style Xtensa task entry still does not restore scanning
+
+- Added a vendored runtime-port A/B in:
+  - `vendor/esp-rtos-0.2.0/src/task/xtensa.rs`
+- New knob:
+  - `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_TASK_ENTRY_DIAG=1`
+
+What it changes:
+- current `esp-rtos` can initialize `esp-radio` tasks with legacy-style direct Xtensa task entry:
+  - `PC = task_fn`
+  - `A6 = param`
+- instead of the current trampoline form:
+  - `PC = task_wrapper`
+  - `A6 = task_fn`
+  - `A7 = param`
+
+Validation:
+- isolated current standalone comparator:
+  - `logs/esp_radio_nostd_wifi_control_legacytaskentry_validate_20260309_berlin/monitor.log`
+- key lines:
+  - `begin=true`
+  - `esp_radio_init=ok`
+  - `wifi_new=ok`
+  - `start=ok`
+  - `scan=ok count=0`
+
+Why this matters:
+- this is a real task/preempt bring-up difference, not a wrapper-level timing knob
+- even with legacy-style task entry, the current standalone `esp-radio` path still scans zero
+- that closes another concrete runtime-port branch and pushes the remaining work deeper into task/preempt behavior than entry register setup alone
+
+## 2026-03-09: legacy Wi-Fi task handoff and zero-priority model still do not restore scanning
+
+- Added a vendored runtime-port handoff helper:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/task_bootstrap.rs`
+- Wired it through:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/mod.rs`
+  - `vendor/esp-rtos-0.2.0/src/scheduler.rs`
+  - `vendor/esp-rtos-0.2.0/src/lib.rs`
+  - `tools/esp_radio_nostd_wifi_control/src/main.rs`
+
+New knobs:
+- `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_WIFI_TASK_BOOTSTRAP_DIAG=1`
+  - after creating the `wifi` task, current `esp-rtos` yields repeatedly until the task has been selected at least once
+- `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_WIFI_TASK_PRIORITY_MODEL_DIAG=1`
+  - the created `wifi` task uses priority `0`, approximating the legacy no-priority/circular scheduler model more closely than the default priority `29`
+
+Validation:
+- handoff-only run:
+  - `logs/esp_radio_nostd_wifi_control_legacywifihandoff_20260309_berlin/monitor.log`
+- combined handoff + zero-priority run:
+  - `logs/esp_radio_nostd_wifi_control_legacypriorityhandoff_20260309_berlin/monitor.log`
+
+Observed result:
+- both runs still reached clean startup:
+  - `begin=true`
+  - `esp_radio_init=ok`
+  - `wifi_new=ok`
+  - `start=ok`
+- both still ended at:
+  - `scan=ok count=0`
+
+Why this matters:
+- this closes the next scheduler-model approximations:
+  - explicit `wifi` task handoff after create
+  - legacy-like zero-priority `wifi` task creation
+- the remaining scheduler gap is no longer simple task entry, priority, or first-handoff behavior
+- the next real step would be a deeper run-queue / circular-scheduler model port, not another local knob

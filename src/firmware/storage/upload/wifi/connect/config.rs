@@ -34,26 +34,11 @@ pub(crate) fn mode_config_from_credentials(
     let ssid = core::str::from_utf8(&credentials.ssid[..credentials.ssid_len as usize]).ok()?;
     let password =
         core::str::from_utf8(&credentials.password[..credentials.password_len as usize]).ok()?;
-    let auth_method = if password.is_empty() {
-        AuthMethod::None
-    } else {
-        auth_method
-    };
-    let scan_method = if channel_hint.is_some() {
-        ScanMethod::Fast
-    } else {
-        ScanMethod::AllChannels
-    };
-    let mut client = ClientConfig::default()
-        .with_ssid(ssid.into())
-        .with_password(password.into())
-        .with_auth_method(auth_method)
-        .with_scan_method(scan_method);
-    if let Some(channel) = channel_hint {
-        client = client.with_channel(channel);
-    }
-    if let Some(bssid) = bssid_hint {
-        client = client.with_bssid(bssid);
-    }
-    Some(ModeConfig::Client(client))
+    Some(wifi_client_mode_config(
+        ssid,
+        password,
+        auth_method,
+        channel_hint,
+        bssid_hint,
+    ))
 }
