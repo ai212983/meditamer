@@ -1,4 +1,4 @@
-use super::blob_state_diag::log_scan_done_list_diag;
+use super::blob_state_diag::{log_scan_done_failure_blob_diag, log_scan_done_list_diag};
 use super::*;
 pub(super) fn state_mem_stage(state: NetState) -> Option<&'static str> {
     match state {
@@ -60,6 +60,13 @@ pub(super) fn install_wifi_event_logger() {
             u32::from(event.number()),
             u32::from(event.id()),
         );
+        if event.status() != 0 {
+            log_scan_done_failure_blob_diag(
+                u32::from(event.status()),
+                u32::from(event.number()),
+                u32::from(event.id()),
+            );
+        }
         maybe_end_first_start_idf_log_diag("scan_done");
         diag_reassoc!(
             "upload_http: event scan_done status={} count={} scan_id={}",

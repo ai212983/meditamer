@@ -20,7 +20,7 @@ fn legacy_task_entry_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_TASK_ENTRY_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || crate::esp_radio::backend_legacy_port_runtime_enabled()
 }
 
 static IDLE_HOOK: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());

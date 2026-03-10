@@ -55,3 +55,19 @@ pub(crate) fn runtime_bootstrap_status() -> LegacyBootstrapRuntimeStatus {
         yielded_once: status.yielded_once,
     }
 }
+
+pub(crate) fn legacy_timer_compat_init_tasks_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_INIT_TASKS_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_INIT_TASKS_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}

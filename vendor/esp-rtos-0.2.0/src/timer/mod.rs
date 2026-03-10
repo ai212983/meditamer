@@ -207,12 +207,16 @@ impl TimeDriver {
     }
 
     pub(crate) fn schedule_wakeup(&mut self, mut current_task: TaskPtr, at: Instant) -> bool {
-        debug_assert_eq!(
-            current_task.state(),
-            TaskState::Ready,
-            "task: {:?}",
-            current_task
-        );
+        let state = current_task.state();
+        #[cfg(feature = "esp-radio")]
+        let allow_legacy_non_ready = crate::esp_radio::backend_legacy_port_runtime_enabled()
+            || crate::esp_radio::legacy_runtime_mode_enabled()
+            || crate::esp_radio::legacy_builtin_scheduler_runtime_mode_enabled();
+        #[cfg(not(feature = "esp-radio"))]
+        let allow_legacy_non_ready = false;
+        if !allow_legacy_non_ready {
+            debug_assert_eq!(state, TaskState::Ready, "task: {:?}", current_task);
+        }
 
         // Target time is infinite, suspend task without waking up via timer.
         if at == Instant::EPOCH + Duration::MAX {

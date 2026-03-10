@@ -27,12 +27,34 @@ use crate::{
     time::{blob_ticks_to_micros, millis_to_blob_ticks},
 };
 
+fn wifi_init_runtime_trace_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_NEW_TRACE_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_INIT_TRACE"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(option_env!("ESP_RADIO_INIT_TRACE"), Some(_))
+}
+
+fn wifi_init_runtime_trace(message: &str) {
+    if wifi_init_runtime_trace_enabled() {
+        let _ = message;
+    }
+}
+
 fn wifi_use_legacy_phy_enable_diag_enabled() -> bool {
     matches!(
         option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_PHY_ENABLE_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_PHY_ENABLE_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
@@ -44,6 +66,12 @@ fn wifi_use_legacy_wifi_alloc_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_WIFI_ALLOC_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
 
@@ -53,6 +81,32 @@ fn wifi_use_legacy_task_delay_diag_enabled() -> bool {
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_TASK_DELAY_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn wifi_use_legacy_coex_status_get_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_COEX_STATUS_GET_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_COEX_STATUS_GET_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn wifi_use_legacy_task_yield_from_isr_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TASK_YIELD_FROM_ISR_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_TASK_YIELD_FROM_ISR_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
@@ -686,7 +740,11 @@ pub unsafe extern "C" fn wifi_int_restore(_wifi_int_mux: *mut c_void, tmp: u32) 
 /// *************************************************************************
 pub unsafe extern "C" fn task_yield_from_isr() {
     trace!("task_yield_from_isr");
-    crate::preempt::yield_task_from_isr();
+    if wifi_use_legacy_task_yield_from_isr_diag_enabled() {
+        crate::preempt::yield_task();
+    } else {
+        crate::preempt::yield_task_from_isr();
+    }
 }
 
 /// **************************************************************************
@@ -703,6 +761,7 @@ pub unsafe extern "C" fn task_yield_from_isr() {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
+    wifi_init_runtime_trace("wifi_thread_semphr_get.before");
     WIFI_THREAD_SEM_GET_COUNT.fetch_add(1, Ordering::Relaxed);
     let task_ptr = crate::preempt::current_task() as *mut c_void;
     let sem_ptr = thread_sem_get();
@@ -718,6 +777,7 @@ pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
         &WIFI_THREAD_SEM_PTR_CHANGE_COUNT,
         sem_ptr as usize,
     );
+    wifi_init_runtime_trace("wifi_thread_semphr_get.after");
     sem_ptr
 }
 
@@ -735,8 +795,10 @@ pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_create() -> *mut c_void {
+    let mutex = crate::compat::mutex::mutex_create(false);
+    wifi_init_runtime_trace("mutex_create");
     trace!("mutex_create");
-    crate::compat::mutex::mutex_create(false)
+    mutex
 }
 
 /// **************************************************************************
@@ -753,8 +815,10 @@ pub unsafe extern "C" fn mutex_create() -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn recursive_mutex_create() -> *mut c_void {
+    let mutex = crate::compat::mutex::mutex_create(true);
+    wifi_init_runtime_trace("recursive_mutex_create");
     trace!("recursive_mutex_create");
-    crate::compat::mutex::mutex_create(true)
+    mutex
 }
 
 /// **************************************************************************
@@ -788,6 +852,7 @@ pub unsafe extern "C" fn mutex_delete(mutex: *mut c_void) {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_lock(mutex: *mut c_void) -> i32 {
+    wifi_init_runtime_trace("mutex_lock");
     crate::compat::mutex::mutex_lock(mutex)
 }
 
@@ -805,6 +870,7 @@ pub unsafe extern "C" fn mutex_lock(mutex: *mut c_void) -> i32 {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_unlock(mutex: *mut c_void) -> i32 {
+    wifi_init_runtime_trace("mutex_unlock");
     crate::compat::mutex::mutex_unlock(mutex)
 }
 
@@ -892,6 +958,7 @@ fn common_task_create(
     task_handle: *mut c_void,
     core_id: Option<u32>,
 ) -> i32 {
+    wifi_init_runtime_trace("common_task_create.before");
     let task_name = unsafe { str_from_c(name as _) };
     trace!(
         "task_create task_func {:?} name {} stack_depth {} param {:?} prio {}, task_handle {:?} core_id {:?}",
@@ -922,6 +989,7 @@ fn common_task_create(
             task as usize,
         );
         *(task_handle as *mut usize) = task as usize;
+        wifi_init_runtime_trace("common_task_create.after");
 
         1
     }
@@ -1034,6 +1102,7 @@ pub unsafe extern "C" fn task_delete(task_handle: *mut c_void) {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn task_delay(tick: u32) {
+    wifi_init_runtime_trace("task_delay.before");
     trace!("task_delay tick {}", tick);
     WIFI_TASK_DELAY_COUNT.fetch_add(1, Ordering::Relaxed);
     atomic_update_max(&WIFI_TASK_DELAY_MAX_TICK, tick);
@@ -1051,6 +1120,7 @@ pub unsafe extern "C" fn task_delay(tick: u32) {
     } else {
         crate::preempt::usleep(blob_ticks_to_micros(tick))
     }
+    wifi_init_runtime_trace("task_delay.after");
 }
 
 /// **************************************************************************
@@ -1067,10 +1137,13 @@ pub unsafe extern "C" fn task_delay(tick: u32) {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn task_ms_to_tick(ms: u32) -> i32 {
+    wifi_init_runtime_trace("task_ms_to_tick.before");
     trace!("task_ms_to_tick ms {}", ms);
     WIFI_TASK_MS_TO_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
     atomic_update_max(&WIFI_TASK_MS_TO_TICK_MAX_MS, ms);
-    millis_to_blob_ticks(ms) as i32
+    let ticks = millis_to_blob_ticks(ms) as i32;
+    wifi_init_runtime_trace("task_ms_to_tick.after");
+    ticks
 }
 
 /// **************************************************************************
@@ -1917,7 +1990,11 @@ pub unsafe extern "C" fn calloc_internal_wrapper(n: usize, size: usize) -> *mut 
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn zalloc_internal(size: usize) -> *mut c_void {
-    unsafe { calloc_internal(size as u32, 1usize) as *mut c_void }
+    if wifi_use_legacy_wifi_alloc_diag_enabled() {
+        unsafe { crate::compat::malloc::calloc(size as u32, 1usize).cast() }
+    } else {
+        unsafe { calloc_internal(size as u32, 1usize) as *mut c_void }
+    }
 }
 
 /// **************************************************************************
@@ -1985,7 +2062,11 @@ pub unsafe extern "C" fn wifi_calloc(n: usize, size: usize) -> *mut c_void {
         &WIFI_OS_WIFI_CALLOC_LAST_SIZE,
         n.saturating_mul(size),
     );
-    unsafe { calloc_internal(n as u32, size) as *mut c_void }
+    if wifi_use_legacy_wifi_alloc_diag_enabled() {
+        unsafe { crate::compat::malloc::calloc(n as u32, size).cast() }
+    } else {
+        unsafe { calloc_internal(n as u32, size) as *mut c_void }
+    }
 }
 
 /// **************************************************************************
@@ -2002,7 +2083,11 @@ pub unsafe extern "C" fn wifi_calloc(n: usize, size: usize) -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn wifi_zalloc(size: usize) -> *mut c_void {
-    unsafe { wifi_calloc(size, 1) }
+    if wifi_use_legacy_wifi_alloc_diag_enabled() {
+        unsafe { crate::compat::malloc::calloc(size as u32, 1usize).cast() }
+    } else {
+        unsafe { wifi_calloc(size, 1) }
+    }
 }
 
 /// **************************************************************************
@@ -2020,9 +2105,17 @@ pub unsafe extern "C" fn wifi_zalloc(size: usize) -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn wifi_create_queue(queue_len: c_int, item_size: c_int) -> *mut c_void {
+    wifi_init_runtime_trace("wifi_create_queue.before");
+    // Legacy esp-wifi 0.15.1 carries a supplicant queue-size workaround here.
+    let (queue_len, item_size) = if queue_len == 3 && item_size == 4 {
+        (3, 8)
+    } else {
+        (queue_len, item_size)
+    };
     let queue = crate::compat::queue::queue_create(queue_len, item_size);
 
     let queue_ptr: *mut *mut c_void = Box::leak(Box::new_in(queue, InternalMemory));
+    wifi_init_runtime_trace("wifi_create_queue.after");
 
     queue_ptr.cast()
 }
@@ -2108,7 +2201,12 @@ pub unsafe extern "C" fn coex_status_get() -> u32 {
     trace!("coex_status_get");
 
     #[cfg(coex)]
-    return unsafe { crate::binary::include::coex_status_get(0b1) }; // COEX_STATUS_GET_WIFI_BITMAP
+    {
+        if wifi_use_legacy_coex_status_get_diag_enabled() {
+            return 0;
+        }
+        return unsafe { crate::binary::include::coex_status_get(0b1) }; // COEX_STATUS_GET_WIFI_BITMAP
+    }
 
     #[cfg(not(coex))]
     0

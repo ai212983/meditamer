@@ -5,6 +5,10 @@ pub(crate) mod integration;
 mod normalize;
 pub(crate) mod tasks;
 pub(crate) mod types;
+#[cfg(feature = "wifi-debug-slim-app")]
+#[path = "wizard_stub.rs"]
+pub(crate) mod wizard;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) mod wizard;
 
 use crate::drivers::inkplate::TouchSample as HalTouchSample;

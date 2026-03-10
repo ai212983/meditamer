@@ -94,7 +94,7 @@ pub(super) fn log_blob_state_diag(stage: &str) {
     let g_ic_ptr = core::ptr::addr_of!(g_ic) as usize;
     let g_chm_slot_ptr = core::ptr::addr_of!(g_chm) as usize;
     let g_scan_slot_ptr = core::ptr::addr_of!(g_scan) as usize;
-    let g_wifi_nvs_ptr = core::ptr::addr_of!(g_wifi_nvs) as usize;
+    let g_wifi_nvs_slot_ptr = core::ptr::addr_of!(g_wifi_nvs) as usize;
     let g_mac_sleep_en_ptr = core::ptr::addr_of!(g_mac_sleep_en) as usize;
     let connect_scan_flag_ptr = core::ptr::addr_of!(connect_scan_flag) as usize;
     let app_scan_params_ptr = core::ptr::addr_of!(app_scan_params) as usize;
@@ -103,19 +103,20 @@ pub(super) fn log_blob_state_diag(stage: &str) {
     let ap_ptr = read_ptr(g_ic_ptr, 0x14);
     let chm_ptr = read_ptr(g_chm_slot_ptr, 0x0);
     let scan_ptr = read_ptr(g_scan_slot_ptr, 0x0);
-    let wifi_mode = read_u8(g_wifi_nvs_ptr, 0x0);
+    let wifi_nvs_ptr = read_ptr(g_wifi_nvs_slot_ptr, 0x0);
 
     println!(
-        "upload_http: boot_scan_only_diag blob_state after={} g_ic_ptr=0x{:x} sta_ptr=0x{:x} ap_ptr=0x{:x} g_chm_slot_ptr=0x{:x} chm_ptr=0x{:x} g_wifi_nvs_ptr=0x{:x} wifi_mode={} wifi_nvs_byte_35c=0x{:02x} g_mac_sleep_en_ptr=0x{:x} g_mac_sleep_en={}",
+        "upload_http: boot_scan_only_diag blob_state after={} g_ic_ptr=0x{:x} sta_ptr=0x{:x} ap_ptr=0x{:x} g_chm_slot_ptr=0x{:x} chm_ptr=0x{:x} g_wifi_nvs_slot_ptr=0x{:x} g_wifi_nvs_ptr=0x{:x} wifi_nvs_byte_00=0x{:02x} wifi_nvs_byte_35c=0x{:02x} g_mac_sleep_en_ptr=0x{:x} g_mac_sleep_en={}",
         stage,
         g_ic_ptr,
         sta_ptr,
         ap_ptr,
         g_chm_slot_ptr,
         chm_ptr,
-        g_wifi_nvs_ptr,
-        wifi_mode,
-        read_u8(g_wifi_nvs_ptr, 0x35c),
+        g_wifi_nvs_slot_ptr,
+        wifi_nvs_ptr,
+        read_u8(wifi_nvs_ptr, 0x00),
+        read_u8(wifi_nvs_ptr, 0x35c),
         g_mac_sleep_en_ptr,
         read_u8(g_mac_sleep_en_ptr, 0),
     );
@@ -223,6 +224,19 @@ pub(super) fn log_scan_done_list_diag(status: u32, count: u32, scan_id: u32) {
             read_u32(head_ptr, 0x0c),
         );
     }
+}
+
+pub(super) fn log_scan_done_failure_blob_diag(status: u32, count: u32, scan_id: u32) {
+    let stage = if status == 0 {
+        "scan_done_ok"
+    } else {
+        "scan_done_fail"
+    };
+    println!(
+        "upload_http: event scan_done_blob_diag status={} count={} scan_id={} stage={}",
+        status, count, scan_id, stage
+    );
+    log_blob_state_diag(stage);
 }
 
 #[allow(dead_code)]

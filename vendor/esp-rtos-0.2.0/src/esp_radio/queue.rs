@@ -327,12 +327,6 @@ impl Queue {
 
 impl QueueImplementation for Queue {
     fn create(capacity: usize, item_size: usize) -> QueuePtr {
-        if create_trace_enabled() {
-            warn!(
-                "esp_rtos: queue_create capacity={} item_size={}",
-                capacity, item_size
-            );
-        }
         QUEUE_CREATE_COUNT.fetch_add(1, Ordering::Relaxed);
         QUEUE_CREATE_LAST_CAPACITY.store(capacity as u32, Ordering::Relaxed);
         QUEUE_CREATE_LAST_ITEM_SIZE.store(item_size as u32, Ordering::Relaxed);

@@ -4,6 +4,7 @@ use esp_hal::{system::Cpu, time::Instant};
 
 use crate::{
     SCHEDULER,
+    esp_radio::sem_trace,
     task::{TaskList, TaskPtr, TaskReadyQueueElement},
 };
 
@@ -40,16 +41,23 @@ impl WaitQueue {
 
     pub(crate) fn notify(&mut self) {
         SCHEDULER.with(|scheduler| {
+            let queue_ptr = self as *mut Self as usize;
             if ESP_RTOS_WAIT_QUEUE_NOTIFY_ONE {
+                let mut resumed = 0usize;
                 if let Some(waken_task) = self.waiting_tasks.pop() {
                     scheduler.resume_task(waken_task);
+                    resumed = 1;
                 }
+                sem_trace::trace_wait_queue_notify(queue_ptr, resumed);
                 return;
             }
 
+            let mut resumed = 0usize;
             while let Some(waken_task) = self.waiting_tasks.pop() {
                 scheduler.resume_task(waken_task);
+                resumed += 1;
             }
+            sem_trace::trace_wait_queue_notify(queue_ptr, resumed);
         });
     }
 
@@ -57,6 +65,7 @@ impl WaitQueue {
         SCHEDULER.with(|scheduler| {
             let mut task = scheduler.current_task(Cpu::current());
             if scheduler.sleep_task_until(task, deadline) {
+                sem_trace::trace_wait_queue_sleep(self as *mut Self as usize);
                 self.waiting_tasks.push(task);
                 unsafe {
                     task.as_mut().current_queue = Some(NonNull::from(self));

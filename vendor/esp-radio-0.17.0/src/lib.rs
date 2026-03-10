@@ -216,6 +216,48 @@ unsafe extern "C" {
     fn __esp_rtos_diag_timer_callback_last_timeout_us() -> u32;
     fn __esp_rtos_diag_timer_callback_last_lateness_us() -> u32;
     fn __esp_rtos_diag_timer_callback_max_lateness_us() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_entry_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_resume_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_loop_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_legacy_compat_branch_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_legacy_driver_branch_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_default_branch_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_mark_ready_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_pop_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_selected_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_ptr() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_current_index() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_task_ptr_at(index: usize) -> usize;
+    fn __esp_rtos_diag_legacy_task_model_task_state_at(index: usize) -> usize;
+    fn __esp_rtos_diag_legacy_task_model_last_pop_candidate_ptr() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_last_pop_candidate_state() -> usize;
+    fn __esp_rtos_diag_legacy_task_model_last_pop_selected_ptr() -> usize;
+    fn __esp_rtos_diag_reset_legacy_builtin_scheduler_snapshot();
+    fn __esp_rtos_diag_legacy_builtin_scheduler_snapshot() -> LegacyBuiltinSchedulerSnapshotRaw;
+    fn __esp_rtos_diag_legacy_builtin_scheduler_task_ptr_at(index: usize) -> usize;
+    fn __esp_rtos_diag_legacy_builtin_scheduler_task_role_at(index: usize) -> [u8; 16];
+}
+
+#[cfg(feature = "wifi")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_radio_diag_legacy_timer_compat_enabled() -> bool {
+    crate::compat::timer_compat_legacy::compat_enabled()
+}
+
+#[cfg(feature = "wifi")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_radio_diag_process_legacy_timer_compat_due() -> bool {
+    crate::compat::timer_compat_legacy::process_due_timer()
+}
+
+#[cfg(feature = "wifi")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_radio_diag_legacy_timer_compat_next_due_us() -> u32 {
+    crate::compat::timer_compat_legacy::next_due_delay_us().unwrap_or(u32::MAX)
 }
 
 #[cfg(feature = "wifi")]
@@ -539,6 +581,18 @@ pub fn diagnostic_wifi_init_config_diag() -> WifiInitConfigDiag {
     crate::wifi::wifi_init_config_diag()
 }
 
+#[cfg(all(feature = "wifi", feature = "sniffer", feature = "unstable"))]
+#[doc(hidden)]
+pub fn diagnostic_reset_wifi_promisc_rx_cb_count() {
+    crate::wifi::diagnostic_reset_wifi_promisc_rx_cb_count()
+}
+
+#[cfg(all(feature = "wifi", feature = "sniffer", feature = "unstable"))]
+#[doc(hidden)]
+pub fn diagnostic_wifi_promisc_rx_cb_count() -> usize {
+    crate::wifi::diagnostic_wifi_promisc_rx_cb_count()
+}
+
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
 pub fn diagnostic_legacy_bootstrap_shim_diag() -> LegacyBootstrapShimDiag {
@@ -599,6 +653,58 @@ pub struct TimerCallbackExecDiag {
 
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
+pub struct TimerTaskRuntimeDiag {
+    pub entry_count: u32,
+    pub resume_count: u32,
+    pub loop_count: u32,
+    pub legacy_compat_branch_count: u32,
+    pub legacy_driver_branch_count: u32,
+    pub default_branch_count: u32,
+    pub mark_ready_count: u32,
+    pub pop_count: u32,
+    pub selected_count: u32,
+    pub task_ptr: usize,
+    pub legacy_compat_enabled: bool,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub struct LegacyTaskModelDiag {
+    pub entry_count: usize,
+    pub current_index: usize,
+    pub task_ptrs: [usize; 8],
+    pub task_states: [usize; 8],
+    pub last_pop_candidate_ptr: usize,
+    pub last_pop_candidate_state: usize,
+    pub last_pop_selected_ptr: usize,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+struct LegacyBuiltinSchedulerSnapshotRaw {
+    pub initialized: bool,
+    pub current_task: usize,
+    pub to_delete: usize,
+    pub switch_count: usize,
+    pub last_selected_task: usize,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct LegacyBuiltinSchedulerDiag {
+    pub initialized: bool,
+    pub current_task: usize,
+    pub to_delete: usize,
+    pub switch_count: usize,
+    pub last_selected_task: usize,
+    pub task_ptrs: [usize; 8],
+    pub task_roles: [[u8; 16]; 8],
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
 pub fn diagnostic_timer_callback_exec_diag() -> TimerCallbackExecDiag {
     TimerCallbackExecDiag {
         current_callback_ptr: unsafe { __esp_rtos_diag_timer_callback_current_ptr() },
@@ -611,6 +717,81 @@ pub fn diagnostic_timer_callback_exec_diag() -> TimerCallbackExecDiag {
         last_lateness_us: unsafe { __esp_rtos_diag_timer_callback_last_lateness_us() },
         max_lateness_us: unsafe { __esp_rtos_diag_timer_callback_max_lateness_us() },
     }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_timer_task_runtime_diag() -> TimerTaskRuntimeDiag {
+    TimerTaskRuntimeDiag {
+        entry_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_entry_count() },
+        resume_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_resume_count() },
+        loop_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_loop_count() },
+        legacy_compat_branch_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_legacy_compat_branch_count()
+        },
+        legacy_driver_branch_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_legacy_driver_branch_count()
+        },
+        default_branch_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_default_branch_count()
+        },
+        mark_ready_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_mark_ready_count() },
+        pop_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_pop_count() },
+        selected_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_selected_count() },
+        task_ptr: unsafe { __esp_rtos_diag_esp_radio_timer_task_ptr() },
+        legacy_compat_enabled: crate::compat::timer_compat_legacy::compat_enabled(),
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_legacy_task_model_diag() -> LegacyTaskModelDiag {
+    let mut task_ptrs = [0; 8];
+    let mut task_states = [0; 8];
+    let mut idx = 0;
+    while idx < 8 {
+        task_ptrs[idx] = unsafe { __esp_rtos_diag_legacy_task_model_task_ptr_at(idx) };
+        task_states[idx] = unsafe { __esp_rtos_diag_legacy_task_model_task_state_at(idx) };
+        idx += 1;
+    }
+    LegacyTaskModelDiag {
+        entry_count: unsafe { __esp_rtos_diag_legacy_task_model_entry_count() },
+        current_index: unsafe { __esp_rtos_diag_legacy_task_model_current_index() },
+        task_ptrs,
+        task_states,
+        last_pop_candidate_ptr: unsafe { __esp_rtos_diag_legacy_task_model_last_pop_candidate_ptr() },
+        last_pop_candidate_state: unsafe { __esp_rtos_diag_legacy_task_model_last_pop_candidate_state() },
+        last_pop_selected_ptr: unsafe { __esp_rtos_diag_legacy_task_model_last_pop_selected_ptr() },
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_reset_legacy_builtin_scheduler_diag() {
+    unsafe { __esp_rtos_diag_reset_legacy_builtin_scheduler_snapshot() };
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_legacy_builtin_scheduler_diag() -> LegacyBuiltinSchedulerDiag {
+    let raw = unsafe { __esp_rtos_diag_legacy_builtin_scheduler_snapshot() };
+    let mut diag = LegacyBuiltinSchedulerDiag {
+        initialized: raw.initialized,
+        current_task: raw.current_task,
+        to_delete: raw.to_delete,
+        switch_count: raw.switch_count,
+        last_selected_task: raw.last_selected_task,
+        task_ptrs: [0; 8],
+        task_roles: [[0; 16]; 8],
+    };
+    let mut idx = 0;
+    while idx < 8 {
+        diag.task_ptrs[idx] = unsafe { __esp_rtos_diag_legacy_builtin_scheduler_task_ptr_at(idx) };
+        diag.task_roles[idx] =
+            unsafe { __esp_rtos_diag_legacy_builtin_scheduler_task_role_at(idx) };
+        idx += 1;
+    }
+    diag
 }
 
 impl core::fmt::Display for InitializationError {

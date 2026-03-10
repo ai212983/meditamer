@@ -9,6 +9,12 @@ pub mod semaphore;
 
 #[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
 pub mod timer_compat;
+#[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
+pub(crate) mod timer_compat_legacy;
+#[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
+pub(crate) mod timer_compat_legacy_diag;
+#[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
+pub(crate) mod timer_compat_legacy_policy;
 
 pub(crate) const OSI_FUNCS_TIME_BLOCKING: u32 = u32::MAX;
 

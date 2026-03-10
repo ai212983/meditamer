@@ -287,6 +287,11 @@ impl RunQueue {
             }
         }
 
+        #[cfg(feature = "esp-radio")]
+        if let Some(task) = popped {
+            crate::esp_radio::note_timer_task_popped(task);
+        }
+
         if self.ready_tasks[current_prio].is_empty() {
             self.ready_priority.unmark(current_prio);
             debug!("pop - New prio level: {}", self.ready_priority.ready());

@@ -145,6 +145,27 @@ const fn wifi_skip_mac_time_update_cb_diag_enabled() -> bool {
     )
 }
 
+const fn wifi_skip_internal_rxcb_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_SKIP_INTERNAL_RXCB_DIAG"),
+        Some(_)
+    ) || matches!(
+        option_env!("ESP_RADIO_SKIP_INTERNAL_RXCB_DIAG"),
+        Some(_)
+    )
+}
+
+const fn wifi_use_legacy_sniffer_cb_storage_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_SNIFFER_CB_STORAGE_DIAG"),
+        Some(_)
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_SNIFFER_CB_STORAGE_DIAG"),
+        Some(_)
+    )
+}
+
+
 fn wifi_new_trace_enabled() -> bool {
     matches!(
         option_env!("MEDITAMER_WIFI_NEW_TRACE_DIAG"),
@@ -154,13 +175,13 @@ fn wifi_new_trace_enabled() -> bool {
 
 fn wifi_init_trace(stage: &str) {
     if wifi_init_trace_enabled() {
-        warn!("esp_radio: wifi_init stage={stage}");
+        esp_println::println!("esp_radio: wifi_init stage={stage}");
     }
 }
 
 fn wifi_new_trace(stage: &str) {
     if wifi_new_trace_enabled() {
-        warn!("esp_radio: wifi_new stage={stage}");
+        esp_println::println!("esp_radio: wifi_new stage={stage}");
     }
 }
 
@@ -1324,6 +1345,8 @@ static RX_QUEUE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static TX_QUEUE_SIZE: AtomicUsize = AtomicUsize::new(0);
 static WIFI_RX_CB_STA_COUNT: AtomicUsize = AtomicUsize::new(0);
 static WIFI_RX_CB_AP_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(all(feature = "sniffer", feature = "unstable"))]
+static WIFI_PROMISC_RX_CB_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static DATA_QUEUE_RX_AP: NonReentrantMutex<VecDeque<PacketBuffer>> =
     NonReentrantMutex::new(VecDeque::new());
@@ -1618,20 +1641,32 @@ pub(crate) fn wifi_init(_wifi: crate::hal::peripherals::WIFI<'_>) -> Result<(), 
         esp_wifi_result!(esp_wifi_set_tx_done_cb(Some(esp_wifi_tx_done_cb)))?;
         wifi_init_trace("esp_wifi_set_tx_done_cb.after");
 
-        wifi_init_trace("esp_wifi_internal_reg_rxcb_sta.before");
-        esp_wifi_result!(esp_wifi_internal_reg_rxcb(
-            esp_interface_t_ESP_IF_WIFI_STA,
-            Some(recv_cb_sta)
-        ))?;
-        wifi_init_trace("esp_wifi_internal_reg_rxcb_sta.after");
+        if wifi_skip_internal_rxcb_diag_enabled() {
+            wifi_init_trace("esp_wifi_internal_reg_rxcb.skip");
+        } else {
+            wifi_init_trace("esp_wifi_internal_reg_rxcb_sta.before");
+            esp_wifi_result!(esp_wifi_internal_reg_rxcb(
+                esp_interface_t_ESP_IF_WIFI_STA,
+                Some(recv_cb_sta)
+            ))?;
+            wifi_init_trace("esp_wifi_internal_reg_rxcb_sta.after");
 
-        // until we support APSTA we just register the same callback for AP and STA
-        wifi_init_trace("esp_wifi_internal_reg_rxcb_ap.before");
-        esp_wifi_result!(esp_wifi_internal_reg_rxcb(
-            esp_interface_t_ESP_IF_WIFI_AP,
-            Some(recv_cb_ap)
-        ))?;
-        wifi_init_trace("esp_wifi_internal_reg_rxcb_ap.after");
+            // until we support APSTA we just register the same callback for AP and STA
+            wifi_init_trace("esp_wifi_internal_reg_rxcb_ap.before");
+            esp_wifi_result!(esp_wifi_internal_reg_rxcb(
+                esp_interface_t_ESP_IF_WIFI_AP,
+                Some(recv_cb_ap)
+            ))?;
+            wifi_init_trace("esp_wifi_internal_reg_rxcb_ap.after");
+        }
+
+        #[cfg(any(esp32, esp32s3))]
+        {
+            static mut NVS_STRUCT: [u32; 12] = [0; 12];
+            crate::common_adapter::__ESP_RADIO_G_MISC_NVS = core::ptr::addr_of_mut!(NVS_STRUCT)
+                .cast::<u32>();
+            wifi_init_trace("g_misc_nvs.assigned");
+        }
         wifi_init_trace("done");
 
         Ok(())
@@ -1759,6 +1794,18 @@ pub fn diagnostic_wifi_rx_cb_counts() -> (usize, usize) {
         WIFI_RX_CB_STA_COUNT.load(Ordering::Relaxed),
         WIFI_RX_CB_AP_COUNT.load(Ordering::Relaxed),
     )
+}
+
+#[cfg(all(feature = "sniffer", feature = "unstable"))]
+#[doc(hidden)]
+pub fn diagnostic_reset_wifi_promisc_rx_cb_count() {
+    WIFI_PROMISC_RX_CB_COUNT.store(0, Ordering::Relaxed);
+}
+
+#[cfg(all(feature = "sniffer", feature = "unstable"))]
+#[doc(hidden)]
+pub fn diagnostic_wifi_promisc_rx_cb_count() -> usize {
+    WIFI_PROMISC_RX_CB_COUNT.load(Ordering::Relaxed)
 }
 
 fn decrement_inflight_counter() {
@@ -2143,6 +2190,11 @@ fn convert_ap_info(record: &include::wifi_ap_record_t) -> AccessPointInfo {
     }
 }
 
+/// Convert a raw ESP-IDF scan record into a public [`AccessPointInfo`].
+pub fn access_point_info_from_raw_record(record: &include::wifi_ap_record_t) -> AccessPointInfo {
+    convert_ap_info(record)
+}
+
 /// The radio metadata header of the received packet, which is the common header
 /// at the beginning of all RX callback buffers in promiscuous mode.
 #[cfg(not(esp32c6))]
@@ -2352,9 +2404,19 @@ impl PromiscuousPkt<'_> {
 static SNIFFER_CB: NonReentrantMutex<Option<fn(PromiscuousPkt<'_>)>> = NonReentrantMutex::new(None);
 
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
+static mut SNIFFER_CB_LEGACY_RAW: Option<fn(PromiscuousPkt<'_>)> = None;
+
+#[cfg(all(feature = "sniffer", feature = "unstable"))]
 unsafe extern "C" fn promiscuous_rx_cb(buf: *mut core::ffi::c_void, frame_type: u32) {
     unsafe {
-        if let Some(sniffer_callback) = SNIFFER_CB.with(|callback| *callback) {
+        WIFI_PROMISC_RX_CB_COUNT.fetch_add(1, Ordering::Relaxed);
+        let sniffer_callback = if wifi_use_legacy_sniffer_cb_storage_diag_enabled() {
+            SNIFFER_CB_LEGACY_RAW
+        } else {
+            SNIFFER_CB.with(|callback| *callback)
+        };
+
+        if let Some(sniffer_callback) = sniffer_callback {
             let promiscuous_pkt = PromiscuousPkt::from_raw(buf as *const _, frame_type);
             sniffer_callback(promiscuous_pkt);
         }
@@ -2411,7 +2473,13 @@ impl Sniffer<'_> {
     /// Set the callback for receiving a packet.
     #[instability::unstable]
     pub fn set_receive_cb(&mut self, cb: fn(PromiscuousPkt<'_>)) {
-        SNIFFER_CB.with(|callback| *callback = Some(cb));
+        if wifi_use_legacy_sniffer_cb_storage_diag_enabled() {
+            unsafe {
+                SNIFFER_CB_LEGACY_RAW = Some(cb);
+            }
+        } else {
+            SNIFFER_CB.with(|callback| *callback = Some(cb));
+        }
     }
 }
 

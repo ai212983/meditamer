@@ -34,6 +34,10 @@ const WIFI_BOOT_SCAN_ONLY_FORCE_PHY_ENABLE_DIAG: bool = parse_nonzero_flag(
 const WIFI_BOOT_SCAN_ONLY_DIAG_SCAN_TIMEOUT_MS: u64 = 15_000;
 static WIFI_BOOT_SCAN_ONLY_DIAG_RAN: AtomicBool = AtomicBool::new(false);
 
+pub(crate) const fn boot_scan_only_diag_enabled() -> bool {
+    WIFI_BOOT_SCAN_ONLY_DIAG
+}
+
 unsafe extern "C" {
     fn esp_rtos_task_role(task: *const c_void) -> *const c_char;
 }
@@ -51,6 +55,20 @@ fn format_task_role(task_ptr: usize) -> &'static str {
 
 fn log_boot_scan_only_diag_counters(stage: &str) {
     log_blob_state_diag(stage);
+    let sem_trace = esp_rtos::diagnostic_esp_radio_sem_trace_snapshot();
+    println!(
+        "upload_http: boot_scan_only_diag sem_trace after={} take_wait={} take_done={} give={} waitq_sleep={} waitq_notify={} last_event={} last_task_ptr=0x{:x} last_object_ptr=0x{:x} last_value={}",
+        stage,
+        sem_trace.take_wait_count,
+        sem_trace.take_done_count,
+        sem_trace.give_count,
+        sem_trace.wait_queue_sleep_count,
+        sem_trace.wait_queue_notify_count,
+        sem_trace.last_event,
+        sem_trace.last_task_ptr,
+        sem_trace.last_object_ptr,
+        sem_trace.last_value,
+    );
     let phy_common_clock = esp_radio::diagnostic_phy_common_clock_diag();
     println!(
         "upload_http: boot_scan_only_diag phy_common_clock after={} enable_calls={} disable_calls={} ref_count={} real_enable={}",
@@ -83,7 +101,7 @@ fn log_boot_scan_only_diag_counters(stage: &str) {
     );
     let os_diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
     println!(
-        "upload_http: boot_scan_only_diag wifi_os_diag after={} sem_take={} sem_take_isr={} sem_give={} sem_give_isr={} queue_send={} queue_send_first_task_ptr=0x{:x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:x} queue_send_last_task_role={} queue_send_task_changes={} queue_send_last_item_size={} queue_send_last_item_word0=0x{:08x} queue_send_last_item_word1=0x{:08x} queue_send_last_item_pointee_word0=0x{:08x} queue_send_last_item_pointee_word1=0x{:08x} queue_send_last_timer_callback_ptr=0x{:x} queue_send_last_timer_arg_ptr=0x{:x} queue_send_isr={} queue_recv={} queue_recv_first_task_ptr=0x{:x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:x} queue_recv_last_task_role={} queue_recv_task_changes={} queue_recv_isr={} event_post={}",
+        "upload_http: boot_scan_only_diag wifi_os_diag after={} sem_take={} sem_take_isr={} sem_give={} sem_give_isr={} queue_send={} queue_send_first_task_ptr=0x{:x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:x} queue_send_last_task_role={} queue_send_task_changes={} queue_send_last_item_size={} queue_send_last_item_word0=0x{:08x} queue_send_last_item_word1=0x{:08x} queue_send_last_item_pointee_word0=0x{:08x} queue_send_last_item_pointee_word1=0x{:08x} queue_send_last_timer_callback_ptr=0x{:x} queue_send_last_timer_arg_ptr=0x{:x} queue_send_isr={} queue_send_isr_legacy_branch={} queue_recv={} queue_recv_first_task_ptr=0x{:x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:x} queue_recv_last_task_role={} queue_recv_task_changes={} queue_recv_isr={} event_post={}",
         stage,
         os_diag.sem_take,
         os_diag.sem_take_isr,
@@ -103,6 +121,7 @@ fn log_boot_scan_only_diag_counters(stage: &str) {
         os_diag.queue_send_last_timer_callback_ptr,
         os_diag.queue_send_last_timer_arg_ptr,
         os_diag.queue_send_isr,
+        os_diag.queue_send_isr_legacy_branch,
         os_diag.queue_recv,
         os_diag.queue_recv_first_task_ptr,
         format_task_role(os_diag.queue_recv_first_task_ptr),
@@ -227,10 +246,13 @@ fn log_boot_scan_only_diag_counters(stage: &str) {
     );
     let timer_diag = esp_radio::diagnostic_timer_compat_diag();
     println!(
-        "upload_http: boot_scan_only_diag timer_compat_diag after={} setfn_count={} arm_count={} wrapper_arm_count={} last_ets_timer_ptr=0x{:x} last_timer_handle_ptr=0x{:x} last_callback_ptr=0x{:x} last_arg_ptr=0x{:x} last_arm_us={} last_arm_repeat={} suppressed_setfn_count={} last_suppressed_setfn_callback_ptr=0x{:x} last_suppressed_setfn_arg_ptr=0x{:x} suppressed_arm_count={} last_suppressed_callback_ptr=0x{:x} last_suppressed_arg_ptr=0x{:x} last_suppressed_us={}",
+        "upload_http: boot_scan_only_diag timer_compat_diag after={} setfn_count={} arm_count={} exec_count={} process_due_call_count={} process_due_hit_count={} wrapper_arm_count={} last_ets_timer_ptr=0x{:x} last_timer_handle_ptr=0x{:x} last_callback_ptr=0x{:x} last_arg_ptr=0x{:x} last_arm_us={} last_arm_repeat={} last_now_us={} last_started_us={} last_timeout_us={} last_next_due_us={} suppressed_setfn_count={} last_suppressed_setfn_callback_ptr=0x{:x} last_suppressed_setfn_arg_ptr=0x{:x} suppressed_arm_count={} last_suppressed_callback_ptr=0x{:x} last_suppressed_arg_ptr=0x{:x} last_suppressed_us={}",
         stage,
         timer_diag.setfn_count,
         timer_diag.arm_count,
+        timer_diag.exec_count,
+        timer_diag.process_due_call_count,
+        timer_diag.process_due_hit_count,
         timer_diag.wrapper_arm_count,
         timer_diag.last_ets_timer_ptr,
         timer_diag.last_timer_handle_ptr,
@@ -238,6 +260,10 @@ fn log_boot_scan_only_diag_counters(stage: &str) {
         timer_diag.last_arg_ptr,
         timer_diag.last_arm_us,
         timer_diag.last_arm_repeat,
+        timer_diag.last_now_us,
+        timer_diag.last_started_us,
+        timer_diag.last_timeout_us,
+        timer_diag.last_next_due_us,
         timer_diag.suppressed_setfn_count,
         timer_diag.last_suppressed_setfn_callback_ptr,
         timer_diag.last_suppressed_setfn_arg_ptr,
@@ -260,6 +286,78 @@ fn log_boot_scan_only_diag_counters(stage: &str) {
         timer_exec_diag.last_lateness_us,
         timer_exec_diag.max_lateness_us,
     );
+    let timer_runtime_diag = esp_radio::diagnostic_timer_task_runtime_diag();
+    println!(
+        "upload_http: boot_scan_only_diag timer_runtime_diag after={} entry_count={} resume_count={} loop_count={} legacy_compat_branch_count={} legacy_driver_branch_count={} default_branch_count={} mark_ready_count={} pop_count={} selected_count={} task_ptr=0x{:x} legacy_compat_enabled={}",
+        stage,
+        timer_runtime_diag.entry_count,
+        timer_runtime_diag.resume_count,
+        timer_runtime_diag.loop_count,
+        timer_runtime_diag.legacy_compat_branch_count,
+        timer_runtime_diag.legacy_driver_branch_count,
+        timer_runtime_diag.default_branch_count,
+        timer_runtime_diag.mark_ready_count,
+        timer_runtime_diag.pop_count,
+        timer_runtime_diag.selected_count,
+        timer_runtime_diag.task_ptr,
+        timer_runtime_diag.legacy_compat_enabled,
+    );
+    let legacy_task_model_diag = esp_radio::diagnostic_legacy_task_model_diag();
+    println!(
+        "upload_http: boot_scan_only_diag legacy_task_model after={} entry_count={} current_index={} last_pop_candidate_ptr=0x{:x} last_pop_candidate_state={} last_pop_selected_ptr=0x{:x}",
+        stage,
+        legacy_task_model_diag.entry_count,
+        legacy_task_model_diag.current_index,
+        legacy_task_model_diag.last_pop_candidate_ptr,
+        legacy_task_model_diag.last_pop_candidate_state,
+        legacy_task_model_diag.last_pop_selected_ptr,
+    );
+    for idx in 0..legacy_task_model_diag.task_ptrs.len() {
+        let task_ptr = legacy_task_model_diag.task_ptrs[idx];
+        if task_ptr != 0 {
+            println!(
+                "upload_http: boot_scan_only_diag legacy_task_model_slot after={} idx={} task_ptr=0x{:x} task_role={} state={}",
+                stage,
+                idx,
+                task_ptr,
+                format_task_role(task_ptr),
+                legacy_task_model_diag.task_states[idx],
+            );
+        }
+    }
+    let legacy_builtin_diag = esp_radio::diagnostic_legacy_builtin_scheduler_diag();
+    println!(
+        "upload_http: boot_scan_only_diag legacy_builtin_scheduler after={} initialized={} current_task=0x{:x} to_delete=0x{:x} switch_count={} last_selected_task=0x{:x}",
+        stage,
+        legacy_builtin_diag.initialized as u8,
+        legacy_builtin_diag.current_task,
+        legacy_builtin_diag.to_delete,
+        legacy_builtin_diag.switch_count,
+        legacy_builtin_diag.last_selected_task,
+    );
+    for idx in 0..legacy_builtin_diag.task_ptrs.len() {
+        let task_ptr = legacy_builtin_diag.task_ptrs[idx];
+        if task_ptr != 0 {
+            let role = core::str::from_utf8(&legacy_builtin_diag.task_roles[idx])
+                .ok()
+                .map(|s| s.trim_end_matches('\0'))
+                .unwrap_or("<invalid>");
+            println!(
+                "upload_http: boot_scan_only_diag legacy_builtin_scheduler_slot after={} idx={} task_ptr=0x{:x} task_role={}{}",
+                stage,
+                idx,
+                task_ptr,
+                role,
+                if task_ptr == legacy_builtin_diag.current_task {
+                    " current=true"
+                } else if task_ptr == legacy_builtin_diag.last_selected_task {
+                    " last_selected=true"
+                } else {
+                    ""
+                },
+            );
+        }
+    }
     for idx in 0..timer_diag.recent_setfn_ordinals.len() {
         let ordinal = timer_diag.recent_setfn_ordinals[idx];
         if ordinal != 0 {
@@ -368,6 +466,8 @@ pub(super) async fn maybe_run_boot_scan_only_diag(
     esp_radio::diagnostic_reset_wifi_scan_done_eventpost_diag();
     esp_radio::diagnostic_reset_timer_compat_diag();
     esp_radio::diagnostic_reset_timer_callback_exec_diag();
+    esp_radio::diagnostic_reset_legacy_builtin_scheduler_diag();
+    esp_rtos::diagnostic_esp_radio_sem_trace_reset();
     println!("upload_http: boot_scan_only_diag begin credentials_present=false");
 
     if let Err(err) = wifi_set_mode(controller, wifi_sta_mode()) {
@@ -404,6 +504,7 @@ pub(super) async fn maybe_run_boot_scan_only_diag(
     }
 
     log_boot_scan_only_driver_state();
+    log_blob_state_diag("after_start_ok");
     let force_wakeup_acquired = maybe_acquire_boot_scan_only_force_wakeup();
     let force_phy_acquired = maybe_acquire_boot_scan_only_force_phy();
     maybe_run_boot_scan_only_promisc_diag().await;
@@ -450,12 +551,14 @@ pub(super) async fn maybe_run_boot_scan_only_diag(
                 elapsed_ms_u32(scan_started_at),
                 err
             );
+            log_boot_scan_only_diag_counters("rust_scan_err");
         }
         Err(_) => {
             println!(
                 "upload_http: boot_scan_only_diag outcome=scan_timeout timeout_ms={}",
                 WIFI_BOOT_SCAN_ONLY_DIAG_SCAN_TIMEOUT_MS
             );
+            log_boot_scan_only_diag_counters("rust_scan_timeout");
         }
     }
 

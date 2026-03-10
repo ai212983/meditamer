@@ -2,13 +2,14 @@
 //!
 //! This module provides the [`Semaphore`] type, which implements counting semaphores and mutexes.
 
-use core::ptr::NonNull;
+use core::{cell::UnsafeCell, ptr::NonNull};
 
 use esp_hal::{system::Cpu, time::Instant};
-use esp_sync::NonReentrantMutex;
+use esp_sync::RawMutex;
 
 use crate::{
     SCHEDULER,
+    esp_radio::sem_trace,
     run_queue::Priority,
     task,
     task::{TaskExt, TaskPtr},
@@ -18,6 +19,22 @@ use crate::{
 fn legacy_poll_wait_enabled() -> bool {
     matches!(
         option_env!("MEDITAMER_WIFI_ESP_RTOS_LEGACY_POLL_WAIT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn legacy_reentrant_lock_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_SEMAPHORE_LOCK_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RTOS_USE_LEGACY_SEMAPHORE_LOCK_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
@@ -208,14 +225,27 @@ impl SemaphoreInner {
 
 /// Semaphore and mutex primitives.
 pub struct Semaphore {
-    inner: NonReentrantMutex<SemaphoreInner>,
+    lock_state: RawMutex,
+    inner: UnsafeCell<SemaphoreInner>,
+}
+
+impl Semaphore {
+    fn with_inner<R>(&self, f: impl FnOnce(&mut SemaphoreInner) -> R) -> R {
+        if legacy_reentrant_lock_enabled() {
+            self.lock_state.lock(|| f(unsafe { &mut *self.inner.get() }))
+        } else {
+            self.lock_state
+                .lock_non_reentrant(|| f(unsafe { &mut *self.inner.get() }))
+        }
+    }
 }
 
 impl Semaphore {
     /// Create a new counting semaphore.
     pub const fn new_counting(initial: u32, max: u32) -> Self {
         Semaphore {
-            inner: NonReentrantMutex::new(SemaphoreInner::Counting {
+            lock_state: RawMutex::new(),
+            inner: UnsafeCell::new(SemaphoreInner::Counting {
                 current: initial,
                 max,
                 waiting: WaitQueue::new(),
@@ -228,7 +258,8 @@ impl Semaphore {
     /// If `recursive` is true, the mutex can be locked multiple times by the same task.
     pub const fn new_mutex(recursive: bool) -> Self {
         Semaphore {
-            inner: NonReentrantMutex::new(SemaphoreInner::Mutex {
+            lock_state: RawMutex::new(),
+            inner: UnsafeCell::new(SemaphoreInner::Mutex {
                 recursive,
                 owner: None,
                 lock_counter: 0,
@@ -243,7 +274,7 @@ impl Semaphore {
     /// This is a non-blocking operation. The return value indicates whether the semaphore was
     /// successfully taken.
     pub fn try_take(&self) -> bool {
-        self.inner.with(|sem| sem.try_take())
+        self.with_inner(|sem| sem.try_take())
     }
 
     /// Try to take the semaphore from an ISR.
@@ -251,7 +282,7 @@ impl Semaphore {
     /// This is a non-blocking operation. The return value indicates whether the semaphore was
     /// successfully taken.
     pub fn try_take_from_isr(&self) -> bool {
-        self.inner.with(|sem| sem.try_take_from_isr())
+        self.with_inner(|sem| sem.try_take_from_isr())
     }
 
     /// Take the semaphore.
@@ -261,33 +292,39 @@ impl Semaphore {
     /// If the semaphore is already taken, the task will be blocked until the semaphore is released.
     /// Recursive mutexes can be locked multiple times by the mutex owner task.
     pub fn take(&self, timeout_us: Option<u32>) -> bool {
+        let sem_ptr = self as *const Self as usize;
         if legacy_poll_wait_enabled() {
             let deadline = timeout_us
                 .map(|us| Instant::now() + esp_hal::time::Duration::from_micros(us as u64))
                 .unwrap_or(Instant::EPOCH + esp_hal::time::Duration::MAX);
             loop {
                 if self.try_take() {
+                    sem_trace::trace_take_done(sem_ptr, true);
                     debug!("Semaphore - legacy poll take - success");
                     return true;
                 }
                 if timeout_us.is_some() && deadline < Instant::now() {
+                    sem_trace::trace_take_done(sem_ptr, false);
                     debug!("Semaphore - legacy poll take - timed out");
                     return false;
                 }
                 task::yield_task();
             }
         }
-        if crate::with_deadline(timeout_us, |deadline| {
-            self.inner.with(|sem| {
+        let ok = crate::with_deadline(timeout_us, |deadline| {
+            self.with_inner(|sem| {
                 if sem.try_take() {
                     true
                 } else {
+                    sem_trace::trace_take_wait(sem_ptr, timeout_us);
                     // The task will go to sleep when the above critical section is released.
                     sem.wait_with_deadline(deadline);
                     false
                 }
             })
-        }) {
+        });
+        sem_trace::trace_take_done(sem_ptr, ok);
+        if ok {
             debug!("Semaphore - take - success");
             true
         } else {
@@ -298,26 +335,28 @@ impl Semaphore {
 
     /// Return the current count of the semaphore.
     pub fn current_count(&self) -> u32 {
-        self.inner.with(|sem| sem.current_count())
+        self.with_inner(|sem| sem.current_count())
     }
 
     /// Unlock the semaphore.
     pub fn give(&self) -> bool {
-        self.inner.with(|sem| {
+        let ok = self.with_inner(|sem| {
             if sem.try_give() {
                 sem.notify();
                 true
             } else {
                 false
             }
-        })
+        });
+        sem_trace::trace_give(self as *const Self as usize, ok);
+        ok
     }
 
     /// Try to unlock the semaphore from an ISR.
     ///
     /// The return value indicates whether the semaphore was successfully unlocked.
     pub fn try_give_from_isr(&self) -> bool {
-        self.inner.with(|sem| {
+        self.with_inner(|sem| {
             if sem.try_give_from_isr() {
                 sem.notify();
                 true
@@ -327,3 +366,6 @@ impl Semaphore {
         })
     }
 }
+
+unsafe impl Send for Semaphore {}
+unsafe impl Sync for Semaphore {}

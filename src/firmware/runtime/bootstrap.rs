@@ -166,7 +166,16 @@ pub fn run() -> ! {
         spawner.must_spawn(clock_task());
         spawner.must_spawn(battery_task());
 
-        spawner.must_spawn(storage::sd_task(sd_probe));
+        #[cfg(feature = "asset-upload-http")]
+        let skip_sd_task_for_boot_scan_diag = storage::upload::boot_scan_only_diag_enabled();
+        #[cfg(not(feature = "asset-upload-http"))]
+        let skip_sd_task_for_boot_scan_diag = false;
+
+        if skip_sd_task_for_boot_scan_diag {
+            esp_println::println!("sdprobe: boot_scan_only_diag active; sd_task skipped");
+        } else {
+            spawner.must_spawn(storage::sd_task(sd_probe));
+        }
         spawner.must_spawn(super::serial_task::time_sync_task(uart));
     });
 }

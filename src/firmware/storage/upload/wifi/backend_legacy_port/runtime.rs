@@ -1,7 +1,7 @@
 use super::{
-    legacy_runtime_config, runtime_bootstrap_status, RadioController, WifiController, WifiDevice,
-    LEGACY_BOOTSTRAP_SEQUENCE, LEGACY_INIT_CONFIG_CONTRACT, LEGACY_SCHEDULER_CONTRACT,
-    LEGACY_WIFI_TASK_CONTRACT,
+    legacy_runtime_config, legacy_timer_compat_init_tasks_enabled, runtime_bootstrap_status,
+    RadioController, WifiController, WifiDevice, LEGACY_BOOTSTRAP_SEQUENCE,
+    LEGACY_INIT_CONFIG_CONTRACT, LEGACY_SCHEDULER_CONTRACT, LEGACY_WIFI_TASK_CONTRACT,
 };
 use esp_hal::peripherals::WIFI;
 use esp_println::println;
@@ -58,6 +58,7 @@ pub(crate) fn initialize_runtime_sta_legacy_port(
 
     log_legacy_runtime_contract();
     log_bootstrap_status();
+    println!("upload_http: legacy_port runtime_init stage=before_esp_radio_init");
 
     let radio_ctrl = match esp_radio::init() {
         Ok(ctrl) => ctrl,
@@ -66,8 +67,15 @@ pub(crate) fn initialize_runtime_sta_legacy_port(
             return Err("asset-upload-http: legacy-port esp_radio::init failed");
         }
     };
+    println!("upload_http: legacy_port runtime_init stage=after_esp_radio_init");
+    if legacy_timer_compat_init_tasks_enabled() {
+        esp_rtos::precreate_esp_radio_timer_task();
+        esp_rtos::yield_for_esp_radio_diag();
+        println!("upload_http: legacy_port init_tasks_precreate_timer_task result=ok");
+    }
     let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
     let config = legacy_runtime_config(country_us_override);
+    println!("upload_http: legacy_port runtime_init stage=before_wifi_new");
 
     match esp_radio::wifi::new(radio_ctrl, wifi, config) {
         Ok((controller, ifaces)) => {

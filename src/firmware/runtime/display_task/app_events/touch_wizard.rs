@@ -20,6 +20,10 @@ async fn handle_start_touch_calibration_wizard_event(
     state: &mut DisplayLoopState,
     upload_enabled: bool,
 ) {
+    if cfg!(feature = "wifi-debug-slim-app") {
+        let _ = (context, state);
+        return;
+    }
     if upload_enabled {
         return;
     }

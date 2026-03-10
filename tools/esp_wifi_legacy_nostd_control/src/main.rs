@@ -1,17 +1,22 @@
 #![no_std]
 #![no_main]
 
+mod blob_state;
+
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use esp_backtrace as _;
 use esp_hal::{rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
-use esp_wifi::wifi::{PromiscuousPkt, WifiMode};
+use esp_wifi::wifi::WifiMode;
 use esp_wifi_sys::include::{
-    esp_wifi_get_channel, esp_wifi_set_channel, wifi_promiscuous_pkt_type_t_WIFI_PKT_CTRL,
+    esp_wifi_get_channel, esp_wifi_get_promiscuous, esp_wifi_set_channel, esp_wifi_set_promiscuous,
+    esp_wifi_set_promiscuous_filter, esp_wifi_set_promiscuous_rx_cb,
+    wifi_promiscuous_filter_t, wifi_promiscuous_pkt_type_t_WIFI_PKT_CTRL,
     wifi_promiscuous_pkt_type_t_WIFI_PKT_DATA, wifi_promiscuous_pkt_type_t_WIFI_PKT_MGMT,
     wifi_promiscuous_pkt_type_t_WIFI_PKT_MISC, wifi_second_chan_t,
-    wifi_second_chan_t_WIFI_SECOND_CHAN_NONE,
+    wifi_second_chan_t_WIFI_SECOND_CHAN_NONE, WIFI_PROMIS_FILTER_MASK_CTRL,
+    WIFI_PROMIS_FILTER_MASK_DATA, WIFI_PROMIS_FILTER_MASK_MGMT,
 };
 unsafe extern "C" {
     fn esp_rom_delay_us(us: u32);
@@ -41,9 +46,12 @@ fn format_legacy_task_role(task_ptr: usize, main_task_ptr: usize) -> &'static st
     }
 }
 
-fn promisc_rx(pkt: PromiscuousPkt<'_>) {
+unsafe extern "C" fn promisc_rx(
+    _buf: *mut esp_wifi_sys::c_types::c_void,
+    pkt_type: esp_wifi_sys::include::wifi_promiscuous_pkt_type_t,
+) {
     PROMISC_TOTAL.fetch_add(1, Ordering::Relaxed);
-    match pkt.frame_type {
+    match pkt_type {
         WIFI_PKT_MGMT => {
             PROMISC_MGMT.fetch_add(1, Ordering::Relaxed);
         }
@@ -76,10 +84,45 @@ fn read_promisc_counts() -> (u32, u32, u32, u32, u32) {
     )
 }
 
-fn run_promisc_diag(sniffer: &mut esp_wifi::wifi::Sniffer) {
-    sniffer.set_receive_cb(promisc_rx);
-    if let Err(err) = sniffer.set_promiscuous_mode(true) {
-        println!("legacy_nostd_wifi_control: promisc_enable=err err={:?}", err);
+fn run_promisc_diag() {
+    println!("legacy_nostd_wifi_control: promisc_enter=true");
+    let mut was_enabled = false;
+    let get_before_rc = unsafe { esp_wifi_get_promiscuous(&mut was_enabled as *mut bool) };
+    println!(
+        "legacy_nostd_wifi_control: promisc_get_before rc={} was_enabled={}",
+        get_before_rc, was_enabled,
+    );
+    if get_before_rc != 0 {
+        println!(
+            "legacy_nostd_wifi_control: promisc_enable=err get_before_rc={}",
+            get_before_rc,
+        );
+        return;
+    }
+    if was_enabled {
+        println!("legacy_nostd_wifi_control: promisc_enable=skip already_enabled=true");
+        return;
+    }
+
+    let cb_rc = unsafe { esp_wifi_set_promiscuous_rx_cb(Some(promisc_rx)) };
+    let filter = wifi_promiscuous_filter_t {
+        filter_mask: WIFI_PROMIS_FILTER_MASK_MGMT
+            | WIFI_PROMIS_FILTER_MASK_CTRL
+            | WIFI_PROMIS_FILTER_MASK_DATA,
+    };
+    let filter_rc = unsafe { esp_wifi_set_promiscuous_filter(&filter) };
+    let enable_rc = unsafe { esp_wifi_set_promiscuous(true) };
+    println!(
+        "legacy_nostd_wifi_control: promisc_enable_attempt cb_rc={} filter_rc={} enable_rc={}",
+        cb_rc, filter_rc, enable_rc,
+    );
+    if cb_rc != 0 || filter_rc != 0 || enable_rc != 0 {
+        let disable_rc = unsafe { esp_wifi_set_promiscuous(false) };
+        let clear_cb_rc = unsafe { esp_wifi_set_promiscuous_rx_cb(None) };
+        println!(
+            "legacy_nostd_wifi_control: promisc_enable=err cb_rc={} filter_rc={} enable_rc={} disable_rc={} clear_cb_rc={}",
+            cb_rc, filter_rc, enable_rc, disable_rc, clear_cb_rc,
+        );
         return;
     }
 
@@ -120,12 +163,15 @@ fn run_promisc_diag(sniffer: &mut esp_wifi::wifi::Sniffer) {
     } else {
         -1
     };
-    let disable = sniffer.set_promiscuous_mode(false);
+    let disable_rc = unsafe { esp_wifi_set_promiscuous(false) };
+    let clear_cb_rc = unsafe { esp_wifi_set_promiscuous_rx_cb(None) };
     println!(
-        "legacy_nostd_wifi_control: promisc_diag get_channel_rc={} restore_rc={} disable_ok={} total={} mgmt={} ctrl={} data={} misc={}",
+        "legacy_nostd_wifi_control: promisc_diag get_channel_rc={} restore_rc={} disable_ok={} disable_rc={} clear_cb_rc={} total={} mgmt={} ctrl={} data={} misc={}",
         get_channel_rc,
         restore_rc,
-        disable.is_ok(),
+        disable_rc == 0 && clear_cb_rc == 0,
+        disable_rc,
+        clear_cb_rc,
         agg_total,
         agg_mgmt,
         agg_ctrl,
@@ -202,6 +248,50 @@ fn print_legacy_diag(label: &str) {
             );
         }
     }
+    println!(
+        "legacy_nostd_wifi_control: mutex_diag label={} lock_count={} unlock_count={} task_delay_count={}",
+        label,
+        esp_wifi::diagnostic_mutex_lock_count(),
+        esp_wifi::diagnostic_mutex_unlock_count(),
+        esp_wifi::diagnostic_task_delay_count(),
+    );
+    for idx in 0..8 {
+        let (ordinal, task_ptr, mutex_ptr, op) = esp_wifi::diagnostic_mutex_recent(idx);
+        if ordinal != 0 {
+            println!(
+                "legacy_nostd_wifi_control: mutex_recent label={} idx={} ordinal={} task_ptr=0x{:08x} task_role={} mutex_ptr=0x{:08x} op={}",
+                label,
+                idx,
+                ordinal,
+                task_ptr,
+                format_legacy_task_role(task_ptr, current_task_ptr),
+                mutex_ptr,
+                op,
+            );
+        }
+    }
+    for idx in 0..8 {
+        let (ordinal, task_ptr, tick) = esp_wifi::diagnostic_task_delay_recent(idx);
+        if ordinal != 0 {
+            println!(
+                "legacy_nostd_wifi_control: task_delay_recent label={} idx={} ordinal={} task_ptr=0x{:08x} task_role={} tick={}",
+                label,
+                idx,
+                ordinal,
+                task_ptr,
+                format_legacy_task_role(task_ptr, current_task_ptr),
+                tick,
+            );
+        }
+    }
+}
+
+fn print_wifi_rx_cb_diag(label: &str) {
+    let (sta, ap) = esp_wifi::wifi::diagnostic_wifi_rx_cb_counts();
+    println!(
+        "legacy_nostd_wifi_control: wifi_rx_cb_diag label={} sta={} ap={}",
+        label, sta, ap,
+    );
 }
 
 fn print_wifi_mac_isr_diag(label: &str) {
@@ -295,10 +385,12 @@ fn main() -> ! {
     };
     println!("legacy_nostd_wifi_control: init=ok");
     esp_wifi::diagnostic_queue_diag_reset();
+    esp_wifi::wifi::diagnostic_reset_wifi_rx_cb_counts();
     esp_wifi::diagnostic_reset_wifi_mac_isr_count();
     print_wifi_init_config_diag("after_init");
     print_wifi_task_create_diag("after_init");
     print_wifi_mac_isr_diag("after_init");
+    print_wifi_rx_cb_diag("after_init");
     print_legacy_diag("after_init");
     let (mut controller, mut ifaces) = match esp_wifi::wifi::new(&init, peripherals.WIFI) {
         Ok(parts) => parts,
@@ -308,6 +400,7 @@ fn main() -> ! {
     print_wifi_init_config_diag("after_wifi_new");
     print_wifi_task_create_diag("after_wifi_new");
     print_wifi_mac_isr_diag("after_wifi_new");
+    print_wifi_rx_cb_diag("after_wifi_new");
     print_legacy_diag("after_wifi_new");
     if let Err(err) = controller.set_mode(WifiMode::Sta) {
         panic!("legacy_nostd_wifi_control: set_mode err={:?}", err);
@@ -319,9 +412,18 @@ fn main() -> ! {
     println!("legacy_nostd_wifi_control: start=ok");
     print_wifi_task_create_diag("after_start");
     print_wifi_mac_isr_diag("after_start");
+    print_wifi_rx_cb_diag("after_start");
     print_legacy_diag("after_start");
+    blob_state::print_blob_state("after_start");
     esp_wifi::diagnostic_queue_diag_reset();
-    run_promisc_diag(&mut ifaces.sniffer);
+    esp_wifi::wifi::diagnostic_reset_wifi_rx_cb_counts();
+    esp_wifi::diagnostic_reset_wifi_mac_isr_count();
+    print_wifi_mac_isr_diag("before_promisc");
+    print_wifi_rx_cb_diag("before_promisc");
+    run_promisc_diag();
+    print_wifi_mac_isr_diag("after_promisc");
+    print_wifi_rx_cb_diag("after_promisc");
+    blob_state::print_blob_state("after_promisc");
 
     match controller.scan_n(16) {
         Ok(results) => {
@@ -341,7 +443,9 @@ fn main() -> ! {
         Err(err) => println!("legacy_nostd_wifi_control: scan=err err={:?}", err),
     }
     print_wifi_mac_isr_diag("after_scan");
+    print_wifi_rx_cb_diag("after_scan");
     print_legacy_diag("after_scan");
+    blob_state::print_blob_state("after_scan");
 
     match controller.stop() {
         Ok(()) => println!("legacy_nostd_wifi_control: stop=ok"),

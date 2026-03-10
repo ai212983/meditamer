@@ -197,6 +197,7 @@ impl SchedulerState {
                 RunSchedulerOn::OtherCore => task::schedule_other_core(),
             }
         }
+        crate::esp_radio::note_timer_task_mark_ready(task_ptr);
 
         debug!("Task '{}' created: {:?}", name, task_ptr);
         if ESP_RTOS_TASK_CREATE_DIAG {
@@ -268,6 +269,7 @@ impl SchedulerState {
             #[cfg(feature = "esp-radio")]
             if let Some(next_task) = next_task {
                 crate::esp_radio::note_task_selected(next_task);
+                crate::esp_radio::note_timer_task_selected(next_task);
             }
 
             trace!("Switching task {:?} -> {:?}", current_task, next_task);
@@ -436,15 +438,34 @@ impl SchedulerState {
         let legacy_runtime_mode = false;
 
         if legacy_runtime_mode {
-            task.set_state(TaskState::Ready);
-            task::yield_task();
-        } else {
-            match self.run_queue.mark_task_ready(&self.per_cpu, task) {
-                RunSchedulerOn::DontRun => {}
-                RunSchedulerOn::CurrentCore => task::yield_task(),
-                #[cfg(multi_core)]
-                RunSchedulerOn::OtherCore => task::schedule_other_core(),
+            // The legacy port can resume tasks that were previously parked on timer/wait queues
+            // while still carrying a stale ready_queue_item link. Clear that linkage before
+            // requeueing so mark_task_ready() can rebuild a consistent runnable state.
+            unsafe {
+                let task_ref = task.as_ptr();
+                (*task_ref).ready_queue_item = None;
+                (*task_ref).run_queued = false;
             }
+        }
+
+        let mut run_on = if legacy_runtime_mode {
+            // Legacy esp-radio modes still need resumed tasks to re-enter the scheduler's
+            // runnable set, and the old circular scheduler semantics do not rely on modern
+            // priority gating to trigger a schedule point.
+            self.run_queue.mark_task_ready(&self.per_cpu, task)
+        } else {
+            self.run_queue.mark_task_ready(&self.per_cpu, task)
+        };
+        crate::esp_radio::note_timer_task_mark_ready(task);
+        if legacy_runtime_mode {
+            run_on = RunSchedulerOn::CurrentCore;
+        }
+
+        match run_on {
+            RunSchedulerOn::DontRun => {}
+            RunSchedulerOn::CurrentCore => task::yield_task(),
+            #[cfg(multi_core)]
+            RunSchedulerOn::OtherCore => task::schedule_other_core(),
         }
     }
 

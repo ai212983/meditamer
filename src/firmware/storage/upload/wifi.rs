@@ -20,16 +20,16 @@ use esp_println::println;
 mod backend;
 mod backend_legacy_port;
 mod runtime_init;
-use backend::{event, AccessPointInfo, AuthMethod, EventExt, ModeConfig};
 pub(crate) use backend::{
-    init_radio, new_runtime, wifi_active_scan_config, wifi_channel_active_scan_config,
-    wifi_client_mode_config, wifi_connect_async, wifi_directed_active_scan_config,
-    wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_started, wifi_passive_scan_config,
-    wifi_power_save_none, wifi_raw_broad_scan_config, wifi_rssi, wifi_scan_with_config_async,
-    wifi_set_config, wifi_set_mode, wifi_set_power_saving, wifi_set_protocol, wifi_sta_mode,
-    wifi_standard_bgn_protocols, wifi_start_async, wifi_stop_async, RadioController, ScanConfig,
-    WifiController, WifiDevice, NAME as BACKEND_NAME,
+    backend_name, init_radio, new_runtime, wifi_active_scan_config,
+    wifi_channel_active_scan_config, wifi_client_mode_config, wifi_connect_async,
+    wifi_directed_active_scan_config, wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_started,
+    wifi_passive_scan_config, wifi_power_save_none, wifi_raw_broad_scan_config, wifi_rssi,
+    wifi_scan_with_config_async, wifi_set_config, wifi_set_mode, wifi_set_power_saving,
+    wifi_set_protocol, wifi_sta_mode, wifi_standard_bgn_protocols, wifi_start_async,
+    wifi_stop_async, RadioController, ScanConfig, WifiController, WifiDevice,
 };
+use backend::{event, AccessPointInfo, AuthMethod, EventExt, ModeConfig};
 pub(crate) use runtime_init::{apply_runtime_setup_overrides_and_log, initialize_runtime_sta};
 type WifiError = backend::WifiError;
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
@@ -121,6 +121,10 @@ const WIFI_START_RAW_SCAN_DIAG: bool =
         Some(value) => Some(value),
         None => option_env!("WIFI_START_RAW_SCAN_DIAG"),
     });
+
+pub(crate) fn boot_scan_only_diag_enabled() -> bool {
+    connect::boot_scan_only_diag_enabled()
+}
 const WIFI_START_READINESS_PROBE: bool =
     parse_nonzero_flag(match option_env!("MEDITAMER_WIFI_START_READINESS_PROBE") {
         Some(value) => Some(value),

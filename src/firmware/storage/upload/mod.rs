@@ -37,7 +37,7 @@ pub(crate) fn setup(
     wifi: esp_hal::peripherals::WIFI<'static>,
 ) -> Result<UploadHttpRuntime, &'static str> {
     wifi_setup_stage_trace("setup.begin");
-    println!("upload_http: wifi_backend name={}", wifi::BACKEND_NAME);
+    println!("upload_http: wifi_backend name={}", wifi::backend_name());
     let initial_credentials = wifi::compiled_wifi_credentials();
 
     static STACK_RESOURCES: StaticCell<StackResources<UPLOAD_NET_STACK_SOCKETS>> =
@@ -82,4 +82,8 @@ pub(crate) async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 #[embassy_executor::task]
 pub(crate) async fn http_server_task(stack: Stack<'static>) {
     http::run_http_server(stack).await;
+}
+
+pub(crate) fn boot_scan_only_diag_enabled() -> bool {
+    wifi::boot_scan_only_diag_enabled()
 }

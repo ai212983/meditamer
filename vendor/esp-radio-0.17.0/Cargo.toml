@@ -365,6 +365,14 @@ default-features = false
 [dependencies.esp-metadata-generated]
 version = "0.3.0"
 
+[dependencies.esp-println]
+version = "0.16.1"
+default-features = false
+features = [
+    "esp32",
+    "uart",
+]
+
 [dependencies.esp-phy]
 version = "0.1.0"
 

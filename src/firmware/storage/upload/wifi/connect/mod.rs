@@ -44,6 +44,7 @@ use state_machine::{apply_pending_runtime_policy_updates, transition_state};
 use success::handle_connect_success;
 use timeout::handle_connect_timeout;
 
+pub(crate) use boot_scan_diag::boot_scan_only_diag_enabled;
 pub(super) use config::{wifi_credentials, wifi_credentials_from_parts};
 pub(super) use timing::{
     active_scan_timeout_ms, directed_scan_timeout_ms, passive_scan_timeout_ms,

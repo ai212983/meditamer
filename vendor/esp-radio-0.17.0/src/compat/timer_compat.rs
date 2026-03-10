@@ -3,6 +3,7 @@ use portable_atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use crate::{
     binary::{c_types::c_void, include::ets_timer},
+    compat::timer_compat_legacy,
     preempt::timer::TimerPtr,
 };
 
@@ -45,6 +46,9 @@ unsafe extern "C" {
 pub struct TimerCompatDiag {
     pub setfn_count: u32,
     pub arm_count: u32,
+    pub exec_count: u32,
+    pub process_due_call_count: u32,
+    pub process_due_hit_count: u32,
     pub wrapper_arm_count: u32,
     pub last_ets_timer_ptr: usize,
     pub last_timer_handle_ptr: usize,
@@ -52,6 +56,10 @@ pub struct TimerCompatDiag {
     pub last_arg_ptr: usize,
     pub last_arm_us: u32,
     pub last_arm_repeat: bool,
+    pub last_now_us: u32,
+    pub last_started_us: u32,
+    pub last_timeout_us: u32,
+    pub last_next_due_us: u32,
     pub recent_setfn_ordinals: [u32; TIMER_COMPAT_RING_CAP],
     pub recent_setfn_ets_timer_ptrs: [usize; TIMER_COMPAT_RING_CAP],
     pub recent_setfn_timer_handle_ptrs: [usize; TIMER_COMPAT_RING_CAP],
@@ -238,6 +246,7 @@ fn lookup_recent_setfn_by_handle(timer_handle_ptr: usize) -> (usize, usize) {
 }
 
 pub fn reset_timer_compat_diag() {
+    timer_compat_legacy::reset_diag();
     TIMER_COMPAT_SETFN_COUNT.store(0, Ordering::Relaxed);
     TIMER_COMPAT_ARM_COUNT.store(0, Ordering::Relaxed);
     TIMER_COMPAT_WRAPPER_ARM_COUNT.store(0, Ordering::Relaxed);
@@ -277,9 +286,71 @@ pub fn reset_timer_compat_diag() {
 }
 
 pub fn timer_compat_diag() -> TimerCompatDiag {
+    if timer_compat_legacy::compat_enabled() {
+        let legacy = timer_compat_legacy::diag();
+        return TimerCompatDiag {
+            setfn_count: legacy.setfn_count,
+            arm_count: legacy.arm_count,
+            exec_count: legacy.exec_count,
+            process_due_call_count: legacy.process_due_call_count,
+            process_due_hit_count: legacy.process_due_hit_count,
+            wrapper_arm_count: TIMER_COMPAT_WRAPPER_ARM_COUNT.load(Ordering::Relaxed),
+            last_ets_timer_ptr: 0,
+            last_timer_handle_ptr: 0,
+            last_callback_ptr: legacy.last_callback_ptr,
+            last_arg_ptr: legacy.last_arg_ptr,
+            last_arm_us: legacy.last_arm_us,
+            last_arm_repeat: legacy.last_arm_repeat,
+            last_now_us: legacy.last_now_us,
+            last_started_us: legacy.last_started_us,
+            last_timeout_us: legacy.last_timeout_us,
+            last_next_due_us: legacy.last_next_due_us,
+            recent_setfn_ordinals: [0; TIMER_COMPAT_RING_CAP],
+            recent_setfn_ets_timer_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_setfn_timer_handle_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_setfn_callback_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_setfn_arg_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_ordinals: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_ets_timer_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_timer_handle_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_callback_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_arg_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_caller_ptrs: [0; TIMER_COMPAT_RING_CAP],
+            recent_wrapper_arm_ordinals: core::array::from_fn(|idx| {
+                TIMER_COMPAT_RECENT_WRAPPER_ARM_ORDINALS[idx].load(Ordering::Relaxed)
+            }),
+            recent_wrapper_arm_caller_ptrs: core::array::from_fn(|idx| {
+                TIMER_COMPAT_RECENT_WRAPPER_ARM_CALLER_PTRS[idx].load(Ordering::Relaxed)
+            }),
+            recent_wrapper_arm_timer_ptrs: core::array::from_fn(|idx| {
+                TIMER_COMPAT_RECENT_WRAPPER_ARM_TIMER_PTRS[idx].load(Ordering::Relaxed)
+            }),
+            recent_wrapper_arm_us: core::array::from_fn(|idx| {
+                TIMER_COMPAT_RECENT_WRAPPER_ARM_US[idx].load(Ordering::Relaxed)
+            }),
+            recent_wrapper_arm_repeat: core::array::from_fn(|idx| {
+                TIMER_COMPAT_RECENT_WRAPPER_ARM_REPEAT[idx].load(Ordering::Relaxed)
+            }),
+            recent_arm_us: [0; TIMER_COMPAT_RING_CAP],
+            recent_arm_repeat: [false; TIMER_COMPAT_RING_CAP],
+            suppressed_setfn_count: TIMER_COMPAT_SUPPRESSED_SETFN_COUNT.load(Ordering::Relaxed),
+            last_suppressed_setfn_callback_ptr: TIMER_COMPAT_LAST_SUPPRESSED_SETFN_CALLBACK_PTR
+                .load(Ordering::Relaxed),
+            last_suppressed_setfn_arg_ptr: TIMER_COMPAT_LAST_SUPPRESSED_SETFN_ARG_PTR
+                .load(Ordering::Relaxed),
+            suppressed_arm_count: TIMER_COMPAT_SUPPRESSED_ARM_COUNT.load(Ordering::Relaxed),
+            last_suppressed_callback_ptr: TIMER_COMPAT_LAST_SUPPRESSED_CALLBACK_PTR
+                .load(Ordering::Relaxed),
+            last_suppressed_arg_ptr: TIMER_COMPAT_LAST_SUPPRESSED_ARG_PTR.load(Ordering::Relaxed),
+            last_suppressed_us: TIMER_COMPAT_LAST_SUPPRESSED_US.load(Ordering::Relaxed),
+        };
+    }
     TimerCompatDiag {
         setfn_count: TIMER_COMPAT_SETFN_COUNT.load(Ordering::Relaxed),
         arm_count: TIMER_COMPAT_ARM_COUNT.load(Ordering::Relaxed),
+        exec_count: 0,
+        process_due_call_count: 0,
+        process_due_hit_count: 0,
         wrapper_arm_count: TIMER_COMPAT_WRAPPER_ARM_COUNT.load(Ordering::Relaxed),
         last_ets_timer_ptr: TIMER_COMPAT_LAST_ETS_TIMER_PTR.load(Ordering::Relaxed),
         last_timer_handle_ptr: TIMER_COMPAT_LAST_TIMER_HANDLE_PTR.load(Ordering::Relaxed),
@@ -287,6 +358,10 @@ pub fn timer_compat_diag() -> TimerCompatDiag {
         last_arg_ptr: TIMER_COMPAT_LAST_ARG_PTR.load(Ordering::Relaxed),
         last_arm_us: TIMER_COMPAT_LAST_ARM_US.load(Ordering::Relaxed),
         last_arm_repeat: TIMER_COMPAT_LAST_ARM_REPEAT.load(Ordering::Relaxed),
+        last_now_us: 0,
+        last_started_us: 0,
+        last_timeout_us: 0,
+        last_next_due_us: u32::MAX,
         recent_setfn_ordinals: core::array::from_fn(|idx| {
             TIMER_COMPAT_RECENT_SETFN_ORDINALS[idx].load(Ordering::Relaxed)
         }),
@@ -355,10 +430,18 @@ pub fn timer_compat_diag() -> TimerCompatDiag {
 }
 
 pub(crate) fn compat_timer_arm(ets_timer: *mut ets_timer, tmout_ms: u32, repeat: bool) {
+    if timer_compat_legacy::compat_enabled() {
+        timer_compat_legacy::compat_timer_arm(ets_timer, tmout_ms, repeat);
+        return;
+    }
     compat_timer_arm_us(ets_timer, tmout_ms.saturating_mul(1000), repeat);
 }
 
 pub(crate) fn compat_timer_arm_us(ets_timer: *mut ets_timer, us: u32, repeat: bool) {
+    if timer_compat_legacy::compat_enabled() {
+        timer_compat_legacy::compat_timer_arm_us(ets_timer, us, repeat);
+        return;
+    }
     trace!(
         "timer_arm_us {:x} current: {} micros: {} repeat: {}",
         ets_timer as usize,
@@ -400,6 +483,10 @@ pub(crate) fn compat_timer_arm_us(ets_timer: *mut ets_timer, us: u32, repeat: bo
 }
 
 pub(crate) fn compat_timer_disarm(ets_timer: *mut ets_timer) {
+    if timer_compat_legacy::compat_enabled() {
+        timer_compat_legacy::compat_timer_disarm(ets_timer);
+        return;
+    }
     trace!("timer disarm");
     let ets_timer = unwrap!(unsafe { ets_timer.as_mut() }, "ets_timer is null");
 
@@ -411,6 +498,9 @@ pub(crate) fn compat_timer_disarm(ets_timer: *mut ets_timer) {
 }
 
 pub(crate) fn compat_timer_is_active(ets_timer: *mut ets_timer) -> bool {
+    if timer_compat_legacy::compat_enabled() {
+        return timer_compat_legacy::compat_timer_is_active(ets_timer);
+    }
     trace!("timer is_active");
     let ets_timer = unwrap!(unsafe { ets_timer.as_mut() }, "ets_timer is null");
 
@@ -433,6 +523,10 @@ fn delete_timer(ets_timer: &mut ets_timer) {
 }
 
 pub(crate) fn compat_timer_done(ets_timer: *mut ets_timer) {
+    if timer_compat_legacy::compat_enabled() {
+        timer_compat_legacy::compat_timer_done(ets_timer);
+        return;
+    }
     trace!("timer done");
 
     let ets_timer = unwrap!(unsafe { ets_timer.as_mut() }, "ets_timer is null");
@@ -445,6 +539,19 @@ pub(crate) fn compat_timer_setfn(
     pfunction: unsafe extern "C" fn(*mut c_void),
     parg: *mut c_void,
 ) {
+    let effective_function = if should_suppress_nan_dp_timer_setfn(pfunction as usize, parg as usize) {
+        TIMER_COMPAT_SUPPRESSED_SETFN_COUNT.fetch_add(1, Ordering::Relaxed);
+        TIMER_COMPAT_LAST_SUPPRESSED_SETFN_CALLBACK_PTR.store(pfunction as usize, Ordering::Relaxed);
+        TIMER_COMPAT_LAST_SUPPRESSED_SETFN_ARG_PTR.store(parg as usize, Ordering::Relaxed);
+        suppressed_timer_callback
+    } else {
+        pfunction
+    };
+
+    if timer_compat_legacy::compat_enabled() {
+        timer_compat_legacy::compat_timer_setfn(ets_timer, effective_function, parg);
+        return;
+    }
     trace!(
         "timer_setfn {:x} {:?} {:?}",
         ets_timer as usize, pfunction, parg
@@ -459,15 +566,6 @@ pub(crate) fn compat_timer_setfn(
     // This function is expected to create timers. For the simplicity of the preempt API, we
     // will not update existing timers, but create new ones.
     delete_timer(ets_timer);
-
-    let effective_function = if should_suppress_nan_dp_timer_setfn(pfunction as usize, parg as usize) {
-        TIMER_COMPAT_SUPPRESSED_SETFN_COUNT.fetch_add(1, Ordering::Relaxed);
-        TIMER_COMPAT_LAST_SUPPRESSED_SETFN_CALLBACK_PTR.store(pfunction as usize, Ordering::Relaxed);
-        TIMER_COMPAT_LAST_SUPPRESSED_SETFN_ARG_PTR.store(parg as usize, Ordering::Relaxed);
-        suppressed_timer_callback
-    } else {
-        pfunction
-    };
 
     let timer = unsafe { TimerHandle::new(effective_function, parg) }
         .leak()

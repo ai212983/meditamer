@@ -11,7 +11,7 @@ fn legacy_wifi_task_bootstrap_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_WIFI_TASK_BOOTSTRAP_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || crate::esp_radio::backend_legacy_port_runtime_enabled()
 }
 
 fn is_wifi_task(task: TaskPtr) -> bool {

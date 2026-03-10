@@ -23,6 +23,29 @@ fn wifi_use_legacy_esp_timer_get_time_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_ESP_TIMER_GET_TIME_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn wifi_use_legacy_queue_send_from_isr_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_QUEUE_SEND_FROM_ISR_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn wifi_use_legacy_semaphore_from_isr_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_SEMAPHORE_FROM_ISR_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_SEMAPHORE_FROM_ISR_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
 
@@ -43,6 +66,7 @@ unsafe extern "C" {
     fn esp_rtos_queue_item_size(queue: *mut c_void) -> usize;
     fn __esp_rtos_diag_timer_callback_current_ptr() -> usize;
     fn __esp_rtos_diag_timer_callback_current_arg_ptr() -> usize;
+    fn __esp_rtos_diag_current_task_ptr_or_zero() -> usize;
 }
 
 #[cfg(feature = "wifi")]
@@ -57,6 +81,7 @@ pub struct WifiOsDiagSnapshot {
     pub queue_send_last_task_ptr: usize,
     pub queue_send_task_changes: u32,
     pub queue_send_isr: u32,
+    pub queue_send_isr_legacy_branch: u32,
     pub queue_send_sample_queues: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_sample_tasks: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_sample_item_word0: [u32; WIFI_OS_QUEUE_SAMPLE_CAP],
@@ -123,6 +148,8 @@ static WIFI_OS_QUEUE_SEND_LAST_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
 static WIFI_OS_QUEUE_SEND_TASK_CHANGES: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES: [AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP] =
     [const { AtomicUsize::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
@@ -268,6 +295,7 @@ pub fn wifi_os_diag_reset() {
     WIFI_OS_QUEUE_SEND_LAST_TASK_PTR.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_TASK_CHANGES.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_ISR_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT.store(0, Ordering::Relaxed);
     for slot in 0..WIFI_OS_QUEUE_SAMPLE_CAP {
         WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES[slot].store(0, Ordering::Relaxed);
         WIFI_OS_QUEUE_SEND_SAMPLE_TASKS[slot].store(0, Ordering::Relaxed);
@@ -332,6 +360,8 @@ pub fn wifi_os_diag_snapshot() -> WifiOsDiagSnapshot {
         queue_send_last_task_ptr: WIFI_OS_QUEUE_SEND_LAST_TASK_PTR.load(Ordering::Relaxed),
         queue_send_task_changes: WIFI_OS_QUEUE_SEND_TASK_CHANGES.load(Ordering::Relaxed),
         queue_send_isr: WIFI_OS_QUEUE_SEND_ISR_COUNT.load(Ordering::Relaxed),
+        queue_send_isr_legacy_branch: WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT
+            .load(Ordering::Relaxed),
         queue_send_sample_queues: core::array::from_fn(|idx| {
             WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES[idx].load(Ordering::Relaxed)
         }),
@@ -616,6 +646,12 @@ fn current_timer_exec_snapshot() -> (usize, usize) {
 }
 
 #[cfg(feature = "wifi")]
+#[inline]
+fn current_task_ptr_for_diag() -> usize {
+    unsafe { __esp_rtos_diag_current_task_ptr_or_zero() }
+}
+
+#[cfg(feature = "wifi")]
 fn record_queue_send_item_words(queue: *mut c_void, item: *const c_void) {
     if queue.is_null() || item.is_null() {
         return;
@@ -745,8 +781,10 @@ fn record_queue_recv_item_words(queue: *mut c_void, item: *mut c_void) {
 /// *************************************************************************
 #[allow(unused)]
 pub unsafe extern "C" fn semphr_create(max: u32, init: u32) -> *mut c_void {
+    let sem = sem_create(max, init);
+    wifi_init_runtime_trace("semphr_create");
     trace!("semphr_create - max {} init {}", max, init);
-    sem_create(max, init)
+    sem
 }
 
 /// **************************************************************************
@@ -784,6 +822,7 @@ pub unsafe extern "C" fn semphr_delete(semphr: *mut c_void) {
 /// *************************************************************************
 #[ram]
 pub unsafe extern "C" fn semphr_take(semphr: *mut c_void, tick: u32) -> i32 {
+    wifi_init_runtime_trace("semphr_take");
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_TAKE_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_take {:?} block_time_tick {}", semphr, tick);
@@ -798,7 +837,14 @@ pub unsafe extern "C" fn semphr_take_from_isr(
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_TAKE_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_take_from_isr {:?}", semphr);
-    sem_try_take_from_isr(semphr, higher_priority_task_waken)
+    if wifi_use_legacy_semaphore_from_isr_diag_enabled() {
+        if !higher_priority_task_waken.is_null() {
+            unsafe { higher_priority_task_waken.write(false) };
+        }
+        semphr_take(semphr, 0)
+    } else {
+        sem_try_take_from_isr(semphr, higher_priority_task_waken)
+    }
 }
 
 /// **************************************************************************
@@ -816,6 +862,7 @@ pub unsafe extern "C" fn semphr_take_from_isr(
 /// *************************************************************************
 #[ram]
 pub unsafe extern "C" fn semphr_give(semphr: *mut c_void) -> i32 {
+    wifi_init_runtime_trace("semphr_give");
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_GIVE_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_give {:?}", semphr);
@@ -830,7 +877,14 @@ pub unsafe extern "C" fn semphr_give_from_isr(
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_GIVE_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_give_from_isr {:?}", semphr);
-    sem_try_give_from_isr(semphr, higher_priority_task_waken)
+    if wifi_use_legacy_semaphore_from_isr_diag_enabled() {
+        if !higher_priority_task_waken.is_null() {
+            unsafe { higher_priority_task_waken.write(false) };
+        }
+        semphr_give(semphr)
+    } else {
+        sem_try_give_from_isr(semphr, higher_priority_task_waken)
+    }
 }
 
 /// **************************************************************************
@@ -910,9 +964,44 @@ pub unsafe extern "C" fn read_mac(mac: *mut u8, type_: u32) -> c_int {
 // other functions
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __esp_radio_puts(s: *const c_char) {
+    WIFI_LOG_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    if wifi_log_callback_suppressed() {
+        let _ = s;
+        return;
+    }
     unsafe {
         let cstr = str_from_c(s);
         info!("{}", cstr);
+    }
+}
+
+static WIFI_INIT_CB_TRACE_COUNT: AtomicU32 = AtomicU32::new(0);
+static WIFI_LOG_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
+
+fn wifi_init_runtime_trace_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_NEW_TRACE_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_INIT_TRACE"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(option_env!("ESP_RADIO_INIT_TRACE"), Some(_))
+}
+
+fn wifi_log_callback_suppressed() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_SUPPRESS_PUTS_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn wifi_init_runtime_trace(message: &str) {
+    if wifi_init_runtime_trace_enabled() {
+        let _ = message;
+        WIFI_INIT_CB_TRACE_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -936,6 +1025,7 @@ pub unsafe extern "C" fn ets_timer_setfn(
     pfunction: *mut c_void,
     parg: *mut c_void,
 ) {
+    wifi_init_runtime_trace("ets_timer_setfn");
     unsafe {
         crate::compat::timer_compat::compat_timer_setfn(
             ptimer.cast(),
@@ -963,6 +1053,7 @@ fn current_timer_wrapper_caller_ptr() -> usize {
 
 #[cfg(feature = "wifi")]
 pub unsafe extern "C" fn ets_timer_arm(timer: *mut c_void, ms: u32, repeat: bool) {
+    wifi_init_runtime_trace("ets_timer_arm");
     crate::compat::timer_compat::record_wrapper_arm_call(
         timer as usize,
         current_timer_wrapper_caller_ptr(),
@@ -974,6 +1065,7 @@ pub unsafe extern "C" fn ets_timer_arm(timer: *mut c_void, ms: u32, repeat: bool
 
 #[cfg(feature = "wifi")]
 pub unsafe extern "C" fn ets_timer_arm_us(timer: *mut c_void, us: u32, repeat: bool) {
+    wifi_init_runtime_trace("ets_timer_arm_us");
     crate::compat::timer_compat::record_wrapper_arm_call(
         timer as usize,
         current_timer_wrapper_caller_ptr(),
@@ -1208,7 +1300,9 @@ pub fn set_phy_calibration_data(data: &[u8; core::mem::size_of::<esp_phy_calibra
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn queue_create(queue_len: u32, item_size: u32) -> *mut c_void {
-    crate::compat::queue::queue_create(queue_len as i32, item_size as i32).cast()
+    let queue = crate::compat::queue::queue_create(queue_len as i32, item_size as i32).cast();
+    wifi_init_runtime_trace("queue_create.after");
+    queue
 }
 
 /// **************************************************************************
@@ -1248,13 +1342,14 @@ pub unsafe extern "C" fn queue_send(
     item: *mut c_void,
     block_time_tick: u32,
 ) -> i32 {
+    let (item_word0, item_pointee_word0, item_pointee_word1) =
+        queue_send_item_snapshot(queue, item.cast_const());
+    wifi_init_runtime_trace("queue_send.before");
     #[cfg(feature = "wifi")]
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
-        let task_ptr = crate::preempt::current_task() as usize;
+        let task_ptr = current_task_ptr_for_diag();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
-        let (item_word0, item_pointee_word0, item_pointee_word1) =
-            queue_send_item_snapshot(queue, item.cast_const());
         record_first_last_task_ptr(
             &WIFI_OS_QUEUE_SEND_FIRST_TASK_PTR,
             &WIFI_OS_QUEUE_SEND_LAST_TASK_PTR,
@@ -1298,11 +1393,13 @@ pub unsafe extern "C" fn queue_send(
         );
         record_queue_send_item_words(queue, item.cast_const());
     }
-    crate::compat::queue::queue_send_to_back(
+    let rc = crate::compat::queue::queue_send_to_back(
         queue.cast(),
         item.cast_const(),
         blob_ticks_to_micros(block_time_tick),
-    )
+    );
+    wifi_init_runtime_trace("queue_send.after");
+    rc
 }
 
 /// **************************************************************************
@@ -1328,6 +1425,14 @@ pub unsafe extern "C" fn queue_send_from_isr(
 ) -> i32 {
     #[cfg(feature = "wifi")]
     WIFI_OS_QUEUE_SEND_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
+    if wifi_use_legacy_queue_send_from_isr_diag_enabled() {
+        #[cfg(feature = "wifi")]
+        WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !higher_priority_task_waken.is_null() {
+            unsafe { *(higher_priority_task_waken as *mut u32) = 1 };
+        }
+        return unsafe { queue_send_to_back(queue, item, 1000) };
+    }
     crate::compat::queue::queue_try_send_to_back_from_isr(
         queue.cast(),
         item.cast_const(),
@@ -1355,10 +1460,11 @@ pub unsafe extern "C" fn queue_send_to_back(
     item: *mut c_void,
     block_time_tick: u32,
 ) -> i32 {
+    wifi_init_runtime_trace("queue_send_to_back.before");
     #[cfg(feature = "wifi")]
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
-        let task_ptr = crate::preempt::current_task() as usize;
+        let task_ptr = current_task_ptr_for_diag();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
         let (item_word0, item_pointee_word0, item_pointee_word1) =
             queue_send_item_snapshot(queue, item.cast_const());
@@ -1405,11 +1511,13 @@ pub unsafe extern "C" fn queue_send_to_back(
         );
         record_queue_send_item_words(queue, item.cast_const());
     }
-    crate::compat::queue::queue_send_to_back(
+    let rc = crate::compat::queue::queue_send_to_back(
         queue.cast(),
         item,
         blob_ticks_to_micros(block_time_tick),
-    )
+    );
+    wifi_init_runtime_trace("queue_send_to_back.after");
+    rc
 }
 
 /// **************************************************************************
@@ -1432,10 +1540,11 @@ pub unsafe extern "C" fn queue_send_to_front(
     item: *mut c_void,
     block_time_tick: u32,
 ) -> i32 {
+    wifi_init_runtime_trace("queue_send_to_front.before");
     #[cfg(feature = "wifi")]
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
-        let task_ptr = crate::preempt::current_task() as usize;
+        let task_ptr = current_task_ptr_for_diag();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
         let (item_word0, item_pointee_word0, item_pointee_word1) =
             queue_send_item_snapshot(queue, item.cast_const());
@@ -1482,11 +1591,13 @@ pub unsafe extern "C" fn queue_send_to_front(
         );
         record_queue_send_item_words(queue, item.cast_const());
     }
-    crate::compat::queue::queue_send_to_front(
+    let rc = crate::compat::queue::queue_send_to_front(
         queue.cast(),
         item,
         blob_ticks_to_micros(block_time_tick),
-    )
+    );
+    wifi_init_runtime_trace("queue_send_to_front.after");
+    rc
 }
 
 /// **************************************************************************
@@ -1509,12 +1620,14 @@ pub unsafe extern "C" fn queue_recv(
     item: *mut c_void,
     block_time_ms: u32,
 ) -> i32 {
+    wifi_init_runtime_trace("queue_recv.before");
     let rc =
         crate::compat::queue::queue_receive(queue.cast(), item, blob_ticks_to_micros(block_time_ms));
+    wifi_init_runtime_trace("queue_recv.after");
     #[cfg(feature = "wifi")]
     if rc != 0 {
         let ordinal = WIFI_OS_QUEUE_RECV_COUNT.fetch_add(1, Ordering::Relaxed);
-        let task_ptr = crate::preempt::current_task() as usize;
+        let task_ptr = current_task_ptr_for_diag();
         let caller_ptr = current_queue_recv_caller_ptr();
         record_first_last_task_ptr(
             &WIFI_OS_QUEUE_RECV_FIRST_TASK_PTR,

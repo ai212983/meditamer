@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 
+mod blob_state;
 mod promisc_diag;
+mod timer_diag;
 
 use core::ffi::{c_char, c_void};
 
@@ -9,6 +11,37 @@ use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 use esp_radio::wifi::{ScanConfig, WifiMode};
+use timer_diag::print_timer_compat_diag;
+
+fn legacy_timer_compat_requested() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn legacy_timer_compat_init_tasks_requested() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_INIT_TASKS_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_INIT_TASKS_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn minimal_log_requested() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_STANDALONE_MINIMAL_LOG_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_STANDALONE_MINIMAL_LOG_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
 
 unsafe extern "C" {
     fn __esp_rtos_diag_reset_legacy_task_model();
@@ -64,6 +97,22 @@ fn print_wifi_mac_isr_diag(label: &str) {
         "nostd_wifi_control: wifi_mac_isr_diag label={} count={}",
         label,
         esp_radio::diagnostic_wifi_mac_isr_count(),
+    );
+}
+
+fn print_wifi_promisc_cb_diag(label: &str) {
+    println!(
+        "nostd_wifi_control: wifi_promisc_cb_diag label={} count={}",
+        label,
+        esp_radio::diagnostic_wifi_promisc_rx_cb_count(),
+    );
+}
+
+fn print_wifi_rx_cb_diag(label: &str) {
+    let (sta, ap) = esp_radio::wifi::diagnostic_wifi_rx_cb_counts();
+    println!(
+        "nostd_wifi_control: wifi_rx_cb_diag label={} sta={} ap={}",
+        label, sta, ap,
     );
 }
 
@@ -327,6 +376,7 @@ fn print_wifi_os_diag(label: &str) {
 
 #[esp_hal::main]
 fn main() -> ! {
+    let minimal_log = minimal_log_requested();
     unsafe {
         __esp_rtos_diag_reset_legacy_task_model();
     }
@@ -336,11 +386,19 @@ fn main() -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
     diag_yield("after_rtos_start", 8);
-    print_rtos_create_diag("after_rtos_start");
-    esp_rtos::precreate_esp_radio_timer_task();
-    println!("nostd_wifi_control: precreate_timer_task=ok");
-    diag_yield("after_precreate_timer_task", 8);
-    print_rtos_create_diag("after_precreate_timer_task");
+    if !minimal_log {
+        print_rtos_create_diag("after_rtos_start");
+    }
+    if !legacy_timer_compat_requested() {
+        esp_rtos::precreate_esp_radio_timer_task();
+        println!("nostd_wifi_control: precreate_timer_task=ok");
+        diag_yield("after_precreate_timer_task", 8);
+        if !minimal_log {
+            print_rtos_create_diag("after_precreate_timer_task");
+        }
+    } else {
+        println!("nostd_wifi_control: precreate_timer_task=skipped legacy_timer_compat=true");
+    }
 
     println!("nostd_wifi_control: begin=true");
 
@@ -349,24 +407,41 @@ fn main() -> ! {
         Err(err) => panic!("nostd_wifi_control: esp_radio::init err={:?}", err),
     };
     println!("nostd_wifi_control: esp_radio_init=ok");
+    if legacy_timer_compat_requested() && legacy_timer_compat_init_tasks_requested() {
+        esp_rtos::precreate_esp_radio_timer_task();
+        println!("nostd_wifi_control: precreate_timer_task=after_esp_radio_init legacy_timer_compat=true");
+        diag_yield("after_legacy_init_tasks_precreate_timer_task", 8);
+        if !minimal_log {
+            print_rtos_create_diag("after_legacy_init_tasks_precreate_timer_task");
+        }
+    }
     diag_yield("after_esp_radio_init", 8);
-    print_rtos_create_diag("after_esp_radio_init");
+    if !minimal_log {
+        print_rtos_create_diag("after_esp_radio_init");
+    }
     esp_radio::diagnostic_wifi_os_diag_reset();
     esp_radio::diagnostic_reset_wifi_task_create_diag();
     esp_radio::diagnostic_reset_wifi_mac_isr_count();
+    esp_radio::diagnostic_reset_wifi_promisc_rx_cb_count();
+    esp_radio::wifi::diagnostic_reset_wifi_rx_cb_counts();
 
-    let (mut controller, mut ifaces) = match esp_radio::wifi::new(&radio, peripherals.WIFI, Default::default()) {
+    let (mut controller, _ifaces) = match esp_radio::wifi::new(&radio, peripherals.WIFI, Default::default()) {
         Ok(parts) => parts,
         Err(err) => panic!("nostd_wifi_control: wifi_new err={:?}", err),
     };
     println!("nostd_wifi_control: wifi_new=ok");
     diag_yield("after_wifi_new", 8);
-    print_rtos_create_diag("after_wifi_new");
-    print_wifi_init_config_diag("after_wifi_new");
-    print_wifi_task_create_diag("after_wifi_new");
-    print_wifi_mac_isr_diag("after_wifi_new");
-    print_wifi_os_diag("after_wifi_new");
-    esp_radio::diagnostic_wifi_os_diag_reset();
+    if !minimal_log {
+        print_rtos_create_diag("after_wifi_new");
+        print_wifi_init_config_diag("after_wifi_new");
+        print_wifi_task_create_diag("after_wifi_new");
+        print_wifi_mac_isr_diag("after_wifi_new");
+        print_wifi_rx_cb_diag("after_wifi_new");
+        print_wifi_os_diag("after_wifi_new");
+        print_timer_compat_diag("after_wifi_new");
+        blob_state::print_blob_state("after_wifi_new");
+        esp_radio::diagnostic_wifi_os_diag_reset();
+    }
 
     if let Err(err) = controller.set_mode(WifiMode::Sta) {
         panic!("nostd_wifi_control: set_mode err={:?}", err);
@@ -377,13 +452,40 @@ fn main() -> ! {
         panic!("nostd_wifi_control: start err={:?}", err);
     }
     println!("nostd_wifi_control: start=ok");
+    esp_radio::diagnostic_reset_wifi_mac_isr_count();
+    println!(
+        "nostd_wifi_control: wifi_mac_isr_diag label=before_promisc count={}",
+        esp_radio::diagnostic_wifi_mac_isr_count()
+    );
+    print_wifi_promisc_cb_diag("before_promisc");
     diag_yield("after_wifi_start", 16);
-    print_rtos_create_diag("after_wifi_start");
-    print_wifi_task_create_diag("after_wifi_start");
-    print_wifi_mac_isr_diag("after_wifi_start");
-    print_wifi_os_diag("after_wifi_start");
-    esp_radio::diagnostic_wifi_os_diag_reset();
-    promisc_diag::run(&mut ifaces.sniffer);
+    if !minimal_log {
+        print_rtos_create_diag("after_wifi_start");
+        print_wifi_task_create_diag("after_wifi_start");
+        print_wifi_mac_isr_diag("after_wifi_start");
+        print_wifi_rx_cb_diag("after_wifi_start");
+        print_wifi_os_diag("after_wifi_start");
+        print_timer_compat_diag("after_wifi_start");
+        blob_state::print_blob_state("after_wifi_start");
+        esp_radio::diagnostic_wifi_os_diag_reset();
+    }
+    if legacy_timer_compat_requested() && !legacy_timer_compat_init_tasks_requested() {
+        esp_rtos::precreate_esp_radio_timer_task();
+        println!("nostd_wifi_control: precreate_timer_task=late legacy_timer_compat=true");
+        diag_yield("after_late_precreate_timer_task", 8);
+        if !minimal_log {
+            print_rtos_create_diag("after_late_precreate_timer_task");
+        }
+    }
+    promisc_diag::run();
+    println!(
+        "nostd_wifi_control: wifi_mac_isr_diag label=after_promisc count={}",
+        esp_radio::diagnostic_wifi_mac_isr_count()
+    );
+    print_wifi_promisc_cb_diag("after_promisc");
+    if !minimal_log {
+        blob_state::print_blob_state("after_promisc");
+    }
 
     let scan = controller.scan_with_config(ScanConfig::default().with_max(16));
     match scan {
@@ -410,12 +512,33 @@ fn main() -> ! {
             println!("nostd_wifi_control: scan=err err={:?}", err);
         }
     }
-    print_wifi_mac_isr_diag("after_scan");
-    print_wifi_os_diag("after_scan");
+    println!(
+        "nostd_wifi_control: wifi_mac_isr_diag label=after_scan count={}",
+        esp_radio::diagnostic_wifi_mac_isr_count()
+    );
+    print_wifi_promisc_cb_diag("after_scan");
+    if !minimal_log {
+        print_wifi_mac_isr_diag("after_scan");
+        print_wifi_rx_cb_diag("after_scan");
+        print_wifi_os_diag("after_scan");
+        print_timer_compat_diag("after_scan");
+        blob_state::print_blob_state("after_scan");
+    }
 
     match controller.stop() {
         Ok(()) => println!("nostd_wifi_control: stop=ok"),
         Err(err) => println!("nostd_wifi_control: stop=err err={:?}", err),
+    }
+
+    for idx in 0..64 {
+        if idx % 8 == 0 {
+            println!(
+                "nostd_wifi_control: wifi_mac_isr_diag label=linger count={}",
+                esp_radio::diagnostic_wifi_mac_isr_count()
+            );
+            print_wifi_promisc_cb_diag("linger");
+        }
+        diag_yield("linger", 64);
     }
 
     loop {

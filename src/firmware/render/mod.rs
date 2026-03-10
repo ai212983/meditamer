@@ -1,4 +1,8 @@
 mod clock;
+#[cfg(feature = "wifi-debug-slim-app")]
+#[path = "visual_stub.rs"]
+mod visual;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 mod visual;
 
 use embassy_time::Instant;

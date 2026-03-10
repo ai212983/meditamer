@@ -15,13 +15,28 @@ use esp_sync::NonReentrantMutex;
 
 use crate::{
     SCHEDULER,
-    esp_radio::legacy_scheduler,
+    esp_radio::{legacy_builtin_scheduler_runtime_mode_enabled, legacy_scheduler},
     task::{TaskExt, TaskPtr},
 };
+
+unsafe extern "C" {
+    fn __esp_radio_diag_legacy_timer_compat_enabled() -> bool;
+    fn __esp_radio_diag_process_legacy_timer_compat_due() -> bool;
+    fn __esp_radio_diag_legacy_timer_compat_next_due_us() -> u32;
+}
 
 static TIMER_QUEUE: TimerQueue = TimerQueue::new();
 static TIMER_CALLBACK_EXEC_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_ENTRY_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_RESUME_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_LOOP_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_DEFAULT_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_MARK_READY_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_POP_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_SELECTED_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_CALLBACK_CURRENT_PTR: AtomicUsize = AtomicUsize::new(0);
 static TIMER_CALLBACK_CURRENT_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
 static TIMER_CALLBACK_LAST_PTR: AtomicUsize = AtomicUsize::new(0);
@@ -38,6 +53,39 @@ fn use_legacy_timer_loop_diag_enabled() -> bool {
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_TIMER_LOOP_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn use_legacy_timer_task_driver_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_TIMER_TASK_DRIVER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RTOS_USE_LEGACY_TIMER_TASK_DRIVER_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn use_legacy_timer_compat_driver_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn use_exact_legacy_timer_compat_loop_diag_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_EXACT_LEGACY_TIMER_COMPAT_LOOP_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("ESP_RTOS_USE_EXACT_LEGACY_TIMER_COMPAT_LOOP_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
 }
@@ -71,6 +119,14 @@ pub struct TimerCallbackExecDiag {
 pub fn reset_timer_callback_exec_diag() {
     TIMER_CALLBACK_EXEC_COUNT.store(0, Ordering::Relaxed);
     TIMER_TASK_ENTRY_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_RESUME_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_LOOP_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_DEFAULT_BRANCH_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_MARK_READY_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_POP_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_SELECTED_COUNT.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_CURRENT_PTR.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_CURRENT_ARG_PTR.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_LAST_PTR.store(0, Ordering::Relaxed);
@@ -84,6 +140,60 @@ pub fn reset_timer_callback_exec_diag() {
 
 pub fn timer_task_entry_count() -> u32 {
     TIMER_TASK_ENTRY_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_resume_count() -> u32 {
+    TIMER_TASK_RESUME_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_loop_count() -> u32 {
+    TIMER_TASK_LOOP_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_legacy_compat_branch_count() -> u32 {
+    TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_legacy_driver_branch_count() -> u32 {
+    TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_default_branch_count() -> u32 {
+    TIMER_TASK_DEFAULT_BRANCH_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_mark_ready_count() -> u32 {
+    TIMER_TASK_MARK_READY_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_pop_count() -> u32 {
+    TIMER_TASK_POP_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_selected_count() -> u32 {
+    TIMER_TASK_SELECTED_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_ptr() -> usize {
+    TIMER_TASK_PTR.load(Ordering::Relaxed)
+}
+
+pub fn note_timer_task_mark_ready(task: TaskPtr) {
+    if TIMER_TASK_PTR.load(Ordering::Relaxed) == task.as_ptr() as usize {
+        TIMER_TASK_MARK_READY_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn note_timer_task_popped(task: TaskPtr) {
+    if TIMER_TASK_PTR.load(Ordering::Relaxed) == task.as_ptr() as usize {
+        TIMER_TASK_POP_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn note_timer_task_selected(task: TaskPtr) {
+    if TIMER_TASK_PTR.load(Ordering::Relaxed) == task.as_ptr() as usize {
+        TIMER_TASK_SELECTED_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub fn timer_callback_exec_diag() -> TimerCallbackExecDiag {
@@ -104,10 +214,23 @@ pub fn timer_callback_exec_diag() -> TimerCallbackExecDiag {
 pub fn ensure_timer_task() {
     TIMER_QUEUE.inner.with(|q| {
         if q.task.is_none() {
-            let task_ptr =
-                SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
-            legacy_scheduler::note_created_task("timer", task_ptr);
-            q.task = Some(task_ptr);
+            let task = create_timer_task();
+            TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
+            q.task = Some(task);
+            q.next_wakeup = u64::MAX;
+        }
+    });
+}
+
+pub fn wake_timer_task() {
+    TIMER_QUEUE.inner.with(|q| {
+        if let Some(task) = q.task {
+            TIMER_TASK_RESUME_COUNT.fetch_add(1, Ordering::Relaxed);
+            wake_timer_task_handle(task);
+        } else {
+            let task = create_timer_task();
+            TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
+            q.task = Some(task);
             q.next_wakeup = u64::MAX;
         }
     });
@@ -132,7 +255,7 @@ struct TimerQueueInner {
     // A linked list of active timers
     head: Option<NonNull<Timer>>,
     next_wakeup: u64,
-    task: Option<TaskPtr>,
+    task: Option<TimerTaskHandle>,
 }
 
 unsafe impl Send for TimerQueueInner {}
@@ -161,14 +284,14 @@ impl TimerQueueInner {
         if let Some(task) = self.task {
             if due < self.next_wakeup {
                 self.next_wakeup = due;
-                task.resume();
+                TIMER_TASK_RESUME_COUNT.fetch_add(1, Ordering::Relaxed);
+                wake_timer_task_handle(task);
             }
         } else {
             // create the timer task
-            let task_ptr =
-                SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
-            legacy_scheduler::note_created_task("timer", task_ptr);
-            self.task = Some(task_ptr);
+            let task = create_timer_task();
+            TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
+            self.task = Some(task);
             self.next_wakeup = due;
         }
     }
@@ -200,6 +323,34 @@ impl TimerQueueInner {
         }
 
         false
+    }
+}
+
+fn create_timer_task() -> TimerTaskHandle {
+    if legacy_builtin_scheduler_runtime_mode_enabled() {
+        crate::esp_radio::legacy_builtin_scheduler::allocate_main_task();
+        let task_handle = crate::esp_radio::legacy_builtin_scheduler::task_create(
+            "timer",
+            timer_task,
+            core::ptr::null_mut(),
+            8192,
+        );
+        if let Some(task_ptr) = TaskPtr::new(task_handle.cast()) {
+            legacy_scheduler::note_created_task("timer", task_ptr);
+        }
+        TimerTaskHandle::Legacy(task_handle)
+    } else {
+        let task_ptr =
+            SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
+        legacy_scheduler::note_created_task("timer", task_ptr);
+        TimerTaskHandle::Modern(task_ptr)
+    }
+}
+
+fn wake_timer_task_handle(task: TimerTaskHandle) {
+    match task {
+        TimerTaskHandle::Modern(task) => task.resume(),
+        TimerTaskHandle::Legacy(_) => crate::task::yield_task(),
     }
 }
 
@@ -319,10 +470,80 @@ impl TimerQueue {
             }
         });
     }
+
+    fn process_legacy_style(&self) {
+        let maybe_due = self.inner.with(|q| {
+            let now = crate::now();
+            let mut current = q.head;
+
+            while let Some(timer_ptr) = current {
+                let timer = unsafe { timer_ptr.as_ref() };
+                let props = timer.properties(q);
+                let next = props.next;
+
+                if props.is_active && now.wrapping_sub(props.started) >= props.period {
+                    let due_at_us = props.next_due as u32;
+                    let timeout_us = props.period as u32;
+
+                    if props.periodic {
+                        props.started = now;
+                        props.next_due += props.period;
+                    }
+                    props.is_active = props.periodic;
+
+                    return Some((
+                        timer_ptr,
+                        due_at_us,
+                        timeout_us,
+                        timer.callback_ptr,
+                        timer.callback_arg_ptr,
+                    ));
+                }
+
+                current = next;
+            }
+
+            None
+        });
+
+        if let Some((timer_ptr, due_at_us, timeout_us, callback_ptr, callback_arg_ptr)) = maybe_due {
+            let exec_at_us = crate::now() as u32;
+            let lateness_us = exec_at_us.saturating_sub(due_at_us);
+            TIMER_CALLBACK_EXEC_COUNT.fetch_add(1, Ordering::Relaxed);
+            TIMER_CALLBACK_CURRENT_PTR.store(callback_ptr, Ordering::Relaxed);
+            TIMER_CALLBACK_CURRENT_ARG_PTR.store(callback_arg_ptr, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_PTR.store(callback_ptr, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_ARG_PTR.store(callback_arg_ptr, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_EXEC_AT_US.store(exec_at_us, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_DUE_AT_US.store(due_at_us, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_TIMEOUT_US.store(timeout_us, Ordering::Relaxed);
+            TIMER_CALLBACK_LAST_LATENESS_US.store(lateness_us, Ordering::Relaxed);
+            update_max_lateness_us(lateness_us);
+
+            let timer = unsafe { timer_ptr.as_ref() };
+            (timer.callback.borrow_mut())();
+
+            TIMER_CALLBACK_CURRENT_PTR.store(0, Ordering::Relaxed);
+            TIMER_CALLBACK_CURRENT_ARG_PTR.store(0, Ordering::Relaxed);
+
+            self.inner.with(|q| {
+                let timer = unsafe { timer_ptr.as_ref() };
+                let props = timer.properties(q);
+                if props.drop {
+                    q.dequeue(timer);
+                    let boxed = unsafe { Box::from_raw(timer_ptr.as_ptr()) };
+                    core::mem::drop(boxed);
+                }
+            });
+        } else {
+            crate::task::yield_task();
+        }
+    }
 }
 
 struct TimerProperties {
     is_active: bool,
+    started: u64,
     next_due: u64,
     period: u64,
     periodic: bool,
@@ -360,6 +581,7 @@ impl Timer {
             callback_arg_ptr,
             timer_properties: TimerQueueCell::new(TimerProperties {
                 is_active: false,
+                started: 0,
                 next_due: 0,
                 period: 0,
                 periodic: false,
@@ -376,10 +598,12 @@ impl Timer {
     }
 
     fn arm(&self, q: &mut TimerQueueInner, timeout: u64, periodic: bool) {
-        let next_due = crate::now() + timeout;
+        let now = crate::now();
+        let next_due = now + timeout;
 
         let props = self.properties(q);
         props.is_active = true;
+        props.started = now;
         props.next_due = next_due;
         props.period = timeout;
         props.periodic = periodic;
@@ -481,6 +705,46 @@ register_timer_implementation!(Timer);
 pub(crate) extern "C" fn timer_task(_: *mut c_void) {
     TIMER_TASK_ENTRY_COUNT.fetch_add(1, Ordering::Relaxed);
     loop {
-        TIMER_QUEUE.process();
+        TIMER_TASK_LOOP_COUNT.fetch_add(1, Ordering::Relaxed);
+        if use_legacy_timer_compat_driver_diag_enabled()
+            && unsafe { __esp_radio_diag_legacy_timer_compat_enabled() }
+        {
+            TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+            if !unsafe { __esp_radio_diag_process_legacy_timer_compat_due() } {
+                if use_exact_legacy_timer_compat_loop_diag_enabled() {
+                    crate::task::yield_task();
+                } else {
+                    let delay_us = unsafe { __esp_radio_diag_legacy_timer_compat_next_due_us() };
+                    if delay_us == u32::MAX {
+                        SCHEDULER.sleep_until(Instant::EPOCH + Duration::MAX);
+                    } else if delay_us == 0 {
+                        crate::task::yield_task();
+                    } else {
+                        SCHEDULER
+                            .sleep_until(Instant::now() + Duration::from_micros(delay_us as u64));
+                    }
+                }
+            }
+        } else if use_legacy_timer_task_driver_diag_enabled() {
+            TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+            TIMER_QUEUE.process_legacy_style();
+        } else {
+            TIMER_TASK_DEFAULT_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+            TIMER_QUEUE.process();
+        }
+    }
+}
+#[derive(Clone, Copy)]
+enum TimerTaskHandle {
+    Modern(TaskPtr),
+    Legacy(*mut c_void),
+}
+
+impl TimerTaskHandle {
+    fn ptr(self) -> usize {
+        match self {
+            Self::Modern(task) => task.as_ptr() as usize,
+            Self::Legacy(task) => task as usize,
+        }
     }
 }

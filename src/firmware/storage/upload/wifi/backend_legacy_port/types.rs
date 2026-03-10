@@ -4,3 +4,7 @@ pub(crate) type WifiDevice<'a> = esp_radio::wifi::WifiDevice<'a>;
 pub(crate) type WifiError = esp_radio::wifi::WifiError;
 pub(crate) type AccessPointInfo = esp_radio::wifi::AccessPointInfo;
 pub(crate) type ScanConfig<'a> = esp_radio::wifi::ScanConfig<'a>;
+pub(crate) type ModeConfig = esp_radio::wifi::ModeConfig;
+pub(crate) type PowerSaveMode = esp_radio::wifi::PowerSaveMode;
+pub(crate) type Protocol = esp_radio::wifi::Protocol;
+pub(crate) type WifiMode = esp_radio::wifi::WifiMode;

@@ -204,6 +204,90 @@ pub fn precreate_esp_radio_timer_task() {
 }
 
 #[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_precreate_esp_radio_timer_task() {
+    crate::esp_radio::ensure_timer_task();
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_resume_esp_radio_timer_task() {
+    crate::esp_radio::wake_timer_task();
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_entry_count() -> u32 {
+    crate::esp_radio::timer_task_entry_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_resume_count() -> u32 {
+    crate::esp_radio::timer_task_resume_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_loop_count() -> u32 {
+    crate::esp_radio::timer_task_loop_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_legacy_compat_branch_count() -> u32 {
+    crate::esp_radio::timer_task_legacy_compat_branch_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_legacy_driver_branch_count() -> u32 {
+    crate::esp_radio::timer_task_legacy_driver_branch_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_default_branch_count() -> u32 {
+    crate::esp_radio::timer_task_default_branch_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_mark_ready_count() -> u32 {
+    crate::esp_radio::timer_task_mark_ready_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_pop_count() -> u32 {
+    crate::esp_radio::timer_task_pop_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_selected_count() -> u32 {
+    crate::esp_radio::timer_task_selected_count()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_esp_radio_timer_task_ptr() -> usize {
+    crate::esp_radio::timer_task_ptr()
+}
+
+#[cfg(feature = "esp-radio")]
 #[doc(hidden)]
 pub fn yield_for_esp_radio_diag() {
     crate::task::yield_task();
@@ -219,6 +303,18 @@ pub fn bootstrap_legacy_wifi_contract_shim() -> crate::esp_radio::LegacyWifiBoot
 #[doc(hidden)]
 pub fn legacy_preempt_bootstrap_compat() -> crate::esp_radio::LegacyPreemptCompatStatus {
     crate::esp_radio::legacy_preempt_bootstrap_compat()
+}
+
+#[cfg(feature = "esp-radio")]
+#[doc(hidden)]
+pub fn diagnostic_esp_radio_sem_trace_reset() {
+    crate::esp_radio::reset_sem_trace_diag();
+}
+
+#[cfg(feature = "esp-radio")]
+#[doc(hidden)]
+pub fn diagnostic_esp_radio_sem_trace_snapshot() -> crate::esp_radio::SemTraceSnapshot {
+    crate::esp_radio::sem_trace_diag()
 }
 
 #[cfg(feature = "esp-radio")]
@@ -269,6 +365,85 @@ pub extern "C" fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize {
 #[doc(hidden)]
 pub extern "C" fn __esp_rtos_diag_legacy_task_model_current_index() -> usize {
     crate::esp_radio::legacy_task_model_current_index()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_task_ptr_at(index: usize) -> usize {
+    crate::esp_radio::legacy_task_model_task_ptr_at(index)
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_task_state_at(index: usize) -> usize {
+    crate::esp_radio::legacy_task_model_task_state_at(index)
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_last_pop_candidate_ptr() -> usize {
+    crate::esp_radio::legacy_task_model_last_pop_candidate_ptr()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_last_pop_candidate_state() -> usize {
+    crate::esp_radio::legacy_task_model_last_pop_candidate_state()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_task_model_last_pop_selected_ptr() -> usize {
+    crate::esp_radio::legacy_task_model_last_pop_selected_ptr()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_reset_legacy_builtin_scheduler_snapshot() {
+    crate::esp_radio::reset_legacy_builtin_scheduler_snapshot()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_builtin_scheduler_snapshot()
+-> crate::esp_radio::LegacyBuiltinSchedulerSnapshot {
+    crate::esp_radio::legacy_builtin_scheduler_snapshot()
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_builtin_scheduler_task_ptr_at(index: usize) -> usize {
+    crate::esp_radio::legacy_builtin_scheduler_task_ptr_at(index)
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_legacy_builtin_scheduler_task_role_at(
+    index: usize,
+) -> [u8; 16] {
+    crate::esp_radio::legacy_builtin_scheduler_task_role_at(index)
+}
+
+#[cfg(feature = "esp-radio")]
+#[unsafe(no_mangle)]
+#[doc(hidden)]
+pub extern "C" fn __esp_rtos_diag_current_task_ptr_or_zero() -> usize {
+    crate::scheduler::SCHEDULER.with(|scheduler| {
+        let cpu = Cpu::current() as usize;
+        scheduler.per_cpu[cpu]
+            .current_task
+            .map(|task: crate::task::TaskPtr| task.as_ptr() as usize)
+            .unwrap_or(0)
+    })
 }
 
 #[cfg(feature = "esp-radio")]

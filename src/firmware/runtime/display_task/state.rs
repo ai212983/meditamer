@@ -65,9 +65,17 @@ impl DisplayLoopState {
         if let Some(control) = boot_result.diag_control() {
             DIAG_CONTROL_EVENTS.send(control).await;
         }
-        if TOUCH_CALIBRATION_WIZARD_ENABLED {
+        if TOUCH_CALIBRATION_WIZARD_ENABLED && !cfg!(feature = "wifi-debug-slim-app") {
             let wizard_result = app_state.apply(AppStateCommand::SetBase(BaseMode::TouchWizard));
             if let Some(control) = wizard_result.diag_control() {
+                DIAG_CONTROL_EVENTS.send(control).await;
+            }
+        }
+        if cfg!(feature = "wifi-debug-slim-app")
+            && matches!(app_state.snapshot().base, BaseMode::TouchWizard)
+        {
+            let day_result = app_state.apply(AppStateCommand::SetBase(BaseMode::Day));
+            if let Some(control) = day_result.diag_control() {
                 DIAG_CONTROL_EVENTS.send(control).await;
             }
         }

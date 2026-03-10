@@ -26,15 +26,22 @@ mod bootstrap;
 mod legacy_builtin_scheduler;
 mod legacy_preempt;
 mod legacy_scheduler;
+pub(crate) mod sem_trace;
 mod task_bootstrap;
 mod timer_queue;
 
 pub use bootstrap::{LegacyWifiBootstrapShimStatus, bootstrap_legacy_wifi_contract_shim};
 pub use legacy_preempt::{LegacyPreemptCompatStatus, legacy_preempt_bootstrap_compat};
+pub use sem_trace::SemTraceSnapshot;
 pub(crate) use task_bootstrap::{maybe_handoff_to_wifi_task, note_task_selected, wifi_task_selected_count};
 pub(crate) use timer_queue::{
     ensure_timer_task, reset_timer_callback_exec_diag, timer_callback_exec_diag,
-    timer_task_entry_count,
+    timer_task_default_branch_count, timer_task_entry_count,
+    timer_task_legacy_compat_branch_count, timer_task_legacy_driver_branch_count,
+    timer_task_loop_count, timer_task_mark_ready_count, timer_task_pop_count,
+    timer_task_ptr, timer_task_resume_count, timer_task_selected_count,
+    note_timer_task_mark_ready, note_timer_task_popped, note_timer_task_selected,
+    wake_timer_task,
 };
 pub(crate) use queue::{
     queue_create_count, queue_create_last_capacity, queue_create_last_item_size,
@@ -44,10 +51,34 @@ pub(crate) use legacy_scheduler::ready_count as legacy_ready_task_count;
 pub(crate) use legacy_scheduler::note_task_selected as note_legacy_task_selected;
 pub(crate) use legacy_scheduler::runtime_mode_enabled as legacy_runtime_mode_enabled;
 pub(crate) use legacy_builtin_scheduler::switch_task as legacy_builtin_scheduler_switch_task;
+pub(crate) use legacy_builtin_scheduler::{
+    LegacyBuiltinSchedulerSnapshot,
+    reset_snapshot as reset_legacy_builtin_scheduler_snapshot,
+    snapshot as legacy_builtin_scheduler_snapshot,
+    task_ptr_at as legacy_builtin_scheduler_task_ptr_at,
+    task_role_at as legacy_builtin_scheduler_task_role_at,
+};
+pub fn reset_sem_trace_diag() {
+    sem_trace::reset();
+}
+
+pub fn sem_trace_diag() -> SemTraceSnapshot {
+    sem_trace::snapshot()
+}
 
 static TASK_CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
 static TASK_CREATE_LAST_REQUESTED_PRIORITY: AtomicU32 = AtomicU32::new(0);
 static TASK_CREATE_LAST_EFFECTIVE_PRIORITY: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn backend_legacy_port_runtime_enabled() -> bool {
+    matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
 
 fn legacy_builtin_scheduler_diag_enabled() -> bool {
     matches!(
@@ -56,7 +87,7 @@ fn legacy_builtin_scheduler_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_BUILTIN_SCHEDULER_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_runtime_enabled()
 }
 
 pub(crate) fn legacy_builtin_scheduler_runtime_mode_enabled() -> bool {
@@ -70,7 +101,7 @@ pub(crate) fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_PREEMPT_BUILTIN_TIMER_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_runtime_enabled()
 }
 
 fn create_trace_enabled() -> bool {
@@ -94,7 +125,7 @@ fn legacy_wifi_task_priority_model_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_WIFI_TASK_PRIORITY_MODEL_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_runtime_enabled()
 }
 
 impl esp_radio_rtos_driver::Scheduler for Scheduler {
@@ -150,18 +181,18 @@ impl esp_radio_rtos_driver::Scheduler for Scheduler {
         } else {
             priority.min(self.max_task_priority())
         };
-        if create_trace_enabled() {
-            warn!(
-                "esp_rtos: task_create name={} priority={} effective_priority={} pin_to_core={:?} stack={}",
-                name, priority, effective_priority, pin_to_core, task_stack_size
-            );
-        }
         TASK_CREATE_COUNT.fetch_add(1, Ordering::Relaxed);
         TASK_CREATE_LAST_REQUESTED_PRIORITY.store(priority, Ordering::Relaxed);
         TASK_CREATE_LAST_EFFECTIVE_PRIORITY.store(effective_priority, Ordering::Relaxed);
         if legacy_builtin_scheduler_diag_enabled() {
             legacy_builtin_scheduler::allocate_main_task();
-            return legacy_builtin_scheduler::task_create(task, param, task_stack_size);
+            let task_handle =
+                legacy_builtin_scheduler::task_create(name, task, param, task_stack_size);
+            if let Some(task_ptr) = NonNull::new(task_handle.cast::<Task>()) {
+                legacy_scheduler::note_created_task(name, task_ptr);
+            }
+            maybe_handoff_to_wifi_task(name);
+            return task_handle;
         }
         let task_ptr = self.create_task(
             name,
@@ -260,13 +291,11 @@ impl SemaphoreImplementation for Semaphore {
 
     unsafe fn take(semaphore: SemaphorePtr, timeout_us: Option<u32>) -> bool {
         let semaphore = unsafe { Semaphore::from_ptr(semaphore) };
-
         semaphore.take(timeout_us)
     }
 
     unsafe fn give(semaphore: SemaphorePtr) -> bool {
         let semaphore = unsafe { Semaphore::from_ptr(semaphore) };
-
         semaphore.give()
     }
 
@@ -331,4 +360,24 @@ pub(crate) fn legacy_task_model_current_index() -> usize {
 
 pub(crate) fn reset_legacy_task_model() {
     legacy_scheduler::reset()
+}
+
+pub(crate) fn legacy_task_model_task_ptr_at(index: usize) -> usize {
+    legacy_scheduler::task_ptr_at(index)
+}
+
+pub(crate) fn legacy_task_model_task_state_at(index: usize) -> usize {
+    legacy_scheduler::task_state_at(index)
+}
+
+pub(crate) fn legacy_task_model_last_pop_candidate_ptr() -> usize {
+    legacy_scheduler::last_pop_candidate_ptr()
+}
+
+pub(crate) fn legacy_task_model_last_pop_candidate_state() -> usize {
+    legacy_scheduler::last_pop_candidate_state()
+}
+
+pub(crate) fn legacy_task_model_last_pop_selected_ptr() -> usize {
+    legacy_scheduler::last_pop_selected_ptr()
 }

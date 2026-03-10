@@ -14,6 +14,9 @@ const MAX_TASKS: usize = 8;
 
 static ENTRY_COUNT: AtomicUsize = AtomicUsize::new(0);
 static CURRENT_INDEX: AtomicUsize = AtomicUsize::new(0);
+static LAST_POP_CANDIDATE_PTR: AtomicUsize = AtomicUsize::new(0);
+static LAST_POP_CANDIDATE_STATE: AtomicUsize = AtomicUsize::new(0);
+static LAST_POP_SELECTED_PTR: AtomicUsize = AtomicUsize::new(0);
 
 struct LegacyTaskModel {
     tasks: [Option<usize>; MAX_TASKS],
@@ -34,7 +37,7 @@ fn enabled() -> bool {
     matches!(
         option_env!("MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_ESP_RADIO_TASK_MODEL_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || crate::esp_radio::backend_legacy_port_runtime_enabled()
 }
 
 pub(crate) fn runtime_mode_enabled() -> bool {
@@ -181,14 +184,19 @@ pub(crate) fn pop_next_ready_override(run_queue: &mut RunQueue) -> Option<TaskPt
             let Some(task) = tasks[idx] else {
                 continue;
             };
-            if task.state() != TaskState::Ready {
+            let state = task.state();
+            LAST_POP_CANDIDATE_PTR.store(task.as_ptr() as usize, Ordering::Relaxed);
+            LAST_POP_CANDIDATE_STATE.store(state as usize, Ordering::Relaxed);
+            if state != TaskState::Ready {
                 continue;
             }
             run_queue.remove(task);
             CURRENT_INDEX.store(idx, Ordering::Relaxed);
+            LAST_POP_SELECTED_PTR.store(task.as_ptr() as usize, Ordering::Relaxed);
             return Some(task);
         }
 
+        LAST_POP_SELECTED_PTR.store(0, Ordering::Relaxed);
         None
     })
 }
@@ -219,5 +227,48 @@ pub(crate) fn ready_count() -> usize {
 pub(crate) fn reset() {
     ENTRY_COUNT.store(0, Ordering::Relaxed);
     CURRENT_INDEX.store(0, Ordering::Relaxed);
+    LAST_POP_CANDIDATE_PTR.store(0, Ordering::Relaxed);
+    LAST_POP_CANDIDATE_STATE.store(0, Ordering::Relaxed);
+    LAST_POP_SELECTED_PTR.store(0, Ordering::Relaxed);
     with_tasks(|tasks| *tasks = [None; MAX_TASKS]);
+}
+
+pub(crate) fn task_ptr_at(index: usize) -> usize {
+    if !enabled() {
+        return 0;
+    }
+    with_tasks(|tasks| {
+        let count = ENTRY_COUNT.load(Ordering::Relaxed).min(MAX_TASKS);
+        if index >= count {
+            0
+        } else {
+            tasks[index].map(|task| task.as_ptr() as usize).unwrap_or(0)
+        }
+    })
+}
+
+pub(crate) fn task_state_at(index: usize) -> usize {
+    if !enabled() {
+        return 0;
+    }
+    with_tasks(|tasks| {
+        let count = ENTRY_COUNT.load(Ordering::Relaxed).min(MAX_TASKS);
+        if index >= count {
+            0
+        } else {
+            tasks[index].map(|task| task.state() as usize).unwrap_or(0)
+        }
+    })
+}
+
+pub(crate) fn last_pop_candidate_ptr() -> usize {
+    LAST_POP_CANDIDATE_PTR.load(Ordering::Relaxed)
+}
+
+pub(crate) fn last_pop_candidate_state() -> usize {
+    LAST_POP_CANDIDATE_STATE.load(Ordering::Relaxed)
+}
+
+pub(crate) fn last_pop_selected_ptr() -> usize {
+    LAST_POP_SELECTED_PTR.load(Ordering::Relaxed)
 }
