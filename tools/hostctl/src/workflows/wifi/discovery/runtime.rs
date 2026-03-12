@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::{
     scenarios::WorkflowRuntime,
     workflows::wifi::common::{
-        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, detect_panic_signal,
-        extract_context_window, fmt_min, netcfg_set_payload, preflight, wait_net_ack,
+        ctx_get_string, ctx_get_u32, detect_panic_signal, extract_context_window, fmt_min,
+        netcfg_set_payload, preflight, wait_net_ack,
     },
 };
 
@@ -33,8 +33,14 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
                 self.handle_start_run()
             }
             "net_apply_config" => self.handle_net_apply_config(),
-            "probe_round" => self.handle_probe_round(context),
-            "evaluate_results" => self.handle_evaluate_results(context),
+            "probe_round" => {
+                let _ = self.handle_probe_round(context)?;
+                Ok(())
+            }
+            "evaluate_results" => {
+                let _ = self.handle_evaluate_results();
+                Ok(())
+            }
             "print_summary" => self.handle_print_summary(),
             "fail_run" => self.handle_fail_run(context),
             _ => Err(anyhow!("unknown workflow action: {action}")),
@@ -47,12 +53,18 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
         args: &Value,
         context: &mut Value,
     ) -> Result<Option<Value>> {
-        if action == "start_run" {
-            self.handle_start_run()?;
-            return Ok(Some(self.build_start_run_result()));
+        match action {
+            "start_run" => {
+                self.handle_start_run()?;
+                Ok(Some(self.build_start_run_result()))
+            }
+            "probe_round" => Ok(Some(self.handle_probe_round(context)?)),
+            "evaluate_results" => Ok(Some(self.handle_evaluate_results())),
+            _ => {
+                self.invoke(action, args, context)?;
+                Ok(None)
+            }
         }
-        self.invoke(action, args, context)?;
-        Ok(None)
     }
 }
 

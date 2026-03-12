@@ -18,6 +18,10 @@ do:
       do:
         - probe_round:
             call: "probe_round"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
       metadata:
         hostctl:
           repeat:
@@ -26,6 +30,10 @@ do:
       then: "evaluate_results"
   - evaluate_results:
       call: "evaluate_results"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "print_summary"
   - print_summary:
       call: "print_summary"

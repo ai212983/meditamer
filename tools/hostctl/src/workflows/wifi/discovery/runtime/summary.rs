@@ -77,7 +77,7 @@ impl WifiDiscoveryRuntime<'_> {
         ));
     }
 
-    fn handle_evaluate_results(&mut self, context: &mut Value) -> Result<()> {
+    fn handle_evaluate_results(&mut self) -> Value {
         let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
         let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
         let scan_evidence_rounds = self
@@ -126,9 +126,10 @@ impl WifiDiscoveryRuntime<'_> {
             ));
         }
         let run_error = failures.join("; ");
-        ctx_set_bool(context, "run_passed", passed)?;
-        ctx_set_string(context, "run_error", &run_error)?;
-        Ok(())
+        serde_json::json!({
+            "run_passed": passed,
+            "run_error": run_error
+        })
     }
 
     fn handle_print_summary(&mut self) -> Result<()> {

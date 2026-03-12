@@ -1,5 +1,5 @@
 impl WifiDiscoveryRuntime<'_> {
-    fn handle_probe_round(&mut self, context: &mut Value) -> Result<()> {
+    fn handle_probe_round(&mut self, context: &mut Value) -> Result<Value> {
         let round = ctx_get_u32(context, "round_index")?.saturating_add(1);
         let ssid_marker = format!("scan ap ssid={}", self.ssid);
         let require_listener = !self.profile.disable_listener_during_probe_rounds;
@@ -31,7 +31,6 @@ impl WifiDiscoveryRuntime<'_> {
                 let _ = wait_net_ack(&mut self.console, "NET LISTENER ON");
             }
             let detail = self.panic_signal_detail(&signal);
-            ctx_set_string(context, "run_error", &detail)?;
             return Err(anyhow!("{detail}"));
         }
 
@@ -44,9 +43,10 @@ impl WifiDiscoveryRuntime<'_> {
                 ));
             }
         }
-        ctx_set_bool(context, "round_ready", state.ready)?;
-        ctx_set_bool(context, "round_zero_discovery", zero_discovery)?;
-        Ok(())
+        Ok(serde_json::json!({
+            "round_ready": state.ready,
+            "round_zero_discovery": zero_discovery
+        }))
     }
 
     fn maybe_recover_before_round(&mut self, round: u32) -> Result<()> {
