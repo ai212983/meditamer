@@ -87,6 +87,9 @@ fn execute_do_task<R: WorkflowRuntime>(
     if !should_run(&task.common, context)? {
         return Ok(task.common.then.clone());
     }
+    if execute_repeatable_do_task(task, runtime, context)? {
+        return Ok(task.common.then.clone());
+    }
     execute_task_map(&task.do_, runtime, context)?;
     Ok(task.common.then.clone())
 }
@@ -123,5 +126,6 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
 
     Ok(task.common.then.clone())
 }
+include!("engine_repeat.rs");
 include!("engine_retry.rs");
 include!("engine_support.rs");

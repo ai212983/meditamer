@@ -227,4 +227,5 @@ do:
     }
 
     include!("retry_tests.rs");
+    include!("for_tests.rs");
 }
