@@ -276,7 +276,8 @@ do:
         Ok(())
     }
 
-    include!("retry_tests.rs");
+    include!("try_retry_tests.rs");
+    include!("call_retry_tests.rs");
     include!("for_tests.rs");
     include!("expression_tests.rs");
     include!("error_patch_tests.rs");
