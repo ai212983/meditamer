@@ -9,9 +9,13 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_troubleshoot_hw.sh
 - runs through `hostctl test troubleshoot` with declarative orchestration in
   `tools/hostctl/scenarios/troubleshoot.sw.yaml`
 - uses `scripts/device/flash.sh` as the flash primitive (per project flash policy)
+  and that wrapper runs `hostctl flash-capture` with orchestration in
+  `tools/hostctl/scenarios/flash-capture.sw.yaml`
 - classifies failures into `build`, `flash`, `boot`, `runtime`,
   `uart_protocol`, `uart_transport`, or `unknown`
 - emits summary plus persistent UART and soak logs under `logs/`
+- boot-phase flash evidence should come from flash-capture artifacts; use
+  `scripts/device/monitor.sh` only for passive follow-up attach
 
 Optional env vars:
 
@@ -25,6 +29,7 @@ Optional env vars:
 Agent-oriented contract and runbook:
 
 - `docs/development/troubleshoot-agent.md`
+- `docs/development/hostctl-workflow-authoring.md`
 
 ## Soak Script
 
@@ -66,21 +71,21 @@ Optional soak env vars:
 Standalone Rust-on-ESP-IDF scan probe:
 
 ```bash
-IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
-IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+IDF_APP_ROOT="$HOME/.esp-idf/v5.3.4" \
+IDF_TOOLS_PATH="$HOME/.espressif" \
 scripts/device/wifi_control_idf_rust.sh build
 ```
 
 Flash and monitor:
 
 ```bash
-IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
-IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+IDF_APP_ROOT="$HOME/.esp-idf/v5.3.4" \
+IDF_TOOLS_PATH="$HOME/.espressif" \
 ESPFLASH_PORT=/dev/cu.usbserial-540 \
 scripts/device/wifi_control_idf_rust.sh flash
 
-IDF_APP_ROOT=/Users/dimitri/Documents/Code/personal/Inkplate/.esp-idf/v5.3.4 \
-IDF_TOOLS_PATH=/Users/dimitri/Documents/Code/personal/Inkplate/.espressif \
+IDF_APP_ROOT="$HOME/.esp-idf/v5.3.4" \
+IDF_TOOLS_PATH="$HOME/.espressif" \
 ESPFLASH_PORT=/dev/cu.usbserial-540 \
 scripts/device/wifi_control_idf_rust.sh monitor
 ```

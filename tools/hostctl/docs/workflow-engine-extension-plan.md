@@ -25,10 +25,10 @@ Relevant implementation points:
 - `tools/hostctl/src/scenarios/engine_support.rs`
 - `tools/hostctl/src/scenarios/conditions.rs`
 
-Current gaps that block YAML-first orchestration:
+Current remaining gap:
 
-- Condition syntax only supports simple comparisons.
-- String interpolation only works for full-value expressions.
+- Engine support is now broad enough for YAML-first orchestration, but workflow
+  authoring guidance must stay current as the stricter contract evolves.
 
 ## Phase 1: Retry
 
@@ -208,12 +208,11 @@ Remove implicit task-order dependence from scenario YAML.
 
 - [x] Add explicit `default` branch support for `switch`.
 - [x] Add explicit `end` semantics or equivalent no-op terminal behavior.
-- [x] Preserve backward compatibility for existing workflows during migration.
 - [x] Add tests for:
   - matching branch
   - default branch
   - no-match end behavior
-  - legacy fallthrough compatibility, if retained temporarily
+  - invalid switch without explicit transition
 - [x] Remove order-dependent comments and layouts from existing scenario YAMLs.
 
 ### Example Target Surface

@@ -87,7 +87,7 @@ Unsupported DSL task kinds currently fail fast.
 - Keep this for true failure-path state only. Use normal result binding for
   successful setup, status, and bookkeeping outputs.
 
-3. Keep each step atomic.
+5. Keep each step atomic.
 - `run_step` handles one command/ack/SDREQ/SDWAIT assertion.
 - Burst tests split into `burst_batch_start` and `burst_batch_assert`.
 
