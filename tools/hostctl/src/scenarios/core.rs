@@ -5,8 +5,8 @@ use serde_json::{Map as JsonMap, Value};
 use serverless_workflow_core::models::{
     map::Map as WorkflowMap,
     task::{
-        CallTaskDefinition, DoTaskDefinition, SwitchTaskDefinition, TaskDefinition,
-        TaskDefinitionFields,
+        CallTaskDefinition, DoTaskDefinition, ErrorFilterDefinition, SetTaskDefinition,
+        SwitchTaskDefinition, TaskDefinition, TaskDefinitionFields, TryTaskDefinition,
     },
     workflow::WorkflowDefinition,
 };

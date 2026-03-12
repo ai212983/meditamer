@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
-use serialport::SerialPort;
+use serialport::{ClearBuffer, SerialPort};
 
 const RX_BUF_MAX: usize = 16 * 1024;
 
@@ -97,6 +97,37 @@ impl SerialConsole {
         let deadline = Instant::now() + Duration::from_millis(settle_ms);
         while Instant::now() < deadline {
             self.poll_once()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_data_terminal_ready(&mut self, asserted: bool) -> Result<()> {
+        self.port
+            .write_data_terminal_ready(asserted)
+            .context("failed to set DTR")
+    }
+
+    pub fn set_request_to_send(&mut self, asserted: bool) -> Result<()> {
+        self.port
+            .write_request_to_send(asserted)
+            .context("failed to set RTS")
+    }
+
+    pub fn clear_input_buffer(&mut self) -> Result<()> {
+        self.port
+            .clear(ClearBuffer::Input)
+            .context("failed to clear serial input buffer")
+    }
+
+    pub fn pulse_en_reset(&mut self, reset_ms: u64, settle_ms: u64) -> Result<()> {
+        self.set_data_terminal_ready(false)?;
+        self.set_request_to_send(false)?;
+        std::thread::sleep(Duration::from_millis(20));
+        self.set_request_to_send(true)?;
+        std::thread::sleep(Duration::from_millis(reset_ms));
+        self.set_request_to_send(false)?;
+        if settle_ms > 0 {
+            std::thread::sleep(Duration::from_millis(settle_ms));
         }
         Ok(())
     }
@@ -237,57 +268,6 @@ impl SerialConsole {
         let pattern = Regex::new(r"^SDWAIT (DONE|TIMEOUT|ERR)")?;
         self.wait_for_regex_since(mark, &pattern, timeout)
     }
-
-    pub fn poll_once(&mut self) -> Result<()> {
-        let mut chunk = [0u8; 4096];
-        loop {
-            match self.port.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => {
-                    self.rx_buf.extend_from_slice(&chunk[..n]);
-                    self.normalize_and_extract_lines()?;
-                }
-                Err(err) if err.kind() == io::ErrorKind::TimedOut => break,
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                Err(err) => return Err(err).context("failed reading serial stream"),
-            }
-        }
-        Ok(())
-    }
-
-    fn normalize_and_extract_lines(&mut self) -> Result<()> {
-        for byte in &mut self.rx_buf {
-            if *byte == b'\r' {
-                *byte = b'\n';
-            }
-        }
-
-        while let Some(pos) = self.rx_buf.iter().position(|b| *b == b'\n') {
-            let mut line = self.rx_buf.drain(..=pos).collect::<Vec<u8>>();
-            while matches!(line.last(), Some(b'\n')) {
-                line.pop();
-            }
-            if line.is_empty() {
-                continue;
-            }
-
-            let parsed = String::from_utf8_lossy(&line).trim().to_string();
-            if parsed.is_empty() {
-                continue;
-            }
-
-            if let Some(file) = &mut self.output {
-                writeln!(file, "{parsed}")?;
-                file.flush()?;
-            }
-
-            self.lines.push_back(parsed);
-            self.line_cursor += 1;
-            while self.lines.len() > RX_BUF_MAX {
-                self.lines.pop_front();
-            }
-        }
-
-        Ok(())
-    }
 }
+
+include!("core_io.rs");

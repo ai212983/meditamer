@@ -10,11 +10,17 @@ mod tests {
     }
 
     impl WorkflowRuntime for TestRuntime {
-        fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
+        fn invoke(&mut self, action: &str, args: &Value, context: &mut Value) -> Result<()> {
             self.actions.push(action.to_string());
             if action == "inc" {
                 let n = context.get("n").and_then(|v| v.as_i64()).unwrap_or(0) + 1;
                 context["n"] = Value::from(n);
+            }
+            if action == "capture_args" {
+                context["captured_args"] = args.clone();
+            }
+            if action == "fail" {
+                anyhow::bail!("boom");
             }
             Ok(())
         }
@@ -96,6 +102,114 @@ do:
             ".lhs != .rhs",
             &serde_json::json!({ "lhs": 1, "rhs": 2 })
         )?);
+        Ok(())
+    }
+
+    #[test]
+    fn call_with_resolves_context_paths() -> Result<()> {
+        let yaml = r#"
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "call-with"
+  version: "1.0.0"
+do:
+  - capture:
+      call: "capture_args"
+      with:
+        mode: "boot"
+        port: ".port"
+        nested:
+          baud: ".baud"
+          enabled: "${ true }"
+"#;
+        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml)?;
+        let mut runtime = TestRuntime {
+            actions: Vec::new(),
+        };
+        let context = execute_workflow(
+            &workflow,
+            &mut runtime,
+            &serde_json::json!({ "port": "/dev/cu.usbserial-510", "baud": 115200 }),
+        )?;
+
+        assert_eq!(context["captured_args"]["mode"].as_str(), Some("boot"));
+        assert_eq!(
+            context["captured_args"]["port"].as_str(),
+            Some("/dev/cu.usbserial-510")
+        );
+        assert_eq!(context["captured_args"]["nested"]["baud"].as_i64(), Some(115200));
+        assert_eq!(
+            context["captured_args"]["nested"]["enabled"].as_bool(),
+            Some(true)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn set_task_updates_nested_context_from_expressions() -> Result<()> {
+        let yaml = r#"
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "set-values"
+  version: "1.0.0"
+do:
+  - seed:
+      set:
+        flags.flash_ok: false
+        flags.capture_mode: ".capture_mode"
+        result.bytes: "${ .capture_bytes }"
+"#;
+        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml)?;
+        let mut runtime = TestRuntime {
+            actions: Vec::new(),
+        };
+        let context = execute_workflow(
+            &workflow,
+            &mut runtime,
+            &serde_json::json!({ "capture_mode": "boot", "capture_bytes": 42 }),
+        )?;
+
+        assert_eq!(context["flags"]["flash_ok"].as_bool(), Some(false));
+        assert_eq!(context["flags"]["capture_mode"].as_str(), Some("boot"));
+        assert_eq!(context["result"]["bytes"].as_i64(), Some(42));
+        Ok(())
+    }
+
+    #[test]
+    fn try_task_catches_error_and_runs_handler() -> Result<()> {
+        let yaml = r#"
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "try-catch"
+  version: "1.0.0"
+do:
+  - guarded:
+      try:
+        - attempt:
+            call: "fail"
+      catch:
+        as: "flash_error"
+        do:
+          - mark:
+              set:
+                flash_ok: false
+                flash_error_text: ".flash_error.message"
+  - done:
+      call: "finish"
+"#;
+        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml)?;
+        let mut runtime = TestRuntime {
+            actions: Vec::new(),
+        };
+        let context = execute_workflow(&workflow, &mut runtime, &serde_json::json!({}))?;
+
+        assert_eq!(context["flash_ok"].as_bool(), Some(false));
+        assert_eq!(context["flash_error"]["message"].as_str(), Some("boom"));
+        assert_eq!(context["flash_error_text"].as_str(), Some("boom"));
+        assert_eq!(runtime.actions, vec!["fail".to_string(), "finish".to_string()]);
         Ok(())
     }
 }

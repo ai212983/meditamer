@@ -1,20 +1,10 @@
 mod env_utils;
+mod idf_env;
 mod logging;
 mod port_detect;
 mod scenarios;
 mod serial_console;
-mod workflows_common;
-mod workflows_runtime_modes;
-mod workflows_sdcard;
-#[cfg(test)]
-mod workflows_sdcard_tests;
-mod workflows_serial;
-mod workflows_storage;
-mod workflows_troubleshoot;
-mod workflows_upload;
-mod workflows_wifi_acceptance;
-mod workflows_wifi_common;
-mod workflows_wifi_discovery;
+mod workflows;
 
 use std::path::PathBuf;
 
@@ -22,13 +12,14 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use logging::Logger;
 
-use workflows_runtime_modes::RuntimeModesSmokeOptions;
-use workflows_sdcard::{SdcardHwOptions, SdcardSuite};
-use workflows_serial::{RepaintOptions, TimeSetOptions, TouchWizardDumpOptions};
-use workflows_troubleshoot::TroubleshootOptions;
-use workflows_upload::UploadOptions;
-use workflows_wifi_acceptance::WifiAcceptanceOptions;
-use workflows_wifi_discovery::WifiDiscoveryDebugOptions;
+use workflows::flash_capture::{run_flash_capture, CaptureMode, FlashCaptureOptions, FlashMode};
+use workflows::runtime_modes::RuntimeModesSmokeOptions;
+use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
+use workflows::serial::{RepaintOptions, TimeSetOptions, TouchWizardDumpOptions};
+use workflows::troubleshoot::TroubleshootOptions;
+use workflows::upload::UploadOptions;
+use workflows::wifi::acceptance::WifiAcceptanceOptions;
+use workflows::wifi::discovery::WifiDiscoveryDebugOptions;
 
 #[derive(Debug, Parser)]
 #[command(name = "hostctl")]
@@ -40,12 +31,39 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    FlashCapture(FlashCaptureArgs),
     Timeset(TimeSetArgs),
     Repaint(RepaintArgs),
     MarbleMetrics,
     TouchWizardDump(TouchWizardDumpArgs),
     Upload(UploadArgs),
     Test(TestArgs),
+}
+
+#[derive(Debug, Args)]
+struct FlashCaptureArgs {
+    #[arg(long, default_value = "release")]
+    profile: String,
+    #[arg(long = "log")]
+    output_path: Option<PathBuf>,
+    #[arg(long)]
+    port: Option<String>,
+    #[arg(long, value_enum, default_value_t = FlashMode::Auto)]
+    flash_mode: FlashMode,
+    #[arg(long, value_enum, default_value_t = CaptureMode::Boot)]
+    capture_mode: CaptureMode,
+    #[arg(long)]
+    image: Option<PathBuf>,
+    #[arg(long)]
+    flash_baud: Option<u32>,
+    #[arg(long)]
+    baud: Option<u32>,
+    #[arg(long)]
+    boot_window_ms: Option<u64>,
+    #[arg(long)]
+    idf_root: Option<PathBuf>,
+    #[arg(long)]
+    idf_tools_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -159,27 +177,43 @@ fn run(cli: Cli) -> Result<()> {
     let mut logger = Logger::from_env()?;
 
     match cli.command {
-        Commands::Timeset(args) => workflows_serial::run_timeset(
+        Commands::FlashCapture(args) => run_flash_capture(
+            &mut logger,
+            FlashCaptureOptions {
+                profile: args.profile,
+                output_path: args.output_path,
+                port: args.port,
+                flash_mode: args.flash_mode,
+                capture_mode: args.capture_mode,
+                image: args.image,
+                flash_baud: args.flash_baud,
+                baud: args.baud,
+                boot_window_ms: args.boot_window_ms,
+                idf_root: args.idf_root,
+                idf_tools_path: args.idf_tools_path,
+            },
+        ),
+        Commands::Timeset(args) => workflows::serial::run_timeset(
             &mut logger,
             TimeSetOptions {
                 epoch: args.epoch,
                 tz_offset_minutes: args.tz_offset_minutes,
             },
         ),
-        Commands::Repaint(args) => workflows_serial::run_repaint(
+        Commands::Repaint(args) => workflows::serial::run_repaint(
             &mut logger,
             RepaintOptions {
                 command: args.command,
             },
         ),
-        Commands::MarbleMetrics => workflows_serial::run_marble_metrics(&mut logger),
-        Commands::TouchWizardDump(args) => workflows_serial::run_touch_wizard_dump(
+        Commands::MarbleMetrics => workflows::serial::run_marble_metrics(&mut logger),
+        Commands::TouchWizardDump(args) => workflows::serial::run_touch_wizard_dump(
             &mut logger,
             TouchWizardDumpOptions {
                 output_path: args.output,
             },
         ),
-        Commands::Upload(args) => workflows_upload::run_upload(
+        Commands::Upload(args) => workflows::upload::run_upload(
             &mut logger,
             UploadOptions {
                 host: args.host,
@@ -193,7 +227,7 @@ fn run(cli: Cli) -> Result<()> {
         ),
         Commands::Test(args) => match args.test {
             TestSubcommand::WifiAcceptance(test_args) => {
-                workflows_wifi_acceptance::run_wifi_acceptance(
+                workflows::wifi::acceptance::run_wifi_acceptance(
                     &mut logger,
                     WifiAcceptanceOptions {
                         output_path: test_args.output_path,
@@ -201,7 +235,7 @@ fn run(cli: Cli) -> Result<()> {
                 )
             }
             TestSubcommand::WifiDiscoveryDebug(test_args) => {
-                workflows_wifi_discovery::run_wifi_discovery_debug(
+                workflows::wifi::discovery::run_wifi_discovery_debug(
                     &mut logger,
                     WifiDiscoveryDebugOptions {
                         output_path: test_args.output_path,
@@ -209,14 +243,14 @@ fn run(cli: Cli) -> Result<()> {
                 )
             }
             TestSubcommand::RuntimeModesSmoke(test_args) => {
-                workflows_runtime_modes::run_runtime_modes_smoke(
+                workflows::runtime_modes::run_runtime_modes_smoke(
                     &mut logger,
                     RuntimeModesSmokeOptions {
                         output_path: test_args.output_path,
                     },
                 )
             }
-            TestSubcommand::SdcardHw(test_args) => workflows_sdcard::run_sdcard_hw(
+            TestSubcommand::SdcardHw(test_args) => workflows::sdcard::run_sdcard_hw(
                 &mut logger,
                 SdcardHwOptions {
                     build_mode: test_args.build_mode,
@@ -225,13 +259,13 @@ fn run(cli: Cli) -> Result<()> {
                 },
             ),
             TestSubcommand::SdcardBurstRegression(test_args) => {
-                workflows_sdcard::run_sdcard_burst_regression(
+                workflows::sdcard::run_sdcard_burst_regression(
                     &mut logger,
                     test_args.build_mode,
                     test_args.output,
                 )
             }
-            TestSubcommand::Troubleshoot(test_args) => workflows_troubleshoot::run_troubleshoot(
+            TestSubcommand::Troubleshoot(test_args) => workflows::troubleshoot::run_troubleshoot(
                 &mut logger,
                 TroubleshootOptions {
                     build_mode: test_args.build_mode,

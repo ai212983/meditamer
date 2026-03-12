@@ -28,7 +28,9 @@ fn execute_task_map<R: WorkflowRuntime>(
         let next = match task {
             TaskDefinition::Call(def) => execute_call_task(def, runtime, context)?,
             TaskDefinition::Do(def) => execute_do_task(def, runtime, context)?,
+            TaskDefinition::Set(def) => execute_set_task(def, context)?,
             TaskDefinition::Switch(def) => execute_switch_task(def, context)?,
+            TaskDefinition::Try(def) => execute_try_task(def, runtime, context)?,
             other => {
                 return Err(anyhow!(
                     "task '{current}' uses unsupported task type '{}'",
@@ -69,7 +71,7 @@ fn execute_call_task<R: WorkflowRuntime>(
     let mut args = JsonMap::new();
     if let Some(with) = &task.with {
         for (key, value) in with {
-            args.insert(key.clone(), value.clone());
+            args.insert(key.clone(), resolve_runtime_value(value, context)?);
         }
     }
 
@@ -86,6 +88,18 @@ fn execute_do_task<R: WorkflowRuntime>(
         return Ok(task.common.then.clone());
     }
     execute_task_map(&task.do_, runtime, context)?;
+    Ok(task.common.then.clone())
+}
+
+fn execute_set_task(task: &SetTaskDefinition, context: &mut Value) -> Result<Option<String>> {
+    if !should_run(&task.common, context)? {
+        return Ok(task.common.then.clone());
+    }
+
+    for (key, value) in &task.set {
+        set_context_path(context, key, resolve_runtime_value(value, context)?)?;
+    }
+
     Ok(task.common.then.clone())
 }
 
@@ -110,65 +124,50 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
     Ok(task.common.then.clone())
 }
 
-fn should_run(common: &TaskDefinitionFields, context: &Value) -> Result<bool> {
-    match &common.if_ {
-        Some(condition) => eval_condition(condition, context),
-        None => Ok(true),
+fn execute_try_task<R: WorkflowRuntime>(
+    task: &TryTaskDefinition,
+    runtime: &mut R,
+    context: &mut Value,
+) -> Result<Option<String>> {
+    if !should_run(&task.common, context)? {
+        return Ok(task.common.then.clone());
     }
-}
 
-fn task_type_name(task: &TaskDefinition) -> &'static str {
-    match task {
-        TaskDefinition::Call(_) => "call",
-        TaskDefinition::Do(_) => "do",
-        TaskDefinition::Emit(_) => "emit",
-        TaskDefinition::For(_) => "for",
-        TaskDefinition::Fork(_) => "fork",
-        TaskDefinition::Listen(_) => "listen",
-        TaskDefinition::Raise(_) => "raise",
-        TaskDefinition::Run(_) => "run",
-        TaskDefinition::Set(_) => "set",
-        TaskDefinition::Switch(_) => "switch",
-        TaskDefinition::Try(_) => "try",
-        TaskDefinition::Wait(_) => "wait",
-    }
-}
+    match execute_task_map(&task.try_, runtime, context) {
+        Ok(()) => Ok(task.common.then.clone()),
+        Err(err) => {
+            if task.catch.retry.is_some() {
+                return Err(anyhow!("workflow catch.retry is not supported yet"));
+            }
 
-struct TaskIndex {
-    tasks_by_name: HashMap<String, TaskDefinition>,
-    ordered_names: Vec<String>,
-    position: HashMap<String, usize>,
-}
+            let error_var = task.catch.as_.as_deref().unwrap_or("error");
+            let error_value = serde_json::json!({
+                "message": err.to_string(),
+            });
+            set_context_path(context, error_var, error_value)?;
 
-fn index_tasks(tasks: &WorkflowMap<String, TaskDefinition>) -> Result<TaskIndex> {
-    let mut tasks_by_name = HashMap::new();
-    let mut ordered_names = Vec::new();
+            if let Some(filter) = &task.catch.errors {
+                if !error_matches_filter(filter, context, error_var)? {
+                    return Err(err);
+                }
+            }
+            if let Some(condition) = &task.catch.when {
+                if !eval_condition(condition, context)? {
+                    return Err(err);
+                }
+            }
+            if let Some(condition) = &task.catch.except_when {
+                if eval_condition(condition, context)? {
+                    return Err(err);
+                }
+            }
 
-    for entry in &tasks.entries {
-        if entry.len() != 1 {
-            return Err(anyhow!(
-                "each task entry must contain exactly one task name/definition pair"
-            ));
+            if let Some(tasks) = &task.catch.do_ {
+                execute_task_map(tasks, runtime, context)?;
+            }
+            Ok(task.common.then.clone())
         }
-
-        let Some((name, task)) = entry.iter().next() else {
-            continue;
-        };
-        if tasks_by_name.insert(name.clone(), task.clone()).is_some() {
-            return Err(anyhow!("duplicate task name '{name}' in workflow"));
-        }
-        ordered_names.push(name.clone());
     }
-
-    let position = ordered_names
-        .iter()
-        .enumerate()
-        .map(|(idx, name)| (name.clone(), idx))
-        .collect::<HashMap<_, _>>();
-
-    Ok(TaskIndex {
-        tasks_by_name,
-        ordered_names,
-        position,
-    })
 }
+
+include!("engine_support.rs");
