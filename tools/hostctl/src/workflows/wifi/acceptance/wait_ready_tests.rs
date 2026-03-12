@@ -68,9 +68,8 @@ fn spawn_status_panic_responder(mut master: TTYPort) -> thread::JoinHandle<()> {
                     b"NET_STATUS {\"state\":\"Idle\",\"link\":false,\"ipv4\":\"0.0.0.0\",\"listener\":false,\"listener_enabled\":false,\"failure_class\":\"none\"}\r\n",
                 );
                 if !emitted_panic {
-                    let _ = master.write_all(
-                        b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n",
-                    );
+                    let _ = master
+                        .write_all(b"Guru Meditation Error: Core 0 panic'ed (LoadProhibited)\r\n");
                     emitted_panic = true;
                 }
                 let _ = master.flush();
