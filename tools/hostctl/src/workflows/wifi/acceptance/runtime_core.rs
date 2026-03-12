@@ -44,11 +44,8 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             "assert_upload_metrics" => self.handle_assert_upload_metrics(context),
             "net_collect_diag" => self.handle_net_collect_diag(),
             "net_recover_once" => self.handle_net_recover_once(),
-            "increment_wait_ready_attempt" => self.handle_increment_wait_ready_attempt(context),
-            "increment_upload_attempt" => self.handle_increment_upload_attempt(context),
             "fail_upload" | "net_fail" => self.handle_fail_upload(context),
             "finalize_cycle" => self.handle_finalize_cycle(context),
-            "advance_cycle" => self.handle_advance_cycle(context),
             "print_summary" => self.handle_print_summary(),
             _ => Err(anyhow!("unknown workflow action: {action}")),
         };

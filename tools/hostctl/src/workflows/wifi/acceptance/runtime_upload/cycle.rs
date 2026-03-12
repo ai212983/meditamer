@@ -27,12 +27,6 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn handle_increment_upload_attempt(&self, context: &mut Value) -> Result<()> {
-        let attempt = ctx_get_u32(context, "upload_attempt")?;
-        ctx_set_u32(context, "upload_attempt", attempt.saturating_add(1))?;
-        Ok(())
-    }
-
     pub(super) fn handle_fail_upload(&mut self, context: &mut Value) -> Result<()> {
         self.log_mem_summary("failure summary");
         let detail = ctx_get_string(context, "upload_error")
@@ -54,12 +48,6 @@ impl WifiAcceptanceRuntime<'_> {
             "cycle {}: connect_ms={} listen_ms={} upload_ms={} throughput_kib_s={:.2}",
             cycle, connect_ms, listen_ms, upload_ms, kib_s
         ));
-        Ok(())
-    }
-
-    pub(super) fn handle_advance_cycle(&self, context: &mut Value) -> Result<()> {
-        let cycle = ctx_get_u32(context, "cycle")?;
-        ctx_set_u32(context, "cycle", cycle.saturating_add(1))?;
         Ok(())
     }
 

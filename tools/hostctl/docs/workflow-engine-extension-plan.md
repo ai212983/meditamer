@@ -48,7 +48,7 @@ Make retry a workflow concern instead of a Rust runtime concern.
 
 ### Steps
 
-- [ ] Add executable support for `retry` on `call` tasks.
+- [x] Add executable support for `retry` on `call` tasks.
 - [x] Add executable support for `catch.retry` on `try` tasks.
 - [x] Define retry fields the engine will support initially.
   - `limit.attempt.count`
@@ -63,8 +63,8 @@ Make retry a workflow concern instead of a Rust runtime concern.
   - [x] conditional retry
   - [x] retry skipped because condition is false
 - [x] Refactor `troubleshoot` flash retry from Rust into YAML.
-- [ ] Refactor `troubleshoot` probe retry from Rust into YAML.
-- [ ] Refactor Wi-Fi readiness retry orchestration from Rust into YAML where possible.
+- [x] Refactor `troubleshoot` probe retry from Rust into YAML.
+- [x] Refactor Wi-Fi readiness retry orchestration from Rust into YAML where possible.
 
 ### Example Target Surface
 
@@ -171,7 +171,7 @@ Let workflow tasks capture action outputs into context instead of forcing action
 - [x] Add tests for:
   scalar result binding, object result binding, nested-path result binding, merge behavior.
 - [x] Refactor one existing runtime to use result binding instead of direct `ctx_set_*`.
-- [ ] Refactor additional workflows only after the binding contract is stable.
+- [x] Refactor additional workflows only after the binding contract is stable.
 
 ### Example Target Surface
 
@@ -251,30 +251,30 @@ Reduce synthetic context flags by making YAML conditions and values more express
 
 ### Steps
 
-- [ ] Add boolean operators:
+- [x] Add boolean operators:
   - `&&`
   - `||`
   - `!`
-- [ ] Add null/presence checks.
-- [ ] Add simple arithmetic for counters.
-- [ ] Add string interpolation inside larger strings.
-- [ ] Add tests for precedence, nesting, and mixed path/literal expressions.
-- [ ] Remove boolean scratch fields that only exist to satisfy current expression limits.
+- [x] Add null/presence checks.
+- [x] Add simple arithmetic for counters.
+- [x] Add string interpolation inside larger strings.
+- [x] Add tests for precedence, nesting, and mixed path/literal expressions.
+- [x] Remove boolean scratch fields that only exist to satisfy current expression limits.
 
 ### Exit Criteria
 
-- [ ] scenario conditions express combined gates directly
-- [ ] workflows need fewer temporary booleans and counters
+- [x] scenario conditions express combined gates directly
+- [x] workflows need fewer temporary booleans and counters
 
 ## Refactor Order After Engine Work
 
-- [ ] Refactor `runtime-modes-smoke` first.
+- [x] Refactor `runtime-modes-smoke` first.
   - remove repeated probe gate actions
-- [ ] Refactor `troubleshoot` second.
+- [x] Refactor `troubleshoot` second.
   - move flash/probe/soak retry policy into YAML
-- [ ] Refactor `wifi-acceptance` third.
+- [x] Refactor `wifi-acceptance` third.
   - move readiness retry and fallback orchestration into YAML
-- [ ] Refactor `wifi-discovery-debug` fourth.
+- [x] Refactor `wifi-discovery-debug` fourth.
   - remove switch-order dependence and simplify round flow
 
 ## What Stays in Rust
@@ -289,8 +289,8 @@ Keep these in Rust primitives:
 
 ## Final Success Criteria
 
-- [ ] scenario YAMLs own retry order and loop structure
-- [ ] Rust runtimes mostly dispatch primitive actions
-- [ ] workflow-specific orchestration glue shrinks materially
-- [ ] YAML no longer depends on implicit fallthrough behavior
-- [ ] hostctl behavior remains covered by engine and workflow tests
+- [x] scenario YAMLs own retry order and loop structure
+- [x] Rust runtimes mostly dispatch primitive actions
+- [x] workflow-specific orchestration glue shrinks materially
+- [x] YAML no longer depends on implicit fallthrough behavior
+- [x] hostctl behavior remains covered by engine and workflow tests

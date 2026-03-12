@@ -26,15 +26,47 @@ fn resolve_runtime_value(value: &Value, context: &Value) -> Result<Value> {
 
 fn resolve_runtime_string(raw: &str, context: &Value) -> Result<Value> {
     let trimmed = raw.trim();
-    let expression = if trimmed.starts_with("${") && trimmed.ends_with('}') {
-        unwrap_expression(trimmed)
-    } else if trimmed.starts_with('.') {
-        trimmed
-    } else {
-        return Ok(Value::String(raw.to_string()));
-    };
+    if trimmed.starts_with("${") && trimmed.ends_with('}') {
+        return eval_expression_value(trimmed, context);
+    }
+    if trimmed.starts_with('.') && trimmed == raw {
+        return eval_expression_value(trimmed, context);
+    }
+    if raw.contains("${") {
+        return interpolate_runtime_string(raw, context).map(Value::String);
+    }
+    Ok(Value::String(raw.to_string()))
+}
 
-    resolve_operand(context, expression)
+fn interpolate_runtime_string(raw: &str, context: &Value) -> Result<String> {
+    let mut rendered = String::new();
+    let mut rest = raw;
+
+    while let Some(start) = rest.find("${") {
+        rendered.push_str(&rest[..start]);
+        let after_start = &rest[start + 2..];
+        let end = after_start
+            .find('}')
+            .ok_or_else(|| anyhow!("unterminated runtime expression in string: {raw}"))?;
+        rendered.push_str(&format_runtime_value(&eval_expression_value(
+            &after_start[..end],
+            context,
+        )?));
+        rest = &after_start[end + 1..];
+    }
+
+    rendered.push_str(rest);
+    Ok(rendered)
+}
+
+fn format_runtime_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(text) => text.clone(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
 }
 
 fn set_context_path(context: &mut Value, path: &str, value: Value) -> Result<()> {

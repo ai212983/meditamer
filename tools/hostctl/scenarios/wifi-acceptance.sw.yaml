@@ -37,19 +37,12 @@ do:
         - net_wait_ready_gate:
             switch:
               - ready_passed:
-                  when: ".net_wait_ready_ok == true"
+                  when: "present(.ip)"
                   then: "__end__"
               - retryable_failure:
-                  when: ".net_wait_ready_retryable == true"
-                  then: "net_wait_ready_retry_gate"
-              - ready_failed:
-                  then: "fail_upload"
-        - net_wait_ready_retry_gate:
-            switch:
-              - retry_allowed:
-                  when: ".net_wait_ready_attempt < .net_wait_ready_recover_retries"
+                  when: ".net_wait_ready_retryable == true && .net_wait_ready_attempt < .net_wait_ready_recover_retries"
                   then: "net_recover_once"
-              - retry_exhausted:
+              - ready_failed:
                   then: "fail_upload"
         - net_recover_once:
             call: "net_recover_once"
@@ -58,13 +51,14 @@ do:
             call: "net_start"
             then: "increment_wait_ready_attempt"
         - increment_wait_ready_attempt:
-            call: "increment_wait_ready_attempt"
+            set:
+              net_wait_ready_attempt: "${ .net_wait_ready_attempt + 1 }"
       metadata:
         hostctl:
           repeat:
             in: ".net_wait_ready_loop_budget"
             at: "net_wait_ready_loop_index"
-            while: ".net_wait_ready_ok != true"
+            while: "!present(.ip)"
       then: "init_upload_attempt"
   - init_upload_attempt:
       call: "init_upload_attempt"
@@ -93,7 +87,8 @@ do:
       call: "net_recover_once"
       then: "increment_upload_attempt"
   - increment_upload_attempt:
-      call: "increment_upload_attempt"
+      set:
+        upload_attempt: "${ .upload_attempt + 1 }"
       then: "upload_retry_gate"
   - fail_upload:
       call: "net_fail"
@@ -107,7 +102,8 @@ do:
       call: "assert_upload_metrics"
       then: "advance_cycle"
   - advance_cycle:
-      call: "advance_cycle"
+      set:
+        cycle: "${ .cycle + 1 }"
       then: "cycle_gate"
   - print_summary:
       call: "print_summary"

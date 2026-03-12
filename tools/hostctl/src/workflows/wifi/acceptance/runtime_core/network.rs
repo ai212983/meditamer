@@ -178,14 +178,16 @@ impl WifiAcceptanceRuntime<'_> {
             "net_wait_ready_loop_budget",
             recover_retries.saturating_add(1),
         )?;
-        ctx_set_bool(context, "net_wait_ready_ok", false)?;
         ctx_set_bool(context, "net_wait_ready_retryable", false)?;
         ctx_set_string(context, "net_wait_ready_error", "")?;
+        let map = context
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("workflow context is not an object"))?;
+        map.insert("ip".to_string(), Value::Null);
         Ok(())
     }
 
     fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<()> {
-        ctx_set_bool(context, "net_wait_ready_ok", false)?;
         ctx_set_bool(context, "net_wait_ready_retryable", false)?;
 
         let result = match wait_ready(&mut self.console, self.policy) {
@@ -219,7 +221,6 @@ impl WifiAcceptanceRuntime<'_> {
         ctx_set_u32(context, "connect_ms", connect_ms)?;
         ctx_set_u32(context, "listen_ms", listen_ms)?;
         ctx_set_string(context, "ip", &ip)?;
-        ctx_set_bool(context, "net_wait_ready_ok", true)?;
         ctx_set_string(context, "net_wait_ready_error", "")?;
         ctx_set_string(context, "upload_error", "")?;
         self.connect_samples.push(connect_ms as f64 / 1000.0);
@@ -227,13 +228,4 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_increment_wait_ready_attempt(&mut self, context: &mut Value) -> Result<()> {
-        let attempt = ctx_get_u32(context, "net_wait_ready_attempt")?.saturating_add(1);
-        let max_retries = ctx_get_u32(context, "net_wait_ready_recover_retries")?;
-        ctx_set_u32(context, "net_wait_ready_attempt", attempt)?;
-        self.logger.info(format!(
-            "net_wait_ready: issuing recover retry {attempt}/{max_retries}"
-        ));
-        Ok(())
-    }
 }

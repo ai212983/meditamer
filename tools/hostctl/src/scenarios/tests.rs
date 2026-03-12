@@ -253,6 +253,7 @@ do:
 
     include!("retry_tests.rs");
     include!("for_tests.rs");
+    include!("expression_tests.rs");
     include!("result_tests.rs");
     include!("switch_tests.rs");
 }
