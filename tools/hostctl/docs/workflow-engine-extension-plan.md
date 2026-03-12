@@ -27,7 +27,6 @@ Relevant implementation points:
 
 Current gaps that block YAML-first orchestration:
 
-- `call` cannot bind structured results back into context.
 - `switch` has no explicit `default` or `end`.
 - Condition syntax only supports simple comparisons.
 - String interpolation only works for full-value expressions.
@@ -166,29 +165,30 @@ Let workflow tasks capture action outputs into context instead of forcing action
 
 ### Steps
 
-- [ ] Extend `WorkflowRuntime` action handling to support structured action output.
-- [ ] Add engine support for binding returned values to a context path.
-- [ ] Decide whether binding semantics should:
-  replace a value, merge into an object, or support both.
-- [ ] Add tests for:
+- [x] Extend `WorkflowRuntime` action handling to support structured action output.
+- [x] Add engine support for binding returned values to a context path.
+- [x] Decide whether binding semantics should:
+  support both replacement and merge through `metadata.hostctl.result`.
+- [x] Add tests for:
   scalar result binding, object result binding, nested-path result binding, merge behavior.
-- [ ] Refactor one existing runtime to use result binding instead of direct `ctx_set_*`.
+- [x] Refactor one existing runtime to use result binding instead of direct `ctx_set_*`.
 - [ ] Refactor additional workflows only after the binding contract is stable.
 
 ### Example Target Surface
 
 ```yaml
 - state_probe:
-    call: "state_get"
-    with:
-      expect_upload: "on"
-    result: ".post_upload.state_line"
+    call: "init_post_upload_checks"
+    metadata:
+      hostctl:
+        result:
+          merge: true
 ```
 
 ### Exit Criteria
 
-- [ ] at least one workflow uses returned action data instead of action-side context mutation
-- [ ] orchestration-only `ctx_set_*` usage is reduced
+- [x] at least one workflow uses returned action data instead of action-side context mutation
+- [x] orchestration-only `ctx_set_*` usage is reduced
 
 ## Phase 4: Explicit Switch Semantics
 

@@ -141,12 +141,6 @@ fn context_get_u32(context: &Value, key: &str) -> u32 {
         .unwrap_or(0)
 }
 
-fn context_set_u32(context: &mut Value, key: &str, value: u32) {
-    if let Some(map) = context.as_object_mut() {
-        map.insert(key.to_string(), Value::from(value));
-    }
-}
-
 impl<'a> RuntimeModesScenarioRuntime<'a> {
     fn new(
         logger: &'a mut Logger,
@@ -165,6 +159,19 @@ impl<'a> RuntimeModesScenarioRuntime<'a> {
             psram_samples: Vec::new(),
             timeset_samples: Vec::new(),
         }
+    }
+
+    fn build_post_upload_checks_result(&mut self) -> Value {
+        if self.post_upload_status_repeats > 0 || self.post_upload_timeset_repeats > 0 {
+            self.logger
+                .info("Running post-upload UART regression checks...");
+        }
+        json!({
+            "post_upload_status_repeats": self.post_upload_status_repeats,
+            "post_upload_timeset_repeats": self.post_upload_timeset_repeats,
+            "post_upload_status_index": 0,
+            "post_upload_timeset_index": 0
+        })
     }
 }
 
@@ -205,22 +212,7 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
                 Ok(())
             }
             "init_post_upload_checks" => {
-                if self.post_upload_status_repeats > 0 || self.post_upload_timeset_repeats > 0 {
-                    self.logger
-                        .info("Running post-upload UART regression checks...");
-                }
-                context_set_u32(
-                    context,
-                    "post_upload_status_repeats",
-                    self.post_upload_status_repeats,
-                );
-                context_set_u32(
-                    context,
-                    "post_upload_timeset_repeats",
-                    self.post_upload_timeset_repeats,
-                );
-                context_set_u32(context, "post_upload_status_index", 0);
-                context_set_u32(context, "post_upload_timeset_index", 0);
+                let _ = self.build_post_upload_checks_result();
                 Ok(())
             }
             "run_post_upload_status_probe" => {
@@ -253,5 +245,18 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
             }
             other => Err(anyhow!("unsupported runtime-modes action: {other}")),
         }
+    }
+
+    fn invoke_with_result(
+        &mut self,
+        action: &str,
+        args: &Value,
+        context: &mut Value,
+    ) -> Result<Option<Value>> {
+        if action == "init_post_upload_checks" {
+            return Ok(Some(self.build_post_upload_checks_result()));
+        }
+        self.invoke(action, args, context)?;
+        Ok(None)
     }
 }

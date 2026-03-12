@@ -20,6 +20,10 @@ do:
       then: "init_post_upload_checks"
   - init_post_upload_checks:
       call: "init_post_upload_checks"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "post_upload_status_loop"
   - post_upload_status_loop:
       do:
