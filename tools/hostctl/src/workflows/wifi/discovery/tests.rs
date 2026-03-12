@@ -9,10 +9,7 @@ use super::{
     probe::ProbeRoundState,
     profile::{recommended_round_timeout_ms, DiscoveryProfile},
 };
-use crate::{
-    scenarios::load_workflow,
-    workflows::wifi::common::NetPolicy,
-};
+use crate::{scenarios::load_workflow, workflows::wifi::common::NetPolicy};
 
 #[test]
 fn scan_done_parser_extracts_count() {
