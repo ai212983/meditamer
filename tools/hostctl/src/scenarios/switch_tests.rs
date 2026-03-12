@@ -88,34 +88,29 @@ do:
     }
 
     #[test]
-    fn switch_uses_explicit_task_then_when_no_case_matches() -> Result<()> {
+    fn switch_errors_when_case_matches_without_then() {
         let yaml = r#"
 document:
   dsl: "1.0.0"
   namespace: "hostctl"
-  name: "switch-task-then"
+  name: "switch-missing-then"
   version: "1.0.0"
 do:
   - gate:
       switch:
         - fail:
-            when: ".ok == false"
-            then: "fail_task"
-      then: "after"
-  - after:
-      call: "finish"
-      then: "__end__"
-  - fail_task:
-      call: "fail"
+            when: ".ok == true"
 "#;
-        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml)?;
+        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml).expect("workflow parses");
         let mut runtime = TestRuntime {
             actions: Vec::new(),
         };
-        execute_workflow(&workflow, &mut runtime, &serde_json::json!({ "ok": true }))?;
+        let err = execute_workflow(&workflow, &mut runtime, &serde_json::json!({ "ok": true }))
+            .expect_err("switch branch without then should fail");
 
-        assert_eq!(runtime.actions, vec!["finish"]);
-        Ok(())
+        assert!(err
+            .to_string()
+            .contains("workflow switch case 'fail' requires then"));
     }
 
     #[test]
@@ -144,5 +139,5 @@ do:
 
         assert!(err
             .to_string()
-            .contains("no matching case and no explicit default/then transition"));
+            .contains("no matching case and no explicit default transition"));
     }

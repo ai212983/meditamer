@@ -105,7 +105,11 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
             if default_then.is_some() {
                 return Err(anyhow!("workflow switch defines multiple default cases"));
             }
-            default_then = case.then.clone().or_else(|| task.common.then.clone());
+            default_then = Some(
+                case.then
+                    .clone()
+                    .ok_or_else(|| anyhow!("workflow switch default case requires then"))?,
+            );
             continue;
         }
         let matches = match &case.when {
@@ -113,16 +117,20 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
             None => true,
         };
         if matches {
-            return Ok(case.then.clone().or_else(|| task.common.then.clone()));
+            return Ok(Some(
+                case.then
+                    .clone()
+                    .ok_or_else(|| anyhow!("workflow switch case '{name}' requires then"))?,
+            ));
         }
     }
 
-    if let Some(next) = default_then.or_else(|| task.common.then.clone()) {
+    if let Some(next) = default_then {
         return Ok(Some(next));
     }
 
     Err(anyhow!(
-        "workflow switch had no matching case and no explicit default/then transition"
+        "workflow switch had no matching case and no explicit default transition"
     ))
 }
 include!("engine_call.rs");
