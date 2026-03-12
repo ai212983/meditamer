@@ -16,11 +16,3 @@ pub fn ctx_get_string(context: &Value, key: &str) -> Result<String> {
         .map(|v| v.to_string())
         .ok_or_else(|| anyhow!("missing context key `{key}` as string"))
 }
-
-pub fn ctx_set_u32(context: &mut Value, key: &str, value: u32) -> Result<()> {
-    let map = context
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("workflow context is not an object"))?;
-    map.insert(key.to_string(), Value::from(value));
-    Ok(())
-}

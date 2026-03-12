@@ -55,7 +55,10 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 Ok(())
             }
             "net_verify_once" => self.handle_net_verify_once(context),
-            "assert_upload_metrics" => self.handle_assert_upload_metrics(context),
+            "assert_upload_metrics" => {
+                let _ = self.handle_assert_upload_metrics()?;
+                Ok(())
+            }
             "net_collect_diag" => self.handle_net_collect_diag(),
             "net_recover_once" => self.handle_net_recover_once(),
             "fail_upload" | "net_fail" => self.handle_fail_upload(context),
@@ -101,6 +104,12 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             "net_upload_once" => {
                 self.capture_mem_diag_lines()?;
                 let result = self.handle_net_upload_once(context)?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(result))
+            }
+            "assert_upload_metrics" => {
+                self.capture_mem_diag_lines()?;
+                let result = self.handle_assert_upload_metrics()?;
                 self.capture_mem_diag_lines()?;
                 Ok(Some(result))
             }

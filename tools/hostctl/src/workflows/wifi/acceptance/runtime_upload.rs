@@ -12,8 +12,8 @@ use crate::{
     workflows::{
         upload,
         wifi::common::{
-            ctx_get_string, ctx_get_u32, ctx_set_u32, is_ready, net_status_line_re,
-            query_net_status, query_net_status_line, PanicSignal,
+            ctx_get_string, ctx_get_u32, is_ready, net_status_line_re, query_net_status,
+            query_net_status_line, PanicSignal,
         },
     },
 };
@@ -72,12 +72,17 @@ impl WifiAcceptanceRuntime<'_> {
         result
     }
 
-    pub(super) fn handle_assert_upload_metrics(&mut self, context: &mut Value) -> Result<()> {
+    fn upload_metrics_result(&self, delta: u32, current: u32) -> Value {
+        serde_json::json!({
+            "req_read_body_reset_delta": delta,
+            "req_read_body_reset_total": current
+        })
+    }
+
+    pub(super) fn handle_assert_upload_metrics(&mut self) -> Result<Value> {
         let current = self.query_req_read_body_reset()?;
         let baseline = self.req_read_body_reset_baseline.unwrap_or(current);
         let delta = current.saturating_sub(baseline);
-        ctx_set_u32(context, "req_read_body_reset_delta", delta)?;
-        ctx_set_u32(context, "req_read_body_reset_total", current)?;
 
         if delta > self.req_read_body_reset_max_delta {
             return Err(anyhow!(
@@ -93,7 +98,7 @@ impl WifiAcceptanceRuntime<'_> {
             "upload_metrics_guard: req_read_body_reset delta={} max_delta={} baseline={} current={}",
             delta, self.req_read_body_reset_max_delta, baseline, current
         ));
-        Ok(())
+        Ok(self.upload_metrics_result(delta, current))
     }
 
     pub(super) fn handle_net_upload_once(&mut self, context: &mut Value) -> Result<Value> {

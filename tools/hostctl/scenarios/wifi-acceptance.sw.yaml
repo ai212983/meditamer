@@ -120,6 +120,10 @@ do:
       then: "assert_upload_metrics"
   - assert_upload_metrics:
       call: "assert_upload_metrics"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "advance_cycle"
   - advance_cycle:
       set:

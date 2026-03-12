@@ -28,6 +28,7 @@ Current examples:
 - `metadata.hostctl.retry`
 - `metadata.hostctl.repeat`
 - `metadata.hostctl.result`
+- structured error context patches via `WorkflowActionError`
 
 Condition parser supports comparisons against literals and context paths:
 
@@ -77,6 +78,14 @@ Unsupported DSL task kinds currently fail fast.
 - If an action's main job is to produce context state, return structured data
   from `invoke_with_result` and bind it with `metadata.hostctl.result`.
 - Use `merge: true` for status objects and `path:` for nested/scoped data.
+
+4. Error context patches for failing actions.
+- If an action must fail and also publish workflow-visible state, raise
+  `WorkflowActionError` with a context patch instead of mutating context first.
+- The engine merges that patch before `catch` / retry condition evaluation, so
+  YAML can branch on fields like `failure_class` or `flash_ok` even on errors.
+- Keep this for true failure-path state only. Use normal result binding for
+  successful setup, status, and bookkeeping outputs.
 
 3. Keep each step atomic.
 - `run_step` handles one command/ack/SDREQ/SDWAIT assertion.
