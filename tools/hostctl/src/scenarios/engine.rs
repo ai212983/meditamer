@@ -96,7 +96,7 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
         return Ok(task.common.then.clone());
     }
 
-    let mut default_then = None;
+    let mut default_then: Option<String> = None;
     for entry in &task.switch.entries {
         let Some((name, case)) = entry.iter().next() else {
             continue;
@@ -105,7 +105,7 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
             if default_then.is_some() {
                 return Err(anyhow!("workflow switch defines multiple default cases"));
             }
-            default_then = Some(case.then.clone().or_else(|| task.common.then.clone()));
+            default_then = case.then.clone().or_else(|| task.common.then.clone());
             continue;
         }
         let matches = match &case.when {
@@ -117,7 +117,13 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
         }
     }
 
-    Ok(default_then.unwrap_or_else(|| task.common.then.clone()))
+    if let Some(next) = default_then.or_else(|| task.common.then.clone()) {
+        return Ok(Some(next));
+    }
+
+    Err(anyhow!(
+        "workflow switch had no matching case and no explicit default/then transition"
+    ))
 }
 include!("engine_call.rs");
 include!("engine_repeat.rs");

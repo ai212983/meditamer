@@ -88,12 +88,12 @@ do:
     }
 
     #[test]
-    fn switch_keeps_legacy_fallthrough_when_no_match_exists() -> Result<()> {
+    fn switch_uses_explicit_task_then_when_no_case_matches() -> Result<()> {
         let yaml = r#"
 document:
   dsl: "1.0.0"
   namespace: "hostctl"
-  name: "switch-fallthrough"
+  name: "switch-task-then"
   version: "1.0.0"
 do:
   - gate:
@@ -101,6 +101,7 @@ do:
         - fail:
             when: ".ok == false"
             then: "fail_task"
+      then: "after"
   - after:
       call: "finish"
       then: "__end__"
@@ -115,4 +116,33 @@ do:
 
         assert_eq!(runtime.actions, vec!["finish"]);
         Ok(())
+    }
+
+    #[test]
+    fn switch_errors_when_no_case_matches_and_no_default_exists() {
+        let yaml = r#"
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "switch-strict"
+  version: "1.0.0"
+do:
+  - gate:
+      switch:
+        - fail:
+            when: ".ok == false"
+            then: "fail_task"
+  - fail_task:
+      call: "fail"
+"#;
+        let workflow: WorkflowDefinition = serde_yaml::from_str(yaml).expect("workflow parses");
+        let mut runtime = TestRuntime {
+            actions: Vec::new(),
+        };
+        let err = execute_workflow(&workflow, &mut runtime, &serde_json::json!({ "ok": true }))
+            .expect_err("strict switch should reject implicit fallthrough");
+
+        assert!(err
+            .to_string()
+            .contains("no matching case and no explicit default/then transition"));
     }
