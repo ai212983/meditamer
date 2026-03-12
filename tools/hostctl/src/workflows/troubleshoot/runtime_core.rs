@@ -141,6 +141,12 @@ impl<'a> TroubleshootRuntime<'a> {
             self.config.flash_retries.saturating_sub(1),
         )?;
         ctx_set_u32(context, "flash_retry_delay_ms", 1_000)?;
+        ctx_set_u32(
+            context,
+            "probe_retry_count",
+            self.config.probe_retries.saturating_sub(1),
+        )?;
+        ctx_set_u32(context, "probe_retry_delay_ms", self.config.probe_delay_ms as u32)?;
         ctx_set_string(context, "result", "failed")?;
         ctx_set_string(context, "failure_stage", "")?;
         ctx_set_string(context, "failure_class", "")?;
@@ -218,7 +224,7 @@ impl WorkflowRuntime for TroubleshootRuntime<'_> {
         match action {
             "preflight" => self.action_preflight(context),
             "flash_firmware_once" => self.action_flash_firmware_once(context),
-            "run_uart_probes" => self.action_run_uart_probes(context),
+            "run_uart_probes_once" => self.action_run_uart_probes_once(context),
             "run_boot_soak" => self.action_run_boot_soak(context),
             "hint_uart_transport" => {
                 self.action_hint_uart_transport();

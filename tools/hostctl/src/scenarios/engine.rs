@@ -64,27 +64,6 @@ fn execute_task_map<R: WorkflowRuntime>(
     }
 }
 
-fn execute_call_task<R: WorkflowRuntime>(
-    task: &CallTaskDefinition,
-    runtime: &mut R,
-    context: &mut Value,
-) -> Result<Option<String>> {
-    if !should_run(&task.common, context)? {
-        return Ok(task.common.then.clone());
-    }
-
-    let mut args = JsonMap::new();
-    if let Some(with) = &task.with {
-        for (key, value) in with {
-            args.insert(key.clone(), resolve_runtime_value(value, context)?);
-        }
-    }
-
-    let output = runtime.invoke_with_result(&task.call, &Value::Object(args), context)?;
-    bind_call_result(&task.common, context, output)?;
-    Ok(task.common.then.clone())
-}
-
 fn execute_do_task<R: WorkflowRuntime>(
     task: &DoTaskDefinition,
     runtime: &mut R,
@@ -140,7 +119,9 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
 
     Ok(default_then.unwrap_or_else(|| task.common.then.clone()))
 }
+include!("engine_call.rs");
 include!("engine_repeat.rs");
 include!("engine_result.rs");
 include!("engine_retry.rs");
+include!("engine_retry_support.rs");
 include!("engine_support.rs");

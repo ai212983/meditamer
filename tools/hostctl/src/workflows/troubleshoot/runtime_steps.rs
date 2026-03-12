@@ -64,10 +64,10 @@ impl TroubleshootRuntime<'_> {
         }
     }
 
-    pub(super) fn action_run_uart_probes(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_run_uart_probes_once(&mut self, context: &mut Value) -> Result<()> {
         self.probe_ok = false;
         ctx_set_bool(context, "probe_ok", false)?;
-        let retries = self.config.probe_retries;
+        let retries = 1;
         let delay_ms = self.config.probe_delay_ms;
         let timeout_ms = self.config.probe_timeout_ms;
 
@@ -75,7 +75,7 @@ impl TroubleshootRuntime<'_> {
             Ok(console) => console,
             Err(err) => {
                 self.set_failure(context, "probe", format!("failed to open serial: {err:#}"))?;
-                return Ok(());
+                return Err(anyhow::anyhow!("failed to open serial: {err:#}"));
             }
         };
 
@@ -93,8 +93,8 @@ impl TroubleshootRuntime<'_> {
                     "UART probes failed: {err:#}\nRecent UART lines:\n{}",
                     recent_uart_lines(console, 20)
                 );
-                self.set_failure(context, "probe", detail)?;
-                Ok(())
+                self.set_failure(context, "probe", detail.clone())?;
+                Err(anyhow::anyhow!(detail))
             }
         }
     }

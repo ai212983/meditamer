@@ -33,7 +33,17 @@ do:
         - flash_passed:
             then: "run_uart_probes"
   - run_uart_probes:
-      call: "run_uart_probes"
+      try:
+        - run_uart_probes_once:
+            call: "run_uart_probes_once"
+            metadata:
+              hostctl:
+                retry:
+                  count: ".probe_retry_count"
+                  delayMs: ".probe_retry_delay_ms"
+                  as: "probe_error"
+      catch:
+        as: "probe_error"
       then: "probe_gate"
   - probe_gate:
       switch:
