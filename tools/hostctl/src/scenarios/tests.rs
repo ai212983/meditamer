@@ -256,4 +256,5 @@ do:
     include!("expression_tests.rs");
     include!("result_tests.rs");
     include!("switch_tests.rs");
+    include!("workflow_contract_tests.rs");
 }

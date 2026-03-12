@@ -60,8 +60,8 @@ Unsupported DSL task kinds currently fail fast.
 
 5. Keep context contract explicit.
 - For each action, define inputs and outputs (which context keys it reads/writes).
-- Every `switch` must have an explicit terminal path: a matching branch, a
-  `default`, or task-level `then`. Do not rely on implicit fallthrough.
+- Every `switch` must define an explicit `default` branch. Do not rely on
+  implicit fallthrough or an unlabeled catch-all case.
 
 ## Data Patterns
 

@@ -22,7 +22,7 @@ do:
         - explicit_image:
             when: "${ .image_supplied == true }"
             then: "resolve_explicit_image"
-        - build_image:
+        - default:
             then: "build_image"
   - resolve_explicit_image:
       call: "resolve_image"
@@ -42,7 +42,7 @@ do:
         - app_only_mode:
             when: "${ .flash_mode == \"app-only\" }"
             then: "begin_direct_app_only"
-        - auto_mode:
+        - default:
             then: "begin_full_flash"
   - begin_full_flash:
       set:
@@ -70,7 +70,7 @@ do:
         - full_flash_failed:
             when: "${ .flash_error != \"\" }"
             then: "post_full_gate"
-        - full_flash_succeeded:
+        - default:
             then: "mark_full_flash_success"
   - mark_full_flash_success:
       set:
@@ -86,14 +86,14 @@ do:
         - auto_mode:
             when: "${ .flash_mode == \"auto\" }"
             then: "auto_fallback_gate"
-        - full_flash_failed:
+        - default:
             then: "abort_flash"
   - auto_fallback_gate:
       switch:
         - fallback_allowed:
             when: "${ .fallback_allowed == true }"
             then: "mark_auto_fallback"
-        - fallback_blocked:
+        - default:
             then: "abort_flash"
   - begin_direct_app_only:
       set:
@@ -128,7 +128,7 @@ do:
         - app_only_flash_failed:
             when: "${ .flash_error != \"\" }"
             then: "post_app_only_gate"
-        - app_only_flash_succeeded:
+        - default:
             then: "mark_app_only_flash_success"
   - mark_app_only_flash_success:
       set:
@@ -141,7 +141,7 @@ do:
         - app_only_flash_passed:
             when: "${ .flash_ok == true }"
             then: "capture_mode_gate"
-        - app_only_flash_failed:
+        - default:
             then: "abort_flash"
   - abort_flash:
       call: "abort_flash"
@@ -153,7 +153,7 @@ do:
         - capture_stream:
             when: "${ .capture_mode == \"stream\" }"
             then: "capture_stream"
-        - capture_boot:
+        - default:
             then: "capture_boot"
   - capture_none:
       call: "capture"
@@ -175,7 +175,7 @@ do:
         - run_timeset:
             when: "${ .set_time_after_flash == true }"
             then: "post_flash_timeset"
-        - skip_timeset:
+        - default:
             then: "write_summary"
   - post_flash_timeset:
       call: "post_flash_timeset"

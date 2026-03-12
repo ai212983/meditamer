@@ -19,7 +19,7 @@ do:
         - run_cycle:
             when: ".cycle <= .cycles"
             then: "net_apply_config"
-        - done:
+        - default:
             then: "print_summary"
   - net_apply_config:
       call: "net_apply_config"
@@ -46,7 +46,7 @@ do:
               - retryable_failure:
                   when: ".net_wait_ready_retryable == true && .net_wait_ready_attempt < .net_wait_ready_recover_retries"
                   then: "net_recover_once"
-              - ready_failed:
+              - default:
                   then: "fail_upload"
         - net_recover_once:
             call: "net_recover_once"
@@ -76,7 +76,7 @@ do:
         - upload_attempt_allowed:
             when: ".upload_attempt <= .operation_retries"
             then: "net_upload_once"
-        - upload_attempt_exhausted:
+        - default:
             then: "fail_upload"
   - net_upload_once:
       call: "net_upload_once"
@@ -86,7 +86,7 @@ do:
         - upload_done:
             when: ".upload_done == true"
             then: "net_verify_once"
-        - upload_failed:
+        - default:
             then: "net_collect_diag"
   - net_collect_diag:
       call: "net_collect_diag"

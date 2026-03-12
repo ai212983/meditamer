@@ -22,7 +22,7 @@ do:
         - run_baseline_only:
             when: ".suite == \"baseline\""
             then: "baseline_mkdir"
-        - skip_baseline:
+        - default:
             then: "burst_gate"
   - baseline_mkdir:
       call: "run_step"
@@ -132,7 +132,7 @@ do:
         - run_burst_only:
             when: ".suite == \"burst\""
             then: "burst_batch_start"
-        - skip_burst:
+        - default:
             then: "failure_gate"
   - burst_batch_start:
       call: "burst_batch_start"
@@ -182,7 +182,7 @@ do:
         - run_failure_only:
             when: ".suite == \"failures\""
             then: "fail_mkdir_nonempty"
-        - skip_failure:
+        - default:
             then: "complete"
   - fail_mkdir_nonempty:
       call: "run_step"

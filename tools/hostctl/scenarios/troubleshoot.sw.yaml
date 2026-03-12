@@ -38,7 +38,7 @@ do:
         - flash_failed:
             when: ".flash_ok == false"
             then: "failure_hint_gate"
-        - flash_passed:
+        - default:
             then: "run_uart_probes"
   - run_uart_probes:
       try:
@@ -60,7 +60,7 @@ do:
         - probe_failed:
             when: ".probe_ok == false"
             then: "failure_hint_gate"
-        - probe_passed:
+        - default:
             then: "run_boot_soak"
   - run_boot_soak:
       call: "run_boot_soak"
@@ -74,7 +74,7 @@ do:
         - soak_failed:
             when: ".soak_ok == false"
             then: "failure_hint_gate"
-        - soak_passed:
+        - default:
             then: "mark_success"
   - failure_hint_gate:
       switch:
@@ -87,7 +87,7 @@ do:
         - dhcp_no_ipv4_hint:
             when: ".failure_class == \"dhcp_no_ipv4_stall\""
             then: "hint_dhcp_no_ipv4"
-        - default_summary:
+        - default:
             then: "print_summary"
   - hint_uart_transport:
       call: "hint_uart_transport"
