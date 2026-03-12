@@ -4,7 +4,7 @@ use super::*;
 mod prepare_preconditions;
 #[path = "prepare/prepare_scan.rs"]
 mod prepare_scan;
-#[path = "prepare/prepare_start.rs"]
+#[path = "prepare/prepare_start/mod.rs"]
 mod prepare_start;
 
 use prepare_preconditions::{prepare_preconditions, PreparePreconditions};
