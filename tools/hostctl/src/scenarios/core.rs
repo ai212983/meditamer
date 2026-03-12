@@ -13,6 +13,16 @@ use serverless_workflow_core::models::{
 
 pub trait WorkflowRuntime {
     fn invoke(&mut self, action: &str, args: &Value, context: &mut Value) -> Result<()>;
+
+    fn invoke_with_result(
+        &mut self,
+        action: &str,
+        args: &Value,
+        context: &mut Value,
+    ) -> Result<Option<Value>> {
+        self.invoke(action, args, context)?;
+        Ok(None)
+    }
 }
 
 pub fn load_workflow(path: &Path) -> Result<WorkflowDefinition> {

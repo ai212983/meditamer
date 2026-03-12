@@ -75,7 +75,8 @@ fn execute_call_task<R: WorkflowRuntime>(
         }
     }
 
-    runtime.invoke(&task.call, &Value::Object(args), context)?;
+    let output = runtime.invoke_with_result(&task.call, &Value::Object(args), context)?;
+    bind_call_result(&task.common, context, output)?;
     Ok(task.common.then.clone())
 }
 
@@ -127,5 +128,6 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
     Ok(task.common.then.clone())
 }
 include!("engine_repeat.rs");
+include!("engine_result.rs");
 include!("engine_retry.rs");
 include!("engine_support.rs");

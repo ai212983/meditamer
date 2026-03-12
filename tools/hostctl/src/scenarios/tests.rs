@@ -37,6 +37,31 @@ mod tests {
             }
             Ok(())
         }
+
+        fn invoke_with_result(
+            &mut self,
+            action: &str,
+            args: &Value,
+            context: &mut Value,
+        ) -> Result<Option<Value>> {
+            match action {
+                "return_scalar" => {
+                    self.actions.push(action.to_string());
+                    Ok(Some(Value::from(7)))
+                }
+                "return_object" => {
+                    self.actions.push(action.to_string());
+                    Ok(Some(serde_json::json!({
+                        "status": "ok",
+                        "echo": args.get("value").cloned().unwrap_or(Value::Null),
+                    })))
+                }
+                _ => {
+                    self.invoke(action, args, context)?;
+                    Ok(None)
+                }
+            }
+        }
     }
 
     #[test]
@@ -228,4 +253,5 @@ do:
 
     include!("retry_tests.rs");
     include!("for_tests.rs");
+    include!("result_tests.rs");
 }
