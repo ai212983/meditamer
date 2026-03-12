@@ -111,3 +111,15 @@ pub fn run_troubleshoot(logger: &mut Logger, opts: TroubleshootOptions) -> Resul
         runtime.failure_class
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn troubleshoot_workflow_yaml_parses() -> Result<()> {
+        let workflow_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/troubleshoot.sw.yaml");
+        load_workflow(&workflow_path).map(|_| ())
+    }
+}

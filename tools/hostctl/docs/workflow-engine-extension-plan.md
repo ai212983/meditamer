@@ -1,7 +1,6 @@
 # Hostctl Workflow Engine Extension Plan
 
 ## Goal
-
 Move more orchestration policy from Rust workflow runtimes into scenario YAML under
 `tools/hostctl/scenarios/`, while keeping Rust focused on primitives:
 
@@ -38,7 +37,6 @@ Current gaps that block YAML-first orchestration:
 ## Phase 1: Retry
 
 ### Objective
-
 Make retry a workflow concern instead of a Rust runtime concern.
 
 ### Why This Phase First
@@ -55,18 +53,20 @@ Make retry a workflow concern instead of a Rust runtime concern.
 ### Steps
 
 - [ ] Add executable support for `retry` on `call` tasks.
-- [ ] Add executable support for `catch.retry` on `try` tasks.
-- [ ] Define retry fields the engine will support initially.
-  - `maxAttempts`
-  - `delayMs`
+- [x] Add executable support for `catch.retry` on `try` tasks.
+- [x] Define retry fields the engine will support initially.
+  - `limit.attempt.count`
+  - `delay`
   - optional `when`
-- [ ] Bind the last error into workflow context before retry evaluation.
+  - optional `exceptWhen`
+  - hostctl metadata overrides for retry count and delay
+- [x] Bind the last error into workflow context before retry evaluation.
 - [ ] Add engine tests for:
-  - successful retry
-  - retry exhaustion
-  - conditional retry
-  - retry skipped because condition is false
-- [ ] Refactor `troubleshoot` flash retry from Rust into YAML.
+  - [x] successful retry
+  - [x] retry exhaustion
+  - [x] conditional retry
+  - [x] retry skipped because condition is false
+- [x] Refactor `troubleshoot` flash retry from Rust into YAML.
 - [ ] Refactor `troubleshoot` probe retry from Rust into YAML.
 - [ ] Refactor Wi-Fi readiness retry orchestration from Rust into YAML where possible.
 
@@ -74,23 +74,33 @@ Make retry a workflow concern instead of a Rust runtime concern.
 
 ```yaml
 - flash_firmware:
-    call: "flash_firmware_once"
-    retry:
-      maxAttempts: 3
-      delayMs: 1000
-      when: "${ .error.class == \"uart_transport\" }"
+    try:
+      - flash_firmware_once:
+          call: "flash_firmware_once"
+    catch:
+      as: "flash_error"
+      retry:
+        limit:
+          attempt:
+            count: 0
+        delay:
+          milliseconds: 0
+    metadata:
+      hostctl:
+        retry:
+          count: ".flash_retry_count"
+          delayMs: ".flash_retry_delay_ms"
 ```
 
 ### Exit Criteria
 
-- [ ] `troubleshoot` no longer owns retry loops in `runtime_steps.rs`
-- [ ] YAML expresses retry count and retry order directly
+- [x] `troubleshoot` no longer owns flash retry loops in `runtime_steps.rs`
+- [x] YAML expresses retry count and retry order directly for `troubleshoot` flash
 - [ ] engine test coverage exists for retry behavior
 
 ## Phase 2: Loops
 
 ### Objective
-
 Make repeated orchestration steps expressible in YAML without gate actions and counter-only helpers.
 
 ### Why This Phase Second
@@ -107,16 +117,12 @@ Make repeated orchestration steps expressible in YAML without gate actions and c
 ### Steps
 
 - [ ] Choose the first loop surface to implement.
-  - preferred: `repeat` with `while`
-  - optional: native `for`
+  Preferred: `repeat` with `while`; optional: native `for`.
 - [ ] Support nested loop bodies using existing task maps.
 - [ ] Support loop-local context updates through `set`.
 - [ ] Add guardrails for runaway loops.
 - [ ] Add engine tests for:
-  - zero-iteration loop
-  - fixed-count loop
-  - condition-controlled loop
-  - nested loop
+  zero-iteration loop, fixed-count loop, condition-controlled loop, nested loop.
 - [ ] Remove `set_post_upload_status_gate` orchestration from `runtime_modes`.
 - [ ] Remove `set_post_upload_timeset_gate` orchestration from `runtime_modes`.
 - [ ] Replace counter-gate patterns in YAML with native loops.
@@ -146,7 +152,6 @@ Make repeated orchestration steps expressible in YAML without gate actions and c
 ## Phase 3: Call Result Binding
 
 ### Objective
-
 Let workflow tasks capture action outputs into context instead of forcing actions to mutate context directly.
 
 ### Why This Phase Third
@@ -165,14 +170,9 @@ Let workflow tasks capture action outputs into context instead of forcing action
 - [ ] Extend `WorkflowRuntime` action handling to support structured action output.
 - [ ] Add engine support for binding returned values to a context path.
 - [ ] Decide whether binding semantics should:
-  - replace a value
-  - merge into an object
-  - support both
+  replace a value, merge into an object, or support both.
 - [ ] Add tests for:
-  - scalar result binding
-  - object result binding
-  - nested-path result binding
-  - merge behavior
+  scalar result binding, object result binding, nested-path result binding, merge behavior.
 - [ ] Refactor one existing runtime to use result binding instead of direct `ctx_set_*`.
 - [ ] Refactor additional workflows only after the binding contract is stable.
 

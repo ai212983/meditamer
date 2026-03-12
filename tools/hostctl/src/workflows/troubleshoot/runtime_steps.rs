@@ -1,4 +1,4 @@
-use std::{process::Command, thread, time::Duration};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -13,7 +13,7 @@ use super::{
 };
 
 impl TroubleshootRuntime<'_> {
-    pub(super) fn action_flash_firmware(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_flash_firmware_once(&mut self, context: &mut Value) -> Result<()> {
         if !self.config.flash_first {
             self.logger
                 .info("Skipping flash step (HOSTCTL_TROUBLESHOOT_FLASH_FIRST=0)");
@@ -26,50 +26,42 @@ impl TroubleshootRuntime<'_> {
 
         let script = repo_root().join("scripts/device/flash.sh");
         let repo_dir = repo_root();
-        let mut last_detail = String::new();
+        self.logger.info("Flash attempt...");
+        let output = Command::new(&script)
+            .arg(&self.build_mode)
+            .current_dir(&repo_dir)
+            .env_remove("RUSTUP_TOOLCHAIN")
+            .env("ESPFLASH_PORT", &self.port)
+            .env("FLASH_SET_TIME_AFTER_FLASH", "0")
+            .output()
+            .with_context(|| format!("failed to execute {}", script.display()));
 
-        for attempt in 1..=self.config.flash_retries {
-            self.logger.info(format!(
-                "Flash attempt {attempt}/{}...",
-                self.config.flash_retries
-            ));
-            let output = Command::new(&script)
-                .arg(&self.build_mode)
-                .current_dir(&repo_dir)
-                .env_remove("RUSTUP_TOOLCHAIN")
-                .env("ESPFLASH_PORT", &self.port)
-                .env("FLASH_SET_TIME_AFTER_FLASH", "0")
-                .output()
-                .with_context(|| format!("failed to execute {}", script.display()));
-
-            match output {
-                Ok(output) if output.status.success() => {
-                    self.flash_ok = true;
-                    ctx_set_bool(context, "flash_ok", true)?;
-                    self.logger.info("Flash step: PASS");
-                    return Ok(());
-                }
-                Ok(output) => {
-                    last_detail = format!(
-                        "flash.sh exited with status {}\n{}",
-                        output.status,
-                        format_command_output(&output)
-                    );
-                }
-                Err(err) => {
-                    last_detail = format!("failed to execute flash script: {err:#}");
-                }
+        match output {
+            Ok(output) if output.status.success() => {
+                self.flash_ok = true;
+                ctx_set_bool(context, "flash_ok", true)?;
+                self.logger.info("Flash step: PASS");
+                Ok(())
             }
-
-            if attempt < self.config.flash_retries {
-                thread::sleep(Duration::from_secs(1));
+            Ok(output) => {
+                let detail = format!(
+                    "flash.sh exited with status {}\n{}",
+                    output.status,
+                    format_command_output(&output)
+                );
+                self.flash_ok = false;
+                ctx_set_bool(context, "flash_ok", false)?;
+                self.set_failure(context, "flash", detail.clone())?;
+                Err(anyhow::anyhow!(detail))
+            }
+            Err(err) => {
+                let detail = format!("failed to execute flash script: {err:#}");
+                self.flash_ok = false;
+                ctx_set_bool(context, "flash_ok", false)?;
+                self.set_failure(context, "flash", detail.clone())?;
+                Err(anyhow::anyhow!(detail))
             }
         }
-
-        self.flash_ok = false;
-        ctx_set_bool(context, "flash_ok", false)?;
-        self.set_failure(context, "flash", last_detail)?;
-        Ok(())
     }
 
     pub(super) fn action_run_uart_probes(&mut self, context: &mut Value) -> Result<()> {

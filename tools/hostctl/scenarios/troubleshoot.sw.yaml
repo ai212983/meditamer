@@ -8,7 +8,22 @@ do:
       call: "preflight"
       then: "flash_firmware"
   - flash_firmware:
-      call: "flash_firmware"
+      try:
+        - flash_firmware_once:
+            call: "flash_firmware_once"
+      catch:
+        as: "flash_error"
+        retry:
+          limit:
+            attempt:
+              count: 0
+          delay:
+            milliseconds: 0
+      metadata:
+        hostctl:
+          retry:
+            count: ".flash_retry_count"
+            delayMs: ".flash_retry_delay_ms"
       then: "flash_gate"
   - flash_gate:
       switch:

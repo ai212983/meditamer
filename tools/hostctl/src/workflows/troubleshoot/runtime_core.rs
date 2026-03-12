@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     classify::{classify_failure, runtime_subclass},
-    context::{ctx_set_bool, ctx_set_string},
+    context::{ctx_set_bool, ctx_set_string, ctx_set_u32},
     TroubleshootConfig, TroubleshootRuntime,
 };
 
@@ -135,6 +135,12 @@ impl<'a> TroubleshootRuntime<'a> {
         ctx_set_bool(context, "flash_ok", false)?;
         ctx_set_bool(context, "probe_ok", false)?;
         ctx_set_bool(context, "soak_ok", false)?;
+        ctx_set_u32(
+            context,
+            "flash_retry_count",
+            self.config.flash_retries.saturating_sub(1),
+        )?;
+        ctx_set_u32(context, "flash_retry_delay_ms", 1_000)?;
         ctx_set_string(context, "result", "failed")?;
         ctx_set_string(context, "failure_stage", "")?;
         ctx_set_string(context, "failure_class", "")?;
@@ -211,7 +217,7 @@ impl WorkflowRuntime for TroubleshootRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
         match action {
             "preflight" => self.action_preflight(context),
-            "flash_firmware" => self.action_flash_firmware(context),
+            "flash_firmware_once" => self.action_flash_firmware_once(context),
             "run_uart_probes" => self.action_run_uart_probes(context),
             "run_boot_soak" => self.action_run_boot_soak(context),
             "hint_uart_transport" => {
