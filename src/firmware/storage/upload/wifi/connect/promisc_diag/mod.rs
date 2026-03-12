@@ -1,104 +1,16 @@
 use super::recovery::disconnect_and_force_deep_reinit_with_timeout;
 use super::*;
 
-const WIFI_SCAN_ENTRY_PROMISC_DIAG: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_SCAN_ENTRY_PROMISC_DIAG") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_SCAN_ENTRY_PROMISC_DIAG"),
-    },
-);
-const WIFI_POST_START_PROMISC_DIAG: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_POST_START_PROMISC_DIAG") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_POST_START_PROMISC_DIAG"),
-    },
-);
-const WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO"),
-    },
-);
-const WIFI_POST_START_PROMISC_ZERO_HARD_REINIT: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_POST_START_PROMISC_ZERO_HARD_REINIT") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_POST_START_PROMISC_ZERO_HARD_REINIT"),
-    },
-);
-const WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG"),
-    },
-);
-const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_DEFAULT: u64 = 120;
-const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MIN: u64 = 50;
-const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MAX: u64 = 3_000;
-const WIFI_SCAN_ENTRY_PROMISC_DIAG_CHANNELS: [u8; 4] = [8, 1, 6, 11];
-const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS: u64 = {
-    let configured = match option_env!("MEDITAMER_WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS"),
-    };
-    match configured {
-        Some(raw) => match parse_ascii_u64(raw) {
-            Some(value)
-                if value >= WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MIN
-                    && value <= WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MAX =>
-            {
-                value
-            }
-            _ => WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_DEFAULT,
-        },
-        None => WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_DEFAULT,
-    }
+mod config;
+mod counters;
+
+use config::{
+    WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG, WIFI_POST_START_PROMISC_DIAG,
+    WIFI_POST_START_PROMISC_ZERO_HARD_REINIT, WIFI_SCAN_ENTRY_PROMISC_DIAG,
+    WIFI_SCAN_ENTRY_PROMISC_DIAG_CHANNELS, WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS,
+    WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO,
 };
-
-static PROMISC_PKT_TOTAL: AtomicU32 = AtomicU32::new(0);
-static PROMISC_PKT_MGMT: AtomicU32 = AtomicU32::new(0);
-static PROMISC_PKT_CTRL: AtomicU32 = AtomicU32::new(0);
-static PROMISC_PKT_DATA: AtomicU32 = AtomicU32::new(0);
-static PROMISC_PKT_MISC: AtomicU32 = AtomicU32::new(0);
-
-unsafe extern "C" fn promisc_rx_cb(
-    _buf: *mut esp_wifi_sys::c_types::c_void,
-    pkt_type: esp_wifi_sys::include::wifi_promiscuous_pkt_type_t,
-) {
-    PROMISC_PKT_TOTAL.fetch_add(1, Ordering::Relaxed);
-    match pkt_type {
-        esp_wifi_sys::include::wifi_promiscuous_pkt_type_t_WIFI_PKT_MGMT => {
-            PROMISC_PKT_MGMT.fetch_add(1, Ordering::Relaxed);
-        }
-        esp_wifi_sys::include::wifi_promiscuous_pkt_type_t_WIFI_PKT_CTRL => {
-            PROMISC_PKT_CTRL.fetch_add(1, Ordering::Relaxed);
-        }
-        esp_wifi_sys::include::wifi_promiscuous_pkt_type_t_WIFI_PKT_DATA => {
-            PROMISC_PKT_DATA.fetch_add(1, Ordering::Relaxed);
-        }
-        esp_wifi_sys::include::wifi_promiscuous_pkt_type_t_WIFI_PKT_MISC => {
-            PROMISC_PKT_MISC.fetch_add(1, Ordering::Relaxed);
-        }
-        _ => {}
-    }
-}
-
-fn reset_promisc_counters() {
-    PROMISC_PKT_TOTAL.store(0, Ordering::Relaxed);
-    PROMISC_PKT_MGMT.store(0, Ordering::Relaxed);
-    PROMISC_PKT_CTRL.store(0, Ordering::Relaxed);
-    PROMISC_PKT_DATA.store(0, Ordering::Relaxed);
-    PROMISC_PKT_MISC.store(0, Ordering::Relaxed);
-}
-
-fn promisc_totals() -> (u32, u32, u32, u32, u32) {
-    (
-        PROMISC_PKT_TOTAL.load(Ordering::Relaxed),
-        PROMISC_PKT_MGMT.load(Ordering::Relaxed),
-        PROMISC_PKT_CTRL.load(Ordering::Relaxed),
-        PROMISC_PKT_DATA.load(Ordering::Relaxed),
-        PROMISC_PKT_MISC.load(Ordering::Relaxed),
-    )
-}
+use counters::{promisc_rx_cb, promisc_totals, reset_promisc_counters};
 
 async fn run_promisc_diag(label: &'static str, software_reset_on_zero: bool) -> Option<u32> {
     if !telemetry::diag_enabled(DIAG_REASSOC) {
