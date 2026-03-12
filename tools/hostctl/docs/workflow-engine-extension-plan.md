@@ -27,7 +27,6 @@ Relevant implementation points:
 
 Current gaps that block YAML-first orchestration:
 
-- `switch` has no explicit `default` or `end`.
 - Condition syntax only supports simple comparisons.
 - String interpolation only works for full-value expressions.
 
@@ -207,15 +206,15 @@ Remove implicit task-order dependence from scenario YAML.
 
 ### Steps
 
-- [ ] Add explicit `default` branch support for `switch`.
-- [ ] Add explicit `end` semantics or equivalent no-op terminal behavior.
-- [ ] Preserve backward compatibility for existing workflows during migration.
-- [ ] Add tests for:
+- [x] Add explicit `default` branch support for `switch`.
+- [x] Add explicit `end` semantics or equivalent no-op terminal behavior.
+- [x] Preserve backward compatibility for existing workflows during migration.
+- [x] Add tests for:
   - matching branch
   - default branch
   - no-match end behavior
   - legacy fallthrough compatibility, if retained temporarily
-- [ ] Remove order-dependent comments and layouts from existing scenario YAMLs.
+- [x] Remove order-dependent comments and layouts from existing scenario YAMLs.
 
 ### Example Target Surface
 
@@ -225,14 +224,14 @@ Remove implicit task-order dependence from scenario YAML.
       - fail:
           when: "${ .run_passed != true }"
           then: "fail_run"
-      - pass:
-          then: "done"
+      - default:
+          then: "__end__"
 ```
 
 ### Exit Criteria
 
-- [ ] `wifi-discovery-debug` no longer depends on task ordering to avoid failure on success
-- [ ] switch behavior is explicit in YAML
+- [x] `wifi-discovery-debug` no longer depends on task ordering to avoid failure on success
+- [x] switch behavior is explicit in YAML
 
 ## Phase 5: Richer Expressions
 
