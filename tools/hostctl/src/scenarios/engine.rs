@@ -1,3 +1,5 @@
+const WORKFLOW_END_TRANSITION: &str = "__end__";
+
 fn execute_task_map<R: WorkflowRuntime>(
     tasks: &WorkflowMap<String, TaskDefinition>,
     runtime: &mut R,
@@ -40,6 +42,9 @@ fn execute_task_map<R: WorkflowRuntime>(
         };
 
         if let Some(next_name) = next {
+            if next_name == WORKFLOW_END_TRANSITION {
+                return Ok(());
+            }
             if tasks_by_name.contains_key(&next_name) {
                 current = next_name;
                 continue;
@@ -112,10 +117,18 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
         return Ok(task.common.then.clone());
     }
 
+    let mut default_then = None;
     for entry in &task.switch.entries {
-        let Some((_, case)) = entry.iter().next() else {
+        let Some((name, case)) = entry.iter().next() else {
             continue;
         };
+        if name == "default" {
+            if default_then.is_some() {
+                return Err(anyhow!("workflow switch defines multiple default cases"));
+            }
+            default_then = Some(case.then.clone().or_else(|| task.common.then.clone()));
+            continue;
+        }
         let matches = match &case.when {
             Some(condition) => eval_condition(condition, context)?,
             None => true,
@@ -125,7 +138,7 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
         }
     }
 
-    Ok(task.common.then.clone())
+    Ok(default_then.unwrap_or_else(|| task.common.then.clone()))
 }
 include!("engine_repeat.rs");
 include!("engine_result.rs");
