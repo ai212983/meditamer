@@ -9,6 +9,10 @@ do:
       then: "start_run"
   - start_run:
       call: "start_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "cycle_gate"
   - cycle_gate:
       switch:
@@ -62,6 +66,10 @@ do:
       then: "init_upload_attempt"
   - init_upload_attempt:
       call: "init_upload_attempt"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "upload_retry_gate"
   - upload_retry_gate:
       switch:

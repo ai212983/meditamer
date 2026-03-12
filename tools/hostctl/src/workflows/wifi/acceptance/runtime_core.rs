@@ -30,7 +30,10 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
         self.capture_mem_diag_lines()?;
         let result = match action {
             "prepare_payload" => self.handle_prepare_payload(),
-            "start_run" => self.handle_start_run(context),
+            "start_run" => {
+                let _ = context;
+                self.handle_start_run()
+            }
             "net_apply_config" => self.handle_net_apply_config(),
             "net_start" => self.handle_net_start(),
             "net_wait_state" => {
@@ -38,7 +41,10 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             }
             "init_wait_ready_recovery" => self.handle_init_wait_ready_recovery(context),
             "net_wait_ready_once" => self.handle_net_wait_ready_once(context),
-            "init_upload_attempt" => self.handle_init_upload_attempt(context),
+            "init_upload_attempt" => {
+                let _ = context;
+                self.handle_init_upload_attempt()
+            }
             "net_upload_once" => self.handle_net_upload_once(context),
             "net_verify_once" => self.handle_net_verify_once(context),
             "assert_upload_metrics" => self.handle_assert_upload_metrics(context),
@@ -51,6 +57,32 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
         };
         self.capture_mem_diag_lines()?;
         result
+    }
+
+    fn invoke_with_result(
+        &mut self,
+        action: &str,
+        args: &Value,
+        context: &mut Value,
+    ) -> Result<Option<Value>> {
+        match action {
+            "start_run" => {
+                self.capture_mem_diag_lines()?;
+                self.handle_start_run()?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(self.build_start_run_result()))
+            }
+            "init_upload_attempt" => {
+                self.capture_mem_diag_lines()?;
+                self.handle_init_upload_attempt()?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(self.build_init_upload_attempt_result()))
+            }
+            _ => {
+                self.invoke(action, args, context)?;
+                Ok(None)
+            }
+        }
     }
 }
 

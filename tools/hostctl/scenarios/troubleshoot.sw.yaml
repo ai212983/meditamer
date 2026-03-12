@@ -6,11 +6,19 @@ document:
 do:
   - preflight:
       call: "preflight"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "flash_firmware"
   - flash_firmware:
       try:
         - flash_firmware_once:
             call: "flash_firmware_once"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
       catch:
         as: "flash_error"
         retry:
@@ -38,6 +46,8 @@ do:
             call: "run_uart_probes_once"
             metadata:
               hostctl:
+                result:
+                  merge: true
                 retry:
                   count: ".probe_retry_count"
                   delayMs: ".probe_retry_delay_ms"
@@ -54,6 +64,10 @@ do:
             then: "run_boot_soak"
   - run_boot_soak:
       call: "run_boot_soak"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "soak_gate"
   - soak_gate:
       switch:
@@ -86,6 +100,10 @@ do:
       then: "print_summary"
   - mark_success:
       call: "mark_success"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "print_summary"
   - print_summary:
       call: "print_summary"

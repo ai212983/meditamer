@@ -8,19 +8,31 @@ YAML files under:
 The `hostctl` Rust code should expose primitive actions, while orchestration
 (retry loops, branch gates, recovery order) should live in YAML.
 
+Current examples:
+
+- `tools/hostctl/scenarios/flash-capture.sw.yaml`
+- `tools/hostctl/scenarios/troubleshoot.sw.yaml`
+- `tools/hostctl/scenarios/wifi-acceptance.sw.yaml`
+
 ## Current Runner Scope
 
 `tools/hostctl/src/scenarios.rs` currently supports:
 
 - `call`
 - `do`
+- `set`
 - `switch`
+- `try` / `catch`
 - `if` guards on tasks
 - `then` transitions
+- `metadata.hostctl.retry`
+- `metadata.hostctl.repeat`
+- `metadata.hostctl.result`
 
 Condition parser supports comparisons against literals and context paths:
 
 - `==`, `!=`, `>`, `>=`, `<`, `<=`
+- `&&`, `||`, `!`, `present(...)`, `exists(...)`
 - examples: `.health_ok == true`, `.upload_attempt < 3`, `.upload_attempt <= .operation_retries`
 
 Unsupported DSL task kinds currently fail fast.
@@ -32,8 +44,11 @@ Unsupported DSL task kinds currently fail fast.
 - Avoid: a single action that contains nested retry/recovery loops.
 
 2. Keep strategy in YAML.
-- Model retries and branch flow with `switch` + context flags/counters.
-- Store counters in context (`health_attempt`, `upload_attempt`).
+- Model retries and branch flow with `switch`, `try`, `metadata.hostctl.retry`, and `metadata.hostctl.repeat`.
+- Store counters in context (`health_attempt`, `upload_attempt`) or return them through `metadata.hostctl.result`.
+- Prefer this split even for flash flows: Rust should provide primitives like
+  `flash_full`, `flash_app_only`, `capture_boot`, `capture_stream`, and
+  `post_flash_timeset`, while the YAML decides when they run.
 
 3. Use TOML for workflow-specific strategy profiles when thresholds become large.
 - Keep orchestration graph in `*.sw.yaml`.
@@ -45,17 +60,23 @@ Unsupported DSL task kinds currently fail fast.
 
 5. Keep context contract explicit.
 - For each action, define inputs and outputs (which context keys it reads/writes).
+- Every `switch` must have an explicit terminal path: a matching branch, a
+  `default`, or task-level `then`. Do not rely on implicit fallthrough.
 
 ## Data Patterns
 
 1. Counter/gate loops in YAML.
-- Runtime writes counters/flags into context (`post_upload_status_index`,
-  `run_post_upload_status_probe`), and YAML loops with `switch`.
+- Prefer `metadata.hostctl.repeat` and `set` for workflow-owned loops.
 
 2. Template variables for command-heavy suites.
 - Workflows like `sdcard-hw` pass command strings with placeholders
   (`{base_path}`, `{file_a}`, `{verify_lba}`).
 - Runtime resolves placeholders before serial command execution.
+
+3. Result binding for setup/status actions.
+- If an action's main job is to produce context state, return structured data
+  from `invoke_with_result` and bind it with `metadata.hostctl.result`.
+- Use `merge: true` for status objects and `path:` for nested/scoped data.
 
 3. Keep each step atomic.
 - `run_step` handles one command/ack/SDREQ/SDWAIT assertion.

@@ -18,7 +18,6 @@ impl TroubleshootRuntime<'_> {
             self.logger
                 .info("Skipping flash step (HOSTCTL_TROUBLESHOOT_FLASH_FIRST=0)");
             self.flash_ok = true;
-            ctx_set_bool(context, "flash_ok", true)?;
             return Ok(());
         }
 
@@ -39,7 +38,6 @@ impl TroubleshootRuntime<'_> {
         match output {
             Ok(output) if output.status.success() => {
                 self.flash_ok = true;
-                ctx_set_bool(context, "flash_ok", true)?;
                 self.logger.info("Flash step: PASS");
                 Ok(())
             }
@@ -66,7 +64,6 @@ impl TroubleshootRuntime<'_> {
 
     pub(super) fn action_run_uart_probes_once(&mut self, context: &mut Value) -> Result<()> {
         self.probe_ok = false;
-        ctx_set_bool(context, "probe_ok", false)?;
         let retries = 1;
         let delay_ms = self.config.probe_delay_ms;
         let timeout_ms = self.config.probe_timeout_ms;
@@ -84,7 +81,6 @@ impl TroubleshootRuntime<'_> {
         match probe_result {
             Ok(()) => {
                 self.probe_ok = true;
-                ctx_set_bool(context, "probe_ok", true)?;
                 self.logger.info("UART probe step: PASS");
                 Ok(())
             }
@@ -101,7 +97,6 @@ impl TroubleshootRuntime<'_> {
 
     pub(super) fn action_run_boot_soak(&mut self, context: &mut Value) -> Result<()> {
         self.soak_ok = false;
-        ctx_set_bool(context, "soak_ok", false)?;
         self.close_console();
 
         crate::logging::ensure_parent_dir(&self.soak_log_dir.join("placeholder"))?;
@@ -125,7 +120,6 @@ impl TroubleshootRuntime<'_> {
         match output {
             Ok(output) if output.status.success() => {
                 self.soak_ok = true;
-                ctx_set_bool(context, "soak_ok", true)?;
                 self.logger.info("Boot soak step: PASS");
                 Ok(())
             }

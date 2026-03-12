@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     logging::{ensure_parent_dir, Logger},
@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     classify::{classify_failure, runtime_subclass},
-    context::{ctx_set_bool, ctx_set_string, ctx_set_u32},
+    context::{ctx_set_bool, ctx_set_string},
     TroubleshootConfig, TroubleshootRuntime,
 };
 
@@ -57,6 +57,34 @@ impl<'a> TroubleshootRuntime<'a> {
         self.console = None;
     }
 
+    fn build_status_result(&self) -> Value {
+        json!({
+            "flash_ok": self.flash_ok,
+            "probe_ok": self.probe_ok,
+            "soak_ok": self.soak_ok,
+            "result": self.result,
+            "failure_stage": self.failure_stage,
+            "failure_class": self.failure_class,
+            "failure_detail": self.failure_detail
+        })
+    }
+
+    fn build_preflight_result(&self) -> Value {
+        json!({
+            "flash_ok": self.flash_ok,
+            "probe_ok": self.probe_ok,
+            "soak_ok": self.soak_ok,
+            "flash_retry_count": self.config.flash_retries.saturating_sub(1),
+            "flash_retry_delay_ms": 1_000,
+            "probe_retry_count": self.config.probe_retries.saturating_sub(1),
+            "probe_retry_delay_ms": self.config.probe_delay_ms as u32,
+            "result": self.result,
+            "failure_stage": self.failure_stage,
+            "failure_class": self.failure_class,
+            "failure_detail": self.failure_detail
+        })
+    }
+
     pub(super) fn set_failure(
         &mut self,
         context: &mut Value,
@@ -90,23 +118,14 @@ impl<'a> TroubleshootRuntime<'a> {
         Ok(())
     }
 
-    fn set_success(&mut self, context: &mut Value) -> Result<()> {
+    fn set_success(&mut self) {
         self.result = "passed".to_string();
         self.failure_stage.clear();
         self.failure_class.clear();
         self.failure_detail.clear();
-
-        ctx_set_bool(context, "flash_ok", self.flash_ok)?;
-        ctx_set_bool(context, "probe_ok", self.probe_ok)?;
-        ctx_set_bool(context, "soak_ok", self.soak_ok)?;
-        ctx_set_string(context, "result", &self.result)?;
-        ctx_set_string(context, "failure_stage", "")?;
-        ctx_set_string(context, "failure_class", "")?;
-        ctx_set_string(context, "failure_detail", "")?;
-        Ok(())
     }
 
-    fn action_preflight(&mut self, context: &mut Value) -> Result<()> {
+    fn action_preflight(&mut self) {
         self.logger
             .info("Starting firmware troubleshoot workflow...");
         self.logger.info(format!(
@@ -131,27 +150,6 @@ impl<'a> TroubleshootRuntime<'a> {
         self.failure_stage.clear();
         self.failure_class.clear();
         self.failure_detail.clear();
-
-        ctx_set_bool(context, "flash_ok", false)?;
-        ctx_set_bool(context, "probe_ok", false)?;
-        ctx_set_bool(context, "soak_ok", false)?;
-        ctx_set_u32(
-            context,
-            "flash_retry_count",
-            self.config.flash_retries.saturating_sub(1),
-        )?;
-        ctx_set_u32(context, "flash_retry_delay_ms", 1_000)?;
-        ctx_set_u32(
-            context,
-            "probe_retry_count",
-            self.config.probe_retries.saturating_sub(1),
-        )?;
-        ctx_set_u32(context, "probe_retry_delay_ms", self.config.probe_delay_ms as u32)?;
-        ctx_set_string(context, "result", "failed")?;
-        ctx_set_string(context, "failure_stage", "")?;
-        ctx_set_string(context, "failure_class", "")?;
-        ctx_set_string(context, "failure_detail", "")?;
-        Ok(())
     }
 
     fn action_hint_uart_transport(&mut self) {
@@ -192,8 +190,8 @@ impl<'a> TroubleshootRuntime<'a> {
         );
     }
 
-    fn action_mark_success(&mut self, context: &mut Value) -> Result<()> {
-        self.set_success(context)
+    fn action_mark_success(&mut self) {
+        self.set_success();
     }
 
     fn action_print_summary(&mut self) {
@@ -222,7 +220,11 @@ impl<'a> TroubleshootRuntime<'a> {
 impl WorkflowRuntime for TroubleshootRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
         match action {
-            "preflight" => self.action_preflight(context),
+            "preflight" => {
+                let _ = context;
+                self.action_preflight();
+                Ok(())
+            }
             "flash_firmware_once" => self.action_flash_firmware_once(context),
             "run_uart_probes_once" => self.action_run_uart_probes_once(context),
             "run_boot_soak" => self.action_run_boot_soak(context),
@@ -238,12 +240,42 @@ impl WorkflowRuntime for TroubleshootRuntime<'_> {
                 self.action_hint_dhcp_no_ipv4();
                 Ok(())
             }
-            "mark_success" => self.action_mark_success(context),
+            "mark_success" => {
+                let _ = context;
+                self.action_mark_success();
+                Ok(())
+            }
             "print_summary" => {
                 self.action_print_summary();
                 Ok(())
             }
             other => Err(anyhow!("unsupported troubleshoot workflow action: {other}")),
+        }
+    }
+
+    fn invoke_with_result(
+        &mut self,
+        action: &str,
+        args: &Value,
+        context: &mut Value,
+    ) -> Result<Option<Value>> {
+        match action {
+            "preflight" => {
+                self.action_preflight();
+                Ok(Some(self.build_preflight_result()))
+            }
+            "flash_firmware_once" | "run_uart_probes_once" | "run_boot_soak" => {
+                self.invoke(action, args, context)?;
+                Ok(Some(self.build_status_result()))
+            }
+            "mark_success" => {
+                self.action_mark_success();
+                Ok(Some(self.build_status_result()))
+            }
+            _ => {
+                self.invoke(action, args, context)?;
+                Ok(None)
+            }
         }
     }
 }

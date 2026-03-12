@@ -9,11 +9,16 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
+    fn build_start_run_result(&self) -> Value {
+        serde_json::json!({
+            "cycle": 1,
+            "cycles": self.cycles,
+            "operation_retries": self.operation_retries
+        })
+    }
+
+    fn handle_start_run(&mut self) -> Result<()> {
         self.ensure_operating_upload_mode()?;
-        ctx_set_u32(context, "cycle", 1)?;
-        ctx_set_u32(context, "cycles", self.cycles)?;
-        ctx_set_u32(context, "operation_retries", self.operation_retries)?;
         self.mem_read_mark = self.console.mark();
         self.panic_monitoring_enabled = true;
         self.panic_first = None;
@@ -73,9 +78,14 @@ impl WifiAcceptanceRuntime<'_> {
         Err(anyhow!("unreachable state-ack retry path"))
     }
 
-    fn handle_init_upload_attempt(&self, context: &mut Value) -> Result<()> {
-        ctx_set_u32(context, "upload_attempt", 1)?;
-        ctx_set_bool(context, "upload_done", false)?;
+    fn build_init_upload_attempt_result(&self) -> Value {
+        serde_json::json!({
+            "upload_attempt": 1,
+            "upload_done": false
+        })
+    }
+
+    fn handle_init_upload_attempt(&self) -> Result<()> {
         Ok(())
     }
 }
