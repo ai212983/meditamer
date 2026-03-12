@@ -16,6 +16,19 @@ mod tests {
                 let n = context.get("n").and_then(|v| v.as_i64()).unwrap_or(0) + 1;
                 context["n"] = Value::from(n);
             }
+            if action == "flaky" {
+                let remaining = context
+                    .get("remaining_failures")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                if remaining > 0 {
+                    context["remaining_failures"] = Value::from(remaining - 1);
+                    anyhow::bail!("retryable");
+                }
+            }
+            if action == "non_retryable" {
+                anyhow::bail!("fatal");
+            }
             if action == "capture_args" {
                 context["captured_args"] = args.clone();
             }
@@ -212,4 +225,6 @@ do:
         assert_eq!(runtime.actions, vec!["fail".to_string(), "finish".to_string()]);
         Ok(())
     }
+
+    include!("retry_tests.rs");
 }

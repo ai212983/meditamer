@@ -123,51 +123,5 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
 
     Ok(task.common.then.clone())
 }
-
-fn execute_try_task<R: WorkflowRuntime>(
-    task: &TryTaskDefinition,
-    runtime: &mut R,
-    context: &mut Value,
-) -> Result<Option<String>> {
-    if !should_run(&task.common, context)? {
-        return Ok(task.common.then.clone());
-    }
-
-    match execute_task_map(&task.try_, runtime, context) {
-        Ok(()) => Ok(task.common.then.clone()),
-        Err(err) => {
-            if task.catch.retry.is_some() {
-                return Err(anyhow!("workflow catch.retry is not supported yet"));
-            }
-
-            let error_var = task.catch.as_.as_deref().unwrap_or("error");
-            let error_value = serde_json::json!({
-                "message": err.to_string(),
-            });
-            set_context_path(context, error_var, error_value)?;
-
-            if let Some(filter) = &task.catch.errors {
-                if !error_matches_filter(filter, context, error_var)? {
-                    return Err(err);
-                }
-            }
-            if let Some(condition) = &task.catch.when {
-                if !eval_condition(condition, context)? {
-                    return Err(err);
-                }
-            }
-            if let Some(condition) = &task.catch.except_when {
-                if eval_condition(condition, context)? {
-                    return Err(err);
-                }
-            }
-
-            if let Some(tasks) = &task.catch.do_ {
-                execute_task_map(tasks, runtime, context)?;
-            }
-            Ok(task.common.then.clone())
-        }
-    }
-}
-
+include!("engine_retry.rs");
 include!("engine_support.rs");
