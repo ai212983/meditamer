@@ -3,13 +3,12 @@ use serde_json::{json, Value};
 
 use crate::{
     logging::{ensure_parent_dir, Logger},
-    scenarios::WorkflowRuntime,
+    scenarios::{WorkflowActionError, WorkflowRuntime},
     serial_console::SerialConsole,
 };
 
 use super::{
     classify::{classify_failure, runtime_subclass},
-    context::{ctx_set_bool, ctx_set_string},
     TroubleshootConfig, TroubleshootRuntime,
 };
 
@@ -85,12 +84,7 @@ impl<'a> TroubleshootRuntime<'a> {
         })
     }
 
-    pub(super) fn set_failure(
-        &mut self,
-        context: &mut Value,
-        stage: &str,
-        detail: impl Into<String>,
-    ) -> Result<()> {
+    pub(super) fn record_failure(&mut self, stage: &str, detail: impl Into<String>) {
         let detail = detail.into();
         let class = classify_failure(stage, &detail);
         let detail = if class == "runtime" {
@@ -107,15 +101,16 @@ impl<'a> TroubleshootRuntime<'a> {
         self.failure_stage = stage.to_string();
         self.failure_class = class.clone();
         self.failure_detail = detail;
+    }
 
-        ctx_set_bool(context, "flash_ok", self.flash_ok)?;
-        ctx_set_bool(context, "probe_ok", self.probe_ok)?;
-        ctx_set_bool(context, "soak_ok", self.soak_ok)?;
-        ctx_set_string(context, "result", &self.result)?;
-        ctx_set_string(context, "failure_stage", &self.failure_stage)?;
-        ctx_set_string(context, "failure_class", &self.failure_class)?;
-        ctx_set_string(context, "failure_detail", &self.failure_detail)?;
-        Ok(())
+    pub(super) fn failure_action_error(
+        &mut self,
+        stage: &str,
+        detail: impl Into<String>,
+    ) -> WorkflowActionError {
+        let detail = detail.into();
+        self.record_failure(stage, detail.clone());
+        WorkflowActionError::new(detail).with_context_patch(self.build_status_result())
     }
 
     fn set_success(&mut self) {
@@ -225,9 +220,18 @@ impl WorkflowRuntime for TroubleshootRuntime<'_> {
                 self.action_preflight();
                 Ok(())
             }
-            "flash_firmware_once" => self.action_flash_firmware_once(context),
-            "run_uart_probes_once" => self.action_run_uart_probes_once(context),
-            "run_boot_soak" => self.action_run_boot_soak(context),
+            "flash_firmware_once" => {
+                let _ = context;
+                self.action_flash_firmware_once()
+            }
+            "run_uart_probes_once" => {
+                let _ = context;
+                self.action_run_uart_probes_once()
+            }
+            "run_boot_soak" => {
+                let _ = context;
+                self.action_run_boot_soak()
+            }
             "hint_uart_transport" => {
                 self.action_hint_uart_transport();
                 Ok(())

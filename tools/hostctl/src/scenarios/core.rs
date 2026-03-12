@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fmt, fs, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map as JsonMap, Value};
@@ -24,6 +24,38 @@ pub trait WorkflowRuntime {
         Ok(None)
     }
 }
+
+#[derive(Debug)]
+pub struct WorkflowActionError {
+    message: String,
+    context_patch: Option<Value>,
+}
+
+impl WorkflowActionError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            context_patch: None,
+        }
+    }
+
+    pub fn with_context_patch(mut self, patch: Value) -> Self {
+        self.context_patch = Some(patch);
+        self
+    }
+
+    pub fn context_patch(&self) -> Option<&Value> {
+        self.context_patch.as_ref()
+    }
+}
+
+impl fmt::Display for WorkflowActionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+impl std::error::Error for WorkflowActionError {}
 
 pub fn load_workflow(path: &Path) -> Result<WorkflowDefinition> {
     let raw = fs::read_to_string(path)

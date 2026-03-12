@@ -3,12 +3,23 @@ use std::thread;
 use anyhow::Error;
 use serde_json::json;
 
+fn bind_workflow_error_context_patch(context: &mut Value, err: &Error) -> Result<()> {
+    if let Some(patch) = err
+        .downcast_ref::<WorkflowActionError>()
+        .and_then(|error| error.context_patch().cloned())
+    {
+        merge_call_result(context, None, patch)?;
+    }
+    Ok(())
+}
+
 fn bind_workflow_error(
     context: &mut Value,
     error_var: &str,
     err: &Error,
     retry_attempt: u16,
 ) -> Result<()> {
+    bind_workflow_error_context_patch(context, err)?;
     set_context_path(
         context,
         error_var,

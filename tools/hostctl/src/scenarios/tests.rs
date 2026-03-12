@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::{eval_condition, execute_workflow, WorkflowRuntime};
+    use super::{eval_condition, execute_workflow, WorkflowActionError, WorkflowRuntime};
     use anyhow::Result;
     use serde_json::Value;
     use serverless_workflow_core::models::workflow::WorkflowDefinition;
@@ -34,6 +34,31 @@ mod tests {
             }
             if action == "fail" {
                 anyhow::bail!("boom");
+            }
+            if action == "fail_with_patch" {
+                return Err(WorkflowActionError::new("boom").with_context_patch(
+                    serde_json::json!({
+                        "failure_class": "uart_transport",
+                        "flash_ok": false
+                    }),
+                )
+                .into());
+            }
+            if action == "flaky_with_patch" {
+                let remaining = context
+                    .get("remaining_failures")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                if remaining > 0 {
+                    context["remaining_failures"] = Value::from(remaining - 1);
+                    return Err(WorkflowActionError::new("boom").with_context_patch(
+                        serde_json::json!({
+                            "failure_class": "uart_transport",
+                            "flash_ok": false
+                        }),
+                    )
+                    .into());
+                }
             }
             Ok(())
         }
@@ -254,6 +279,7 @@ do:
     include!("retry_tests.rs");
     include!("for_tests.rs");
     include!("expression_tests.rs");
+    include!("error_patch_tests.rs");
     include!("result_tests.rs");
     include!("switch_tests.rs");
     include!("workflow_contract_tests.rs");

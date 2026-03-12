@@ -1,19 +1,17 @@
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use serde_json::Value;
 
 use crate::workflows::common::repo_root;
 
 use super::{
-    context::ctx_set_bool,
     probes::run_uart_probe_sequence,
     utils::{format_command_output, recent_uart_lines},
     TroubleshootRuntime,
 };
 
 impl TroubleshootRuntime<'_> {
-    pub(super) fn action_flash_firmware_once(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_flash_firmware_once(&mut self) -> Result<()> {
         if !self.config.flash_first {
             self.logger
                 .info("Skipping flash step (HOSTCTL_TROUBLESHOOT_FLASH_FIRST=0)");
@@ -48,21 +46,17 @@ impl TroubleshootRuntime<'_> {
                     format_command_output(&output)
                 );
                 self.flash_ok = false;
-                ctx_set_bool(context, "flash_ok", false)?;
-                self.set_failure(context, "flash", detail.clone())?;
-                Err(anyhow::anyhow!(detail))
+                Err(self.failure_action_error("flash", detail.clone()).into())
             }
             Err(err) => {
                 let detail = format!("failed to execute flash script: {err:#}");
                 self.flash_ok = false;
-                ctx_set_bool(context, "flash_ok", false)?;
-                self.set_failure(context, "flash", detail.clone())?;
-                Err(anyhow::anyhow!(detail))
+                Err(self.failure_action_error("flash", detail.clone()).into())
             }
         }
     }
 
-    pub(super) fn action_run_uart_probes_once(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_run_uart_probes_once(&mut self) -> Result<()> {
         self.probe_ok = false;
         let retries = 1;
         let delay_ms = self.config.probe_delay_ms;
@@ -71,8 +65,9 @@ impl TroubleshootRuntime<'_> {
         let console = match self.ensure_console() {
             Ok(console) => console,
             Err(err) => {
-                self.set_failure(context, "probe", format!("failed to open serial: {err:#}"))?;
-                return Err(anyhow::anyhow!("failed to open serial: {err:#}"));
+                return Err(self
+                    .failure_action_error("probe", format!("failed to open serial: {err:#}"))
+                    .into());
             }
         };
 
@@ -89,13 +84,12 @@ impl TroubleshootRuntime<'_> {
                     "UART probes failed: {err:#}\nRecent UART lines:\n{}",
                     recent_uart_lines(console, 20)
                 );
-                self.set_failure(context, "probe", detail.clone())?;
-                Err(anyhow::anyhow!(detail))
+                Err(self.failure_action_error("probe", detail.clone()).into())
             }
         }
     }
 
-    pub(super) fn action_run_boot_soak(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_run_boot_soak(&mut self) -> Result<()> {
         self.soak_ok = false;
         self.close_console();
 
@@ -129,15 +123,14 @@ impl TroubleshootRuntime<'_> {
                     output.status,
                     format_command_output(&output)
                 );
-                self.set_failure(context, "soak", detail)?;
+                self.record_failure("soak", detail);
                 Ok(())
             }
             Err(err) => {
-                self.set_failure(
-                    context,
+                self.record_failure(
                     "soak",
                     format!("failed to execute soak boot script: {err:#}"),
-                )?;
+                );
                 Ok(())
             }
         }
