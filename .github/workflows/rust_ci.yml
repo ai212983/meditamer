@@ -48,6 +48,8 @@ jobs:
         run: rustup component add rust-analyzer
       - name: Markdown LOC guard
         run: scripts/ci/check_markdown_loc.sh
+      - name: Rust LOC guard
+        run: scripts/ci/check_rust_loc.sh
       - name: Run host config regression suite
         run: scripts/tests/host/test_event_config_host.sh
       - name: Run host event engine suite
