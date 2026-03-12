@@ -9,20 +9,17 @@ do:
       then: "net_apply_config"
   - net_apply_config:
       call: "net_apply_config"
-      then: "round_gate"
-  - round_gate:
-      switch:
-        - run_round:
-            when: ".round <= .rounds"
-            then: "probe_round"
-        - evaluate:
-            then: "evaluate_results"
-  - probe_round:
-      call: "probe_round"
-      then: "advance_round"
-  - advance_round:
-      call: "advance_round"
-      then: "round_gate"
+      then: "round_loop"
+  - round_loop:
+      do:
+        - probe_round:
+            call: "probe_round"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".rounds"
+            at: "round_index"
+      then: "evaluate_results"
   - evaluate_results:
       call: "evaluate_results"
       then: "print_summary"

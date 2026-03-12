@@ -27,8 +27,6 @@ Relevant implementation points:
 
 Current gaps that block YAML-first orchestration:
 
-- `catch.retry` is parsed but not executed.
-- There is no native loop execution.
 - `call` cannot bind structured results back into context.
 - `switch` has no explicit `default` or `end`.
 - Condition syntax only supports simple comparisons.
@@ -61,7 +59,7 @@ Make retry a workflow concern instead of a Rust runtime concern.
   - optional `exceptWhen`
   - hostctl metadata overrides for retry count and delay
 - [x] Bind the last error into workflow context before retry evaluation.
-- [ ] Add engine tests for:
+- [x] Add engine tests for:
   - [x] successful retry
   - [x] retry exhaustion
   - [x] conditional retry
@@ -96,7 +94,7 @@ Make retry a workflow concern instead of a Rust runtime concern.
 
 - [x] `troubleshoot` no longer owns flash retry loops in `runtime_steps.rs`
 - [x] YAML expresses retry count and retry order directly for `troubleshoot` flash
-- [ ] engine test coverage exists for retry behavior
+- [x] engine test coverage exists for retry behavior
 
 ## Phase 2: Loops
 
@@ -116,38 +114,39 @@ Make repeated orchestration steps expressible in YAML without gate actions and c
 
 ### Steps
 
-- [ ] Choose the first loop surface to implement.
-  Preferred: `repeat` with `while`; optional: native `for`.
-- [ ] Support nested loop bodies using existing task maps.
-- [ ] Support loop-local context updates through `set`.
-- [ ] Add guardrails for runaway loops.
-- [ ] Add engine tests for:
+- [x] Choose the first loop surface to implement.
+  Implemented as `metadata.hostctl.repeat` on `do` tasks because the upstream
+  untagged parser does not reliably distinguish YAML `for` tasks from plain `do` tasks.
+- [x] Support nested loop bodies using existing task maps.
+- [x] Support loop-local context updates through `set`.
+- [x] Add guardrails for runaway loops.
+- [x] Add engine tests for:
   zero-iteration loop, fixed-count loop, condition-controlled loop, nested loop.
-- [ ] Remove `set_post_upload_status_gate` orchestration from `runtime_modes`.
-- [ ] Remove `set_post_upload_timeset_gate` orchestration from `runtime_modes`.
-- [ ] Replace counter-gate patterns in YAML with native loops.
+- [x] Remove `set_post_upload_status_gate` orchestration from `runtime_modes`.
+- [x] Remove `set_post_upload_timeset_gate` orchestration from `runtime_modes`.
+- [x] Replace counter-gate patterns in YAML with native loops.
 
 ### Example Target Surface
 
 ```yaml
 - post_upload_status_loop:
-    repeat:
-      while: "${ .post_upload_status_index < .post_upload_status_repeats }"
-      do:
-        - run_status_probe:
-            call: "state_get"
-            with:
-              expect_upload: "on"
-        - advance_status_index:
-            set:
-              post_upload_status_index: "${ .post_upload_status_index + 1 }"
+    do:
+      - run_status_probe:
+          call: "state_get"
+          with:
+            expect_upload: "on"
+    metadata:
+      hostctl:
+        repeat:
+          in: ".post_upload_status_repeats"
+          at: "post_upload_status_index"
 ```
 
 ### Exit Criteria
 
-- [ ] `runtime-modes-smoke` no longer uses gate-only actions for repeated probes
-- [ ] loop structure is visible directly in YAML
-- [ ] Rust no longer computes loop booleans just to drive workflow control flow
+- [x] `runtime-modes-smoke` no longer uses gate-only actions for repeated probes
+- [x] loop structure is visible directly in YAML
+- [x] Rust no longer computes loop booleans just to drive workflow control flow
 
 ## Phase 3: Call Result Binding
 

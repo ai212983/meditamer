@@ -1,6 +1,6 @@
 impl WifiDiscoveryRuntime<'_> {
     fn handle_probe_round(&mut self, context: &mut Value) -> Result<()> {
-        let round = ctx_get_u32(context, "round")?;
+        let round = ctx_get_u32(context, "round_index")?.saturating_add(1);
         let ssid_marker = format!("scan ap ssid={}", self.ssid);
         let require_listener = !self.profile.disable_listener_during_probe_rounds;
         let round_read_mark = self.console.mark();

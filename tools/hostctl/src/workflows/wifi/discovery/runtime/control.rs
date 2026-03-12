@@ -1,6 +1,5 @@
 impl WifiDiscoveryRuntime<'_> {
     fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
-        ctx_set_u32(context, "round", 1)?;
         ctx_set_u32(context, "rounds", self.profile.rounds)?;
         ctx_set_bool(context, "run_passed", false)?;
         ctx_set_string(context, "run_error", "")?;

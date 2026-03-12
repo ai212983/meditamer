@@ -77,11 +77,6 @@ impl WifiDiscoveryRuntime<'_> {
         ));
     }
 
-    fn handle_advance_round(&mut self, context: &mut Value) -> Result<()> {
-        let round = ctx_get_u32(context, "round")?;
-        ctx_set_u32(context, "round", round.saturating_add(1))
-    }
-
     fn handle_evaluate_results(&mut self, context: &mut Value) -> Result<()> {
         let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
         let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;

@@ -32,7 +32,6 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
             "start_run" => self.handle_start_run(context),
             "net_apply_config" => self.handle_net_apply_config(),
             "probe_round" => self.handle_probe_round(context),
-            "advance_round" => self.handle_advance_round(context),
             "evaluate_results" => self.handle_evaluate_results(context),
             "print_summary" => self.handle_print_summary(),
             "fail_run" => self.handle_fail_run(context),

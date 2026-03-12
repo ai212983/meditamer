@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use crate::workflows::wifi::common::{parse_mem_diag_line, parse_scan_done_count, MemDiagKind};
 
@@ -6,7 +9,10 @@ use super::{
     probe::ProbeRoundState,
     profile::{recommended_round_timeout_ms, DiscoveryProfile},
 };
-use crate::workflows::wifi::common::NetPolicy;
+use crate::{
+    scenarios::load_workflow,
+    workflows::wifi::common::NetPolicy,
+};
 
 #[test]
 fn scan_done_parser_extracts_count() {
@@ -83,4 +89,11 @@ fn recommended_timeout_respects_lower_bound_and_profile_override() {
     profile.round_timeout_ms = 5_000_000;
     let overridden = recommended_round_timeout_ms(&policy, &profile);
     assert_eq!(overridden, profile.round_timeout_ms as u64);
+}
+
+#[test]
+fn wifi_discovery_workflow_yaml_parses() {
+    let workflow_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-discovery-debug.sw.yaml");
+    load_workflow(&workflow_path).expect("wifi discovery workflow parses");
 }

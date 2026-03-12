@@ -127,7 +127,7 @@ fn probe_round_fails_fast_when_panic_marker_is_seen() -> Result<()> {
         panic_first: None,
     };
 
-    let mut context = json!({"round": 1});
+    let mut context = json!({"round_index": 0});
     let err = runtime
         .handle_probe_round(&mut context)
         .expect_err("panic marker should fail round immediately");

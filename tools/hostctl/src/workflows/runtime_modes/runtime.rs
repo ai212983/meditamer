@@ -147,12 +147,6 @@ fn context_set_u32(context: &mut Value, key: &str, value: u32) {
     }
 }
 
-fn context_set_bool(context: &mut Value, key: &str, value: bool) {
-    if let Some(map) = context.as_object_mut() {
-        map.insert(key.to_string(), Value::from(value));
-    }
-}
-
 impl<'a> RuntimeModesScenarioRuntime<'a> {
     fn new(
         logger: &'a mut Logger,
@@ -215,33 +209,23 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
                     self.logger
                         .info("Running post-upload UART regression checks...");
                 }
+                context_set_u32(
+                    context,
+                    "post_upload_status_repeats",
+                    self.post_upload_status_repeats,
+                );
+                context_set_u32(
+                    context,
+                    "post_upload_timeset_repeats",
+                    self.post_upload_timeset_repeats,
+                );
                 context_set_u32(context, "post_upload_status_index", 0);
                 context_set_u32(context, "post_upload_timeset_index", 0);
-                Ok(())
-            }
-            "set_post_upload_status_gate" => {
-                let index = context_get_u32(context, "post_upload_status_index");
-                context_set_bool(
-                    context,
-                    "run_post_upload_status_probe",
-                    index < self.post_upload_status_repeats,
-                );
                 Ok(())
             }
             "run_post_upload_status_probe" => {
                 let line = query_mode_status(&mut self.console, Some("on"), None)?;
                 self.mode_samples.push(line);
-                let next = context_get_u32(context, "post_upload_status_index").saturating_add(1);
-                context_set_u32(context, "post_upload_status_index", next);
-                Ok(())
-            }
-            "set_post_upload_timeset_gate" => {
-                let index = context_get_u32(context, "post_upload_timeset_index");
-                context_set_bool(
-                    context,
-                    "run_post_upload_timeset_probe",
-                    index < self.post_upload_timeset_repeats,
-                );
                 Ok(())
             }
             "run_post_upload_timeset_probe" => {
@@ -250,7 +234,6 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
                 let line = run_timeset_probe(&mut self.console, tz_offset)?;
                 self.timeset_samples
                     .push(format!("timeset probe #{probe_number}: {line}"));
-                context_set_u32(context, "post_upload_timeset_index", probe_number);
                 Ok(())
             }
             "print_summary" => {
