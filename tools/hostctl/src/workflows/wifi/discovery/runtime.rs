@@ -10,9 +10,8 @@ use serde_json::Value;
 use crate::{
     scenarios::WorkflowRuntime,
     workflows::wifi::common::{
-        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32,
-        detect_panic_signal, extract_context_window, fmt_min, netcfg_set_payload, preflight,
-        wait_net_ack,
+        ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, detect_panic_signal,
+        extract_context_window, fmt_min, netcfg_set_payload, preflight, wait_net_ack,
     },
 };
 
@@ -29,7 +28,10 @@ const ACK_LOSS_RECOVERY_SETTLE_MS: u64 = 200;
 impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
         match action {
-            "start_run" => self.handle_start_run(context),
+            "start_run" => {
+                let _ = context;
+                self.handle_start_run()
+            }
             "net_apply_config" => self.handle_net_apply_config(),
             "probe_round" => self.handle_probe_round(context),
             "evaluate_results" => self.handle_evaluate_results(context),
@@ -37,6 +39,20 @@ impl WorkflowRuntime for WifiDiscoveryRuntime<'_> {
             "fail_run" => self.handle_fail_run(context),
             _ => Err(anyhow!("unknown workflow action: {action}")),
         }
+    }
+
+    fn invoke_with_result(
+        &mut self,
+        action: &str,
+        args: &Value,
+        context: &mut Value,
+    ) -> Result<Option<Value>> {
+        if action == "start_run" {
+            self.handle_start_run()?;
+            return Ok(Some(self.build_start_run_result()));
+        }
+        self.invoke(action, args, context)?;
+        Ok(None)
     }
 }
 

@@ -1,8 +1,13 @@
 impl WifiDiscoveryRuntime<'_> {
-    fn handle_start_run(&mut self, context: &mut Value) -> Result<()> {
-        ctx_set_u32(context, "rounds", self.profile.rounds)?;
-        ctx_set_bool(context, "run_passed", false)?;
-        ctx_set_string(context, "run_error", "")?;
+    fn build_start_run_result(&self) -> Value {
+        serde_json::json!({
+            "rounds": self.profile.rounds,
+            "run_passed": false,
+            "run_error": ""
+        })
+    }
+
+    fn handle_start_run(&mut self) -> Result<()> {
         self.panic_first = None;
         if self.profile.disable_listener_during_probe_rounds {
             self.run_control_command_with_guard(0, "NET LISTENER OFF", 0)?;

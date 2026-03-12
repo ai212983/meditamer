@@ -160,3 +160,19 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     execute_workflow(&workflow, &mut runtime, &json!({}))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use anyhow::Result;
+
+    use crate::scenarios::load_workflow;
+
+    #[test]
+    fn wifi_acceptance_workflow_yaml_parses() -> Result<()> {
+        let workflow_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-acceptance.sw.yaml");
+        load_workflow(&workflow_path).map(|_| ())
+    }
+}

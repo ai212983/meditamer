@@ -6,6 +6,10 @@ document:
 do:
   - start_run:
       call: "start_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "net_apply_config"
   - net_apply_config:
       call: "net_apply_config"

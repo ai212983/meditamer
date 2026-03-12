@@ -25,9 +25,46 @@ do:
       then: "net_wait_state"
   - net_wait_state:
       call: "net_wait_state"
-      then: "net_wait_ready"
-  - net_wait_ready:
-      call: "net_wait_ready"
+      then: "init_wait_ready_recovery"
+  - init_wait_ready_recovery:
+      call: "init_wait_ready_recovery"
+      then: "net_wait_ready_loop"
+  - net_wait_ready_loop:
+      do:
+        - net_wait_ready_once:
+            call: "net_wait_ready_once"
+            then: "net_wait_ready_gate"
+        - net_wait_ready_gate:
+            switch:
+              - ready_passed:
+                  when: ".net_wait_ready_ok == true"
+                  then: "__end__"
+              - retryable_failure:
+                  when: ".net_wait_ready_retryable == true"
+                  then: "net_wait_ready_retry_gate"
+              - ready_failed:
+                  then: "fail_upload"
+        - net_wait_ready_retry_gate:
+            switch:
+              - retry_allowed:
+                  when: ".net_wait_ready_attempt < .net_wait_ready_recover_retries"
+                  then: "net_recover_once"
+              - retry_exhausted:
+                  then: "fail_upload"
+        - net_recover_once:
+            call: "net_recover_once"
+            then: "net_start"
+        - net_start:
+            call: "net_start"
+            then: "increment_wait_ready_attempt"
+        - increment_wait_ready_attempt:
+            call: "increment_wait_ready_attempt"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".net_wait_ready_loop_budget"
+            at: "net_wait_ready_loop_index"
+            while: ".net_wait_ready_ok != true"
       then: "init_upload_attempt"
   - init_upload_attempt:
       call: "init_upload_attempt"

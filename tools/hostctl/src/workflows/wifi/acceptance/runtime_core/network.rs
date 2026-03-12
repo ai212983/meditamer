@@ -168,28 +168,47 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_net_wait_ready(&mut self, context: &mut Value) -> Result<()> {
-        let max_recover_retries =
+    fn handle_init_wait_ready_recovery(&mut self, context: &mut Value) -> Result<()> {
+        let recover_retries =
             env_utils::parse_env_u32("HOSTCTL_NET_WAIT_READY_RECOVER_RETRIES", 1)?;
-        let mut recover_attempt = 0u32;
-        let (mut connect_ms, mut listen_ms, mut ip) = loop {
-            match wait_ready(&mut self.console, self.policy) {
-                Ok(result) => break result,
-                Err(err)
-                    if recover_attempt < max_recover_retries
-                        && should_retry_wait_ready_after_recover(&err.to_string()) =>
-                {
-                    recover_attempt = recover_attempt.saturating_add(1);
-                    self.logger.info(format!(
-                        "net_wait_ready: retryable readiness failure; recover retry {}/{} err={}",
-                        recover_attempt, max_recover_retries, err
-                    ));
-                    self.handle_net_recover_once()?;
-                    self.handle_net_start()?;
-                }
-                Err(err) => return Err(err),
+        ctx_set_u32(context, "net_wait_ready_attempt", 0)?;
+        ctx_set_u32(context, "net_wait_ready_recover_retries", recover_retries)?;
+        ctx_set_u32(
+            context,
+            "net_wait_ready_loop_budget",
+            recover_retries.saturating_add(1),
+        )?;
+        ctx_set_bool(context, "net_wait_ready_ok", false)?;
+        ctx_set_bool(context, "net_wait_ready_retryable", false)?;
+        ctx_set_string(context, "net_wait_ready_error", "")?;
+        Ok(())
+    }
+
+    fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<()> {
+        ctx_set_bool(context, "net_wait_ready_ok", false)?;
+        ctx_set_bool(context, "net_wait_ready_retryable", false)?;
+
+        let result = match wait_ready(&mut self.console, self.policy) {
+            Ok(result) => result,
+            Err(err) => {
+                let detail = err.to_string();
+                let retryable = should_retry_wait_ready_after_recover(&detail);
+                self.logger.info(format!(
+                    "net_wait_ready: {} readiness failure err={detail}",
+                    if retryable {
+                        "retryable"
+                    } else {
+                        "non-retryable"
+                    }
+                ));
+                ctx_set_bool(context, "net_wait_ready_retryable", retryable)?;
+                ctx_set_string(context, "net_wait_ready_error", &detail)?;
+                ctx_set_string(context, "upload_error", &detail)?;
+                return Ok(());
             }
         };
+
+        let (mut connect_ms, mut listen_ms, mut ip) = result;
         if ctx_get_u32(context, "cycle")? == 1 {
             let (stabilized_connect_ms, stabilized_listen_ms, stabilized_ip) =
                 self.enforce_startup_health_hysteresis(connect_ms, listen_ms, &ip)?;
@@ -200,9 +219,21 @@ impl WifiAcceptanceRuntime<'_> {
         ctx_set_u32(context, "connect_ms", connect_ms)?;
         ctx_set_u32(context, "listen_ms", listen_ms)?;
         ctx_set_string(context, "ip", &ip)?;
+        ctx_set_bool(context, "net_wait_ready_ok", true)?;
+        ctx_set_string(context, "net_wait_ready_error", "")?;
+        ctx_set_string(context, "upload_error", "")?;
         self.connect_samples.push(connect_ms as f64 / 1000.0);
         self.listen_samples.push(listen_ms as f64 / 1000.0);
         Ok(())
     }
 
+    fn handle_increment_wait_ready_attempt(&mut self, context: &mut Value) -> Result<()> {
+        let attempt = ctx_get_u32(context, "net_wait_ready_attempt")?.saturating_add(1);
+        let max_retries = ctx_get_u32(context, "net_wait_ready_recover_retries")?;
+        ctx_set_u32(context, "net_wait_ready_attempt", attempt)?;
+        self.logger.info(format!(
+            "net_wait_ready: issuing recover retry {attempt}/{max_retries}"
+        ));
+        Ok(())
+    }
 }
