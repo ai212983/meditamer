@@ -168,28 +168,20 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_init_wait_ready_recovery(&mut self, context: &mut Value) -> Result<()> {
+    fn handle_init_wait_ready_recovery(&mut self) -> Result<Value> {
         let recover_retries =
             env_utils::parse_env_u32("HOSTCTL_NET_WAIT_READY_RECOVER_RETRIES", 1)?;
-        ctx_set_u32(context, "net_wait_ready_attempt", 0)?;
-        ctx_set_u32(context, "net_wait_ready_recover_retries", recover_retries)?;
-        ctx_set_u32(
-            context,
-            "net_wait_ready_loop_budget",
-            recover_retries.saturating_add(1),
-        )?;
-        ctx_set_bool(context, "net_wait_ready_retryable", false)?;
-        ctx_set_string(context, "net_wait_ready_error", "")?;
-        let map = context
-            .as_object_mut()
-            .ok_or_else(|| anyhow!("workflow context is not an object"))?;
-        map.insert("ip".to_string(), Value::Null);
-        Ok(())
+        Ok(serde_json::json!({
+            "net_wait_ready_attempt": 0,
+            "net_wait_ready_recover_retries": recover_retries,
+            "net_wait_ready_loop_budget": recover_retries.saturating_add(1),
+            "net_wait_ready_retryable": false,
+            "net_wait_ready_error": "",
+            "ip": Value::Null
+        }))
     }
 
-    fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<()> {
-        ctx_set_bool(context, "net_wait_ready_retryable", false)?;
-
+    fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<Value> {
         let result = match wait_ready(&mut self.console, self.policy) {
             Ok(result) => result,
             Err(err) => {
@@ -203,10 +195,11 @@ impl WifiAcceptanceRuntime<'_> {
                         "non-retryable"
                     }
                 ));
-                ctx_set_bool(context, "net_wait_ready_retryable", retryable)?;
-                ctx_set_string(context, "net_wait_ready_error", &detail)?;
-                ctx_set_string(context, "upload_error", &detail)?;
-                return Ok(());
+                return Ok(serde_json::json!({
+                    "net_wait_ready_retryable": retryable,
+                    "net_wait_ready_error": detail,
+                    "upload_error": detail
+                }));
             }
         };
 
@@ -218,14 +211,16 @@ impl WifiAcceptanceRuntime<'_> {
             listen_ms = stabilized_listen_ms;
             ip = stabilized_ip;
         }
-        ctx_set_u32(context, "connect_ms", connect_ms)?;
-        ctx_set_u32(context, "listen_ms", listen_ms)?;
-        ctx_set_string(context, "ip", &ip)?;
-        ctx_set_string(context, "net_wait_ready_error", "")?;
-        ctx_set_string(context, "upload_error", "")?;
         self.connect_samples.push(connect_ms as f64 / 1000.0);
         self.listen_samples.push(listen_ms as f64 / 1000.0);
-        Ok(())
+        Ok(serde_json::json!({
+            "connect_ms": connect_ms,
+            "listen_ms": listen_ms,
+            "ip": ip,
+            "net_wait_ready_retryable": false,
+            "net_wait_ready_error": "",
+            "upload_error": ""
+        }))
     }
 
 }

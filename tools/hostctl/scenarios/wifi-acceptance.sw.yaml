@@ -32,11 +32,19 @@ do:
       then: "init_wait_ready_recovery"
   - init_wait_ready_recovery:
       call: "init_wait_ready_recovery"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "net_wait_ready_loop"
   - net_wait_ready_loop:
       do:
         - net_wait_ready_once:
             call: "net_wait_ready_once"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
             then: "net_wait_ready_gate"
         - net_wait_ready_gate:
             switch:
@@ -80,6 +88,10 @@ do:
             then: "fail_upload"
   - net_upload_once:
       call: "net_upload_once"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "upload_result_gate"
   - upload_result_gate:
       switch:

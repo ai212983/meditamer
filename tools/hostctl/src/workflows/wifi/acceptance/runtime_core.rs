@@ -14,9 +14,8 @@ use crate::{
     scenarios::WorkflowRuntime,
     serial_console::AckStatus,
     workflows::wifi::common::{
-        ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, detect_panic_signal,
-        extract_context_window, fmt_min, is_ready, netcfg_set_payload, query_net_status,
-        wait_net_ack, NetStatus, PanicSignal,
+        ctx_get_u32, detect_panic_signal, extract_context_window, fmt_min, is_ready,
+        netcfg_set_payload, query_net_status, wait_net_ack, NetStatus, PanicSignal,
     },
 };
 
@@ -39,13 +38,22 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             "net_wait_state" => {
                 wait_state_progress(&mut self.console, self.policy.connect_timeout_ms)
             }
-            "init_wait_ready_recovery" => self.handle_init_wait_ready_recovery(context),
-            "net_wait_ready_once" => self.handle_net_wait_ready_once(context),
+            "init_wait_ready_recovery" => {
+                let _ = self.handle_init_wait_ready_recovery()?;
+                Ok(())
+            }
+            "net_wait_ready_once" => {
+                let _ = self.handle_net_wait_ready_once(context)?;
+                Ok(())
+            }
             "init_upload_attempt" => {
                 let _ = context;
                 self.handle_init_upload_attempt()
             }
-            "net_upload_once" => self.handle_net_upload_once(context),
+            "net_upload_once" => {
+                let _ = self.handle_net_upload_once(context)?;
+                Ok(())
+            }
             "net_verify_once" => self.handle_net_verify_once(context),
             "assert_upload_metrics" => self.handle_assert_upload_metrics(context),
             "net_collect_diag" => self.handle_net_collect_diag(),
@@ -77,6 +85,24 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
                 self.handle_init_upload_attempt()?;
                 self.capture_mem_diag_lines()?;
                 Ok(Some(self.build_init_upload_attempt_result()))
+            }
+            "init_wait_ready_recovery" => {
+                self.capture_mem_diag_lines()?;
+                let result = self.handle_init_wait_ready_recovery()?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(result))
+            }
+            "net_wait_ready_once" => {
+                self.capture_mem_diag_lines()?;
+                let result = self.handle_net_wait_ready_once(context)?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(result))
+            }
+            "net_upload_once" => {
+                self.capture_mem_diag_lines()?;
+                let result = self.handle_net_upload_once(context)?;
+                self.capture_mem_diag_lines()?;
+                Ok(Some(result))
             }
             _ => {
                 self.invoke(action, args, context)?;

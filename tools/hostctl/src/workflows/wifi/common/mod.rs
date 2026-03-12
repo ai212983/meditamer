@@ -5,7 +5,7 @@ mod net;
 mod panic;
 mod types;
 
-pub use context::{ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32};
+pub use context::{ctx_get_string, ctx_get_u32, ctx_set_u32};
 pub use guardrails::{acquire_port_lock, enforce_log_path_policy, enforce_policy_floors};
 pub use mem_diag::{fmt_min, MemDiagSummary};
 #[cfg(test)]

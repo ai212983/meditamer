@@ -12,8 +12,8 @@ use crate::{
     workflows::{
         upload,
         wifi::common::{
-            ctx_get_string, ctx_get_u32, ctx_set_bool, ctx_set_string, ctx_set_u32, is_ready,
-            net_status_line_re, query_net_status, query_net_status_line, PanicSignal,
+            ctx_get_string, ctx_get_u32, ctx_set_u32, is_ready, net_status_line_re,
+            query_net_status, query_net_status_line, PanicSignal,
         },
     },
 };
@@ -21,6 +21,21 @@ use crate::{
 use super::WifiAcceptanceRuntime;
 
 impl WifiAcceptanceRuntime<'_> {
+    fn upload_attempt_result(
+        &self,
+        remote_file: &str,
+        upload_ms: u32,
+        upload_done: bool,
+        upload_error: &str,
+    ) -> Value {
+        serde_json::json!({
+            "remote_file": remote_file,
+            "upload_ms": upload_ms,
+            "upload_done": upload_done,
+            "upload_error": upload_error
+        })
+    }
+
     fn run_direct_upload_attempt(
         &mut self,
         ip: &str,
@@ -81,7 +96,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn handle_net_upload_once(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn handle_net_upload_once(&mut self, context: &mut Value) -> Result<Value> {
         let ip = ctx_get_string(context, "ip")?;
         let cycle_root = self.remote_root.clone();
         let upload_name = self
@@ -90,7 +105,6 @@ impl WifiAcceptanceRuntime<'_> {
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "net_acceptance_payload.bin".to_string());
         let remote_file = format!("{}/{}", self.remote_root, upload_name);
-        ctx_set_string(context, "remote_file", &remote_file)?;
         let started = Instant::now();
         let upload_timeout_sec =
             env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
@@ -103,13 +117,13 @@ impl WifiAcceptanceRuntime<'_> {
             retry_policy,
             false,
         );
-        let upload_ms = started.elapsed().as_millis() as u32;
-        ctx_set_u32(context, "upload_ms", upload_ms)?;
         match result {
-            Ok(()) => {
-                ctx_set_bool(context, "upload_done", true)?;
-                ctx_set_string(context, "upload_error", "")?;
-            }
+            Ok(()) => Ok(self.upload_attempt_result(
+                &remote_file,
+                started.elapsed().as_millis() as u32,
+                true,
+                "",
+            )),
             Err(err) => {
                 if self.reuse_upload_client {
                     self.upload_client = None;
@@ -142,14 +156,15 @@ impl WifiAcceptanceRuntime<'_> {
                         true,
                     ) {
                         Ok(()) => {
-                            let retry_upload_ms = started.elapsed().as_millis() as u32;
-                            ctx_set_u32(context, "upload_ms", retry_upload_ms)?;
-                            ctx_set_bool(context, "upload_done", true)?;
-                            ctx_set_string(context, "upload_error", "")?;
                             self.logger.info(
                                 "host_upload_refresh_retry: recovered upload with fresh client",
                             );
-                            return Ok(());
+                            return Ok(self.upload_attempt_result(
+                                &remote_file,
+                                started.elapsed().as_millis() as u32,
+                                true,
+                                "",
+                            ));
                         }
                         Err(refresh_err) => {
                             detail.push_str(&format!("; refresh_retry_err={}", refresh_err));
@@ -168,14 +183,10 @@ impl WifiAcceptanceRuntime<'_> {
 
                 if let Err(panic_err) = self.capture_mem_diag_lines() {
                     detail.push_str(&format!("; {panic_err}"));
-                    ctx_set_bool(context, "upload_done", false)?;
-                    ctx_set_string(context, "upload_error", &detail)?;
                     return Err(anyhow!("{detail}"));
                 }
 
                 if append_panic_signal_context(&mut detail, self.panic_signal()) {
-                    ctx_set_bool(context, "upload_done", false)?;
-                    ctx_set_string(context, "upload_error", &detail)?;
                     return Err(anyhow!("{detail}"));
                 }
 
@@ -184,11 +195,14 @@ impl WifiAcceptanceRuntime<'_> {
                         .info(format!("HOST_FAILURE class={class} detail={detail}"));
                 }
 
-                ctx_set_bool(context, "upload_done", false)?;
-                ctx_set_string(context, "upload_error", &detail)?;
+                Ok(self.upload_attempt_result(
+                    &remote_file,
+                    started.elapsed().as_millis() as u32,
+                    false,
+                    &detail,
+                ))
             }
         }
-        Ok(())
     }
 
     pub(super) fn handle_net_verify_once(&mut self, context: &mut Value) -> Result<()> {
