@@ -198,7 +198,7 @@ pub(super) static LEGACY_STACK_G_WIFI_OSI_FUNCS: wifi_osi_funcs_t = wifi_osi_fun
 
 pub(super) static mut g_wifi_feature_caps: u64 = WIFI_FEATURE_CAPS;
 
-pub(super) static mut G_CONFIG: wifi_init_config_t = wifi_init_config_t {
+pub(crate) static mut G_CONFIG: wifi_init_config_t = wifi_init_config_t {
     osi_funcs: (&raw const LEGACY_STACK_G_WIFI_OSI_FUNCS).cast_mut(),
     wpa_crypto_funcs: wpa_crypto_funcs_t {
         size: 0,
@@ -239,7 +239,7 @@ pub(super) static mut G_CONFIG: wifi_init_config_t = wifi_init_config_t {
     dump_hesigb_enable: false,
 };
 
-pub(super) unsafe fn install_legacy_literal_g_config(
+pub(crate) unsafe fn install_legacy_literal_g_config(
     config: Config,
     wpa_crypto: wpa_crypto_funcs_t,
 ) {

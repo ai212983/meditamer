@@ -6,6 +6,7 @@ pub mod event;
 mod blob_compat_internal;
 mod internal;
 mod legacy_stack;
+mod true_old_stack;
 mod internal_legacy_admission_literal;
 mod internal_legacy_coex_backend;
 mod internal_legacy_backend;
@@ -229,6 +230,32 @@ pub fn backend_legacy_port_scan_with_config(
     config: ScanConfig<'_>,
 ) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
     legacy_stack::init::scan_with_config(controller, config)
+}
+
+#[doc(hidden)]
+pub fn backend_true_old_stack_wifi_new<'d>(
+    device: crate::hal::peripherals::WIFI<'d>,
+    config: Config,
+) -> Result<(WifiController<'d>, Interfaces<'d>), WifiError> {
+    true_old_stack::wifi_new(device, config)
+}
+
+#[doc(hidden)]
+pub fn backend_true_old_stack_start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    true_old_stack::start(controller)
+}
+
+#[doc(hidden)]
+pub fn backend_true_old_stack_stop(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    true_old_stack::stop(controller)
+}
+
+#[doc(hidden)]
+pub fn backend_true_old_stack_scan_with_config(
+    controller: &mut WifiController<'_>,
+    config: ScanConfig<'_>,
+) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
+    true_old_stack::scan_with_config(controller, config)
 }
 
 #[cfg(all(feature = "csi", esp32c6))]
