@@ -6,21 +6,6 @@ use super::{
 };
 use enumset::EnumSet;
 use esp_println::println;
-use esp_wifi_sys::include::{
-    esp_wifi_clear_ap_list, esp_wifi_scan_get_ap_num, esp_wifi_scan_get_ap_records,
-    esp_wifi_scan_start, wifi_active_scan_time_t, wifi_ap_record_t, wifi_scan_channel_bitmap_t,
-    wifi_scan_config_t, wifi_scan_time_t, wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE, ESP_OK,
-};
-
-fn legacy_port_force_direct_explicit_scan_enabled() -> bool {
-    matches!(
-        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_FORCE_DIRECT_EXPLICIT_SCAN_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("WIFI_BACKEND_LEGACY_PORT_FORCE_DIRECT_EXPLICIT_SCAN_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
-}
 
 fn legacy_timer_compat_enabled() -> bool {
     matches!(
@@ -38,71 +23,42 @@ fn legacy_timer_compat_enabled() -> bool {
     )
 }
 
-fn direct_explicit_scan() -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
-    let scan_config = wifi_scan_config_t {
-        ssid: core::ptr::null_mut(),
-        bssid: core::ptr::null_mut(),
-        channel: 0,
-        show_hidden: true,
-        scan_type: wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE,
-        scan_time: wifi_scan_time_t {
-            active: wifi_active_scan_time_t { min: 10, max: 20 },
-            passive: 0,
-        },
-        home_chan_dwell_time: 0,
-        channel_bitmap: wifi_scan_channel_bitmap_t {
-            ghz_2_channels: 0,
-            ghz_5_channels: 0,
-        },
-        coex_background_scan: false,
-    };
-
-    let scan_rc = unsafe { esp_wifi_scan_start(&scan_config, true) };
-    if scan_rc != ESP_OK as i32 {
-        return Err(WifiError::InternalError(
-            esp_radio::wifi::InternalWifiError::Timeout,
-        ));
+fn log_post_start_runtime_state(stage: &str) {
+    if !legacy_timer_compat_enabled() {
+        return;
     }
 
-    let mut ap_num = 0u16;
-    let ap_num_rc = unsafe { esp_wifi_scan_get_ap_num(&mut ap_num) };
-    if ap_num_rc != ESP_OK as i32 {
-        let _ = unsafe { esp_wifi_clear_ap_list() };
-        return Err(WifiError::InternalError(
-            esp_radio::wifi::InternalWifiError::Timeout,
-        ));
-    }
+    let os_diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
+    let adapter_diag = esp_radio::diagnostic_wifi_adapter_primitive_diag();
+    let scan_done = esp_radio::diagnostic_wifi_scan_done_eventpost_diag();
+    let legacy_builtin = esp_radio::diagnostic_legacy_builtin_scheduler_diag();
+    let legacy_preempt = esp_radio::diagnostic_legacy_preempt_builtin_diag();
 
-    if ap_num == 0 {
-        return Ok(alloc::vec::Vec::new());
-    }
-
-    let mut returned = ap_num;
-    let mut records =
-        alloc::vec![unsafe { core::mem::zeroed::<wifi_ap_record_t>() }; ap_num as usize];
-    let records_rc = unsafe { esp_wifi_scan_get_ap_records(&mut returned, records.as_mut_ptr()) };
-    let _ = unsafe { esp_wifi_clear_ap_list() };
-    if records_rc != ESP_OK as i32 {
-        return Err(WifiError::InternalError(
-            esp_radio::wifi::InternalWifiError::Timeout,
-        ));
-    }
-
-    Ok(records
-        .iter()
-        .take(returned as usize)
-        .map(esp_radio::wifi::access_point_info_from_raw_record)
-        .collect())
+    println!(
+        "upload_http: legacy_port post_start after={} wifi_mac_isr_count={} queue_send={} queue_send_isr={} queue_recv={} event_post={} thread_sem_get={} task_get_current_task_count={} scan_done_count={} scan_done_ap_num={} legacy_builtin_initialized={} legacy_builtin_switch_count={} legacy_preempt_initialized={} legacy_preempt_current_task=0x{:x} legacy_preempt_thread_sem=0x{:x}",
+        stage,
+        esp_radio::diagnostic_wifi_mac_isr_count(),
+        os_diag.queue_send,
+        os_diag.queue_send_isr,
+        os_diag.queue_recv,
+        os_diag.event_post,
+        adapter_diag.thread_sem_get_count,
+        adapter_diag.task_get_current_task_count,
+        scan_done.count,
+        scan_done.ap_num,
+        legacy_builtin.initialized as u8,
+        legacy_builtin.switch_count,
+        legacy_preempt.initialized as u8,
+        legacy_preempt.current_task,
+        legacy_preempt.current_task_thread_semaphore,
+    );
 }
 
 pub(crate) async fn scan_with_config(
     controller: &mut WifiController<'_>,
     config: ScanConfig<'_>,
 ) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
-    if legacy_port_force_direct_explicit_scan_enabled() {
-        return direct_explicit_scan();
-    }
-    esp_radio::wifi::WifiController::scan_with_config(controller, config)
+    esp_radio::wifi::backend_legacy_port_scan_with_config(controller, config)
 }
 
 pub(crate) fn set_config(
@@ -142,17 +98,22 @@ pub(crate) fn rssi(controller: &WifiController<'_>) -> Result<i32, WifiError> {
 }
 
 pub(crate) async fn start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::start(controller)?;
+    esp_radio::wifi::backend_legacy_port_start(controller)?;
+    log_post_start_runtime_state("after_start");
     if legacy_timer_compat_enabled() && !legacy_timer_compat_init_tasks_enabled() {
-        esp_rtos::precreate_esp_radio_timer_task();
-        esp_rtos::yield_for_esp_radio_diag();
-        println!("upload_http: legacy_port late_precreate_timer_task result=ok");
+        let status = esp_radio::backend_legacy_port_init_tasks();
+        println!(
+            "upload_http: legacy_port late_init_tasks result=ok timer_task_precreated={} yielded_once={}",
+            status.timer_task_precreated,
+            status.yielded_once,
+        );
+        log_post_start_runtime_state("after_late_init_tasks");
     }
     Ok(())
 }
 
 pub(crate) async fn stop(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::stop(controller)
+    esp_radio::wifi::backend_legacy_port_stop(controller)
 }
 
 pub(crate) async fn connect(controller: &mut WifiController<'_>) -> Result<(), WifiError> {

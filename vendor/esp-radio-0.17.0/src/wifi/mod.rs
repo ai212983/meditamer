@@ -1747,7 +1747,44 @@ pub(crate) fn wifi_init(_wifi: crate::hal::peripherals::WIFI<'_>) -> Result<(), 
 }
 
 pub(crate) fn wifi_init_config_diag() -> WifiInitConfigDiag {
-    internal::wifi_init_config_diag()
+    if crate::compat::legacy_runtime_policy::backend_legacy_port_enabled() {
+        let diag = blob_compat_internal::wifi_init_config_diag();
+        WifiInitConfigDiag {
+            config_ptr: diag.config_ptr,
+            osi_funcs_ptr: diag.osi_funcs_ptr,
+            static_rx_buf_num: diag.static_rx_buf_num,
+            dynamic_rx_buf_num: diag.dynamic_rx_buf_num,
+            static_tx_buf_num: diag.static_tx_buf_num,
+            dynamic_tx_buf_num: diag.dynamic_tx_buf_num,
+            rx_mgmt_buf_type: diag.rx_mgmt_buf_type,
+            rx_mgmt_buf_num: diag.rx_mgmt_buf_num,
+            cache_tx_buf_num: diag.cache_tx_buf_num,
+            ampdu_rx_enable: diag.ampdu_rx_enable,
+            ampdu_tx_enable: diag.ampdu_tx_enable,
+            amsdu_tx_enable: diag.amsdu_tx_enable,
+            nvs_enable: diag.nvs_enable,
+            nano_enable: diag.nano_enable,
+            rx_ba_win: diag.rx_ba_win,
+            wifi_task_core_id: diag.wifi_task_core_id,
+            feature_caps: diag.feature_caps,
+            sta_disconnected_pm: diag.sta_disconnected_pm,
+            tx_hetb_queue_num: diag.tx_hetb_queue_num,
+            dump_hesigb_enable: diag.dump_hesigb_enable,
+            magic: diag.magic,
+            osi_set_isr_ptr: diag.osi_set_isr_ptr,
+            osi_queue_create_ptr: diag.osi_queue_create_ptr,
+            osi_queue_recv_ptr: diag.osi_queue_recv_ptr,
+            osi_task_create_ptr: diag.osi_task_create_ptr,
+            osi_task_create_pinned_ptr: diag.osi_task_create_pinned_ptr,
+            osi_task_get_current_ptr: diag.osi_task_get_current_ptr,
+            osi_wifi_thread_semphr_get_ptr: diag.osi_wifi_thread_semphr_get_ptr,
+            osi_timer_arm_us_ptr: diag.osi_timer_arm_us_ptr,
+            osi_event_post_ptr: diag.osi_event_post_ptr,
+            osi_malloc_internal_ptr: diag.osi_malloc_internal_ptr,
+        }
+    } else {
+        internal::wifi_init_config_diag()
+    }
 }
 
 #[cfg(coex)]
