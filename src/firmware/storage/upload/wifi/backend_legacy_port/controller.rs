@@ -1,8 +1,8 @@
 extern crate alloc;
 
 use super::{
-    legacy_timer_compat_init_tasks_enabled, AccessPointInfo, ModeConfig, PowerSaveMode, Protocol,
-    ScanConfig, WifiController, WifiError, WifiMode,
+    legacy_timer_compat_init_tasks_enabled, log_runtime_state, AccessPointInfo, ModeConfig,
+    PowerSaveMode, Protocol, ScanConfig, WifiController, WifiError, WifiMode,
 };
 use enumset::EnumSet;
 use esp_println::println;
@@ -21,37 +21,6 @@ fn legacy_timer_compat_enabled() -> bool {
         option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
-}
-
-fn log_post_start_runtime_state(stage: &str) {
-    if !legacy_timer_compat_enabled() {
-        return;
-    }
-
-    let os_diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
-    let adapter_diag = esp_radio::diagnostic_wifi_adapter_primitive_diag();
-    let scan_done = esp_radio::diagnostic_wifi_scan_done_eventpost_diag();
-    let legacy_builtin = esp_radio::diagnostic_legacy_builtin_scheduler_diag();
-    let legacy_preempt = esp_radio::diagnostic_legacy_preempt_builtin_diag();
-
-    println!(
-        "upload_http: legacy_port post_start after={} wifi_mac_isr_count={} queue_send={} queue_send_isr={} queue_recv={} event_post={} thread_sem_get={} task_get_current_task_count={} scan_done_count={} scan_done_ap_num={} legacy_builtin_initialized={} legacy_builtin_switch_count={} legacy_preempt_initialized={} legacy_preempt_current_task=0x{:x} legacy_preempt_thread_sem=0x{:x}",
-        stage,
-        esp_radio::diagnostic_wifi_mac_isr_count(),
-        os_diag.queue_send,
-        os_diag.queue_send_isr,
-        os_diag.queue_recv,
-        os_diag.event_post,
-        adapter_diag.thread_sem_get_count,
-        adapter_diag.task_get_current_task_count,
-        scan_done.count,
-        scan_done.ap_num,
-        legacy_builtin.initialized as u8,
-        legacy_builtin.switch_count,
-        legacy_preempt.initialized as u8,
-        legacy_preempt.current_task,
-        legacy_preempt.current_task_thread_semaphore,
-    );
 }
 
 pub(crate) async fn scan_with_config(
@@ -99,7 +68,7 @@ pub(crate) fn rssi(controller: &WifiController<'_>) -> Result<i32, WifiError> {
 
 pub(crate) async fn start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
     esp_radio::wifi::backend_legacy_port_start(controller)?;
-    log_post_start_runtime_state("after_start");
+    log_runtime_state("after_start");
     if legacy_timer_compat_enabled() && !legacy_timer_compat_init_tasks_enabled() {
         let status = esp_radio::backend_legacy_port_init_tasks();
         println!(
@@ -107,7 +76,7 @@ pub(crate) async fn start(controller: &mut WifiController<'_>) -> Result<(), Wif
             status.timer_task_precreated,
             status.yielded_once,
         );
-        log_post_start_runtime_state("after_late_init_tasks");
+        log_runtime_state("after_late_init_tasks");
     }
     Ok(())
 }

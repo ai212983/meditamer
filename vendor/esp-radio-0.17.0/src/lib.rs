@@ -141,7 +141,6 @@ use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub use common_adapter::{phy_calibration_data, set_phy_calibration_data};
 use esp_hal::{self as hal};
-use esp_radio_rtos_driver as preempt;
 use esp_sync::RawMutex;
 #[cfg(esp32)]
 use hal::analog::adc::{release_adc2, try_claim_adc2};
@@ -167,9 +166,17 @@ use crate::wifi::os_adapter::{
 #[cfg(feature = "wifi")]
 use crate::compat::timer_compat::{reset_timer_compat_diag, timer_compat_diag, TimerCompatDiag};
 #[cfg(feature = "wifi")]
+use crate::compat::{
+    common_legacy_queue::common_legacy_queue_diag,
+    common_legacy_literal::common_legacy_literal_diag,
+    preempt_legacy_backend::preempt_legacy_backend_diag,
+};
+#[cfg(feature = "wifi")]
 use crate::wifi::WifiInitConfigDiag;
 #[cfg(feature = "wifi")]
 use crate::wifi::WifiError;
+#[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
+pub use crate::compat::legacy_wifi_tasks::LegacyWifiTasksInitStatus;
 
 // can't use instability on inline module definitions, see https://github.com/rust-lang/rust/issues/54727
 #[doc(hidden)]
@@ -197,6 +204,7 @@ mod binary {
     pub use esp_wifi_sys::*;
 }
 mod compat;
+mod preempt_backend;
 
 mod radio;
 mod time;
@@ -237,6 +245,9 @@ unsafe extern "C" {
     fn __esp_rtos_diag_legacy_builtin_scheduler_snapshot() -> LegacyBuiltinSchedulerSnapshotRaw;
     fn __esp_rtos_diag_legacy_builtin_scheduler_task_ptr_at(index: usize) -> usize;
     fn __esp_rtos_diag_legacy_builtin_scheduler_task_role_at(index: usize) -> [u8; 16];
+    fn __esp_rtos_diag_legacy_preempt_builtin_initialized() -> bool;
+    fn __esp_rtos_diag_legacy_preempt_builtin_current_task_ptr() -> usize;
+    fn __esp_rtos_diag_legacy_preempt_builtin_current_task_thread_semaphore_ptr() -> usize;
 }
 
 #[cfg(feature = "wifi")]
@@ -473,6 +484,63 @@ pub fn init<'d>() -> Result<Controller<'d>, InitializationError> {
     })
 }
 
+#[doc(hidden)]
+pub fn backend_legacy_port_init_pre_tasks() -> Result<(), InitializationError> {
+    #[cfg(esp32)]
+    if try_claim_adc2(unsafe { hal::Internal::conjure() }).is_err() {
+        return Err(InitializationError::Adc2IsUsed);
+    }
+
+    if crate::is_interrupts_disabled() {
+        return Err(InitializationError::InterruptsDisabled);
+    }
+
+    if !preempt::initialized() {
+        return Err(InitializationError::SchedulerNotInitialized);
+    }
+
+    const MIN_CLOCK: Rate = Rate::from_mhz(80);
+    let clocks = Clocks::get();
+    if clocks.cpu_clock < MIN_CLOCK {
+        return Err(InitializationError::WrongClockConfig);
+    }
+
+    crate::common_adapter::enable_wifi_power_domain();
+    #[cfg(esp32)]
+    crate::wifi::legacy_phy_mem_init_diag();
+
+    setup_radio_isr();
+    preempt::enable();
+
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_enable_scheduler() {
+    preempt::enable();
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_init_post_tasks<'d>() -> Result<Controller<'d>, InitializationError> {
+    wifi_set_log_verbose();
+    init_radio_clocks();
+
+    #[cfg(coex)]
+    match crate::wifi::coex_initialize() {
+        0 => {}
+        error => return Err(InitializationError::General(error)),
+    }
+
+    Ok(Controller {
+        _inner: PhantomData,
+    })
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_init_tasks() -> LegacyWifiTasksInitStatus {
+    crate::compat::legacy_wifi_tasks::init_legacy_wifi_tasks()
+}
+
 /// Returns true if at least some interrupt levels are disabled.
 fn is_interrupts_disabled() -> bool {
     #[cfg(target_arch = "xtensa")]
@@ -579,6 +647,124 @@ pub fn diagnostic_wifi_task_create_diag() -> WifiTaskCreateDiag {
 #[doc(hidden)]
 pub fn diagnostic_wifi_init_config_diag() -> WifiInitConfigDiag {
     crate::wifi::wifi_init_config_diag()
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct CommonLegacyLiteralDiag {
+    pub task_create_count: u32,
+    pub task_create_last_task_ptr: usize,
+    pub task_create_last_stack_depth: u32,
+    pub thread_sem_get_count: u32,
+    pub thread_sem_get_last_ptr: usize,
+    pub queue_create_count: u32,
+    pub queue_create_last_len: i32,
+    pub queue_create_last_item_size: i32,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_common_legacy_literal_diag() -> CommonLegacyLiteralDiag {
+    let diag = common_legacy_literal_diag();
+    CommonLegacyLiteralDiag {
+        task_create_count: diag.task_create_count,
+        task_create_last_task_ptr: diag.task_create_last_task_ptr,
+        task_create_last_stack_depth: diag.task_create_last_stack_depth,
+        thread_sem_get_count: diag.thread_sem_get_count,
+        thread_sem_get_last_ptr: diag.thread_sem_get_last_ptr,
+        queue_create_count: diag.queue_create_count,
+        queue_create_last_len: diag.queue_create_last_len,
+        queue_create_last_item_size: diag.queue_create_last_item_size,
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct PreemptLegacyBackendDiag {
+    pub enable_count: u32,
+    pub yield_count: u32,
+    pub current_task_count: u32,
+    pub current_task_last_ptr: usize,
+    pub current_task_thread_sem_count: u32,
+    pub current_task_thread_sem_last_ptr: usize,
+    pub task_create_count: u32,
+    pub task_create_last_task_ptr: usize,
+    pub task_create_last_stack_size: usize,
+    pub schedule_delete_count: u32,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_preempt_legacy_backend_diag() -> PreemptLegacyBackendDiag {
+    let diag = preempt_legacy_backend_diag();
+    PreemptLegacyBackendDiag {
+        enable_count: diag.enable_count,
+        yield_count: diag.yield_count,
+        current_task_count: diag.current_task_count,
+        current_task_last_ptr: diag.current_task_last_ptr,
+        current_task_thread_sem_count: diag.current_task_thread_sem_count,
+        current_task_thread_sem_last_ptr: diag.current_task_thread_sem_last_ptr,
+        task_create_count: diag.task_create_count,
+        task_create_last_task_ptr: diag.task_create_last_task_ptr,
+        task_create_last_stack_size: diag.task_create_last_stack_size,
+        schedule_delete_count: diag.schedule_delete_count,
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct CommonLegacyQueueDiag {
+    pub send_count: u32,
+    pub send_front_count: u32,
+    pub recv_count: u32,
+    pub send_isr_count: u32,
+    pub recv_isr_count: u32,
+    pub last_queue_ptr: usize,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_common_legacy_queue_diag() -> CommonLegacyQueueDiag {
+    let diag = common_legacy_queue_diag();
+    CommonLegacyQueueDiag {
+        send_count: diag.send_count,
+        send_front_count: diag.send_front_count,
+        recv_count: diag.recv_count,
+        send_isr_count: diag.send_isr_count,
+        recv_isr_count: diag.recv_isr_count,
+        last_queue_ptr: diag.last_queue_ptr,
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct InternalLegacyEventPostDiag {
+    pub count: u32,
+    pub last_event_id: i32,
+    pub scan_done_status: u32,
+    pub scan_done_number: u32,
+    pub scan_done_id: u32,
+    pub scan_done_ap_num_rc: u32,
+    pub scan_done_ap_num: u32,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_internal_legacy_event_post_diag() -> InternalLegacyEventPostDiag {
+    let diag = crate::wifi::internal_legacy_event_post_diag();
+    InternalLegacyEventPostDiag {
+        count: diag.count,
+        last_event_id: diag.last_event_id,
+        scan_done_status: diag.scan_done_status,
+        scan_done_number: diag.scan_done_number,
+        scan_done_id: diag.scan_done_id,
+        scan_done_ap_num_rc: diag.scan_done_ap_num_rc,
+        scan_done_ap_num: diag.scan_done_ap_num,
+    }
 }
 
 #[cfg(all(feature = "wifi", feature = "sniffer", feature = "unstable"))]
@@ -705,6 +891,15 @@ pub struct LegacyBuiltinSchedulerDiag {
 
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct LegacyPreemptBuiltinDiag {
+    pub initialized: bool,
+    pub current_task: usize,
+    pub current_task_thread_semaphore: usize,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
 pub fn diagnostic_timer_callback_exec_diag() -> TimerCallbackExecDiag {
     TimerCallbackExecDiag {
         current_callback_ptr: unsafe { __esp_rtos_diag_timer_callback_current_ptr() },
@@ -794,6 +989,18 @@ pub fn diagnostic_legacy_builtin_scheduler_diag() -> LegacyBuiltinSchedulerDiag 
     diag
 }
 
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_legacy_preempt_builtin_diag() -> LegacyPreemptBuiltinDiag {
+    LegacyPreemptBuiltinDiag {
+        initialized: unsafe { __esp_rtos_diag_legacy_preempt_builtin_initialized() },
+        current_task: unsafe { __esp_rtos_diag_legacy_preempt_builtin_current_task_ptr() },
+        current_task_thread_semaphore: unsafe {
+            __esp_rtos_diag_legacy_preempt_builtin_current_task_thread_semaphore_ptr()
+        },
+    }
+}
+
 impl core::fmt::Display for InitializationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -842,3 +1049,4 @@ pub fn wifi_set_log_verbose() {
         esp_wifi_internal_set_log_level(wifi_log_level_t_WIFI_LOG_VERBOSE);
     }
 }
+use preempt_backend as preempt;

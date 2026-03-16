@@ -1749,7 +1749,7 @@ pub(crate) fn wifi_init(_wifi: crate::hal::peripherals::WIFI<'_>) -> Result<(), 
 pub(crate) fn wifi_init_config_diag() -> WifiInitConfigDiag {
     if crate::compat::legacy_runtime_policy::backend_legacy_port_enabled() {
         let diag = blob_compat_internal::wifi_init_config_diag();
-        WifiInitConfigDiag {
+        return WifiInitConfigDiag {
             config_ptr: diag.config_ptr,
             osi_funcs_ptr: diag.osi_funcs_ptr,
             static_rx_buf_num: diag.static_rx_buf_num,
@@ -1781,9 +1781,32 @@ pub(crate) fn wifi_init_config_diag() -> WifiInitConfigDiag {
             osi_timer_arm_us_ptr: diag.osi_timer_arm_us_ptr,
             osi_event_post_ptr: diag.osi_event_post_ptr,
             osi_malloc_internal_ptr: diag.osi_malloc_internal_ptr,
-        }
-    } else {
-        internal::wifi_init_config_diag()
+        };
+    }
+
+    internal::wifi_init_config_diag()
+}
+
+pub(crate) struct InternalLegacyEventPostDiag {
+    pub count: u32,
+    pub last_event_id: i32,
+    pub scan_done_status: u32,
+    pub scan_done_number: u32,
+    pub scan_done_id: u32,
+    pub scan_done_ap_num_rc: u32,
+    pub scan_done_ap_num: u32,
+}
+
+pub(crate) fn internal_legacy_event_post_diag() -> InternalLegacyEventPostDiag {
+    let diag = internal_legacy_common_literal::internal_legacy_event_post_diag();
+    InternalLegacyEventPostDiag {
+        count: diag.count,
+        last_event_id: diag.last_event_id,
+        scan_done_status: diag.scan_done_status,
+        scan_done_number: diag.scan_done_number,
+        scan_done_id: diag.scan_done_id,
+        scan_done_ap_num_rc: diag.scan_done_ap_num_rc,
+        scan_done_ap_num: diag.scan_done_ap_num,
     }
 }
 

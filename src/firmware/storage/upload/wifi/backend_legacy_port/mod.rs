@@ -7,14 +7,15 @@ mod contracts;
 mod controller;
 mod runtime;
 mod types;
+mod wifi_new;
 
 pub(crate) use availability::{
     LegacyHookAvailability, LEGACY_AVAILABLE_HOOKS, LEGACY_MISSING_HOOKS,
 };
 pub(crate) use bootstrap::{
-    legacy_timer_compat_init_tasks_enabled, runtime_bootstrap_status, LegacyBootstrapRuntimeStatus,
-    LegacyBootstrapStep, LegacySchedulerContract, LEGACY_BOOTSTRAP_SEQUENCE,
-    LEGACY_SCHEDULER_CONTRACT,
+    install_legacy_preempt_timer, legacy_timer_compat_init_tasks_enabled, runtime_bootstrap_status,
+    setup_legacy_preempt_timer, LegacyBootstrapRuntimeStatus, LegacyBootstrapStep,
+    LegacySchedulerContract, LEGACY_BOOTSTRAP_SEQUENCE, LEGACY_SCHEDULER_CONTRACT,
 };
 pub(crate) use config::{
     active_scan_config as legacy_active_scan_config,
@@ -38,7 +39,8 @@ pub(crate) use controller::{
     set_protocol as controller_set_protocol, start as controller_start, stop as controller_stop,
 };
 pub(crate) use runtime::{
-    initialize_runtime_sta_legacy_port, legacy_port_runtime_enabled, LEGACY_RUNTIME_NAME,
+    initialize_runtime_sta_legacy_port, legacy_port_runtime_enabled, log_runtime_state,
+    LEGACY_RUNTIME_NAME,
 };
 pub(crate) use types::{
     AccessPointInfo, ModeConfig, PowerSaveMode, Protocol, RadioController, ScanConfig,

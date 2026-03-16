@@ -1,5 +1,6 @@
 use core::ffi::{c_char, c_void};
 use num_traits::FromPrimitive;
+use portable_atomic::{AtomicU32, Ordering};
 
 use crate::{
     compat::{
@@ -13,6 +14,25 @@ use crate::{
 };
 
 static mut WIFI_STATIC_QUEUE_HANDLE: *mut c_void = core::ptr::null_mut();
+
+#[derive(Clone, Copy)]
+pub(crate) struct InternalLegacyEventPostDiag {
+    pub count: u32,
+    pub last_event_id: i32,
+    pub scan_done_status: u32,
+    pub scan_done_number: u32,
+    pub scan_done_id: u32,
+    pub scan_done_ap_num_rc: u32,
+    pub scan_done_ap_num: u32,
+}
+
+static INTERNAL_LEGACY_EVENT_POST_COUNT: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_EVENT_POST_LAST_EVENT_ID: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_SCAN_DONE_STATUS: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_SCAN_DONE_NUMBER: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_SCAN_DONE_ID: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_SCAN_DONE_AP_NUM_RC: AtomicU32 = AtomicU32::new(0);
+static INTERNAL_LEGACY_SCAN_DONE_AP_NUM: AtomicU32 = AtomicU32::new(0);
 
 fn legacy_random_u32() -> u32 {
     let mut rng = esp_hal::rng::Rng::new();
@@ -254,7 +274,21 @@ pub(crate) unsafe extern "C" fn event_post(
     event_data_size: usize,
     _ticks_to_wait: u32,
 ) -> i32 {
+    INTERNAL_LEGACY_EVENT_POST_COUNT.fetch_add(1, Ordering::Relaxed);
+    INTERNAL_LEGACY_EVENT_POST_LAST_EVENT_ID.store(event_id as u32, Ordering::Relaxed);
     let event = WifiEvent::from_i32(event_id).expect("invalid wifi event id");
+    if matches!(event, WifiEvent::ScanDone) {
+        let mut ap_num: u16 = 0;
+        let ap_num_rc = unsafe { crate::binary::include::esp_wifi_scan_get_ap_num(&mut ap_num) };
+        let scan = unsafe {
+            &*(event_data.cast::<crate::binary::include::wifi_event_sta_scan_done_t>())
+        };
+        INTERNAL_LEGACY_SCAN_DONE_STATUS.store(scan.status, Ordering::Relaxed);
+        INTERNAL_LEGACY_SCAN_DONE_NUMBER.store(u32::from(scan.number), Ordering::Relaxed);
+        INTERNAL_LEGACY_SCAN_DONE_ID.store(u32::from(scan.scan_id), Ordering::Relaxed);
+        INTERNAL_LEGACY_SCAN_DONE_AP_NUM_RC.store(ap_num_rc as u32, Ordering::Relaxed);
+        INTERNAL_LEGACY_SCAN_DONE_AP_NUM.store(u32::from(ap_num), Ordering::Relaxed);
+    }
     WIFI_EVENTS.with(|events| events.insert(event));
 
     let handled = internal_legacy_event_literal::dispatch_event_handler(
@@ -277,6 +311,18 @@ pub(crate) unsafe extern "C" fn event_post(
 
     memory_fence();
     0
+}
+
+pub(crate) fn internal_legacy_event_post_diag() -> InternalLegacyEventPostDiag {
+    InternalLegacyEventPostDiag {
+        count: INTERNAL_LEGACY_EVENT_POST_COUNT.load(Ordering::Relaxed),
+        last_event_id: INTERNAL_LEGACY_EVENT_POST_LAST_EVENT_ID.load(Ordering::Relaxed) as i32,
+        scan_done_status: INTERNAL_LEGACY_SCAN_DONE_STATUS.load(Ordering::Relaxed),
+        scan_done_number: INTERNAL_LEGACY_SCAN_DONE_NUMBER.load(Ordering::Relaxed),
+        scan_done_id: INTERNAL_LEGACY_SCAN_DONE_ID.load(Ordering::Relaxed),
+        scan_done_ap_num_rc: INTERNAL_LEGACY_SCAN_DONE_AP_NUM_RC.load(Ordering::Relaxed),
+        scan_done_ap_num: INTERNAL_LEGACY_SCAN_DONE_AP_NUM.load(Ordering::Relaxed),
+    }
 }
 
 pub(crate) unsafe extern "C" fn get_free_heap_size() -> u32 {
