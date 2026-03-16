@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use super::super::{
-    backend_legacy_port, wifi_stop_async, ScanConfig, WifiController, WifiError,
+    backend_legacy_port, ScanConfig, WifiController, WifiError,
 };
 use super::{LegacyDiscoveryResult, LegacyDiscoverySession};
 
@@ -29,7 +29,7 @@ pub(crate) async fn scan_with_controller(
 
 pub(crate) async fn shutdown(session: LegacyDiscoverySession<'_>) -> Result<(), WifiError> {
     if session.owns_start {
-        wifi_stop_async(session.controller).await
+        backend_legacy_port::controller_stop(session.controller).await
     } else {
         Ok(())
     }
