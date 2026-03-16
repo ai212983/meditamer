@@ -4,6 +4,22 @@
 
 pub mod event;
 mod internal;
+mod internal_legacy_admission_literal;
+mod internal_legacy_coex_backend;
+mod internal_legacy_backend;
+mod internal_legacy_common_literal;
+mod internal_legacy_control_backend;
+mod internal_legacy_control_literal;
+mod internal_legacy_device_backend;
+mod internal_legacy_literal;
+mod internal_legacy_common_backend;
+mod internal_legacy_misc_backend;
+mod internal_legacy_packet_backend;
+mod internal_legacy_scan_backend;
+mod internal_legacy_scan_literal;
+mod internal_legacy_system_backend;
+mod internal_legacy_timer_backend;
+mod legacy_osi_backend;
 #[cfg(esp32)]
 mod phy_legacy_esp32;
 pub(crate) mod os_adapter;
@@ -183,6 +199,152 @@ fn wifi_new_trace(stage: &str) {
     if wifi_new_trace_enabled() {
         esp_println::println!("esp_radio: wifi_new stage={stage}");
     }
+}
+
+fn legacy_port_validate_config(config: Config) -> Result<(), WifiError> {
+    if crate::is_interrupts_disabled() {
+        return Err(WifiError::Unsupported);
+    }
+
+    config.validate();
+    Ok(())
+}
+fn legacy_port_wifi_init(_wifi: crate::hal::peripherals::WIFI<'_>, config: Config) -> Result<(), WifiError> {
+    unsafe {
+        internal_legacy_literal::install_legacy_runtime_globals(
+            config,
+            g_wifi_default_wpa_crypto_funcs,
+        );
+        RX_QUEUE_SIZE.store(config.rx_queue_size, Ordering::Relaxed);
+        TX_QUEUE_SIZE.store(config.tx_queue_size, Ordering::Relaxed);
+
+        #[cfg(coex)]
+        {
+            esp_println::println!("esp_radio: legacy_port_wifi_init stage=coex_init.before");
+            esp_wifi_result!(internal_legacy_coex_backend::coex_init())?;
+            esp_println::println!("esp_radio: legacy_port_wifi_init stage=coex_init.after");
+        }
+
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_init_internal.before");
+        esp_wifi_result!(esp_wifi_init_internal(addr_of!(internal_legacy_literal::G_CONFIG)))?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_init_internal.after");
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_set_mode_null.before");
+        esp_wifi_result!(esp_wifi_set_mode(wifi_mode_t_WIFI_MODE_NULL))?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_set_mode_null.after");
+
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_supplicant_init.before");
+        esp_wifi_result!(esp_supplicant_init())?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_supplicant_init.after");
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_set_tx_done_cb.before");
+        esp_wifi_result!(esp_wifi_set_tx_done_cb(Some(esp_wifi_tx_done_cb)))?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_set_tx_done_cb.after");
+
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=reg_rxcb_sta.before");
+        esp_wifi_result!(esp_wifi_internal_reg_rxcb(
+            esp_interface_t_ESP_IF_WIFI_STA,
+            Some(if internal_legacy_backend::enabled() {
+                internal_legacy_backend::recv_cb_sta
+            } else {
+                recv_cb_sta
+            })
+        ))?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=reg_rxcb_sta.after");
+
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=reg_rxcb_ap.before");
+        esp_wifi_result!(esp_wifi_internal_reg_rxcb(
+            esp_interface_t_ESP_IF_WIFI_AP,
+            Some(if internal_legacy_backend::enabled() {
+                internal_legacy_backend::recv_cb_ap
+            } else {
+                recv_cb_ap
+            })
+        ))?;
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=reg_rxcb_ap.after");
+
+        #[cfg(any(esp32, esp32s3))]
+        {
+            static mut NVS_STRUCT: [u32; 12] = [0; 12];
+            crate::common_adapter::__ESP_RADIO_G_MISC_NVS = core::ptr::addr_of_mut!(NVS_STRUCT)
+                .cast::<u32>();
+        }
+
+        esp_println::println!("esp_radio: legacy_port_wifi_init stage=done");
+        Ok(())
+    }
+}
+
+fn legacy_port_set_country(config: Config) -> Result<(), WifiError> {
+    unsafe {
+        let country = config.country_code.into_blob();
+        esp_wifi_result!(esp_wifi_set_country(&country))?;
+    }
+
+    Ok(())
+}
+
+fn legacy_port_finish_new<'d>(
+    config: Config,
+) -> Result<(WifiController<'d>, Interfaces<'d>), WifiError> {
+    unsafe { esp_hal::rng::TrngSource::increase_entropy_source_counter() };
+
+    let mut controller = WifiController {
+        _phantom: Default::default(),
+        beacon_timeout: 6,
+        ap_beacon_timeout: 100,
+    };
+
+    controller.set_power_saving(config.power_save_mode)?;
+
+    Ok((
+        controller,
+        Interfaces {
+            sta: WifiDevice {
+                _phantom: Default::default(),
+                mode: WifiDeviceMode::Sta,
+            },
+            ap: WifiDevice {
+                _phantom: Default::default(),
+                mode: WifiDeviceMode::Ap,
+            },
+            #[cfg(all(feature = "esp-now", feature = "unstable"))]
+            esp_now: crate::esp_now::EspNow::new_internal(),
+            #[cfg(all(feature = "sniffer", feature = "unstable"))]
+            sniffer: Sniffer::new(),
+        },
+    ))
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_wifi_new<'d>(
+    device: crate::hal::peripherals::WIFI<'d>,
+    config: Config,
+) -> Result<(WifiController<'d>, Interfaces<'d>), WifiError> {
+    esp_println::println!("esp_radio: legacy_port_wifi_new stage=validate");
+    legacy_port_validate_config(config)?;
+    esp_println::println!("esp_radio: legacy_port_wifi_new stage=wifi_init");
+    legacy_port_wifi_init(device, config)?;
+    esp_println::println!("esp_radio: legacy_port_wifi_new stage=set_country");
+    legacy_port_set_country(config)?;
+    esp_println::println!("esp_radio: legacy_port_wifi_new stage=finish_new");
+    legacy_port_finish_new(config)
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    internal_legacy_admission_literal::start(controller)
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_stop(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    internal_legacy_admission_literal::stop(controller)
+}
+
+#[doc(hidden)]
+pub fn backend_legacy_port_scan_with_config(
+    controller: &mut WifiController<'_>,
+    config: ScanConfig<'_>,
+) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
+    internal_legacy_admission_literal::scan_with_config(controller, config)
 }
 
 #[cfg(all(feature = "csi", esp32c6))]
@@ -1681,8 +1843,14 @@ pub(crate) fn wifi_init_config_diag() -> WifiInitConfigDiag {
 pub(crate) fn coex_initialize() -> i32 {
     debug!("call coex-initialize");
     unsafe {
+        let adapter = if crate::compat::legacy_runtime_policy::backend_legacy_port_enabled() {
+            core::ptr::addr_of_mut!(internal_legacy_coex_backend::LEGACY_G_COEX_ADAPTER_FUNCS)
+                .cast()
+        } else {
+            core::ptr::addr_of_mut!(internal::G_COEX_ADAPTER_FUNCS).cast()
+        };
         let res = crate::binary::include::esp_coex_adapter_register(
-            core::ptr::addr_of_mut!(internal::G_COEX_ADAPTER_FUNCS).cast(),
+            adapter,
         );
         if res != 0 {
             error!("Error: esp_coex_adapter_register {}", res);
@@ -1722,28 +1890,33 @@ unsafe extern "C" fn recv_cb_sta(
     eb: *mut c_types::c_void,
 ) -> esp_err_t {
     WIFI_RX_CB_STA_COUNT.fetch_add(1, Ordering::Relaxed);
-    let packet = PacketBuffer { buffer, len, eb };
-    // We must handle the result outside of the lock because
-    // PacketBuffer::drop must not be called in a critical section.
-    // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
-    // which will try to lock an internal mutex. If the mutex is already taken,
-    // the function will try to trigger a context switch, which will fail if we
-    // are in an interrupt-free context.
-    match DATA_QUEUE_RX_STA.with(|queue| {
-        if queue.len() < RX_QUEUE_SIZE.load(Ordering::Relaxed) {
-            queue.push_back(packet);
-            Ok(())
-        } else {
-            Err(packet)
-        }
-    }) {
-        Ok(()) => {
-            embassy::STA_RECEIVE_WAKER.wake();
-            include::ESP_OK as esp_err_t
-        }
-        _ => {
-            debug!("RX QUEUE FULL");
-            include::ESP_ERR_NO_MEM as esp_err_t
+    if internal_legacy_backend::enabled() {
+        internal_legacy_backend::recv_cb_sta(buffer, len, eb)
+    } else {
+        let packet = PacketBuffer { buffer, len, eb };
+        // We must handle the result outside of the lock because
+        // PacketBuffer::drop must not be called in a critical section.
+        // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
+        // which will try to lock an internal mutex. If the mutex is already taken,
+        // the function will try to trigger a context switch, which will fail if we
+        // are in an interrupt-free context.
+        let result = DATA_QUEUE_RX_STA.with(|queue| {
+            if queue.len() < RX_QUEUE_SIZE.load(Ordering::Relaxed) {
+                queue.push_back(packet);
+                Ok(())
+            } else {
+                Err(packet)
+            }
+        });
+        match result {
+            Ok(()) => {
+                embassy::STA_RECEIVE_WAKER.wake();
+                include::ESP_OK as esp_err_t
+            }
+            Err(_) => {
+                debug!("RX QUEUE FULL");
+                include::ESP_ERR_NO_MEM as esp_err_t
+            }
         }
     }
 }
@@ -1754,28 +1927,33 @@ unsafe extern "C" fn recv_cb_ap(
     eb: *mut c_types::c_void,
 ) -> esp_err_t {
     WIFI_RX_CB_AP_COUNT.fetch_add(1, Ordering::Relaxed);
-    let packet = PacketBuffer { buffer, len, eb };
-    // We must handle the result outside of the critical section because
-    // PacketBuffer::drop must not be called in a critical section.
-    // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
-    // which will try to lock an internal mutex. If the mutex is already taken,
-    // the function will try to trigger a context switch, which will fail if we
-    // are in an interrupt-free context.
-    match DATA_QUEUE_RX_AP.with(|queue| {
-        if queue.len() < RX_QUEUE_SIZE.load(Ordering::Relaxed) {
-            queue.push_back(packet);
-            Ok(())
-        } else {
-            Err(packet)
-        }
-    }) {
-        Ok(()) => {
-            embassy::AP_RECEIVE_WAKER.wake();
-            include::ESP_OK as esp_err_t
-        }
-        _ => {
-            debug!("RX QUEUE FULL");
-            include::ESP_ERR_NO_MEM as esp_err_t
+    if internal_legacy_backend::enabled() {
+        internal_legacy_backend::recv_cb_ap(buffer, len, eb)
+    } else {
+        let packet = PacketBuffer { buffer, len, eb };
+        // We must handle the result outside of the critical section because
+        // PacketBuffer::drop must not be called in a critical section.
+        // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
+        // which will try to lock an internal mutex. If the mutex is already taken,
+        // the function will try to trigger a context switch, which will fail if we
+        // are in an interrupt-free context.
+        let result = DATA_QUEUE_RX_AP.with(|queue| {
+            if queue.len() < RX_QUEUE_SIZE.load(Ordering::Relaxed) {
+                queue.push_back(packet);
+                Ok(())
+            } else {
+                Err(packet)
+            }
+        });
+        match result {
+            Ok(()) => {
+                embassy::AP_RECEIVE_WAKER.wake();
+                include::ESP_OK as esp_err_t
+            }
+            Err(_) => {
+                debug!("RX QUEUE FULL");
+                include::ESP_ERR_NO_MEM as esp_err_t
+            }
         }
     }
 }
@@ -2055,39 +2233,65 @@ impl WifiDeviceMode {
     }
 
     fn can_send(&self) -> bool {
-        WIFI_TX_INFLIGHT.load(Ordering::SeqCst) < TX_QUEUE_SIZE.load(Ordering::Relaxed)
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::tx_can_send()
+        } else {
+            WIFI_TX_INFLIGHT.load(Ordering::SeqCst) < TX_QUEUE_SIZE.load(Ordering::Relaxed)
+        }
     }
 
     fn increase_in_flight_counter(&self) {
-        WIFI_TX_INFLIGHT.fetch_add(1, Ordering::SeqCst);
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::increase_tx_inflight();
+        } else {
+            WIFI_TX_INFLIGHT.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     fn tx_token(&self) -> Option<WifiTxToken> {
-        if !self.can_send() {
-            // TODO: perhaps we can use a counting semaphore with a short blocking timeout
-            crate::preempt::yield_task();
-        }
-
-        if self.can_send() {
-            Some(WifiTxToken { mode: *self })
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::tx_token(*self)
         } else {
-            None
+            let ready = {
+            if !self.can_send() {
+                // TODO: perhaps we can use a counting semaphore with a short blocking timeout
+                crate::preempt::yield_task();
+            }
+
+            self.can_send()
+            };
+
+            if ready {
+                Some(WifiTxToken { mode: *self })
+            } else {
+                None
+            }
         }
     }
 
     fn rx_token(&self) -> Option<(WifiRxToken, WifiTxToken)> {
-        let is_empty = self.data_queue_rx().with(|q| q.is_empty());
-        if is_empty || !self.can_send() {
-            // TODO: use an OS queue with a short timeout
-            crate::preempt::yield_task();
-        }
-
-        let is_empty = is_empty && self.data_queue_rx().with(|q| q.is_empty());
-
-        if !is_empty {
-            self.tx_token().map(|tx| (WifiRxToken { mode: *self }, tx))
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::rx_token(*self, self.can_send())
         } else {
-            None
+            let ready = {
+            let is_empty = self.data_queue_rx().with(|q| q.is_empty());
+            if is_empty || !self.can_send() {
+                // TODO: use an OS queue with a short timeout
+                crate::preempt::yield_task();
+            }
+
+            if is_empty {
+                !self.data_queue_rx().with(|q| q.is_empty())
+            } else {
+                true
+            }
+            };
+
+            if ready {
+                self.tx_token().map(|tx| (WifiRxToken { mode: *self }, tx))
+            } else {
+                None
+            }
         }
     }
 
@@ -2103,9 +2307,13 @@ impl WifiDeviceMode {
     }
 
     fn register_receive_waker(&self, cx: &mut core::task::Context<'_>) {
-        match self {
-            WifiDeviceMode::Sta => embassy::STA_RECEIVE_WAKER.register(cx.waker()),
-            WifiDeviceMode::Ap => embassy::AP_RECEIVE_WAKER.register(cx.waker()),
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::register_receive_waker(*self, cx);
+        } else {
+            match self {
+                WifiDeviceMode::Sta => embassy::STA_RECEIVE_WAKER.register(cx.waker()),
+                WifiDeviceMode::Ap => embassy::AP_RECEIVE_WAKER.register(cx.waker()),
+            }
         }
     }
 
@@ -2409,6 +2617,11 @@ static mut SNIFFER_CB_LEGACY_RAW: Option<fn(PromiscuousPkt<'_>)> = None;
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
 unsafe extern "C" fn promiscuous_rx_cb(buf: *mut core::ffi::c_void, frame_type: u32) {
     unsafe {
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::promiscuous_rx_cb(buf, frame_type);
+            return;
+        }
+
         WIFI_PROMISC_RX_CB_COUNT.fetch_add(1, Ordering::Relaxed);
         let sniffer_callback = if wifi_use_legacy_sniffer_cb_storage_diag_enabled() {
             SNIFFER_CB_LEGACY_RAW
@@ -2473,7 +2686,9 @@ impl Sniffer<'_> {
     /// Set the callback for receiving a packet.
     #[instability::unstable]
     pub fn set_receive_cb(&mut self, cb: fn(PromiscuousPkt<'_>)) {
-        if wifi_use_legacy_sniffer_cb_storage_diag_enabled() {
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::sniffer_set(cb);
+        } else if wifi_use_legacy_sniffer_cb_storage_diag_enabled() {
             unsafe {
                 SNIFFER_CB_LEGACY_RAW = Some(cb);
             }
@@ -2536,23 +2751,29 @@ impl WifiRxToken {
     where
         F: FnOnce(&mut [u8]) -> R,
     {
-        let mut data = self.mode.data_queue_rx().with(|queue| {
-            unwrap!(
-                queue.pop_front(),
-                "unreachable: transmit()/receive() ensures there is a packet to process"
-            )
-        });
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::consume_rx_token(self.mode, f)
+        } else {
+            let mut data = {
+            self.mode.data_queue_rx().with(|queue| {
+                unwrap!(
+                    queue.pop_front(),
+                    "unreachable: transmit()/receive() ensures there is a packet to process"
+                )
+            })
+            };
 
-        // We handle the received data outside of the lock because
-        // PacketBuffer::drop must not be called in a critical section.
-        // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
-        // which will try to lock an internal mutex. If the mutex is already
-        // taken, the function will try to trigger a context switch, which will
-        // fail if we are in an interrupt-free context.
-        let buffer = data.as_slice_mut();
-        dump_packet_info(buffer);
+            // We handle the received data outside of the lock because
+            // PacketBuffer::drop must not be called in a critical section.
+            // Dropping an PacketBuffer will call `esp_wifi_internal_free_rx_buffer`
+            // which will try to lock an internal mutex. If the mutex is already
+            // taken, the function will try to trigger a context switch, which will
+            // fail if we are in an interrupt-free context.
+            let buffer = data.as_slice_mut();
+            dump_packet_info(buffer);
 
-        f(buffer)
+            f(buffer)
+        }
     }
 }
 
@@ -2580,20 +2801,24 @@ impl WifiTxToken {
     where
         F: FnOnce(&mut [u8]) -> R,
     {
-        self.mode.increase_in_flight_counter();
+        if internal_legacy_backend::enabled() {
+            internal_legacy_backend::consume_tx_token(self.mode, len, f)
+        } else {
+            self.mode.increase_in_flight_counter();
 
-        // (safety): creation of multiple Wi-Fi devices with the same mode is impossible
-        // in safe Rust, therefore only smoltcp _or_ embassy-net can be used at
-        // one time
-        static mut BUFFER: [u8; MTU] = [0u8; MTU];
+            // (safety): creation of multiple Wi-Fi devices with the same mode is impossible
+            // in safe Rust, therefore only smoltcp _or_ embassy-net can be used at
+            // one time
+            static mut BUFFER: [u8; MTU] = [0u8; MTU];
 
-        let buffer = unsafe { &mut BUFFER[..len] };
+            let buffer = unsafe { &mut BUFFER[..len] };
 
-        let res = f(buffer);
+            let res = f(buffer);
 
-        esp_wifi_send_data(self.mode.interface(), buffer);
+            esp_wifi_send_data(self.mode.interface(), buffer);
 
-        res
+            res
+        }
     }
 }
 

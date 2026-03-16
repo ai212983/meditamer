@@ -259,23 +259,3 @@ Interpretation:
     correct, but it does not move the packet-delivery boundary
   - the remaining gap is below runtime/bootstrap activation and below wrapper
     scan shape, in the internal Wi-Fi delivery/admission layer itself
-
-## 2026-03-13 - Literal Legacy Wi-Fi OS-Adapter Backend Slice
-
-- Replaced `wifi/legacy_osi_backend.rs` delegation away from the compat shim `compat/common_adapter_legacy_osi_backend` and onto a dedicated literal backend module:
-  - `vendor/esp-radio-0.17.0/src/wifi/legacy_literal_backend.rs`
-- The new module is sourced from the already-ported `internal_legacy_common_backend` surface, so the internal Wi-Fi OSI table now uses one coherent literal legacy backend for:
-  - semaphores
-  - queues
-  - mutexes
-  - task creation/current task/delay
-  - event/time/random/malloc helpers
-  - static Wi-Fi queue helpers
-- Updated:
-  - `vendor/esp-radio-0.17.0/src/wifi/mod.rs`
-  - `vendor/esp-radio-0.17.0/src/wifi/legacy_osi_backend.rs`
-- Validation:
-  - firmware toolchain build passes via `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
-- Interpretation:
-  - this is a wholesale migration step, not an A/B hook tweak
-  - next step is canonical `backend_legacy_port` full-flash validation from this new literal backend baseline
