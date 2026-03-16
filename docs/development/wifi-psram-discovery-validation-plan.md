@@ -49,7 +49,7 @@ If all stay unchanged, PSRAM is not the primary blocker.
 
 - [x] Phase 1: prove or disprove PSRAM correlation
 - [ ] Phase 2: localize which memory paths must remain internal
-- [ ] Phase 3: validate against an official ESP-IDF control
+- [x] Phase 3: validate against an official ESP-IDF control
 - [x] Phase 4: decide the long-term fix
 
 ## Phase 1: Prove Or Disprove PSRAM Correlation
@@ -139,15 +139,42 @@ Separate a board/PSRAM/system issue from an esp-rs integration issue.
 
 ### Steps
 
-- [ ] Step 3.1 run an official ESP-IDF station scan example on the same board
-- [ ] Step 3.2 compare PSRAM-off vs PSRAM-on behavior there
-- [ ] Step 3.3 classify whether the problem is substrate-level or integration-level
+- [x] Step 3.1 run an official ESP-IDF station scan example on the same board
+- [x] Step 3.2 compare PSRAM-off vs PSRAM-on behavior there
+- [x] Step 3.3 classify whether the problem is substrate-level or integration-level
 
 ### Notes
 
 - commit:
 - validation:
+  - PSRAM-off:
+    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_idf_wifi_control_psram_off_20260316_102928/serial_capture.log`
+  - PSRAM-on:
+    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_idf_wifi_control_psram_on_20260316_103325/serial_capture.log`
 - outcome:
+  - the official C/ESP-IDF control app still scans successfully with PSRAM off
+    and with PSRAM on
+  - PSRAM-off control result:
+    - `wifi_init nvs_enable=1`
+    - `mode=scan_only`
+    - `pre_scan_driver_state ... ps=1 ... cc=01.`
+    - `scan_complete total_ap_count=9 returned_ap_count=9`
+  - PSRAM-on control result:
+    - `esp_psram: Found 8MB PSRAM device`
+    - `esp_psram: PSRAM initialized`
+    - `esp_psram: Adding pool of 4096K of PSRAM memory to heap allocator`
+    - `esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations`
+    - `wifi_init nvs_enable=1`
+    - `mode=scan_only`
+    - `pre_scan_driver_state ... ps=1 ... cc=01.`
+    - `scan_complete total_ap_count=10 returned_ap_count=10`
+  - repo-side test seam added:
+    - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/esp_idf_wifi_control/sdkconfig.psram_on.defaults`
+  - conclusion:
+    - PSRAM does not break official ESP-IDF station scanning on this board
+    - the remaining failure is integration-level and specific to the current
+      no-std / `esp-radio` / backend path, not a generic board+PSRAM substrate
+      failure
 
 ## Phase 4: Decide The Long-Term Fix
 
@@ -179,9 +206,11 @@ Separate a board/PSRAM/system issue from an esp-rs integration issue.
 
 Do not continue Phase 2 on this branch.
 
-If more validation is required, the next meaningful step is Phase 3:
+Phase 3 is now closed.
 
-- run an official ESP-IDF station scan example on the same board
-- compare PSRAM-off vs PSRAM-on there
-- determine whether the remaining problem is substrate-level or specific to the
-  current Rust Wi-Fi integration
+The next meaningful step is no longer PSRAM-focused. It is to return to the
+Wi-Fi backend/substrate line of work with this stronger conclusion:
+
+- official ESP-IDF discovery works with PSRAM off
+- official ESP-IDF discovery works with PSRAM on
+- the remaining fault is specific to the current no-std Rust Wi-Fi integration
