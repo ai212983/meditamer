@@ -37,6 +37,7 @@ impl Drop for LargeByteBuffer {
         }
     }
 }
+#[cfg(feature = "psram-alloc")]
 pub(crate) fn alloc_large_byte_buffer(
     byte_len: usize,
 ) -> Result<LargeByteBuffer, BufferAllocError> {
