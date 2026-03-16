@@ -20,7 +20,15 @@ use super::super::{
     app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
     psram, storage, telemetry, touch,
 };
+#[cfg(feature = "asset-upload-http")]
+use crate::firmware::storage::upload::wifi::backend_legacy_port;
 use sdcard::probe;
+
+fn backend_legacy_port_diag_enabled() -> bool {
+    option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG")
+        .or(option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"))
+        .is_some_and(|raw| raw != "0")
+}
 
 pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -50,6 +58,11 @@ pub fn run() -> ! {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
+    if backend_legacy_port_diag_enabled() {
+        let timg1 = TimerGroup::new(peripherals.TIMG1);
+        backend_legacy_port::install_legacy_preempt_timer(timg1.timer0);
+        esp_println::println!("upload_http: legacy_port setup_timer staged=true");
+    }
     telemetry::log_stack_headroom("boot_after_rtos_start");
 
     let uart_cfg = UartConfig::default().with_baudrate(UART_BAUD);
@@ -149,34 +162,38 @@ pub fn run() -> ! {
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
         #[cfg(feature = "asset-upload-http")]
+        let boot_scan_only_diag_active = storage::upload::boot_scan_only_diag_enabled();
+        #[cfg(not(feature = "asset-upload-http"))]
+        let boot_scan_only_diag_active = false;
+
+        #[cfg(feature = "asset-upload-http")]
         if let Some(upload_http_runtime) = upload_http_runtime {
             spawner.must_spawn(storage::upload::wifi_connection_task(
                 upload_http_runtime.wifi_controller,
                 upload_http_runtime.initial_credentials,
                 upload_http_runtime.stack,
             ));
-            spawner.must_spawn(storage::upload::net_task(upload_http_runtime.net_runner));
-            spawner.must_spawn(storage::upload::http_server_task(upload_http_runtime.stack));
+            if !boot_scan_only_diag_active {
+                spawner.must_spawn(storage::upload::net_task(upload_http_runtime.net_runner));
+                spawner.must_spawn(storage::upload::http_server_task(upload_http_runtime.stack));
+            }
         }
 
-        spawner.must_spawn(touch::tasks::touch_pipeline_task());
-        spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
-        spawner.must_spawn(super::display_task::display_task(display_context));
-        spawner.must_spawn(super::diagnostics::diagnostics_task());
-        spawner.must_spawn(clock_task());
-        spawner.must_spawn(battery_task());
-
-        #[cfg(feature = "asset-upload-http")]
-        let skip_sd_task_for_boot_scan_diag = storage::upload::boot_scan_only_diag_enabled();
-        #[cfg(not(feature = "asset-upload-http"))]
-        let skip_sd_task_for_boot_scan_diag = false;
-
-        if skip_sd_task_for_boot_scan_diag {
+        if boot_scan_only_diag_active {
+            esp_println::println!(
+                "runtime: boot_scan_only_diag active; non-wifi tasks skipped"
+            );
             esp_println::println!("sdprobe: boot_scan_only_diag active; sd_task skipped");
         } else {
+            spawner.must_spawn(touch::tasks::touch_pipeline_task());
+            spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
+            spawner.must_spawn(super::display_task::display_task(display_context));
+            spawner.must_spawn(super::diagnostics::diagnostics_task());
+            spawner.must_spawn(clock_task());
+            spawner.must_spawn(battery_task());
             spawner.must_spawn(storage::sd_task(sd_probe));
+            spawner.must_spawn(super::serial_task::time_sync_task(uart));
         }
-        spawner.must_spawn(super::serial_task::time_sync_task(uart));
     });
 }
 
