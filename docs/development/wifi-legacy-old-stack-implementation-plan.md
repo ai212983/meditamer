@@ -24,9 +24,9 @@ Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
 - [x] Phase 1: establish `wifi/legacy_stack/` module tree
 - [x] Phase 2: move old install/init ownership into `legacy_stack`
 - [x] Phase 3: move old start/stop/scan ownership into `legacy_stack`
-- [ ] Phase 4: move old RX delivery ownership into `legacy_stack`
-- [ ] Phase 5: cut `backend_legacy_port` over to the parallel old stack
-- [ ] Phase 6: decide whether the Rust-side old-stack import was sufficient
+- [x] Phase 4: move old RX delivery ownership into `legacy_stack`
+- [x] Phase 5: cut `backend_legacy_port` over to the parallel old stack
+- [x] Phase 6: decide whether the Rust-side old-stack import was sufficient
 
 ## Steps
 
@@ -50,7 +50,7 @@ Notes:
 - [x] Step 2.3 route only `backend_legacy_port` init entrypoints to the new tree
 
 Notes:
-- commit: pending
+- commit: `bb9d27e`
 - validation: build-only, `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
 - outcome: `backend_legacy_port` init ownership now routes through
   `legacy_stack/install.rs` and `legacy_stack/init.rs` while the current backend
@@ -65,7 +65,7 @@ Notes:
       control/admission path
 
 Notes:
-- commit: pending
+- commit: `bb9d27e`
 - validation:
   `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase3_control_cutover/capture.log`
 - outcome: the old-stack control path is active for `backend_legacy_port`, but
@@ -75,39 +75,49 @@ Notes:
 
 ### Phase 4
 
-- [ ] Step 4.1 move old RX queue/packet/callback/device behavior into
+- [x] Step 4.1 move old RX queue/packet/callback/device behavior into
       `legacy_stack/rx.rs`
-- [ ] Step 4.2 make active legacy RX behavior come only from that module
-- [ ] Step 4.3 keep type adaptation at the boundary only
+- [x] Step 4.2 make active legacy RX behavior come only from that module
+- [x] Step 4.3 keep type adaptation at the boundary only
 
 Notes:
-- commit:
+- commit: pending
 - validation:
-- outcome:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase4_rx_cutover/capture.log`
+- outcome: active RX queue, token, callback, and packet-buffer ownership moved
+  into `legacy_stack/rx.rs`; discovery metrics remained unchanged with
+  `wifi_rx_cb_count sta=0 ap=0` and `scan_done_eventpost=0`
 
 ### Phase 5
 
-- [ ] Step 5.1 make `backend_legacy_port` use the parallel old stack for
+- [x] Step 5.1 make `backend_legacy_port` use the parallel old stack for
       `wifi_new`, start/stop/scan, and RX callbacks/tokens
-- [ ] Step 5.2 keep runtime/bootstrap unchanged
-- [ ] Step 5.3 keep shim modules only as compile support until validation lands
+- [x] Step 5.2 keep runtime/bootstrap unchanged
+- [x] Step 5.3 keep shim modules only as compile support until validation lands
 
 Notes:
-- commit:
+- commit: pending
 - validation:
-- outcome:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase4_rx_cutover/capture.log`
+- outcome: `backend_legacy_port` now uses the parallel old-stack path for
+  init, start/stop/scan, and RX callbacks/tokens while runtime/bootstrap stayed
+  unchanged; success criteria were not met because all discovery metrics
+  remained flat
 
 ### Phase 6
 
 - [ ] Step 6.1 if metrics improve, branch to stabilization follow-up work
-- [ ] Step 6.2 if metrics remain unchanged, record that the Rust-side parallel
+- [x] Step 6.2 if metrics remain unchanged, record that the Rust-side parallel
       import did not move the boundary
-- [ ] Step 6.3 stop Rust-side wrapper/table/facade refactors after that point
+- [x] Step 6.3 stop Rust-side wrapper/table/facade refactors after that point
 
 Notes:
-- commit:
+- commit: pending
 - validation:
-- outcome:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase4_rx_cutover/capture.log`
+- outcome: the parallel old-stack Rust-side import did not move the validated
+  boundary; the next phase must target old-vs-new blob/internal compatibility
+  directly
 
 ## Stop Conditions
 
@@ -120,5 +130,5 @@ Stop this chunk immediately if:
 
 ## Next Pending Step
 
-Phase 4, Step 4.1: move old RX queue/packet/callback/device behavior into
-`wifi/legacy_stack/rx.rs`.
+No further pending step inside this plan. The next implementation chunk must
+target old-vs-new blob/internal compatibility directly.

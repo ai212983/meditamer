@@ -4,7 +4,7 @@ use core::{ptr::addr_of, sync::atomic::Ordering, task::Context};
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
 use crate::wifi::PromiscuousPkt;
 
-use super::{control, install, super::{
+use super::{control, install, rx, super::{
     g_wifi_default_wpa_crypto_funcs,
     internal_legacy_admission_literal,
     internal_legacy_backend,
@@ -35,7 +35,7 @@ use super::{control, install, super::{
 use crate::esp_wifi_result;
 
 pub(crate) fn enabled() -> bool {
-    internal_legacy_backend::enabled()
+    rx::enabled()
 }
 
 fn validate_config(config: Config) -> Result<(), WifiError> {
@@ -82,7 +82,7 @@ unsafe fn wifi_init(
     esp_wifi_result!(esp_wifi_internal_reg_rxcb(
         esp_interface_t_ESP_IF_WIFI_STA,
         Some(if internal_legacy_backend::enabled() {
-            internal_legacy_backend::recv_cb_sta
+            rx::recv_cb_sta
         } else {
             recv_cb_sta
         }),
@@ -93,7 +93,7 @@ unsafe fn wifi_init(
     esp_wifi_result!(esp_wifi_internal_reg_rxcb(
         esp_interface_t_ESP_IF_WIFI_AP,
         Some(if internal_legacy_backend::enabled() {
-            internal_legacy_backend::recv_cb_ap
+            rx::recv_cb_ap
         } else {
             recv_cb_ap
         }),
@@ -180,37 +180,37 @@ pub(crate) fn scan_with_config(
 }
 
 pub(crate) fn tx_can_send() -> bool {
-    internal_legacy_backend::tx_can_send()
+    rx::tx_can_send()
 }
 
 pub(crate) fn increase_tx_inflight() {
-    internal_legacy_backend::increase_tx_inflight();
+    rx::increase_tx_inflight();
 }
 
 pub(crate) fn tx_token(mode: WifiDeviceMode) -> Option<WifiTxToken> {
-    internal_legacy_backend::tx_token(mode)
+    rx::tx_token(mode)
 }
 
 pub(crate) fn rx_token(mode: WifiDeviceMode, can_send: bool) -> Option<(WifiRxToken, WifiTxToken)> {
-    internal_legacy_backend::rx_token(mode, can_send)
+    rx::rx_token(mode, can_send)
 }
 
 pub(crate) fn register_receive_waker(mode: WifiDeviceMode, cx: &mut Context<'_>) {
-    internal_legacy_backend::register_receive_waker(mode, cx);
+    rx::register_receive_waker(mode, cx);
 }
 
 pub(crate) fn consume_rx_token<R, F>(mode: WifiDeviceMode, f: F) -> R
 where
     F: FnOnce(&mut [u8]) -> R,
 {
-    internal_legacy_backend::consume_rx_token(mode, f)
+    rx::consume_rx_token(mode, f)
 }
 
 pub(crate) fn consume_tx_token<R, F>(mode: WifiDeviceMode, len: usize, f: F) -> R
 where
     F: FnOnce(&mut [u8]) -> R,
 {
-    internal_legacy_backend::consume_tx_token(mode, len, f)
+    rx::consume_tx_token(mode, len, f)
 }
 
 pub(crate) unsafe extern "C" fn recv_cb_sta(
@@ -218,7 +218,7 @@ pub(crate) unsafe extern "C" fn recv_cb_sta(
     len: u16,
     eb: *mut crate::binary::c_types::c_void,
 ) -> i32 {
-    unsafe { internal_legacy_backend::recv_cb_sta(buffer, len, eb) }
+    unsafe { rx::recv_cb_sta(buffer, len, eb) }
 }
 
 pub(crate) unsafe extern "C" fn recv_cb_ap(
@@ -226,7 +226,7 @@ pub(crate) unsafe extern "C" fn recv_cb_ap(
     len: u16,
     eb: *mut crate::binary::c_types::c_void,
 ) -> i32 {
-    unsafe { internal_legacy_backend::recv_cb_ap(buffer, len, eb) }
+    unsafe { rx::recv_cb_ap(buffer, len, eb) }
 }
 
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
@@ -234,10 +234,10 @@ pub(crate) unsafe extern "C" fn promiscuous_rx_cb(
     buf: *mut core::ffi::c_void,
     frame_type: u32,
 ) {
-    unsafe { internal_legacy_backend::promiscuous_rx_cb(buf, frame_type) }
+    unsafe { rx::promiscuous_rx_cb(buf, frame_type) }
 }
 
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
 pub(crate) fn sniffer_set(cb: fn(PromiscuousPkt<'_>)) {
-    internal_legacy_backend::sniffer_set(cb);
+    rx::sniffer_set(cb);
 }
