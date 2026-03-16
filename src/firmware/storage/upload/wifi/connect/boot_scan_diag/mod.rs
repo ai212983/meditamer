@@ -3,6 +3,7 @@ use super::boot_scan_idf_compare::{
     maybe_run_boot_scan_only_idf_explicit_compare, run_boot_scan_only_idf_null_compare,
 };
 use super::maybe_run_boot_scan_only_promisc_diag;
+use super::super::legacy_discovery;
 use super::*;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -161,11 +162,12 @@ pub(super) async fn maybe_run_boot_scan_only_diag(
     }
 
     let scan_started_at = Instant::now();
-    let scan_config = driver::raw_broad_scan_config().with_max(WIFI_SCAN_DIAG_MAX_APS);
-    match with_timeout(
-        Duration::from_millis(WIFI_BOOT_SCAN_ONLY_DIAG_SCAN_TIMEOUT_MS),
-        wifi_scan_with_config_async(controller, scan_config),
-    )
+    match with_timeout(Duration::from_millis(WIFI_BOOT_SCAN_ONLY_DIAG_SCAN_TIMEOUT_MS), async {
+        let mut session = legacy_discovery::begin_session(controller).await?;
+        let results = legacy_discovery::scan_broad(&mut session, WIFI_SCAN_DIAG_MAX_APS).await?;
+        legacy_discovery::shutdown(session).await?;
+        Ok::<_, WifiError>(results)
+    })
     .await
     {
         Ok(Ok(results)) => {
