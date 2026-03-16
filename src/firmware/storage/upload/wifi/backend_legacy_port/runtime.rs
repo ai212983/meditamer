@@ -10,6 +10,15 @@ use static_cell::StaticCell;
 
 pub(crate) const LEGACY_RUNTIME_NAME: &str = "backend-legacy-port";
 
+unsafe extern "C" {
+    fn __esp_rtos_diag_task_create_count() -> u32;
+    fn __esp_rtos_diag_task_create_last_requested_priority() -> u32;
+    fn __esp_rtos_diag_task_create_last_effective_priority() -> u32;
+    fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize;
+    fn __esp_rtos_diag_queue_create_count() -> u32;
+    fn __esp_rtos_diag_wifi_task_selected_count() -> u32;
+}
+
 pub(crate) fn legacy_port_runtime_enabled() -> bool {
     matches!(
         option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
@@ -32,6 +41,15 @@ fn log_runtime_state(stage: &str) {
     let init_config = esp_radio::diagnostic_wifi_init_config_diag();
     let legacy_builtin = esp_radio::diagnostic_legacy_builtin_scheduler_diag();
     let legacy_preempt = esp_radio::diagnostic_legacy_preempt_builtin_diag();
+    let rtos_task_create_count = unsafe { __esp_rtos_diag_task_create_count() };
+    let rtos_task_create_last_requested_priority =
+        unsafe { __esp_rtos_diag_task_create_last_requested_priority() };
+    let rtos_task_create_last_effective_priority =
+        unsafe { __esp_rtos_diag_task_create_last_effective_priority() };
+    let rtos_legacy_task_model_entry_count =
+        unsafe { __esp_rtos_diag_legacy_task_model_entry_count() };
+    let rtos_queue_create_count = unsafe { __esp_rtos_diag_queue_create_count() };
+    let rtos_wifi_task_selected_count = unsafe { __esp_rtos_diag_wifi_task_selected_count() };
 
     println!(
         "upload_http: legacy_port runtime_state after={} wifi_mac_isr_count={} queue_send={} queue_send_isr={} queue_recv={} event_post={} thread_sem_get={} task_get_current_task_count={} scan_done_count={} scan_done_ap_num={} legacy_builtin_initialized={} legacy_builtin_switch_count={} legacy_preempt_initialized={} legacy_preempt_current_task=0x{:x} legacy_preempt_thread_sem=0x{:x}",
@@ -52,7 +70,7 @@ fn log_runtime_state(stage: &str) {
         legacy_preempt.current_task_thread_semaphore,
     );
     println!(
-        "upload_http: legacy_port runtime_state_task after={} task_create_count={} recent_name_tag0=0x{:08x} recent_stack0={} recent_prio0={} recent_core0={} recent_task_ptr0=0x{:x} init_config_ptr=0x{:x} osi_funcs_ptr=0x{:x} wifi_task_core_id={} init_magic=0x{:08x} osi_queue_create_ptr=0x{:x} osi_queue_recv_ptr=0x{:x} osi_task_create_ptr=0x{:x} osi_task_create_pinned_ptr=0x{:x} osi_task_get_current_ptr=0x{:x} osi_thread_sem_get_ptr=0x{:x} osi_event_post_ptr=0x{:x} osi_malloc_internal_ptr=0x{:x}",
+        "upload_http: legacy_port runtime_state_task after={} task_create_count={} recent_name_tag0=0x{:08x} recent_stack0={} recent_prio0={} recent_core0={} recent_task_ptr0=0x{:x} init_config_ptr=0x{:x} osi_funcs_ptr=0x{:x} wifi_task_core_id={} init_magic=0x{:08x} osi_queue_create_ptr=0x{:x} osi_queue_recv_ptr=0x{:x} osi_task_create_ptr=0x{:x} osi_task_create_pinned_ptr=0x{:x} osi_task_get_current_ptr=0x{:x} osi_thread_sem_get_ptr=0x{:x} osi_event_post_ptr=0x{:x} osi_malloc_internal_ptr=0x{:x} rtos_task_create_count={} rtos_task_create_last_requested_priority={} rtos_task_create_last_effective_priority={} rtos_legacy_task_model_entry_count={} rtos_queue_create_count={} rtos_wifi_task_selected_count={}",
         stage,
         task_create.count,
         task_create.recent_name_tags[0],
@@ -72,6 +90,12 @@ fn log_runtime_state(stage: &str) {
         init_config.osi_wifi_thread_semphr_get_ptr,
         init_config.osi_event_post_ptr,
         init_config.osi_malloc_internal_ptr,
+        rtos_task_create_count,
+        rtos_task_create_last_requested_priority,
+        rtos_task_create_last_effective_priority,
+        rtos_legacy_task_model_entry_count,
+        rtos_queue_create_count,
+        rtos_wifi_task_selected_count,
     );
 }
 
