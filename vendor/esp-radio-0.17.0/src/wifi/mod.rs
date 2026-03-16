@@ -4,6 +4,7 @@
 
 pub mod event;
 mod internal;
+mod legacy_stack;
 mod internal_legacy_admission_literal;
 mod internal_legacy_coex_backend;
 mod internal_legacy_backend;
