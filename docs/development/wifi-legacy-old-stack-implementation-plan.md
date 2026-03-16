@@ -22,8 +22,8 @@ Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
 ## Phase Checklist
 
 - [x] Phase 1: establish `wifi/legacy_stack/` module tree
-- [ ] Phase 2: move old install/init ownership into `legacy_stack`
-- [ ] Phase 3: move old start/stop/scan ownership into `legacy_stack`
+- [x] Phase 2: move old install/init ownership into `legacy_stack`
+- [x] Phase 3: move old start/stop/scan ownership into `legacy_stack`
 - [ ] Phase 4: move old RX delivery ownership into `legacy_stack`
 - [ ] Phase 5: cut `backend_legacy_port` over to the parallel old stack
 - [ ] Phase 6: decide whether the Rust-side old-stack import was sufficient
@@ -45,27 +45,33 @@ Notes:
 
 ### Phase 2
 
-- [ ] Step 2.1 move old OSI/global table ownership into `legacy_stack/install.rs`
-- [ ] Step 2.2 move old `wifi_new` / `wifi_init` into `legacy_stack/init.rs`
-- [ ] Step 2.3 route only `backend_legacy_port` init entrypoints to the new tree
+- [x] Step 2.1 move old OSI/global table ownership into `legacy_stack/install.rs`
+- [x] Step 2.2 move old `wifi_new` / `wifi_init` into `legacy_stack/init.rs`
+- [x] Step 2.3 route only `backend_legacy_port` init entrypoints to the new tree
 
 Notes:
-- commit:
-- validation:
-- outcome:
+- commit: pending
+- validation: build-only, `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
+- outcome: `backend_legacy_port` init ownership now routes through
+  `legacy_stack/install.rs` and `legacy_stack/init.rs` while the current backend
+  remains unchanged
 
 ### Phase 3
 
-- [ ] Step 3.1 move old start/stop/scan into `legacy_stack/control.rs`
-- [ ] Step 3.2 keep broad blocking scan and result retrieval literal to the old
+- [x] Step 3.1 move old start/stop/scan into `legacy_stack/control.rs`
+- [x] Step 3.2 keep broad blocking scan and result retrieval literal to the old
       stack
-- [ ] Step 3.3 remove active `backend_legacy_port` dependence on the stitched
+- [x] Step 3.3 remove active `backend_legacy_port` dependence on the stitched
       control/admission path
 
 Notes:
-- commit:
+- commit: pending
 - validation:
-- outcome:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase3_control_cutover/capture.log`
+- outcome: the old-stack control path is active for `backend_legacy_port`, but
+  discovery metrics remain unchanged:
+  `scan_rc=12300`, `ap_num=0`, wrapped scan `InternalError(Timeout)`,
+  `wifi_rx_cb_count sta=0 ap=0`, `scan_done_eventpost=0`
 
 ### Phase 4
 
@@ -114,5 +120,5 @@ Stop this chunk immediately if:
 
 ## Next Pending Step
 
-Phase 2, Step 2.1: move old OSI/global table ownership into
-`wifi/legacy_stack/install.rs`.
+Phase 4, Step 4.1: move old RX queue/packet/callback/device behavior into
+`wifi/legacy_stack/rx.rs`.
