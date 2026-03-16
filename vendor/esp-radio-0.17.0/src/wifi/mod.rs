@@ -8,6 +8,7 @@ mod internal_legacy_admission_literal;
 mod internal_legacy_coex_backend;
 mod internal_legacy_backend;
 mod internal_legacy_common_literal;
+mod internal_legacy_event_literal;
 mod internal_legacy_control_backend;
 mod internal_legacy_control_literal;
 mod internal_legacy_device_backend;

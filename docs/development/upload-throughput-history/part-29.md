@@ -120,3 +120,53 @@
     admission
   - the remaining gap is now clearly below the Rust-side internal admission
     surface and inside the deeper old-vs-new internal Wi-Fi/blob behavior
+
+## 2026-03-16 - Literal legacy event path closes without moving discovery
+
+- Routed legacy `event_post` handling away from the mixed modern Wi-Fi event
+  handler and into a dedicated legacy event module:
+  - `vendor/esp-radio-0.17.0/src/wifi/internal_legacy_event_literal.rs`
+- Re-routed the legacy common surface to call that module:
+  - `vendor/esp-radio-0.17.0/src/wifi/internal_legacy_common_literal.rs`
+  - `vendor/esp-radio-0.17.0/src/wifi/mod.rs`
+- Validation:
+  - firmware build:
+    - `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
+  - canonical full-flash hostctl boot-scan capture with:
+    - `MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG=1`
+    - `MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG=1`
+    - `MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_NULL_FIRST=1`
+    - `MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE=1`
+    - `MEDITAMER_WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG=1`
+  - artifact:
+    - `logs/hostctl_flashcapture_backend_legacy_port_20260316_081114_legacy_event_literal/capture.log`
+- Result:
+  - `backend_legacy_port` remains active:
+    - `wifi_backend name=backend-legacy-port`
+    - `legacy_port runtime_init result=ok`
+    - `boot_scan_only_diag start=ok`
+  - but the discovery boundary does not move:
+    - pre-scan promisc remains zero on `8/1/6/11`
+    - direct null scan still fails:
+      - `idf_compare=scan_start_err scan_rc=12300`
+    - direct explicit scan still returns zero:
+      - `idf_explicit_compare=ok ... ap_num=0`
+    - wrapped scan still fails early:
+      - `outcome=scan_err elapsed_ms=8 err=InternalError(Timeout)`
+    - `wifi_mac_isr_count` still rises
+    - `wifi_rx_cb_count` stays dark:
+      - `sta=0 ap=0`
+    - raw `ScanDone` remains empty
+    - `scan_done_eventpost` remains zero throughout scan failure
+    - scan-time runtime counters remain flat:
+      - `queue_send=0`
+      - `queue_send_isr=0`
+      - `queue_recv=0`
+      - `sem_take=0`
+      - `sem_give=0`
+      - `thread_sem_get=0`
+- Interpretation:
+  - the mixed modern Wi-Fi event handler surface is no longer a credible primary
+    blocker for discovery
+  - the remaining gap stays below Rust-side event routing and inside the deeper
+    internal Wi-Fi/blob-facing delivery and admission path
