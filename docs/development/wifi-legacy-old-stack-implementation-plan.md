@@ -38,7 +38,7 @@ Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
       next wholesale slice
 
 Notes:
-- commit: pending
+- commit: `5a08b55`
 - validation: tree creation only; compile validation deferred to Phase 2
 - outcome: parallel old-stack module tree exists and is now the authoritative
   destination for the next wholesale legacy import
@@ -81,7 +81,7 @@ Notes:
 - [x] Step 4.3 keep type adaptation at the boundary only
 
 Notes:
-- commit: pending
+- commit: `5a08b55`
 - validation:
   `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase4_rx_cutover/capture.log`
 - outcome: active RX queue, token, callback, and packet-buffer ownership moved
@@ -96,7 +96,7 @@ Notes:
 - [x] Step 5.3 keep shim modules only as compile support until validation lands
 
 Notes:
-- commit: pending
+- commit: `5a08b55`
 - validation:
   `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_phase4_rx_cutover/capture.log`
 - outcome: `backend_legacy_port` now uses the parallel old-stack path for
