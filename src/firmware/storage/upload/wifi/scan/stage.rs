@@ -86,7 +86,7 @@ pub(super) async fn run_scan_stage(
     let started_at = Instant::now();
     match with_timeout(
         timeout,
-        wifi_scan_with_config_async(context.controller, config),
+        legacy_discovery::scan_with_controller(context.controller, config),
     )
     .await
     {
