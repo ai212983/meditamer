@@ -4,7 +4,8 @@ use core::{ptr::addr_of, sync::atomic::Ordering, task::Context};
 #[cfg(all(feature = "sniffer", feature = "unstable"))]
 use crate::wifi::PromiscuousPkt;
 
-use super::{control, install, rx, super::{
+use super::{control, rx, super::{
+    blob_compat_internal,
     g_wifi_default_wpa_crypto_funcs,
     internal_legacy_admission_literal,
     internal_legacy_backend,
@@ -51,7 +52,7 @@ unsafe fn wifi_init(
     _wifi: crate::hal::peripherals::WIFI<'_>,
     config: Config,
 ) -> Result<(), WifiError> {
-    install::install_legacy_runtime_globals(config, g_wifi_default_wpa_crypto_funcs);
+    blob_compat_internal::install_blob_compat_globals(config, g_wifi_default_wpa_crypto_funcs);
     RX_QUEUE_SIZE.store(config.rx_queue_size, Ordering::Relaxed);
     TX_QUEUE_SIZE.store(config.tx_queue_size, Ordering::Relaxed);
 
@@ -63,7 +64,7 @@ unsafe fn wifi_init(
     }
 
     esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_init_internal.before");
-    esp_wifi_result!(esp_wifi_init_internal(addr_of!(install::G_CONFIG)))?;
+    esp_wifi_result!(esp_wifi_init_internal(addr_of!(blob_compat_internal::G_CONFIG)))?;
     esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_init_internal.after");
 
     esp_println::println!("esp_radio: legacy_port_wifi_init stage=esp_wifi_set_mode_null.before");

@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 pub mod event;
+mod blob_compat_internal;
 mod internal;
 mod legacy_stack;
 mod internal_legacy_admission_literal;
@@ -1727,7 +1728,7 @@ pub(crate) fn coex_initialize() -> i32 {
     debug!("call coex-initialize");
     unsafe {
         let adapter = if crate::compat::legacy_runtime_policy::backend_legacy_port_enabled() {
-            core::ptr::addr_of_mut!(internal_legacy_coex_backend::LEGACY_G_COEX_ADAPTER_FUNCS)
+            core::ptr::addr_of_mut!(blob_compat_internal::G_COEX_ADAPTER_FUNCS)
                 .cast()
         } else {
             core::ptr::addr_of_mut!(internal::G_COEX_ADAPTER_FUNCS).cast()

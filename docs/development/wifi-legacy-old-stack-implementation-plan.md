@@ -3,7 +3,12 @@
 ## Goal
 
 Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
- to restore stable Wi-Fi discovery without changing runtime/bootstrap again.
+to restore stable Wi-Fi discovery without changing runtime/bootstrap again.
+
+This document now covers two completed conclusions:
+
+1. the Rust-side parallel old-stack import is complete
+2. the next work must target old-vs-new blob/internal compatibility directly
 
 ## Current Validated Boundary
 
@@ -19,6 +24,13 @@ Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
 - wrapped scan ends with `InternalError(Timeout)`
 - scan-time queue/semaphore/thread-semaphore counters stay zero
 
+Interpretation:
+
+- Rust-side legacy runtime/bootstrap ownership is no longer the main blocker
+- Rust-side old-stack init/control/RX ownership is no longer the main blocker
+- the remaining mismatch is below the Rust Wi-Fi seams and above packet
+  admission, in the old-vs-new blob/internal compatibility layer
+
 ## Phase Checklist
 
 - [x] Phase 1: establish `wifi/legacy_stack/` module tree
@@ -27,6 +39,12 @@ Implement a parallel old-stack Wi-Fi backend path behind `backend_legacy_port`
 - [x] Phase 4: move old RX delivery ownership into `legacy_stack`
 - [x] Phase 5: cut `backend_legacy_port` over to the parallel old stack
 - [x] Phase 6: decide whether the Rust-side old-stack import was sufficient
+- [x] Phase 7: map old-vs-new blob/internal compatibility surface
+- [x] Phase 8: isolate the minimum old internal/blob contract required for scan
+      admission
+- [x] Phase 9: implement the first direct blob/internal compatibility slice
+- [x] Phase 10: validate whether discovery metrics move
+- [x] Phase 11: decide between deeper blob-facing import vs stop
 
 ## Steps
 
@@ -119,16 +137,49 @@ Notes:
   boundary; the next phase must target old-vs-new blob/internal compatibility
   directly
 
+## Next-Phase Scope
+
+The next chunk is no longer a Rust-side old-stack import. It is a direct
+blob/internal compatibility phase.
+
+Detailed execution plan:
+- [Wi-Fi Blob Compatibility Phase Plan](./wifi-legacy-old-stack-blob-compatibility-plan.md)
+
+Rules that still apply here:
+
+- do not change runtime/bootstrap
+- do not add generic diagnostics or A/B knobs
+- do not add more Rust-side wrapper/facade/table refactors
+- every runtime-affecting step must end with canonical full-flash validation
+
+Success threshold for the next chunk:
+
+- any of these becomes non-zero in canonical validation:
+  - pre-scan promisc totals
+  - `wifi_rx_cb_count`
+  - `scan_done_eventpost`
+  - direct explicit scan `ap_num`
+  - wrapped scan AP count
+
+If all stay unchanged, stop and record that the remaining gap is below the
+current vendorable Rust-side boundary.
+
 ## Stop Conditions
 
-Stop this chunk immediately if:
+Stop the next chunk immediately if:
 
 - canonical full-flash validation does not run
 - the active backend is not `backend-legacy-port`
-- the parallel old-stack cutover compiles but leaves all discovery metrics
-  unchanged
+- a proposed change is only another Rust-side wrapper/table/facade refactor
+- the direct blob/internal compatibility slice validates cleanly but leaves all
+  discovery metrics unchanged
 
 ## Next Pending Step
 
-No further pending step inside this plan. The next implementation chunk must
-target old-vs-new blob/internal compatibility directly.
+Start a new implementation chunk only if we are willing to pair
+`backend_legacy_port` more directly with old `esp-wifi-sys 0.7.1` internal
+expectations instead of continuing compatibility extraction against the current
+blob generation.
+
+The detailed closure and next-step recommendation are now recorded in
+[Wi-Fi Blob Compatibility Phase Plan](./wifi-legacy-old-stack-blob-compatibility-plan.md).
