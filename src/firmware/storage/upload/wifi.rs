@@ -18,7 +18,7 @@ use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_println::println;
 mod backend;
-mod backend_legacy_port;
+pub(crate) mod backend_legacy_port;
 mod runtime_init;
 pub(crate) use backend::{
     backend_name, init_radio, new_runtime, wifi_active_scan_config,
@@ -217,6 +217,7 @@ mod connect;
 mod diag;
 mod driver;
 mod helpers;
+mod legacy_discovery;
 mod policy;
 mod scan;
 mod scan_candidates;
