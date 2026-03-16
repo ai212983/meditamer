@@ -44,23 +44,28 @@ pub(super) async fn run_scan_stage(
         ScanStage::ActiveBroad => (
             "active_broad",
             telemetry::WifiScanPhase::Active,
-            driver::active_scan_config(context.runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS),
+            legacy_discovery::active_scan_config(context.runtime_policy)
+                .with_max(WIFI_SCAN_DIAG_MAX_APS),
         ),
         ScanStage::ActiveDirected => (
             "active_directed",
             telemetry::WifiScanPhase::Active,
-            driver::directed_active_scan_config(context.target_ssid, context.runtime_policy)
-                .with_max(WIFI_SCAN_DIAG_MAX_APS),
+            legacy_discovery::directed_active_scan_config(
+                context.target_ssid,
+                context.runtime_policy,
+            )
+            .with_max(WIFI_SCAN_DIAG_MAX_APS),
         ),
         ScanStage::Passive => (
             "passive",
             telemetry::WifiScanPhase::Passive,
-            driver::passive_scan_config(context.runtime_policy).with_max(WIFI_SCAN_DIAG_MAX_APS),
+            legacy_discovery::passive_scan_config(context.runtime_policy)
+                .with_max(WIFI_SCAN_DIAG_MAX_APS),
         ),
         ScanStage::Probe(channel) => (
             "probe",
             telemetry::WifiScanPhase::Active,
-            driver::channel_active_scan_config(channel, context.runtime_policy)
+            legacy_discovery::channel_active_scan_config(channel, context.runtime_policy)
                 .with_max(WIFI_SCAN_DIAG_MAX_APS),
         ),
     };
