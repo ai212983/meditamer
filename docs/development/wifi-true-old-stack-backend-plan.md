@@ -162,9 +162,9 @@ Record after each runtime-affecting phase:
 
 - [x] Phase 1: isolate a dedicated old-stack substrate
 - [x] Phase 2: define the backend API boundary
-- [ ] Phase 3: wire old init/install ownership
-- [ ] Phase 4: wire old control/scan ownership
-- [ ] Phase 5: wire old RX delivery ownership
+- [~] Phase 3: wire old init/install ownership
+- [~] Phase 4: wire old control/scan ownership
+- [~] Phase 5: wire old RX delivery ownership
 - [ ] Phase 6: cut `backend_legacy_port` over to the true old stack
 - [ ] Phase 7: validate discovery behavior
 - [ ] Phase 8: decide continue vs stop
@@ -276,6 +276,19 @@ Build first. Then canonical validation to confirm:
 - old backend selected
 - init completes or fails at a new, precise boundary
 
+Notes:
+
+- commit:
+- validation:
+  `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
+- outcome:
+  - `true_old_stack/install.rs` now contains a literal copy of the current
+    old-stack install/global ownership instead of a bridge stub
+  - `true_old_stack/init.rs` now contains a literal copy of the current
+    old-stack init path and depends on the isolated subtree install module
+  - this phase is still in progress because the active backend has not been
+    cut over yet
+
 ## Phase 4: Wire Old Control/Scan Ownership
 
 ### Goal
@@ -298,6 +311,17 @@ Record:
 - direct null scan result
 - direct explicit scan AP count
 - wrapped scan result
+
+Notes:
+
+- commit:
+- validation:
+  `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
+- outcome:
+  - `true_old_stack/control.rs` now contains the literal current old-stack
+    control/scan implementation
+  - active backend ownership has not been switched yet, so runtime validation
+    is deferred to the cutover phase
 
 ## Phase 5: Wire Old RX Delivery Ownership
 
@@ -324,6 +348,18 @@ Record:
 - `wifi_rx_cb_count`
 - `scan_done_eventpost`
 - raw scan state
+
+Notes:
+
+- commit:
+- validation:
+  `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
+- outcome:
+  - `true_old_stack/rx.rs` now contains the literal current old-stack RX
+    delivery implementation
+  - the isolated subtree now hosts install/init/control/RX as one coherent
+    compile-clean unit
+  - active runtime validation is deferred until the explicit backend cutover
 
 ## Phase 6: Cut `backend_legacy_port` Over To The True Old Stack
 
@@ -375,8 +411,9 @@ At least one discovery metric must move off zero.
 
 ## First Recommended Step
 
-Start Phase 3 by moving old init/install ownership into the isolated
-`true_old_stack/` subtree and keeping runtime/bootstrap unchanged.
+Start Phase 6 by cutting `backend_legacy_port` over to the isolated
+`true_old_stack/` subtree for init/control/RX while keeping runtime/bootstrap
+unchanged.
 
 ## Stop Conditions
 
