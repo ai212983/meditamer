@@ -11,74 +11,18 @@ use esp_wifi_sys::include::{
     wifi_scan_type_t_WIFI_SCAN_TYPE_PASSIVE,
 };
 
-use crate::binary::include::{wifi_interface_t_WIFI_IF_AP, wifi_interface_t_WIFI_IF_STA};
-
 use super::{
     convert_ap_info, esp_wifi_result, AccessPointInfo, FreeApListOnDrop, ScanConfig,
-    ScanTypeConfig, WifiController, WifiError, WifiMode,
+    ScanTypeConfig, WifiError,
 };
-
-pub(crate) fn start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    unsafe {
-        esp_wifi_result!(include::esp_wifi_start())?;
-
-        let mode = WifiMode::current()?;
-
-        if mode.is_ap() {
-            esp_wifi_result!(include::esp_wifi_set_inactive_time(
-                wifi_interface_t_WIFI_IF_AP,
-                controller.ap_beacon_timeout,
-            ))?;
-        }
-        if mode.is_sta() {
-            esp_wifi_result!(include::esp_wifi_set_inactive_time(
-                wifi_interface_t_WIFI_IF_STA,
-                controller.beacon_timeout,
-            ))?;
-        }
-    }
-
-    Ok(())
-}
-
-pub(crate) fn stop(_controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    esp_wifi_result!(unsafe { include::esp_wifi_stop() })
-}
-
-pub(crate) fn scan_with_config(
-    _controller: &mut WifiController<'_>,
-    config: ScanConfig<'_>,
-) -> Result<Vec<AccessPointInfo>, WifiError> {
-    let max = config.max.unwrap_or(usize::MAX);
-    let use_legacy_scan_n = matches!(
-        config,
-        ScanConfig {
-            ssid: None,
-            bssid: None,
-            channel: None,
-            show_hidden: false,
-            scan_type: ScanTypeConfig::Active { .. },
-            ..
-        }
-    );
-
-    if use_legacy_scan_n {
-        return scan_n(max);
-    }
-
-    scan_with_config_sync_max(config, max)
-}
-
-pub(crate) fn scan_n(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
-    scan_with_config_sync_max(Default::default(), max)
-}
 
 pub(crate) fn scan_with_config_sync_max(
     config: ScanConfig<'_>,
     max: usize,
 ) -> Result<Vec<AccessPointInfo>, WifiError> {
     esp_wifi_result!(wifi_start_scan(true, config))?;
-    scan_results(max)
+    let result = scan_results(max)?;
+    Ok(result)
 }
 
 fn scan_results(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
@@ -96,12 +40,17 @@ fn scan_results(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
     for _ in 0..result_cap {
         let record = unsafe { MaybeUninit::assume_init_mut(&mut record) };
         unsafe { esp_wifi_result!(include::esp_wifi_scan_get_ap_record(record))? };
-        scanned.push(convert_ap_info(record));
+        let ap_info = convert_ap_info(record);
+        scanned.push(ap_info);
     }
 
     unsafe { esp_wifi_result!(include::esp_wifi_clear_ap_list())? };
 
     Ok(scanned)
+}
+
+pub(crate) fn scan_n(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
+    scan_with_config_sync_max(Default::default(), max)
 }
 
 pub(crate) fn wifi_start_scan(
@@ -136,19 +85,19 @@ pub(crate) fn wifi_start_scan(
         ),
     };
 
-    let mut ssid_buf = ssid.map(|value| {
-        let mut buf = alloc::vec::Vec::from_iter(value.bytes());
+    let mut ssid_buf = ssid.map(|m| {
+        let mut buf = alloc::vec::Vec::from_iter(m.bytes());
         buf.push(b'\0');
         buf
     });
 
     let ssid = ssid_buf
         .as_mut()
-        .map(|buf| buf.as_mut_ptr())
+        .map(|e| e.as_mut_ptr())
         .unwrap_or_else(core::ptr::null_mut);
     let bssid = bssid
         .as_mut()
-        .map(|buf| buf.as_mut_ptr())
+        .map(|e| e.as_mut_ptr())
         .unwrap_or_else(core::ptr::null_mut);
 
     let mut scan_config: wifi_scan_config_t = unsafe { mem::zeroed() };

@@ -82,7 +82,6 @@ pub(crate) fn scan_with_config_sync_max(
 }
 
 fn scan_results(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
-    let mut scanned = Vec::<AccessPointInfo>::new();
     let mut bss_total: u16 = max as u16;
 
     let guard = FreeApListOnDrop;
@@ -91,8 +90,10 @@ fn scan_results(max: usize) -> Result<Vec<AccessPointInfo>, WifiError> {
 
     guard.defuse();
 
+    let result_cap = usize::min(bss_total as usize, max);
+    let mut scanned = Vec::<AccessPointInfo>::with_capacity(result_cap);
     let mut record: MaybeUninit<include::wifi_ap_record_t> = MaybeUninit::uninit();
-    for _ in 0..usize::min(bss_total as usize, max) {
+    for _ in 0..result_cap {
         let record = unsafe { MaybeUninit::assume_init_mut(&mut record) };
         unsafe { esp_wifi_result!(include::esp_wifi_scan_get_ap_record(record))? };
         scanned.push(convert_ap_info(record));
