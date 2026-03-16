@@ -165,9 +165,9 @@ Record after each runtime-affecting phase:
 - [~] Phase 3: wire old init/install ownership
 - [~] Phase 4: wire old control/scan ownership
 - [~] Phase 5: wire old RX delivery ownership
-- [ ] Phase 6: cut `backend_legacy_port` over to the true old stack
-- [ ] Phase 7: validate discovery behavior
-- [ ] Phase 8: decide continue vs stop
+- [x] Phase 6: cut `backend_legacy_port` over to the true old stack
+- [x] Phase 7: validate discovery behavior
+- [x] Phase 8: decide continue vs stop
 
 ## Phase 1: Isolate A Dedicated Old-Stack Substrate
 
@@ -369,14 +369,30 @@ Make the firmware use the true old-stack backend as the active implementation.
 
 ### Steps
 
-- [ ] Step 6.1 switch `backend_legacy_port` init/control/RX entrypoints to the
+- [x] Step 6.1 switch `backend_legacy_port` init/control/RX entrypoints to the
       isolated old backend
-- [ ] Step 6.2 keep old shim-based adaptation code only as compile support
-- [ ] Step 6.3 do not delete current fallback paths in the same step
+- [x] Step 6.2 keep old shim-based adaptation code only as compile support
+- [x] Step 6.3 do not delete current fallback paths in the same step
 
 ### Validation
 
 Canonical full-flash boot-scan only.
+
+Notes:
+
+- commit:
+- validation:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+- outcome:
+  - switched the active `backend_legacy_port` entrypoints in
+    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/mod.rs`
+    to the isolated `true_old_stack/` subtree for:
+    - `wifi_new`
+    - `start`
+    - `stop`
+    - `scan_with_config`
+  - runtime/bootstrap remained unchanged
+  - the true old-stack backend initialized and started successfully
 
 ## Phase 7: Validate Discovery Behavior
 
@@ -386,13 +402,35 @@ Determine whether the true old-stack backend actually restores discovery.
 
 ### Steps
 
-- [ ] Step 7.1 run canonical validation
-- [ ] Step 7.2 compare against the current control baseline
-- [ ] Step 7.3 classify whether discovery metrics moved meaningfully
+- [x] Step 7.1 run canonical validation
+- [x] Step 7.2 compare against the current control baseline
+- [x] Step 7.3 classify whether discovery metrics moved meaningfully
 
 ### Success Threshold
 
 At least one discovery metric must move off zero.
+
+Notes:
+
+- commit:
+- validation:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+- outcome:
+  - active backend remained `backend-legacy-port`
+  - init completed:
+    - `runtime_init result=ok`
+    - `legacy_port_wifi_init stage=done`
+    - `start=ok`
+  - discovery did not improve:
+    - pre-scan promisc stayed zero
+    - `wifi_rx_cb_count sta=0 ap=0`
+    - `scan_done_eventpost count=0`
+    - direct null scan still `scan_rc=12300`
+    - direct explicit scan still `ap_num=0`
+    - wrapped scan still `InternalError(Timeout)`
+    - queue/semaphore/thread-semaphore counters stayed zero
+  - this matches the prior control boundary; the true old-stack backend did not
+    move discovery metrics
 
 ## Phase 8: Decide Continue vs Stop
 
@@ -404,16 +442,35 @@ At least one discovery metric must move off zero.
 
 ### If Discovery Does Not Improve
 
-- [ ] Step 8.4 stop source-level backend work on this branch
-- [ ] Step 8.5 record that even the true old-stack backend does not cross the
+- [x] Step 8.4 stop source-level backend work on this branch
+- [x] Step 8.5 record that even the true old-stack backend does not cross the
       remaining boundary
-- [ ] Step 8.6 reassess product/backend strategy outside the current approach
+- [x] Step 8.6 reassess product/backend strategy outside the current approach
+
+Notes:
+
+- commit:
+- validation:
+  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+- outcome:
+  - stop condition reached
+  - even the isolated true old-stack backend does not restore discovery on the
+    current underlying blob/runtime combination
+  - further source-level backend work in this branch is not credible
+  - the next decision must be outside this approach:
+    - different Wi-Fi backend strategy
+    - different blob generation / system substrate
+    - or product-level workaround
 
 ## First Recommended Step
 
-Start Phase 6 by cutting `backend_legacy_port` over to the isolated
-`true_old_stack/` subtree for init/control/RX while keeping runtime/bootstrap
-unchanged.
+No further implementation is recommended on this branch.
+
+If work continues, it should start as a new decision line with one of:
+
+- a different Wi-Fi backend strategy
+- a different blob/system substrate
+- a product-level workaround that avoids native scan discovery
 
 ## Stop Conditions
 

@@ -211,17 +211,17 @@ pub fn backend_legacy_port_wifi_new<'d>(
     device: crate::hal::peripherals::WIFI<'d>,
     config: Config,
 ) -> Result<(WifiController<'d>, Interfaces<'d>), WifiError> {
-    legacy_stack::init::wifi_new(device, config)
+    true_old_stack::wifi_new(device, config)
 }
 
 #[doc(hidden)]
 pub fn backend_legacy_port_start(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    legacy_stack::init::start(controller)
+    true_old_stack::start(controller)
 }
 
 #[doc(hidden)]
 pub fn backend_legacy_port_stop(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    legacy_stack::init::stop(controller)
+    true_old_stack::stop(controller)
 }
 
 #[doc(hidden)]
@@ -229,7 +229,7 @@ pub fn backend_legacy_port_scan_with_config(
     controller: &mut WifiController<'_>,
     config: ScanConfig<'_>,
 ) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
-    legacy_stack::init::scan_with_config(controller, config)
+    true_old_stack::scan_with_config(controller, config)
 }
 
 #[doc(hidden)]
