@@ -6,7 +6,26 @@ const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE: bool = parse_nonzero_flag(
         None => option_env!("WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE"),
     },
 );
+const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071: bool = parse_nonzero_flag(
+    match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071"),
+    },
+);
 const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_MAX_RECORDS: usize = 10;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct WifiScanConfigCompat071 {
+    ssid: *mut u8,
+    bssid: *mut u8,
+    channel: u8,
+    show_hidden: bool,
+    scan_type: esp_wifi_sys::include::wifi_scan_type_t,
+    scan_time: esp_wifi_sys::include::wifi_scan_time_t,
+    home_chan_dwell_time: u8,
+    channel_bitmap: esp_wifi_sys::include::wifi_scan_channel_bitmap_t,
+}
 
 fn log_idf_explicit_postcall_diag(stage: &str, scan_rc: i32) {
     let (rx_sta, rx_ap) = esp_radio::wifi::diagnostic_wifi_rx_cb_counts();
@@ -142,13 +161,47 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
         },
         coex_background_scan: false,
     };
+    let scan_config_compat = WifiScanConfigCompat071 {
+        ssid: core::ptr::null_mut(),
+        bssid: core::ptr::null_mut(),
+        channel: 0,
+        show_hidden: true,
+        scan_type: esp_wifi_sys::include::wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE,
+        scan_time: esp_wifi_sys::include::wifi_scan_time_t {
+            active: esp_wifi_sys::include::wifi_active_scan_time_t {
+                min: active_min_ms,
+                max: active_max_ms,
+            },
+            passive: 0,
+        },
+        home_chan_dwell_time,
+        channel_bitmap: esp_wifi_sys::include::wifi_scan_channel_bitmap_t {
+            ghz_2_channels: 0,
+            ghz_5_channels: 0,
+        },
+    };
+    let use_compat071 = WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071;
 
     println!(
-        "upload_http: boot_scan_only_diag idf_explicit_compare begin=true active_min_ms={} active_max_ms={} passive_ms=0 home_chan_dwell_ms={} show_hidden=true channel=0",
-        active_min_ms, active_max_ms, home_chan_dwell_time
+        "upload_http: boot_scan_only_diag idf_explicit_compare begin=true compat071={} active_min_ms={} active_max_ms={} passive_ms=0 home_chan_dwell_ms={} show_hidden=true channel=0 size_current={} size_compat071={}",
+        use_compat071 as u8,
+        active_min_ms,
+        active_max_ms,
+        home_chan_dwell_time,
+        core::mem::size_of::<esp_wifi_sys::include::wifi_scan_config_t>(),
+        core::mem::size_of::<WifiScanConfigCompat071>(),
     );
     log_blob_state_diag("idf_explicit_compare_prestart");
-    let scan_rc = unsafe { esp_wifi_sys::include::esp_wifi_scan_start(&scan_config, true) };
+    let scan_rc = unsafe {
+        if use_compat071 {
+            esp_wifi_sys::include::esp_wifi_scan_start(
+                (&scan_config_compat as *const WifiScanConfigCompat071).cast(),
+                true,
+            )
+        } else {
+            esp_wifi_sys::include::esp_wifi_scan_start(&scan_config, true)
+        }
+    };
     log_idf_explicit_postcall_diag("idf_explicit_compare_postcall", scan_rc);
     if scan_rc != esp_wifi_sys::include::ESP_OK as i32 {
         println!(
