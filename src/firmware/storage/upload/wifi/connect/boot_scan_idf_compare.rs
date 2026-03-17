@@ -1,4 +1,4 @@
-use super::*;
+use super::{blob_state_diag::log_blob_state_diag, *};
 
 const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE: bool = parse_nonzero_flag(
     match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE") {
@@ -7,6 +7,31 @@ const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE: bool = parse_nonzero_flag(
     },
 );
 const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_MAX_RECORDS: usize = 10;
+
+fn log_idf_explicit_postcall_diag(stage: &str, scan_rc: i32) {
+    let (rx_sta, rx_ap) = esp_radio::wifi::diagnostic_wifi_rx_cb_counts();
+    let os_diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
+    let scan_done = esp_radio::diagnostic_wifi_scan_done_eventpost_diag();
+    let adapter_diag = esp_radio::diagnostic_wifi_adapter_primitive_diag();
+    println!(
+        "upload_http: boot_scan_only_diag {stage}=postcall scan_rc={} wifi_mac_isr_count={} rx_sta={} rx_ap={} queue_send={} queue_send_isr={} queue_recv={} event_post={} scan_done_count={} scan_done_status={} scan_done_ap_num={} thread_sem_get={} task_get_current_task_count={}",
+        scan_rc,
+        esp_radio::diagnostic_wifi_mac_isr_count(),
+        rx_sta,
+        rx_ap,
+        os_diag.queue_send,
+        os_diag.queue_send_isr,
+        os_diag.queue_recv,
+        os_diag.event_post,
+        scan_done.count,
+        scan_done.status,
+        scan_done.ap_num,
+        adapter_diag.thread_sem_get_count,
+        adapter_diag.task_get_current_task_count,
+    );
+    log_blob_state_diag(stage);
+    super::super::backend_legacy_port::log_runtime_state(stage);
+}
 
 const fn wifi_use_idf_default_scan_timing_diag_enabled() -> bool {
     matches!(
@@ -122,7 +147,9 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
         "upload_http: boot_scan_only_diag idf_explicit_compare begin=true active_min_ms={} active_max_ms={} passive_ms=0 home_chan_dwell_ms={} show_hidden=true channel=0",
         active_min_ms, active_max_ms, home_chan_dwell_time
     );
+    log_blob_state_diag("idf_explicit_compare_prestart");
     let scan_rc = unsafe { esp_wifi_sys::include::esp_wifi_scan_start(&scan_config, true) };
+    log_idf_explicit_postcall_diag("idf_explicit_compare_postcall", scan_rc);
     if scan_rc != esp_wifi_sys::include::ESP_OK as i32 {
         println!(
             "upload_http: boot_scan_only_diag idf_explicit_compare=scan_start_err scan_rc={}",

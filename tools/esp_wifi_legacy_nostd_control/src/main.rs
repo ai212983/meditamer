@@ -10,8 +10,11 @@ use esp_hal::{rng::Rng, timer::timg::TimerGroup};
 use esp_println::println;
 use esp_wifi::wifi::WifiMode;
 use esp_wifi_sys::include::{
-    esp_wifi_get_channel, esp_wifi_get_promiscuous, esp_wifi_set_channel, esp_wifi_set_promiscuous,
-    esp_wifi_set_promiscuous_filter, esp_wifi_set_promiscuous_rx_cb,
+    esp_wifi_get_channel, esp_wifi_get_promiscuous, esp_wifi_scan_get_ap_num,
+    esp_wifi_scan_get_ap_records, esp_wifi_scan_start, esp_wifi_set_channel,
+    esp_wifi_set_promiscuous, esp_wifi_set_promiscuous_filter, esp_wifi_set_promiscuous_rx_cb,
+    wifi_active_scan_time_t, wifi_ap_record_t, wifi_scan_channel_bitmap_t, wifi_scan_config_t,
+    wifi_scan_time_t, wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE, ESP_OK,
     wifi_promiscuous_filter_t, wifi_promiscuous_pkt_type_t_WIFI_PKT_CTRL,
     wifi_promiscuous_pkt_type_t_WIFI_PKT_DATA, wifi_promiscuous_pkt_type_t_WIFI_PKT_MGMT,
     wifi_promiscuous_pkt_type_t_WIFI_PKT_MISC, wifi_second_chan_t,
@@ -24,6 +27,7 @@ unsafe extern "C" {
 
 const PROMISC_CHANNELS: [u8; 4] = [8, 1, 6, 11];
 const PROMISC_DWELL_US: u32 = 120_000;
+const IDF_EXPLICIT_MAX_RECORDS: usize = 10;
 const WIFI_PKT_MGMT: u32 = wifi_promiscuous_pkt_type_t_WIFI_PKT_MGMT;
 const WIFI_PKT_CTRL: u32 = wifi_promiscuous_pkt_type_t_WIFI_PKT_CTRL;
 const WIFI_PKT_DATA: u32 = wifi_promiscuous_pkt_type_t_WIFI_PKT_DATA;
@@ -180,6 +184,97 @@ fn run_promisc_diag() {
     );
 }
 
+fn format_bssid(bssid: [u8; 6]) -> [u8; 6] {
+    bssid
+}
+
+fn run_idf_explicit_compare() {
+    let scan_config = wifi_scan_config_t {
+        ssid: core::ptr::null_mut(),
+        bssid: core::ptr::null_mut(),
+        channel: 0,
+        show_hidden: true,
+        scan_type: wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE,
+        scan_time: wifi_scan_time_t {
+            active: wifi_active_scan_time_t { min: 10, max: 20 },
+            passive: 0,
+        },
+        home_chan_dwell_time: 0,
+        channel_bitmap: wifi_scan_channel_bitmap_t {
+            ghz_2_channels: 0,
+            ghz_5_channels: 0,
+        },
+    };
+
+    println!(
+        "legacy_nostd_wifi_control: idf_explicit_compare begin=true active_min_ms=10 active_max_ms=20 passive_ms=0 home_chan_dwell_ms=0 show_hidden=true channel=0"
+    );
+    let scan_rc = unsafe { esp_wifi_scan_start(&scan_config, true) };
+    print_wifi_mac_isr_diag("idf_explicit_compare_postcall");
+    print_wifi_rx_cb_diag("idf_explicit_compare_postcall");
+    print_wifi_isr_hook_diag("idf_explicit_compare_postcall");
+    print_legacy_diag("idf_explicit_compare_postcall");
+    blob_state::print_blob_state("idf_explicit_compare_postcall");
+    if scan_rc != ESP_OK as i32 {
+        println!(
+            "legacy_nostd_wifi_control: idf_explicit_compare=scan_start_err scan_rc={}",
+            scan_rc
+        );
+        return;
+    }
+
+    let mut ap_num = 0u16;
+    let ap_num_rc = unsafe { esp_wifi_scan_get_ap_num(&mut ap_num) };
+    if ap_num_rc != ESP_OK as i32 {
+        println!(
+            "legacy_nostd_wifi_control: idf_explicit_compare=get_ap_num_err scan_rc={} ap_num_rc={}",
+            scan_rc, ap_num_rc
+        );
+        return;
+    }
+
+    let mut returned = core::cmp::min(ap_num as usize, IDF_EXPLICIT_MAX_RECORDS) as u16;
+    let mut records = [unsafe { core::mem::zeroed::<wifi_ap_record_t>() }; IDF_EXPLICIT_MAX_RECORDS];
+    let records_rc = if returned == 0 {
+        ESP_OK as i32
+    } else {
+        unsafe { esp_wifi_scan_get_ap_records(&mut returned, records.as_mut_ptr()) }
+    };
+
+    println!(
+        "legacy_nostd_wifi_control: idf_explicit_compare=ok scan_rc={} ap_num_rc={} records_rc={} ap_num={} records_returned={}",
+        scan_rc, ap_num_rc, records_rc, ap_num, returned
+    );
+
+    if records_rc != ESP_OK as i32 {
+        return;
+    }
+
+    for (idx, record) in records.iter().take(returned as usize).enumerate() {
+        let ssid_len = record
+            .ssid
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(record.ssid.len());
+        let ssid = core::str::from_utf8(&record.ssid[..ssid_len]).unwrap_or("<non_utf8>");
+        let bssid = format_bssid(record.bssid);
+        println!(
+            "legacy_nostd_wifi_control: idf_explicit_compare_ap idx={} ssid={} channel={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} rssi={} auth={}",
+            idx,
+            ssid,
+            record.primary,
+            bssid[0],
+            bssid[1],
+            bssid[2],
+            bssid[3],
+            bssid[4],
+            bssid[5],
+            record.rssi,
+            record.authmode
+        );
+    }
+}
+
 fn print_legacy_diag(label: &str) {
     let send_count = esp_wifi::diagnostic_queue_send_count();
     let recv_count = esp_wifi::diagnostic_queue_recv_count();
@@ -302,6 +397,17 @@ fn print_wifi_mac_isr_diag(label: &str) {
     );
 }
 
+fn print_wifi_isr_hook_diag(label: &str) {
+    println!(
+        "legacy_nostd_wifi_control: wifi_isr_hook_diag label={} queue_send_isr={} task_yield_from_isr={} sem_take_from_isr={} sem_give_from_isr={}",
+        label,
+        esp_wifi::diagnostic_queue_send_from_isr_count(),
+        esp_wifi::diagnostic_task_yield_from_isr_count(),
+        esp_wifi::diagnostic_semphr_take_from_isr_count(),
+        esp_wifi::diagnostic_semphr_give_from_isr_count(),
+    );
+}
+
 fn print_wifi_init_config_diag(label: &str) {
     let diag = esp_wifi::diagnostic_wifi_init_config_diag();
     println!(
@@ -413,6 +519,7 @@ fn main() -> ! {
     print_wifi_task_create_diag("after_start");
     print_wifi_mac_isr_diag("after_start");
     print_wifi_rx_cb_diag("after_start");
+    print_wifi_isr_hook_diag("after_start");
     print_legacy_diag("after_start");
     blob_state::print_blob_state("after_start");
     esp_wifi::diagnostic_queue_diag_reset();
@@ -423,7 +530,15 @@ fn main() -> ! {
     run_promisc_diag();
     print_wifi_mac_isr_diag("after_promisc");
     print_wifi_rx_cb_diag("after_promisc");
+    print_wifi_isr_hook_diag("after_promisc");
     blob_state::print_blob_state("after_promisc");
+
+    run_idf_explicit_compare();
+    print_wifi_mac_isr_diag("after_idf_explicit_compare");
+    print_wifi_rx_cb_diag("after_idf_explicit_compare");
+    print_wifi_isr_hook_diag("after_idf_explicit_compare");
+    print_legacy_diag("after_idf_explicit_compare");
+    blob_state::print_blob_state("after_idf_explicit_compare");
 
     match controller.scan_n(16) {
         Ok(results) => {
@@ -444,6 +559,7 @@ fn main() -> ! {
     }
     print_wifi_mac_isr_diag("after_scan");
     print_wifi_rx_cb_diag("after_scan");
+    print_wifi_isr_hook_diag("after_scan");
     print_legacy_diag("after_scan");
     blob_state::print_blob_state("after_scan");
 
