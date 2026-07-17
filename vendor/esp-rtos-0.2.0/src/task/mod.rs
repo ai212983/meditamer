@@ -607,6 +607,13 @@ pub extern "C" fn esp_rtos_task_role(task: *const Task) -> *const core::ffi::c_c
     if task.is_null() {
         return c"<null>".as_ptr();
     }
+    if crate::esp_radio::legacy_builtin_scheduler_runtime_mode_enabled() {
+        let role_ptr =
+            crate::esp_radio::legacy_builtin_scheduler_task_role_ptr_for_task_ptr(task as usize);
+        if !role_ptr.is_null() {
+            return role_ptr.cast();
+        }
+    }
     unsafe { (*task).task_role.as_ptr().cast() }
 }
 

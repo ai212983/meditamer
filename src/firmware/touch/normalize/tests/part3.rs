@@ -108,4 +108,28 @@ fn dual_contact_keeps_continuity_and_does_not_force_slot_switch() {
     assert_eq!(c1, 1);
     assert_eq!(p1, Some(NormalizedTouchPoint { x: 222, y: 221 }));
 }
+
+#[test]
+fn logical_advance_preserves_an_explicit_contact_without_extra_samples() {
+    let mut normalizer = TouchPresenceNormalizer::new();
+    let (ms, input) = sample(10, 1, (140, 220), (0, 0), true);
+    let _ = normalizer.normalize(ms, input);
+
+    assert_eq!(
+        normalizer.advance(500),
+        (1, Some(NormalizedTouchPoint { x: 140, y: 220 }))
+    );
+}
+
+#[test]
+fn logical_advance_expires_continuity_after_a_zero_report() {
+    let mut normalizer = TouchPresenceNormalizer::new();
+    let (ms, input) = sample(10, 1, (140, 220), (0, 0), true);
+    let _ = normalizer.normalize(ms, input);
+    let (ms, input) = sample(20, 0, (0, 0), (0, 0), false);
+    let _ = normalizer.normalize(ms, input);
+
+    assert_eq!(normalizer.advance(66).0, 1);
+    assert_eq!(normalizer.advance(67), (0, None));
+}
 use super::*;

@@ -18,18 +18,17 @@ use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_println::println;
 mod backend;
-pub(crate) mod backend_legacy_port;
 mod runtime_init;
 pub(crate) use backend::{
-    backend_name, init_radio, new_runtime, wifi_active_scan_config,
-    wifi_channel_active_scan_config, wifi_client_mode_config, wifi_connect_async,
-    wifi_directed_active_scan_config, wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_started,
+    backend_name, wifi_active_scan_config, wifi_channel_active_scan_config,
+    wifi_client_mode_config, wifi_connect_async, wifi_directed_active_scan_config,
+    wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_connected, wifi_is_started,
     wifi_passive_scan_config, wifi_power_save_none, wifi_raw_broad_scan_config, wifi_rssi,
     wifi_scan_with_config_async, wifi_set_config, wifi_set_mode, wifi_set_power_saving,
     wifi_set_protocol, wifi_sta_mode, wifi_standard_bgn_protocols, wifi_start_async,
-    wifi_stop_async, RadioController, ScanConfig, WifiController, WifiDevice,
+    wifi_stop_async, ScanConfig, WifiController, WifiDevice,
 };
-use backend::{event, AccessPointInfo, AuthMethod, EventExt, ModeConfig};
+use backend::{AccessPointInfo, AuthMethod, ModeConfig};
 pub(crate) use runtime_init::{apply_runtime_setup_overrides_and_log, initialize_runtime_sta};
 type WifiError = backend::WifiError;
 const WIFI_SCAN_DIAG_MAX_APS: usize = 64;
@@ -65,8 +64,6 @@ const WIFI_REASON_CONNECT_ATTEMPT_TIMEOUT: u8 = 252;
 const WIFI_REASON_START_NOMEM: u8 = 253;
 const WIFI_REASON_SCAN_NOMEM: u8 = 254;
 const WIFI_DRIVER_CONTROL_TIMEOUT_MS: u64 = 5_000;
-const WIFI_DRIVER_STOP_RETRIES: u8 = 2;
-const WIFI_DRIVER_STOP_RETRY_BACKOFF_MS: u64 = 300;
 const WIFI_CONNECTED_WATCHDOG_MS: u64 = 2_000;
 // Two bounded same-link reacquire attempts before escalating to candidate/auth rotation.
 const WIFI_DHCP_LEASE_REACQUIRE_MAX_ATTEMPTS: u8 = 2;
@@ -257,10 +254,6 @@ pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {
     })
 }
 
-pub(super) fn wifi_runtime_config() -> backend::WifiDriverConfig {
-    backend::wifi_runtime_config(WIFI_COUNTRY_US_OVERRIDE)
-}
-
 pub(crate) struct NetConfigSnapshotView {
     pub(crate) credentials_set: bool,
     pub(crate) ssid: heapless::String<WIFI_SSID_MAX>,
@@ -288,6 +281,7 @@ pub(crate) fn net_status_snapshot() -> NetStatusSnapshot {
     NetStatusSnapshot {
         state: state.as_str(),
         link: telemetry.wifi_link_connected,
+        radio_quiesced: diag::radio_quiesced(),
         ipv4: telemetry.upload_http_ipv4.unwrap_or([0, 0, 0, 0]),
         listener: telemetry.upload_http_listening,
         listener_enabled: service_mode::upload_http_listener_enabled(),

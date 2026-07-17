@@ -21,14 +21,22 @@ fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
     if basic::parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
     }
+    #[cfg(not(feature = "wifi-debug-slim-app"))]
     if basic::parse_touch_wizard_dump_command(line) {
         return Some(SerialCommand::TouchWizardDump);
     }
+    #[cfg(not(feature = "wifi-debug-slim-app"))]
     if basic::parse_touch_wizard_command(line) {
         return Some(SerialCommand::TouchWizard);
     }
     if basic::parse_metrics_net_command(line) {
         return Some(SerialCommand::MetricsNet);
+    }
+    if basic::parse_touch_sched_reset_command(line) {
+        return Some(SerialCommand::TouchSchedReset);
+    }
+    if let Some(operation) = basic::parse_scheduler_command(line) {
+        return Some(SerialCommand::Scheduler { operation });
     }
     if basic::parse_telemetry_status_command(line) {
         return Some(SerialCommand::TelemetryStatus);

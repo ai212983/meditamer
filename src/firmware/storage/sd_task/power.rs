@@ -48,21 +48,31 @@ pub(crate) async fn request_sd_power(action: SdPowerRequest) -> bool {
                 SD_POWER_REQUEST_MAX_ATTEMPTS,
             );
         } else {
-            match with_timeout(
-                Duration::from_millis(response_timeout_ms),
-                SD_POWER_RESPONSES.receive(),
-            )
-            .await
-            {
-                Ok(ok) => return ok,
-                Err(_) => {
-                    esp_println::println!(
-                        "sdtask: power_resp_timeout action={} timeout_ms={} attempt={}/{}",
-                        action_label,
-                        response_timeout_ms,
-                        attempt,
-                        SD_POWER_REQUEST_MAX_ATTEMPTS,
-                    );
+            loop {
+                match with_timeout(
+                    Duration::from_millis(response_timeout_ms),
+                    SD_POWER_RESPONSES.receive(),
+                )
+                .await
+                {
+                    Ok(ok) => return ok,
+                    Err(_) if crate::firmware::runtime::display_task::is_display_work_busy() => {
+                        // The request remains queued while a display refresh
+                        // owns the expander. Keep waiting for that same request
+                        // instead of reporting a false timeout or enqueueing a
+                        // duplicate operation.
+                        continue;
+                    }
+                    Err(_) => {
+                        esp_println::println!(
+                            "sdtask: power_resp_timeout action={} timeout_ms={} attempt={}/{}",
+                            action_label,
+                            response_timeout_ms,
+                            attempt,
+                            SD_POWER_REQUEST_MAX_ATTEMPTS,
+                        );
+                        break;
+                    }
                 }
             }
         }

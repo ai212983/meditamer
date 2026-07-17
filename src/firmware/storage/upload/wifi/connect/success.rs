@@ -139,6 +139,12 @@ pub(super) async fn handle_connect_success(
             break;
         }
 
+        if !wifi_is_connected(controller) {
+            WIFI_LAST_DISCONNECT_REASON
+                .compare_exchange(0, WIFI_REASON_OTHER, Ordering::Relaxed, Ordering::Relaxed)
+                .ok();
+            WIFI_DISCONNECTED_EVENT.store(true, Ordering::Relaxed);
+        }
         if WIFI_DISCONNECTED_EVENT.swap(false, Ordering::Relaxed) {
             let disconnect_reason = WIFI_LAST_DISCONNECT_REASON.load(Ordering::Relaxed);
             if disconnect_reason == WIFI_REASON_OTHER {

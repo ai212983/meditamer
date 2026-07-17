@@ -132,6 +132,8 @@ struct WifiDiscoveryDebugArgs {
 
 #[derive(Debug, Args)]
 struct RuntimeModesArgs {
+    #[arg(long, default_value = "full")]
+    suite: String,
     output_path: Option<PathBuf>,
 }
 
@@ -167,8 +169,10 @@ fn parse_suite(raw: &str) -> Result<SdcardSuite> {
         "baseline" => Ok(SdcardSuite::Baseline),
         "burst" => Ok(SdcardSuite::Burst),
         "failures" => Ok(SdcardSuite::Failures),
+        "cutover" => Ok(SdcardSuite::Cutover),
+        "no-card" => Ok(SdcardSuite::NoCard),
         _ => Err(anyhow::anyhow!(
-            "Invalid suite `{raw}` (use all|baseline|burst|failures)"
+            "Invalid suite `{raw}` (use all|baseline|burst|failures|cutover|no-card)"
         )),
     }
 }
@@ -247,6 +251,7 @@ fn run(cli: Cli) -> Result<()> {
                     &mut logger,
                     RuntimeModesSmokeOptions {
                         output_path: test_args.output_path,
+                        suite: test_args.suite,
                     },
                 )
             }

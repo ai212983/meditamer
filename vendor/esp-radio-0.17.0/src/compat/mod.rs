@@ -1,10 +1,24 @@
 #![allow(dead_code)]
 
 pub mod common;
+pub(crate) mod common_adapter_legacy_backend;
+pub(crate) mod common_adapter_legacy_osi_backend;
+pub(crate) mod common_adapter_legacy_queue_backend;
+pub(crate) mod common_legacy_queue;
+pub(crate) mod common_legacy_backend;
+pub(crate) mod common_legacy_literal;
+pub(crate) mod common_legacy;
+pub(crate) mod common_legacy_port;
+#[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]
+pub(crate) mod legacy_wifi_tasks;
+pub(crate) mod preempt_legacy_backend;
 pub mod malloc;
+pub(crate) mod legacy_runtime_policy;
 pub mod misc;
 pub mod mutex;
 pub mod queue;
+pub(crate) mod queue_legacy;
+pub(crate) mod queue_legacy_backend;
 pub mod semaphore;
 
 #[cfg(any(feature = "wifi", all(feature = "ble", bt_controller = "npl")))]

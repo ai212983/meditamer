@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+firmware_target_dir="${FIRMWARE_CARGO_TARGET_DIR:-$repo_root/target}"
+
+firmware_toolchain="${FIRMWARE_RUSTUP_TOOLCHAIN:-esp}"
+firmware_target="${FIRMWARE_TARGET_TRIPLE:-xtensa-esp32-none-elf}"
+
 if [[ -f "$HOME/export-esp.sh" ]]; then
     # Ensure Xtensa toolchain is available for linking.
     # shellcheck disable=SC1090
@@ -10,7 +17,7 @@ fi
 
 run_cargo_build() {
     local mode="$1"
-    local cmd=(cargo build)
+    local cmd=(rustup run "$firmware_toolchain" cargo build -Zbuild-std=core,alloc --target "$firmware_target")
 
     if [[ "$mode" == "release" ]]; then
         cmd+=(--release)
@@ -22,7 +29,10 @@ run_cargo_build() {
         cmd+=(--features "$CARGO_FEATURES")
     fi
 
-    "${cmd[@]}"
+    (
+        cd "$repo_root"
+        CARGO_TARGET_DIR="$firmware_target_dir" "${cmd[@]}"
+    )
 }
 
 case "${1:-}" in

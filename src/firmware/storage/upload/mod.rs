@@ -29,7 +29,7 @@ fn wifi_setup_stage_trace(stage: &str) {
 pub(crate) struct UploadHttpRuntime {
     pub(crate) wifi_controller: WifiController<'static>,
     pub(crate) initial_credentials: Option<WifiCredentials>,
-    pub(crate) net_runner: Runner<'static, WifiDevice<'static>>,
+    pub(crate) net_runner: Runner<'static, WifiDevice>,
     pub(crate) stack: Stack<'static>,
 }
 
@@ -75,7 +75,7 @@ pub(crate) async fn wifi_connection_task(
 }
 
 #[embassy_executor::task]
-pub(crate) async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
+pub(crate) async fn net_task(mut runner: Runner<'static, WifiDevice>) {
     runner.run().await
 }
 

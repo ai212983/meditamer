@@ -4,6 +4,7 @@ async fn process_upload_request_and_publish(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) {
     let result = process_upload_request(
         upload_request,
@@ -11,6 +12,7 @@ async fn process_upload_request_and_publish(
         sd_probe,
         powered,
         upload_mounted,
+        fat_engine,
     )
     .await;
     publish_upload_result(result);
@@ -23,6 +25,7 @@ async fn process_asset_read_request_and_publish(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) {
     let response = process_asset_read_request(
         asset_request,
@@ -30,6 +33,7 @@ async fn process_asset_read_request_and_publish(
         sd_probe,
         powered,
         upload_mounted,
+        fat_engine,
     )
     .await;
     publish_asset_read_response(response);

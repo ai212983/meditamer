@@ -103,39 +103,18 @@ pub(super) fn wait_for_sd_result(
     Ok(())
 }
 
-pub(super) fn force_upload_mode_off(
+pub(super) fn wait_for_pattern(
     logger: &mut Logger,
     console: &mut SerialConsole,
+    name: &str,
+    expected_pattern: &Regex,
+    timeout: Duration,
 ) -> Result<()> {
-    for _ in 0..12 {
-        let mark = console.mark();
-        console.send_line("STATE SET upload=off")?;
-        let (status, line) = console.wait_ack_since(mark, "STATE", Duration::from_secs(4))?;
-        match status {
-            AckStatus::Ok => {
-                logger.info("Precondition: upload mode forced off");
-                return Ok(());
-            }
-            AckStatus::Busy | AckStatus::None => {
-                thread::sleep(Duration::from_secs(1));
-            }
-            AckStatus::Err => {
-                if line
-                    .as_deref()
-                    .is_some_and(|msg| msg.contains("reason=timeout"))
-                {
-                    thread::sleep(Duration::from_secs(1));
-                    continue;
-                }
-                return Err(anyhow!(
-                    "failed forcing upload mode off before SD suite: {}",
-                    line.unwrap_or_else(|| "STATE ERR".to_string())
-                ));
-            }
-        }
+    let line = console.wait_for_regex_since(0, expected_pattern, timeout)?;
+    if line.is_none() {
+        return Err(anyhow!("[FAIL] {name}: missing expected pattern"));
     }
-
-    logger.warn("Could not confirm upload mode off before SD suite; proceeding");
+    logger.info(format!("[PASS] {name}"));
     Ok(())
 }
 

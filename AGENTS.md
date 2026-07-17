@@ -7,7 +7,8 @@
 |development/rfc-upload-throughput-next-phase.md: Sharded index; append new RFC updates to the latest `development/rfc-upload-throughput-next-phase/part-*.md`
 |development/wifi-upload-decision-ledger.md: Fast decision ledger for promoted/rejected/non-default Wi-Fi/upload knobs; check this first before proposing/rerunning A/B experiments
 |MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `development/rfc-upload-throughput-next-phase/` and `development/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
-|Flash policy: Prefer `scripts/device/flash.sh` over raw `espflash`; use its timeout/fallback diagnostics before deeper debugging
+|Flash policy: Prefer `scripts/device/flash.sh` over raw `espflash`; it wraps `hostctl flash-capture` and the canonical orchestration in `tools/hostctl/scenarios/flash-capture.sw.yaml`. Use `hostctl flash-capture` directly only when you need explicit `--flash-mode` / `--capture-mode` / artifact-path control. Use `scripts/device/monitor.sh` only for passive attach/debug, not boot capture.
+|Hostctl workflow policy: Keep orchestration (branching, fallback order, retries, gate flow) in Serverless Workflow YAML under `tools/hostctl/scenarios/*.sw.yaml`; keep Rust hostctl code focused on primitive actions and context I/O.
 |development/event-engine-guide.md: Practical guide for tuning/modifying the event engine
 |development/statig-event-engine-plan.md: Plan for statig-based sensor-event engine
 |development/sensors.md: Sensor details and behavior

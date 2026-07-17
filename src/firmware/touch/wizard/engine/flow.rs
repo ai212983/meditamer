@@ -1,26 +1,27 @@
 use super::super::super::super::config::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use super::super::super::config::{TOUCH_WIZARD_SESSION_EVENTS, TOUCH_WIZARD_SWIPE_TRACE_SAMPLES};
 use super::super::super::types::{TouchWizardSessionEvent, TouchWizardSwipeTraceSample};
-use super::draw::{continue_button_bounds, swipe_mark_button_bounds};
-use super::swipe::{
-    clamp_to_u16, squared_distance_i32, trace_direction_code, trace_speed_code, SwipeCaseTraceInput,
+use super::draw::{
+    continue_button_bounds, precision_menu_button_bounds, swipe_mark_button_bounds,
+    test_return_bounds, test_toggle_bounds, ButtonBounds,
 };
+use super::swipe::{clamp_to_u16, trace_direction_code, trace_speed_code, SwipeCaseTraceInput};
 use super::*;
 
 impl TouchCalibrationWizard {
     pub(super) fn shows_swipe_debug(&self) -> bool {
-        matches!(self.phase, WizardPhase::SwipeRight | WizardPhase::Complete)
+        matches!(self.phase, WizardPhase::SwipeRight)
     }
 
     pub(super) fn shows_continue_button(&self) -> bool {
-        !matches!(self.phase, WizardPhase::Closed)
+        matches!(self.phase, WizardPhase::SwipeRight | WizardPhase::Complete)
     }
 
     pub(super) fn continue_button_label(&self) -> &'static str {
         match self.phase {
             WizardPhase::SwipeRight => "SKIP CASE",
             WizardPhase::Complete => "EXIT",
-            _ => "CONTINUE",
+            _ => "",
         }
     }
 
@@ -36,6 +37,62 @@ impl TouchCalibrationWizard {
     pub(super) fn swipe_mark_button_hit(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
         let (left, top, w, h) = swipe_mark_button_bounds(width, height);
         x >= left && x < left + w && y >= top && y < top + h
+    }
+
+    pub(super) fn precision_menu_action(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) -> Option<PrecisionMenuAction> {
+        let (calibrate, test, continue_button) = precision_menu_button_bounds(width, height);
+        if point_in_bounds(x, y, calibrate) {
+            Some(PrecisionMenuAction::Calibrate)
+        } else if point_in_bounds(x, y, test) {
+            Some(PrecisionMenuAction::Test)
+        } else if point_in_bounds(x, y, continue_button) {
+            Some(PrecisionMenuAction::Continue)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn test_toggle_hit(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
+        point_in_bounds(x, y, test_toggle_bounds(width, height))
+    }
+
+    pub(super) fn test_return_hit(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
+        point_in_bounds(x, y, test_return_bounds(width, height))
+    }
+
+    pub(super) fn open_precision_test(&mut self) {
+        self.phase = WizardPhase::PrecisionTest;
+        self.hint = "Tap anywhere to compare touch coordinates.";
+        self.last_test_touch = None;
+        self.test_mode = TestCoordinateMode::Calibrated;
+    }
+
+    pub(super) fn return_to_precision_menu(&mut self) {
+        self.phase = WizardPhase::PrecisionMenu;
+        self.hint = if self.calibration.is_some() {
+            "Calibration ready. Test it or continue to swipes."
+        } else {
+            "Calibrate precision before testing swipes."
+        };
+        self.calibration_pending_return = false;
+        self.last_test_touch = None;
+    }
+
+    pub(super) fn toggle_test_mode(&mut self) {
+        self.test_mode = match self.test_mode {
+            TestCoordinateMode::Calibrated => TestCoordinateMode::Uncalibrated,
+            TestCoordinateMode::Uncalibrated => TestCoordinateMode::Calibrated,
+        };
+        self.hint = match self.test_mode {
+            TestCoordinateMode::Calibrated => "Calibrated touches are circles.",
+            TestCoordinateMode::Uncalibrated => "Uncalibrated touches are crosses.",
+        };
     }
 
     pub(super) fn on_manual_swipe_mark(&mut self, t_ms: u64) -> bool {
@@ -89,28 +146,14 @@ impl TouchCalibrationWizard {
     pub(super) fn on_continue_button(&mut self, t_ms: u64) -> bool {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
-        let prev_last_tap = self.last_tap;
         let prev_swipe_trace = self.swipe_trace;
         let prev_last_swipe = self.last_swipe;
 
         match self.phase {
-            WizardPhase::Intro => {
-                self.phase = WizardPhase::TapCenter;
-                self.hint = "Manual continue: step 1.";
+            WizardPhase::PrecisionMenu => {
+                self.enter_swipe_phase(t_ms, "Guided swipes ready.");
             }
-            WizardPhase::TapCenter => {
-                self.phase = WizardPhase::TapTopLeft;
-                self.hint = "Manual continue: step 2.";
-                self.last_tap = None;
-            }
-            WizardPhase::TapTopLeft => {
-                self.phase = WizardPhase::TapBottomRight;
-                self.hint = "Manual continue: step 3.";
-                self.last_tap = None;
-            }
-            WizardPhase::TapBottomRight => {
-                self.enter_swipe_phase(t_ms, "Manual continue: guided swipes.");
-            }
+            WizardPhase::Calibrate | WizardPhase::PrecisionTest => {}
             WizardPhase::SwipeRight => {
                 let case_index = self.swipe_case_index;
                 let case = self.current_swipe_case(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -151,22 +194,14 @@ impl TouchCalibrationWizard {
 
         self.phase != prev_phase
             || self.hint != prev_hint
-            || self.last_tap != prev_last_tap
             || self.swipe_trace != prev_swipe_trace
             || self.last_swipe != prev_last_swipe
-    }
-
-    pub(super) fn tap_hits_target(&self, x: i32, y: i32, width: i32, height: i32) -> bool {
-        let Some((tx, ty)) = self.target_point(width, height) else {
-            return false;
-        };
-        squared_distance_i32(x, y, tx, ty) <= TARGET_HIT_RADIUS_PX * TARGET_HIT_RADIUS_PX
     }
 
     pub(super) fn enter_swipe_phase(&mut self, t_ms: u64, hint: &'static str) {
         self.phase = WizardPhase::SwipeRight;
         self.hint = hint;
-        self.last_tap = None;
+        self.calibration_pending_return = false;
         self.clear_swipe_debug();
         self.emit_swipe_session_event(TouchWizardSessionEvent::Start { t_ms });
     }
@@ -210,11 +245,10 @@ impl TouchCalibrationWizard {
 
     pub(super) fn step_progress_text(&self) -> &'static str {
         match self.phase {
-            WizardPhase::Intro => "Step 0/4",
-            WizardPhase::TapCenter => "Step 1/4",
-            WizardPhase::TapTopLeft => "Step 2/4",
-            WizardPhase::TapBottomRight => "Step 3/4",
-            WizardPhase::SwipeRight => "Step 4/4 Guided Swipes",
+            WizardPhase::PrecisionMenu => "Touch precision",
+            WizardPhase::Calibrate => "Calibration",
+            WizardPhase::PrecisionTest => "Precision test",
+            WizardPhase::SwipeRight => "Guided Swipes",
             WizardPhase::Complete => "Done",
             WizardPhase::Closed => "",
         }
@@ -222,22 +256,20 @@ impl TouchCalibrationWizard {
 
     pub(super) fn primary_instruction(&self) -> &'static str {
         match self.phase {
-            WizardPhase::Intro => "Tap anywhere to begin touch checks.",
-            WizardPhase::TapCenter => "Tap the center target.",
-            WizardPhase::TapTopLeft => "Tap the top-left target.",
-            WizardPhase::TapBottomRight => "Tap the bottom-right target.",
+            WizardPhase::PrecisionMenu => "Calibrate or test touch precision.",
+            WizardPhase::Calibrate => "Touch all four corner dots.",
+            WizardPhase::PrecisionTest => "Tap to show the selected coordinates.",
             WizardPhase::SwipeRight => "Perform the guided swipe case.",
-            WizardPhase::Complete => "Calibration complete.",
+            WizardPhase::Complete => "Touch test complete.",
             WizardPhase::Closed => "",
         }
     }
 
     pub(super) fn secondary_instruction(&self) -> &'static str {
         match self.phase {
-            WizardPhase::Intro => "This validates tap and swipe tracking.",
-            WizardPhase::TapCenter => "Aim inside the ring.",
-            WizardPhase::TapTopLeft => "Aim inside the ring.",
-            WizardPhase::TapBottomRight => "Aim inside the ring.",
+            WizardPhase::PrecisionMenu => "Continue opens guided swipes.",
+            WizardPhase::Calibrate => "Completed dots become solid.",
+            WizardPhase::PrecisionTest => "Use the center toggle to switch modes.",
             WizardPhase::SwipeRight => {
                 "FROM->TO + direction. Speed logged. Use I JUST SWIPED or SKIP CASE."
             }
@@ -245,15 +277,16 @@ impl TouchCalibrationWizard {
             WizardPhase::Closed => "",
         }
     }
+}
 
-    pub(super) fn target_point(&self, width: i32, height: i32) -> Option<(i32, i32)> {
-        let w = width.max(1);
-        let h = height.max(1);
-        match self.phase {
-            WizardPhase::TapCenter => Some((w / 2, h / 2 + 24)),
-            WizardPhase::TapTopLeft => Some((w / 5, h / 3)),
-            WizardPhase::TapBottomRight => Some((w * 4 / 5, h * 2 / 3)),
-            _ => None,
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PrecisionMenuAction {
+    Calibrate,
+    Test,
+    Continue,
+}
+
+fn point_in_bounds(x: i32, y: i32, bounds: ButtonBounds) -> bool {
+    let (left, top, width, height) = bounds;
+    x >= left && x < left + width && y >= top && y < top + height
 }

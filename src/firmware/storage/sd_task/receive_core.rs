@@ -1,5 +1,6 @@
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{with_timeout, Duration};
+use sdcard::fat::FatEngine;
 
 #[cfg(not(feature = "asset-upload-http"))]
 use super::super::super::config::SD_ASSET_READ_REQUESTS;
@@ -25,12 +26,19 @@ pub(super) async fn receive_core_request(
     powered: &mut bool,
     upload_mounted: &mut bool,
     upload_session: &mut Option<SdUploadSession>,
+    fat_engine: &mut FatEngine,
 ) -> Option<SdRequest> {
     loop {
         #[cfg(feature = "asset-upload-http")]
         {
-            if let Some(request) =
-                receive_request_with_wifi(sd_probe, powered, upload_mounted, upload_session).await
+            if let Some(request) = receive_request_with_wifi(
+                sd_probe,
+                powered,
+                upload_mounted,
+                upload_session,
+                fat_engine,
+            )
+            .await
             {
                 return Some(request);
             }
@@ -38,13 +46,17 @@ pub(super) async fn receive_core_request(
 
         #[cfg(not(feature = "asset-upload-http"))]
         {
-            if let Some(request) =
-                receive_request_without_wifi(sd_probe, powered, upload_mounted, upload_session)
-                    .await
+            if let Some(request) = receive_request_without_wifi(
+                sd_probe,
+                powered,
+                upload_mounted,
+                upload_session,
+                fat_engine,
+            )
+            .await
             {
                 return Some(request);
             }
         }
     }
 }
-

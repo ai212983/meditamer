@@ -7,50 +7,17 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 app_dir="$repo_root/tools/esp_idf_wifi_control"
 build_dir="$repo_root/.embuild/idf_apps/wifi_control/build"
 
+# shellcheck source=../lib/esp_idf_env.sh
+source "$script_dir/../lib/esp_idf_env.sh"
 # shellcheck source=../lib/serial_port.sh
 source "$script_dir/../lib/serial_port.sh"
 
-resolve_idf_root() {
-    if [[ -n "${IDF_APP_ROOT:-}" ]]; then
-        printf '%s\n' "$IDF_APP_ROOT"
-        return 0
-    fi
-
-    local latest=""
-    local candidate=""
-    shopt -s nullglob
-    for candidate in "$repo_root"/.embuild/espressif/esp-idf/v*; do
-        [[ -d "$candidate" ]] || continue
-        latest="$candidate"
-    done
-    shopt -u nullglob
-
-    if [[ -n "$latest" ]]; then
-        printf '%s\n' "$latest"
-        return 0
-    fi
-
-    return 1
-}
-
 ensure_idf_env() {
-    local idf_root
-    if ! idf_root="$(resolve_idf_root)"; then
-        echo "No local ESP-IDF install found under $repo_root/.embuild/espressif/esp-idf" >&2
-        echo "Set IDF_APP_ROOT explicitly if ESP-IDF is installed elsewhere." >&2
-        exit 1
-    fi
-    if [[ ! -f "$idf_root/export.sh" ]]; then
-        echo "ESP-IDF export.sh not found at $idf_root/export.sh" >&2
-        exit 1
-    fi
-    # shellcheck disable=SC1090
-    source "$idf_root/export.sh" >/dev/null
+    esp_idf_source_env "wifi_control_idf.sh" auto || exit 1
     if ! command -v idf.py >/dev/null 2>&1; then
-        echo "idf.py not available after sourcing $idf_root/export.sh" >&2
+        echo "idf.py not available after sourcing $ESP_IDF_ROOT_RESOLVED/export.sh" >&2
         exit 1
     fi
-    echo "wifi_control_idf.sh: using ESP-IDF root: $idf_root" >&2
 }
 
 idf_cmd() {

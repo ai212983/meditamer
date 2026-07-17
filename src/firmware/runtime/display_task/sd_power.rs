@@ -6,8 +6,8 @@ use crate::firmware::{
 pub(super) async fn process_sd_power_requests(context: &mut DisplayContext) {
     while let Ok(request) = SD_POWER_REQUESTS.try_receive() {
         let ok = match request {
-            SdPowerRequest::On => context.inkplate.sd_card_power_on().is_ok(),
-            SdPowerRequest::Off => context.inkplate.sd_card_power_off().is_ok(),
+            SdPowerRequest::On => context.inkplate.sd_card_power_on().await.is_ok(),
+            SdPowerRequest::Off => context.inkplate.sd_card_power_off().await.is_ok(),
         };
         SD_POWER_RESPONSES.send(ok).await;
     }

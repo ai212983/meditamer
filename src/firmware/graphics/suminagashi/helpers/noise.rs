@@ -2,7 +2,7 @@ use super::{
     blue_noise_threshold_u8, Fx, Vec2Fx, FX_40, FX_EPSILON, FX_HALF, FX_HUNDRED, FX_ONE, FX_PI,
     FX_SIX, FX_TAU, FX_THREE, FX_TWO, FX_ZERO, NOISE_ROT_COS, NOISE_ROT_SIN,
 };
-use fixed_sqrt::FixedSqrt;
+use fixed_sqrt::FastSqrt;
 
 pub(super) fn blue_noise_fbm(mut p: Vec2Fx) -> Fx {
     let mut value = FX_ZERO;
@@ -107,7 +107,7 @@ pub(super) fn wrap_pi(mut angle: Fx) -> Fx {
 
 #[inline]
 pub(crate) fn sqrt_fx(v: Fx) -> Fx {
-    FixedSqrt::sqrt(v.max(FX_ZERO))
+    v.max(FX_ZERO).fast_sqrt()
 }
 
 #[inline]

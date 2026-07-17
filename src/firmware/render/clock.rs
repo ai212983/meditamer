@@ -52,8 +52,8 @@ pub(crate) async fn render_clock_overlay(
     psram::log_allocator_high_water("render_clock_overlay_partial");
 }
 
-pub(crate) fn sample_battery_percent(display: &mut InkplateDriver) -> Option<u8> {
-    let soc = display.fuel_gauge_soc().ok()?;
+pub(crate) async fn sample_battery_percent(display: &mut InkplateDriver) -> Option<u8> {
+    let soc = display.fuel_gauge_soc().await.ok()?;
     if soc > 100 {
         return None;
     }

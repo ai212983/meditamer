@@ -1,4 +1,5 @@
 use super::*;
+use crate::firmware::storage::upload::wifi::diag::publish_radio_quiesced;
 
 pub(super) enum PreparePreconditions {
     Continue,
@@ -69,11 +70,13 @@ pub(super) async fn prepare_preconditions(
 
     if !service_mode::upload_enabled() {
         if !state.paused {
+            publish_radio_quiesced(false);
             disconnect_and_stop_with_timeout(controller, "upload_off_pause").await;
             telemetry::set_wifi_link_connected(false);
             telemetry::set_upload_http_listener(false, None);
             telemetry::record_wifi_reassoc_mode_pause();
             state.paused = true;
+            publish_radio_quiesced(true);
             state.config_applied = false;
             state.auth_method_idx = 0;
             state.channel_hint = None;
@@ -115,6 +118,7 @@ pub(super) async fn prepare_preconditions(
 
     if state.paused {
         state.paused = false;
+        publish_radio_quiesced(false);
         state.net_attempt = 0;
         state.terminal_fail_latched = false;
         telemetry::record_wifi_reassoc_mode_resume();

@@ -25,8 +25,11 @@ async fn handle_battery_tick_event(
     if upload_enabled {
         return;
     }
-    if let Some(sampled_percent) = sample_battery_percent(&mut context.inkplate) {
+    if let Some(sampled_percent) = sample_battery_percent(&mut context.inkplate).await {
         state.battery_percent = Some(sampled_percent);
+        crate::firmware::imu::publish_trace_context(crate::firmware::imu::ImuTraceContext {
+            battery_percent: i16::from(sampled_percent),
+        });
     }
     if state.in_touch_wizard_mode() {
         return;

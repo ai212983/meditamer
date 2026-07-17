@@ -1,3 +1,7 @@
+#[cfg(feature = "wifi-debug-slim-app")]
+#[path = "clock_stub.rs"]
+mod clock;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 mod clock;
 #[cfg(feature = "wifi-debug-slim-app")]
 #[path = "visual_stub.rs"]

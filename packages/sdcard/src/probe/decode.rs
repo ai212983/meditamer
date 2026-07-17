@@ -50,3 +50,18 @@ fn detect_vbr_filesystem(sector: &[u8; 512]) -> Option<SdFilesystem> {
     }
     None
 }
+fn parse_ascii_u32(value: &str) -> Option<u32> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = 0u32;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        let digit = (b - b'0') as u32;
+        out = out.checked_mul(10)?.checked_add(digit)?;
+    }
+    Some(out)
+}

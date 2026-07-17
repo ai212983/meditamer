@@ -11,9 +11,11 @@ use serde_json::Value;
 use crate::{logging::Logger, scenarios::WorkflowRuntime, serial_console::SerialConsole};
 
 use super::{
-    io::{run_raw_expect_pattern, run_step, wait_for_sd_result},
+    io::{run_raw_expect_pattern, run_step, wait_for_pattern, wait_for_sd_result},
     templates::{optional_arg_u32, required_arg_str, resolve_templates},
 };
+
+mod cutover;
 
 pub(super) struct SdcardScenarioRuntime<'a> {
     logger: &'a mut Logger,
@@ -21,6 +23,7 @@ pub(super) struct SdcardScenarioRuntime<'a> {
     vars: HashMap<String, String>,
     sdwait_timeout_ms: u32,
     burst_mark: Option<usize>,
+    scenario_mark: usize,
 }
 
 impl<'a> SdcardScenarioRuntime<'a> {
@@ -30,12 +33,14 @@ impl<'a> SdcardScenarioRuntime<'a> {
         vars: HashMap<String, String>,
         sdwait_timeout_ms: u32,
     ) -> Self {
+        let scenario_mark = console.mark();
         Self {
             logger,
             console,
             vars,
             sdwait_timeout_ms,
             burst_mark: None,
+            scenario_mark,
         }
     }
 
@@ -91,6 +96,64 @@ impl<'a> SdcardScenarioRuntime<'a> {
             &expected_pattern,
             Duration::from_millis(timeout_ms as u64),
         )
+    }
+
+    fn invoke_wait_pattern(&mut self, args: &Value) -> Result<()> {
+        let name = self.resolve(required_arg_str(args, "name", "wait_pattern")?)?;
+        let expected_pattern = Regex::new(&self.resolve(required_arg_str(
+            args,
+            "expected_pattern",
+            "wait_pattern",
+        )?)?)?;
+        let timeout_ms = optional_arg_u32(args, "timeout_ms").unwrap_or(20_000);
+        wait_for_pattern(
+            self.logger,
+            self.console,
+            &name,
+            &expected_pattern,
+            Duration::from_millis(timeout_ms as u64),
+        )
+    }
+
+    fn invoke_poll_command_pattern(&mut self, args: &Value) -> Result<()> {
+        let name = self.resolve(required_arg_str(args, "name", "poll_command_pattern")?)?;
+        let command = self.resolve(required_arg_str(args, "command", "poll_command_pattern")?)?;
+        let response_pattern = Regex::new(&self.resolve(required_arg_str(
+            args,
+            "response_pattern",
+            "poll_command_pattern",
+        )?)?)?;
+        let expected_pattern = Regex::new(&self.resolve(required_arg_str(
+            args,
+            "expected_pattern",
+            "poll_command_pattern",
+        )?)?)?;
+        let timeout_ms = optional_arg_u32(args, "timeout_ms").unwrap_or(20_000);
+        let interval_ms = optional_arg_u32(args, "interval_ms").unwrap_or(100);
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
+        let mut last_response = None;
+
+        while Instant::now() < deadline {
+            let mark = self.console.mark();
+            self.console.send_line(&command)?;
+            if let Some(line) = self.console.wait_for_regex_since(
+                mark,
+                &response_pattern,
+                Duration::from_secs(1),
+            )? {
+                if expected_pattern.is_match(&line) {
+                    self.logger.info(format!("[PASS] {name}"));
+                    return Ok(());
+                }
+                last_response = Some(line);
+            }
+            thread::sleep(Duration::from_millis(interval_ms as u64));
+        }
+
+        Err(anyhow!(
+            "[FAIL] {name}: state did not converge; last response: {}",
+            last_response.unwrap_or_else(|| "<none>".to_string())
+        ))
     }
 
     fn invoke_burst_batch_start(&mut self, args: &Value) -> Result<()> {
@@ -185,15 +248,33 @@ impl<'a> SdcardScenarioRuntime<'a> {
         self.burst_mark = None;
         Ok(())
     }
+
+    fn invoke_repeat_step(&mut self, args: &Value) -> Result<()> {
+        let repetitions = optional_arg_u32(args, "repetitions").unwrap_or(1);
+        let step = args
+            .get("step")
+            .ok_or_else(|| anyhow!("repeat_step requires object argument 'step'"))?;
+        for iteration in 1..=repetitions {
+            self.vars
+                .insert("iteration".to_string(), iteration.to_string());
+            self.invoke_run_step(step)?;
+        }
+        self.vars.remove("iteration");
+        Ok(())
+    }
 }
 
 impl WorkflowRuntime for SdcardScenarioRuntime<'_> {
     fn invoke(&mut self, action: &str, args: &Value, _context: &mut Value) -> Result<()> {
         match action {
             "run_step" => self.invoke_run_step(args),
+            "wait_pattern" => self.invoke_wait_pattern(args),
+            "poll_command_pattern" => self.invoke_poll_command_pattern(args),
             "raw_expect_pattern" => self.invoke_raw_expect_pattern(args),
             "burst_batch_start" => self.invoke_burst_batch_start(args),
             "burst_batch_assert" => self.invoke_burst_batch_assert(args),
+            "repeat_step" => self.invoke_repeat_step(args),
+            "cutover_summary" => self.invoke_cutover_summary(args),
             "complete" => Ok(()),
             other => Err(anyhow!("unsupported sdcard workflow action: {other}")),
         }

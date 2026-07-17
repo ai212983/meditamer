@@ -1,5 +1,5 @@
 #[cfg(feature = "psram-alloc")]
-pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> AllocatorStatus {
+pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> AllocatorStatus {
     if matches!(current_allocator_state(), AllocatorState::Initialized) {
         return allocator_status();
     }
@@ -8,13 +8,14 @@ pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> Allocat
     // cannot allocate from external PSRAM.
     esp_alloc::heap_allocator!(size: INTERNAL_HEAP_BYTES);
 
-    let (_start, size) = esp_hal::psram::psram_raw_parts(psram);
+    let psram = esp_hal::psram::Psram::new(psram, Default::default());
+    let (_start, size) = psram.raw_parts();
     if size == 0 {
         update_allocator_state(AllocatorState::InitFailed);
         return allocator_status();
     }
 
-    esp_alloc::psram_allocator!(psram, esp_hal::psram);
+    esp_alloc::psram_allocator!(&psram);
     PEAK_USED_BYTES.store(0, Ordering::Relaxed);
     LAST_LOGGED_PEAK_USED_BYTES.store(0, Ordering::Relaxed);
     MIN_FREE_BYTES.store(usize::MAX, Ordering::Relaxed);

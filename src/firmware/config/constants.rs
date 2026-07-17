@@ -1,3 +1,4 @@
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 use super::super::graphics::suminagashi::{
     DitherMode as SuminagashiDitherMode, RenderMode as SuminagashiRenderMode, RgssMode,
 };
@@ -20,24 +21,37 @@ pub(crate) const RENDER_TIME_FONT: FontRenderer =
 pub(crate) const BATTERY_FONT: FontRenderer = FontRenderer::new::<fonts::u8g2_font_helvB12_tf>();
 pub(crate) const BATTERY_TEXT_Y: i32 = 44;
 pub(crate) const BATTERY_TEXT_RIGHT_X: i32 = SCREEN_WIDTH - 16;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_RGSS_MODE: RgssMode = RgssMode::X4;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_CHUNK_ROWS: i32 = 8;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_USE_GRAY4: bool = false;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const VISUAL_DEFAULT_SEED: u32 = 12_345;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_DITHER_MODE: SuminagashiDitherMode =
     SuminagashiDitherMode::BlueNoise600;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_RENDER_MODE: SuminagashiRenderMode = if SUMINAGASHI_USE_GRAY4 {
     SuminagashiRenderMode::Gray4
 } else {
     SuminagashiRenderMode::Mono1
 };
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_ENABLE_SUN: bool = false;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_SUN_ONLY: bool = false;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUMINAGASHI_BG_ALPHA_50_THRESHOLD: u8 = 128;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUN_TARGET_DIAMETER_PX: i32 = 75;
 pub(crate) const SUN_FORCE_CENTER: bool = true;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUN_RENDER_TIME_Y_OFFSET: i32 = 22;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUNRISE_SECONDS_OF_DAY: i64 = 6 * 3_600;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) const SUNSET_SECONDS_OF_DAY: i64 = 18 * 3_600;
 pub(crate) const FACE_NORMAL_MIN_ABS_AXIS: i32 = 5_500;
 pub(crate) const FACE_NORMAL_MIN_GAP: i32 = 1_200;
@@ -49,15 +63,11 @@ pub(crate) const APP_STATE_STORE_MAGIC: u32 = 0x4150_5053;
 pub(crate) const APP_STATE_STORE_VERSION: u8 = 1;
 pub(crate) const APP_STATE_STORE_RECORD_LEN: usize = 16;
 pub(crate) const UI_TICK_MS: u64 = 50;
-pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
 pub(crate) const BACKLIGHT_MAX_BRIGHTNESS: u8 = 63;
 pub(crate) const BACKLIGHT_HOLD_MS: u64 = 3_000;
 pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
 // State transitions may trigger service teardown/allocation paths that can exceed
 // short UART command deadlines on real hardware.
 pub(crate) const APP_STATE_APPLY_ACK_TIMEOUT_MS: u64 = 6_000;
-pub(crate) const TAP_TRACE_ENABLED: bool = false;
-pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
-pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;

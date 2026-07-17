@@ -7,7 +7,8 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 - Board: Inkplate 4 TEMPERA (ESP32)
 - MCU module: ESP32-WROVER-E ([CNX Software, 2023-10-04](https://www.cnx-software.com/2023/10/04/inkplate-4-tempera-epaper-display-supports-esphome-arduino-and-micropython/))
 - Port: hostctl wrappers use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
-- Firmware: current `debug` build from `scripts/device/flash.sh debug`
+- Firmware: current `debug` build from `scripts/device/flash.sh debug` (wrapper over `hostctl flash-capture`)
+- Boot-capture artifacts: `logs/.../flash.log`, `capture.log`, `summary.txt` from the most recent flash-capture run
 
 ## 1. Reset-Cycle Soak (Automated)
 
@@ -60,6 +61,7 @@ Suite selection:
 HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=baseline scripts/tests/hw/test_sdcard_hw.sh
 HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/tests/hw/test_sdcard_hw.sh
 HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/tests/hw/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=no-card scripts/tests/hw/test_sdcard_hw.sh
 ```
 
 ## 2B. Wi-Fi/Upload Regression Gate (Automated)
@@ -97,6 +99,74 @@ If panic is detected:
 - preserve panic excerpt artifact
 - run troubleshoot workflow once
 - attach troubleshoot output with regression report
+
+## 2C. DMA SD/FAT Gate
+
+DMA is the sole SD backend. Build both profiles without changing the established 36 MHz data-clock
+default:
+
+```bash
+scripts/build/build.sh debug
+scripts/build/build.sh release
+```
+
+The physical devices have different storage capabilities, so they have different mandatory lanes:
+
+| Device | SD card | Debug and release acceptance |
+| --- | --- | --- |
+| Device 1 | Present | Full `cutover` suite plus Wi-Fi/upload 1-, 3-, and 10-cycle gates |
+| Device 2 | Absent | `no-card` suite plus runtime-mode, display/IMU/touch/shared-I2C, and Wi-Fi discovery gates |
+
+For Device 1, flash each profile with `scripts/device/flash.sh`, enable `TELEMSET SD ON`, and send
+`TOUCHSCHEDRESET` immediately before the workload. Run 20 probes, the complete SD suite, expected
+failures, burst regression, 20 nested-directory writes, and the Wi-Fi/upload 1-, 3-, and 10-cycle
+gates. Preserve both `stack_diag` and `touch_core_stack_diag` minima in the summary.
+
+For Device 2, run `HOSTCTL_SDCARD_SUITE=no-card`. It must complete 20 absent-card probes with
+`status=error code=init_failed` after bounded `NoResponse` initialization attempts, then pass the
+same stack, internal-memory, touch-scheduling, panic, reset, and true-timeout checks. Also run
+`HOSTCTL_MODE_SMOKE_SUITE=no-storage scripts/device/runtime_modes_smoke.sh` and Wi-Fi discovery.
+Device 2's lane does not count as SD/FAT correctness or upload-throughput evidence.
+
+Pass criteria:
+
+- `loop_gap_max_ms <= 8` and `active_gap_max_ms <= 16`;
+- minimum stack headroom is 8 KiB, with 12 KiB as the target;
+- minimum dedicated touch-core stack headroom is 1 KiB;
+- internal free memory is at least 16 KiB;
+- normal uploads retain `cmd25_fallback_bursts=0`;
+- no panic, reset, timeout, stale test directory, or incomplete upload session;
+- median upload throughput is no more than 10% below the latest valid baseline.
+
+Device-1 final evidence on 2026-07-17 passes debug and release. Debug recorded 28,408-byte main
+and 3,332-byte touch-core stack minima; release recorded 24,712 and 3,220 bytes. Ten-cycle upload
+averages were 138.03 KiB/s debug and 190.41 KiB/s release, with 4 ms and 3 ms touch loop maxima.
+Device-2 debug and release no-card/runtime lanes remain required before promotion. Promotion
+requires Device 1's full storage lanes and Device 2's capability-appropriate lanes; an absent card
+on Device 2 is a recorded hardware limitation, not an SD test pass.
+
+## 2D. Adaptive IMU Acquisition
+
+Build and flash the default `odr=416`, `idle=20`, `active=125` configuration, then issue `METRICS` before and after each scenario.
+
+Scenarios:
+
+1. Leave the device still until the scheduler demotes to idle.
+2. Perform intended tap sequences on each tested enclosure side.
+3. Perform touch-only swipes, placement motion, and large swings without taps.
+4. Trigger full and partial display refreshes while collecting metrics.
+5. Enter and leave upload mode.
+
+Pass criteria:
+
+- the first tap promotes acquisition and the scheduler later demotes after the configured hold;
+- `IMU_SCHED active_n` advances independently during display refresh;
+- touch contact increments `touch_skip` without I2C faults or worse touch scheduling;
+- upload mode increments `upload_skip` and resume records a discontinuity;
+- intended tap actions and face-down toggles occur once, with no stale action after upload;
+- transient I2C failure enters retry and recovers without reboot.
+
+Repeat the cadence check with `40/80` and `100/125` configurations before changing defaults.
 
 ## 3. Cold Boot Cycles (Manual)
 

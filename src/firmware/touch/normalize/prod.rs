@@ -40,6 +40,9 @@ pub(crate) struct TouchPresenceNormalizer {
     last_motion_dx: i32,
     last_motion_dy: i32,
     pending_outlier: Option<NormalizedTouchPoint>,
+    last_report_decoded: bool,
+    last_report_raw_present: bool,
+    current_count: u8,
 }
 
 impl Default for TouchPresenceNormalizer {
@@ -60,6 +63,9 @@ impl TouchPresenceNormalizer {
             last_motion_dx: 0,
             last_motion_dy: 0,
             pending_outlier: None,
+            last_report_decoded: false,
+            last_report_raw_present: false,
+            current_count: 0,
         }
     }
 
@@ -75,6 +81,8 @@ impl TouchPresenceNormalizer {
         let decoded_present =
             sample.touch_count > 0 && sample_has_decoded_coordinate(sample.points);
         let raw_present = sample.raw[7].count_ones() > 0;
+        self.last_report_decoded = decoded_present;
+        self.last_report_raw_present = raw_present;
         let recent_decoded_short = self
             .last_decoded_present_ms
             .is_some_and(|t_ms| now_ms.saturating_sub(t_ms) <= TOUCH_DECODED_GRACE_MS);
@@ -120,11 +128,37 @@ impl TouchPresenceNormalizer {
         } else {
             0
         };
+        self.current_count = normalized_count;
 
         (
             normalized_count,
             if normalized_present { primary } else { None },
         )
+    }
+
+    pub(crate) fn advance(&mut self, now_ms: u64) -> (u8, Option<NormalizedTouchPoint>) {
+        if self.last_report_decoded {
+            return (self.current_count.max(1), self.last_primary);
+        }
+        let recent_short = self
+            .last_decoded_present_ms
+            .is_some_and(|t_ms| now_ms.saturating_sub(t_ms) <= TOUCH_DECODED_GRACE_MS);
+        let recent_long = self
+            .last_decoded_present_ms
+            .is_some_and(|t_ms| now_ms.saturating_sub(t_ms) <= TOUCH_RAW_ASSIST_GRACE_MS);
+        if recent_short || (self.last_report_raw_present && recent_long) {
+            return (self.current_count.max(1), self.last_primary);
+        }
+        self.last_primary = None;
+        self.last_decoded_present_ms = None;
+        self.recent_primary_len = 0;
+        self.last_filtered_primary = None;
+        self.last_filtered_ms = None;
+        self.last_motion_dx = 0;
+        self.last_motion_dy = 0;
+        self.pending_outlier = None;
+        self.current_count = 0;
+        (0, None)
     }
 
     fn filter_primary(&mut self, now_ms: u64, point: NormalizedTouchPoint) -> NormalizedTouchPoint {

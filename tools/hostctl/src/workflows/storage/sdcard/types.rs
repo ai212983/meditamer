@@ -6,6 +6,8 @@ pub enum SdcardSuite {
     Baseline,
     Burst,
     Failures,
+    Cutover,
+    NoCard,
 }
 
 pub(super) fn suite_name(suite: &SdcardSuite) -> &'static str {
@@ -14,6 +16,8 @@ pub(super) fn suite_name(suite: &SdcardSuite) -> &'static str {
         SdcardSuite::Baseline => "baseline",
         SdcardSuite::Burst => "burst",
         SdcardSuite::Failures => "failures",
+        SdcardSuite::Cutover => "cutover",
+        SdcardSuite::NoCard => "no-card",
     }
 }
 

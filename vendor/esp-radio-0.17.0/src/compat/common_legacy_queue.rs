@@ -22,6 +22,14 @@ pub(crate) struct CommonLegacyQueueDiag {
     pub send_isr_count: u32,
     pub recv_isr_count: u32,
     pub last_queue_ptr: usize,
+    pub recent_send_ordinals: [u32; 8],
+    pub recent_send_item_word0: [u32; 8],
+    pub recent_send_item_pointee_word0: [u32; 8],
+    pub recent_send_item_pointee_word1: [u32; 8],
+    pub recent_recv_ordinals: [u32; 8],
+    pub recent_recv_item_word0: [u32; 8],
+    pub recent_recv_item_pointee_word0: [u32; 8],
+    pub recent_recv_item_pointee_word1: [u32; 8],
 }
 
 static COMMON_LEGACY_QUEUE_SEND_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -30,6 +38,66 @@ static COMMON_LEGACY_QUEUE_RECV_COUNT: AtomicU32 = AtomicU32::new(0);
 static COMMON_LEGACY_QUEUE_SEND_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
 static COMMON_LEGACY_QUEUE_RECV_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
 static COMMON_LEGACY_QUEUE_LAST_PTR: AtomicUsize = AtomicUsize::new(0);
+static COMMON_LEGACY_QUEUE_SEND_RECENT_ORDINALS: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_WORD0: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_RECV_RECENT_ORDINALS: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_WORD0: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD0: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+static COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD1: [AtomicU32; 8] =
+    [const { AtomicU32::new(0) }; 8];
+
+fn record_recent_queue_item(
+    ordinals: &[AtomicU32; 8],
+    item_word0s: &[AtomicU32; 8],
+    pointee_word0s: &[AtomicU32; 8],
+    pointee_word1s: &[AtomicU32; 8],
+    ordinal: u32,
+    item: *const c_void,
+    item_size: usize,
+) {
+    let slot = (ordinal as usize).wrapping_sub(1) % ordinals.len();
+    let (item_word0, item_word1) = if item.is_null() || item_size == 0 {
+        (0, 0)
+    } else {
+        let bytes = unsafe { core::slice::from_raw_parts(item.cast::<u8>(), item_size) };
+        let word0 = if item_size >= 4 {
+            u32::from_le_bytes(bytes[..4].try_into().unwrap())
+        } else {
+            0
+        };
+        let word1 = if item_size >= 8 {
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap())
+        } else {
+            0
+        };
+        (word0, word1)
+    };
+    let pointee_addr = item_word1 as usize;
+    let pointee_is_plausible = item_word1 != 0 && (0x3ff0_0000..0x4000_0000).contains(&pointee_addr);
+    let pointee = pointee_addr as *const u32;
+    let pointee_word0 = if !pointee_is_plausible || pointee.is_null() {
+        0
+    } else {
+        unsafe { pointee.read_unaligned() }
+    };
+    let pointee_word1 = if !pointee_is_plausible || pointee.is_null() {
+        0
+    } else {
+        unsafe { pointee.add(1).read_unaligned() }
+    };
+
+    item_word0s[slot].store(item_word0, Ordering::Relaxed);
+    pointee_word0s[slot].store(pointee_word0, Ordering::Relaxed);
+    pointee_word1s[slot].store(pointee_word1, Ordering::Relaxed);
+    ordinals[slot].store(ordinal, Ordering::Relaxed);
+}
 
 struct Locked<T> {
     inner: UnsafeCell<T>,
@@ -205,8 +273,17 @@ pub(crate) fn delete_queue(queue: *mut ConcurrentQueue) {
 }
 
 pub(crate) fn send_queued(queue: *mut ConcurrentQueue, item: *mut c_void, block_time_tick: u32) -> i32 {
-    COMMON_LEGACY_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = COMMON_LEGACY_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     COMMON_LEGACY_QUEUE_LAST_PTR.store(queue as usize, Ordering::Relaxed);
+    record_recent_queue_item(
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ORDINALS,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+        ordinal,
+        item,
+        unsafe { (*queue).raw_queue.with(|q| q.item_size) },
+    );
     let forever = block_time_tick == OSI_FUNCS_TIME_BLOCKING;
     let timeout = block_time_tick as u64;
     let start = time::systimer_count();
@@ -228,8 +305,17 @@ pub(crate) fn send_queued_front(
     item: *mut c_void,
     block_time_tick: u32,
 ) -> i32 {
-    COMMON_LEGACY_QUEUE_SEND_FRONT_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = COMMON_LEGACY_QUEUE_SEND_FRONT_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     COMMON_LEGACY_QUEUE_LAST_PTR.store(queue as usize, Ordering::Relaxed);
+    record_recent_queue_item(
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ORDINALS,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+        ordinal,
+        item,
+        unsafe { (*queue).raw_queue.with(|q| q.item_size) },
+    );
     let forever = block_time_tick == OSI_FUNCS_TIME_BLOCKING;
     let timeout = block_time_tick as u64;
     let start = time::systimer_count();
@@ -247,7 +333,7 @@ pub(crate) fn send_queued_front(
 }
 
 pub(crate) fn receive_queued(queue: *mut ConcurrentQueue, item: *mut c_void, block_time_tick: u32) -> i32 {
-    COMMON_LEGACY_QUEUE_RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = COMMON_LEGACY_QUEUE_RECV_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     COMMON_LEGACY_QUEUE_LAST_PTR.store(queue as usize, Ordering::Relaxed);
     let forever = block_time_tick == OSI_FUNCS_TIME_BLOCKING;
     let timeout = block_time_tick as u64;
@@ -255,6 +341,15 @@ pub(crate) fn receive_queued(queue: *mut ConcurrentQueue, item: *mut c_void, blo
 
     loop {
         if unsafe { (*queue).try_dequeue(item) } {
+            record_recent_queue_item(
+                &COMMON_LEGACY_QUEUE_RECV_RECENT_ORDINALS,
+                &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_WORD0,
+                &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD0,
+                &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD1,
+                ordinal,
+                item,
+                unsafe { (*queue).raw_queue.with(|q| q.item_size) },
+            );
             return 1;
         }
         if !forever && time::elapsed_time_since(start) > timeout {
@@ -273,8 +368,17 @@ pub(crate) fn try_send_queued_from_isr(
     item: *mut c_void,
     higher_priority_task_waken: *mut bool,
 ) -> i32 {
-    COMMON_LEGACY_QUEUE_SEND_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = COMMON_LEGACY_QUEUE_SEND_ISR_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     COMMON_LEGACY_QUEUE_LAST_PTR.store(queue as usize, Ordering::Relaxed);
+    record_recent_queue_item(
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ORDINALS,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
+        &COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+        ordinal,
+        item,
+        unsafe { (*queue).raw_queue.with(|q| q.item_size) },
+    );
     let sent = unsafe { (*queue).enqueue(item) };
     if sent == 1 {
         unsafe {
@@ -291,10 +395,19 @@ pub(crate) fn try_receive_queued_from_isr(
     item: *mut c_void,
     higher_priority_task_waken: *mut bool,
 ) -> i32 {
-    COMMON_LEGACY_QUEUE_RECV_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = COMMON_LEGACY_QUEUE_RECV_ISR_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
     COMMON_LEGACY_QUEUE_LAST_PTR.store(queue as usize, Ordering::Relaxed);
     let received = unsafe { (*queue).try_dequeue(item) };
     if received {
+        record_recent_queue_item(
+            &COMMON_LEGACY_QUEUE_RECV_RECENT_ORDINALS,
+            &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_WORD0,
+            &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD0,
+            &COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD1,
+            ordinal,
+            item,
+            unsafe { (*queue).raw_queue.with(|q| q.item_size) },
+        );
         unsafe {
             if let Some(waken) = higher_priority_task_waken.as_mut() {
                 *waken = true;
@@ -319,5 +432,29 @@ pub(crate) fn common_legacy_queue_diag() -> CommonLegacyQueueDiag {
         send_isr_count: COMMON_LEGACY_QUEUE_SEND_ISR_COUNT.load(Ordering::Relaxed),
         recv_isr_count: COMMON_LEGACY_QUEUE_RECV_ISR_COUNT.load(Ordering::Relaxed),
         last_queue_ptr: COMMON_LEGACY_QUEUE_LAST_PTR.load(Ordering::Relaxed),
+        recent_send_ordinals: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_SEND_RECENT_ORDINALS[idx].load(Ordering::Relaxed)
+        }),
+        recent_send_item_word0: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_WORD0[idx].load(Ordering::Relaxed)
+        }),
+        recent_send_item_pointee_word0: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0[idx].load(Ordering::Relaxed)
+        }),
+        recent_send_item_pointee_word1: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1[idx].load(Ordering::Relaxed)
+        }),
+        recent_recv_ordinals: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_RECV_RECENT_ORDINALS[idx].load(Ordering::Relaxed)
+        }),
+        recent_recv_item_word0: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_WORD0[idx].load(Ordering::Relaxed)
+        }),
+        recent_recv_item_pointee_word0: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD0[idx].load(Ordering::Relaxed)
+        }),
+        recent_recv_item_pointee_word1: core::array::from_fn(|idx| {
+            COMMON_LEGACY_QUEUE_RECV_RECENT_ITEM_POINTEE_WORD1[idx].load(Ordering::Relaxed)
+        }),
     }
 }

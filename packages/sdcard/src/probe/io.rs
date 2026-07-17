@@ -1,16 +1,19 @@
-impl<'d> SdCardProbe<'d> {
+impl<'d, SPI> SdCardProbe<'d, SPI>
+where
+    SPI: SdSpiBus,
+{
     pub async fn read_sector(
         &mut self,
         lba: u32,
         out: &mut [u8; SD_SECTOR_SIZE],
     ) -> Result<(), SdProbeError> {
         if self.cached_sector_lba == Some(lba) {
-            out.copy_from_slice(&self.cached_sector);
+            out.copy_from_slice(&self.cached_sector[..SD_SECTOR_SIZE]);
             return Ok(());
         }
         let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
         self.read_data_sector_512_into(lba, high_capacity, out).await?;
-        self.cached_sector.copy_from_slice(out);
+        self.cached_sector[..SD_SECTOR_SIZE].copy_from_slice(out);
         self.cached_sector_lba = Some(lba);
         Ok(())
     }
@@ -35,26 +38,20 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::Cmd24Unexpected(cmd24_r1));
         }
 
-        let _ = self.transfer_byte(0xFF).await?;
-        let _ = self.transfer_byte(0xFE).await?;
-        self.spi.write(data)?;
-        // Data CRC16 is ignored in SPI mode unless CRC is explicitly enabled.
-        let _ = self.transfer_byte(0xFF).await?;
-        let _ = self.transfer_byte(0xFF).await?;
-
-        let response = self.transfer_byte(0xFF).await? & 0x1F;
+        let (response, ready) = self.transfer_write_frame(0xFE, data).await?;
         if response != 0x05 {
             self.end_transaction().await;
             return Err(SdProbeError::WriteDataRejected(response));
         }
-
-        let released = self.wait_write_ready().await?;
         self.end_transaction().await;
-        if !released {
-            return Err(SdProbeError::WriteBusyTimeout);
+        if !ready.released {
+            return Err(SdProbeError::WriteBusyTimeout {
+                elapsed_ms: ready.elapsed_ms,
+                polls: ready.polls,
+            });
         }
         self.record_cmd24_sector_write();
-        self.cached_sector.copy_from_slice(data);
+        self.cached_sector[..SD_SECTOR_SIZE].copy_from_slice(data);
         self.cached_sector_lba = Some(lba);
         Ok(())
     }
@@ -99,7 +96,9 @@ impl<'d> SdCardProbe<'d> {
         ];
 
         self.cs.set_low();
-        self.spi.transfer_in_place(&mut frame)?;
+        self.spi
+            .transfer_in_place_with_deadline(&mut frame)
+            .await?;
 
         let mut r1 = 0xFFu8;
         let mut got_response = false;
@@ -109,6 +108,7 @@ impl<'d> SdCardProbe<'d> {
                 got_response = true;
                 break;
             }
+            embassy_futures::yield_now().await;
         }
 
         if !got_response {
@@ -118,7 +118,9 @@ impl<'d> SdCardProbe<'d> {
 
         if !extra_response.is_empty() {
             extra_response.fill(0xFF);
-            self.spi.transfer_in_place(extra_response)?;
+            self.spi
+                .transfer_in_place_with_deadline(extra_response)
+                .await?;
         }
 
         if release_cs_after {
@@ -133,7 +135,9 @@ impl<'d> SdCardProbe<'d> {
         let mut remaining = bytes;
         while remaining > 0 {
             let chunk = remaining.min(DUMMY_CLOCK_CHUNK);
-            self.spi.transfer_in_place(&mut frame[..chunk])?;
+            self.spi
+                .transfer_in_place_with_deadline(&mut frame[..chunk])
+                .await?;
             remaining -= chunk;
         }
         Ok(())
@@ -141,29 +145,29 @@ impl<'d> SdCardProbe<'d> {
 
     async fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
         let mut frame = [byte];
-        self.spi.transfer_in_place(&mut frame)?;
+        self.spi
+            .transfer_in_place_with_deadline(&mut frame)
+            .await?;
         Ok(frame[0])
     }
 
     async fn read_data_block(&mut self) -> Result<[u8; 16], SdProbeError> {
-        let mut token = 0xFFu8;
-        let mut got_token = false;
-        for _ in 0..50_000 {
-            token = self.transfer_byte(0xFF).await?;
-            if token != 0xFF {
-                got_token = true;
-                break;
+        let token = match self.wait_data_token(SD_CMD9).await {
+            Ok(token) => token,
+            Err(err) => {
+                self.end_transaction().await;
+                return Err(err);
             }
-        }
-        if !got_token {
-            return Err(SdProbeError::DataTokenTimeout(SD_CMD9));
-        }
+        };
         if token != 0xFE {
+            self.end_transaction().await;
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD9, token));
         }
 
         let mut block = [0xFFu8; 16];
-        self.spi.transfer_in_place(&mut block)?;
+        self.spi
+            .transfer_in_place_with_deadline(&mut block)
+            .await?;
         // Read and discard CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
@@ -189,26 +193,20 @@ impl<'d> SdCardProbe<'d> {
             return Err(SdProbeError::Cmd17Unexpected(cmd17_r1));
         }
 
-        let mut token = 0xFFu8;
-        let mut got_token = false;
-        for _ in 0..50_000 {
-            token = self.transfer_byte(0xFF).await?;
-            if token != 0xFF {
-                got_token = true;
-                break;
+        let token = match self.wait_data_token(SD_CMD17).await {
+            Ok(token) => token,
+            Err(err) => {
+                self.end_transaction().await;
+                return Err(err);
             }
-        }
-        if !got_token {
-            self.end_transaction().await;
-            return Err(SdProbeError::DataTokenTimeout(SD_CMD17));
-        }
+        };
         if token != 0xFE {
             self.end_transaction().await;
             return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
         }
 
         out.fill(0xFF);
-        self.spi.transfer_in_place(out)?;
+        self.spi.transfer_in_place_with_deadline(out).await?;
         // Discard data CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;

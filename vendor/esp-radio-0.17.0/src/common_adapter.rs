@@ -33,20 +33,15 @@ fn wifi_use_legacy_esp_timer_get_time_diag_enabled() -> bool {
 }
 
 fn wifi_use_legacy_queue_send_from_isr_diag_enabled() -> bool {
-    matches!(
-        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_QUEUE_SEND_FROM_ISR_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    crate::compat::legacy_runtime_policy::legacy_queue_send_from_isr_enabled()
 }
 
 fn wifi_use_legacy_semaphore_from_isr_diag_enabled() -> bool {
-    matches!(
-        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_SEMAPHORE_FROM_ISR_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("ESP_RADIO_USE_LEGACY_SEMAPHORE_FROM_ISR_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    crate::compat::legacy_runtime_policy::legacy_semaphore_from_isr_enabled()
+}
+
+fn wifi_use_legacy_common_adapter_enabled() -> bool {
+    crate::compat::legacy_runtime_policy::backend_legacy_port_enabled()
 }
 
 #[cfg(feature = "wifi")]
@@ -67,6 +62,14 @@ unsafe extern "C" {
     fn __esp_rtos_diag_timer_callback_current_ptr() -> usize;
     fn __esp_rtos_diag_timer_callback_current_arg_ptr() -> usize;
     fn __esp_rtos_diag_current_task_ptr_or_zero() -> usize;
+    fn wifi_scan_start_process();
+    fn wifi_get_ap_list_process();
+    fn wifi_clear_ap_list_process();
+    fn wifi_set_promis_process();
+    fn wifi_set_rxcb_process();
+    fn wifi_register_mgmt_frame();
+    fn wifi_set_country();
+    fn wifi_set_ps_process();
 }
 
 #[cfg(feature = "wifi")]
@@ -76,6 +79,7 @@ pub struct WifiOsDiagSnapshot {
     pub sem_take_isr: u32,
     pub sem_give: u32,
     pub sem_give_isr: u32,
+    pub task_yield_from_isr: u32,
     pub queue_send: u32,
     pub queue_send_first_task_ptr: usize,
     pub queue_send_last_task_ptr: usize,
@@ -95,6 +99,7 @@ pub struct WifiOsDiagSnapshot {
     pub queue_send_recent_item_word0: [u32; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_recent_item_pointee_word0: [u32; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_recent_item_pointee_word1: [u32; WIFI_OS_QUEUE_SAMPLE_CAP],
+    pub queue_send_recent_caller_ptr: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_recent_timer_callback_ptr: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_recent_timer_arg_ptr: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
     pub queue_send_last_item_size: usize,
@@ -102,8 +107,17 @@ pub struct WifiOsDiagSnapshot {
     pub queue_send_last_item_word1: u32,
     pub queue_send_last_item_pointee_word0: u32,
     pub queue_send_last_item_pointee_word1: u32,
+    pub queue_send_last_caller_ptr: usize,
     pub queue_send_last_timer_callback_ptr: usize,
     pub queue_send_last_timer_arg_ptr: usize,
+    pub queue_send_scan_start_process_count: u32,
+    pub queue_send_get_ap_list_process_count: u32,
+    pub queue_send_clear_ap_list_process_count: u32,
+    pub queue_send_set_promis_process_count: u32,
+    pub queue_send_set_rxcb_process_count: u32,
+    pub queue_send_register_mgmt_frame_process_count: u32,
+    pub queue_send_set_country_process_count: u32,
+    pub queue_send_set_ps_process_count: u32,
     pub queue_recv: u32,
     pub queue_recv_first_task_ptr: usize,
     pub queue_recv_last_task_ptr: usize,
@@ -127,7 +141,18 @@ pub struct WifiOsDiagSnapshot {
     pub queue_recv_last_item_pointee_word0: u32,
     pub queue_recv_last_item_pointee_word1: u32,
     pub queue_recv_last_caller_ptr: usize,
+    pub queue_recv_scan_start_process_count: u32,
+    pub queue_recv_get_ap_list_process_count: u32,
+    pub queue_recv_clear_ap_list_process_count: u32,
+    pub queue_recv_set_promis_process_count: u32,
+    pub queue_recv_set_rxcb_process_count: u32,
+    pub queue_recv_register_mgmt_frame_process_count: u32,
+    pub queue_recv_set_country_process_count: u32,
+    pub queue_recv_set_ps_process_count: u32,
     pub event_post: u32,
+    pub wifi_log_callback_count: u32,
+    pub wifi_log_recent_ordinals: [u32; WIFI_OS_QUEUE_SAMPLE_CAP],
+    pub wifi_log_recent_caller_ptr: [usize; WIFI_OS_QUEUE_SAMPLE_CAP],
 }
 
 #[cfg(feature = "wifi")]
@@ -138,6 +163,8 @@ static WIFI_OS_SEM_TAKE_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
 static WIFI_OS_SEM_GIVE_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_SEM_GIVE_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_TASK_YIELD_FROM_ISR_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
@@ -190,6 +217,9 @@ static WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0: [AtomicU32; WIFI_OS_QUEUE_S
 static WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1: [AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP] =
     [const { AtomicU32::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
 #[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR: [AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP] =
+    [const { AtomicUsize::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
+#[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR: [AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP] =
     [const { AtomicUsize::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
 #[cfg(feature = "wifi")]
@@ -206,9 +236,27 @@ static WIFI_OS_QUEUE_SEND_LAST_ITEM_POINTEE_WORD0: AtomicU32 = AtomicU32::new(0)
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_LAST_ITEM_POINTEE_WORD1: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_LAST_TIMER_CALLBACK_PTR: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_SEND_LAST_TIMER_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_SCAN_START_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_GET_AP_LIST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_CLEAR_AP_LIST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_SET_PROMIS_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_SET_RXCB_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_REGISTER_MGMT_FRAME_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_SET_COUNTRY_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_SEND_SET_PS_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_RECV_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
@@ -268,13 +316,96 @@ static WIFI_OS_QUEUE_RECV_LAST_ITEM_POINTEE_WORD1: AtomicU32 = AtomicU32::new(0)
 #[cfg(feature = "wifi")]
 static WIFI_OS_QUEUE_RECV_LAST_CALLER_PTR: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_SCAN_START_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_GET_AP_LIST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_CLEAR_AP_LIST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_SET_PROMIS_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_SET_RXCB_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_REGISTER_MGMT_FRAME_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_SET_COUNTRY_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_OS_QUEUE_RECV_SET_PS_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
 static WIFI_OS_EVENT_POST_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "wifi")]
+static WIFI_LOG_RECENT_ORDINALS: [AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP] =
+    [const { AtomicU32::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
+#[cfg(feature = "wifi")]
+static WIFI_LOG_RECENT_CALLER_PTR: [AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP] =
+    [const { AtomicUsize::new(0) }; WIFI_OS_QUEUE_SAMPLE_CAP];
 #[cfg(feature = "wifi")]
 static PHY_COMMON_CLOCK_ENABLE_CALLS: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static PHY_COMMON_CLOCK_DISABLE_CALLS: AtomicU32 = AtomicU32::new(0);
 #[cfg(feature = "wifi")]
 static PHY_COMMON_CLOCK_ENABLE_REF: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "wifi")]
+fn record_queue_process_target(is_send: bool, pointee_word1: u32) {
+    let scan_start = wifi_scan_start_process as usize as u32;
+    let get_ap_list = wifi_get_ap_list_process as usize as u32;
+    let clear_ap_list = wifi_clear_ap_list_process as usize as u32;
+    let set_promis = wifi_set_promis_process as usize as u32;
+    let set_rxcb = wifi_set_rxcb_process as usize as u32;
+    let register_mgmt_frame = wifi_register_mgmt_frame as usize as u32;
+    let set_country = wifi_set_country as usize as u32;
+    let set_ps = wifi_set_ps_process as usize as u32;
+    let (
+        scan_start_count,
+        get_ap_list_count,
+        clear_ap_list_count,
+        set_promis_count,
+        set_rxcb_count,
+        register_mgmt_frame_count,
+        set_country_count,
+        set_ps_count,
+    ) = if is_send {
+        (
+            &WIFI_OS_QUEUE_SEND_SCAN_START_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_GET_AP_LIST_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_CLEAR_AP_LIST_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_SET_PROMIS_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_SET_RXCB_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_REGISTER_MGMT_FRAME_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_SET_COUNTRY_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_SEND_SET_PS_PROCESS_COUNT,
+        )
+    } else {
+        (
+            &WIFI_OS_QUEUE_RECV_SCAN_START_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_GET_AP_LIST_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_CLEAR_AP_LIST_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_SET_PROMIS_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_SET_RXCB_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_REGISTER_MGMT_FRAME_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_SET_COUNTRY_PROCESS_COUNT,
+            &WIFI_OS_QUEUE_RECV_SET_PS_PROCESS_COUNT,
+        )
+    };
+    if pointee_word1 == scan_start {
+        scan_start_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == get_ap_list {
+        get_ap_list_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == clear_ap_list {
+        clear_ap_list_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == set_promis {
+        set_promis_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == set_rxcb {
+        set_rxcb_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == register_mgmt_frame {
+        register_mgmt_frame_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == set_country {
+        set_country_count.fetch_add(1, Ordering::Relaxed);
+    } else if pointee_word1 == set_ps {
+        set_ps_count.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 #[cfg(feature = "wifi")]
 fn phy_common_clock_real_enable() -> bool {
@@ -290,6 +421,7 @@ pub fn wifi_os_diag_reset() {
     WIFI_OS_SEM_TAKE_ISR_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_SEM_GIVE_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_SEM_GIVE_ISR_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_TASK_YIELD_FROM_ISR_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_FIRST_TASK_PTR.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_LAST_TASK_PTR.store(0, Ordering::Relaxed);
@@ -310,6 +442,7 @@ pub fn wifi_os_diag_reset() {
         WIFI_OS_QUEUE_SEND_RECENT_ITEM_WORD0[slot].store(0, Ordering::Relaxed);
         WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0[slot].store(0, Ordering::Relaxed);
         WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1[slot].store(0, Ordering::Relaxed);
+        WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR[slot].store(0, Ordering::Relaxed);
         WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR[slot].store(0, Ordering::Relaxed);
         WIFI_OS_QUEUE_SEND_RECENT_TIMER_ARG_PTR[slot].store(0, Ordering::Relaxed);
     }
@@ -318,8 +451,17 @@ pub fn wifi_os_diag_reset() {
     WIFI_OS_QUEUE_SEND_LAST_ITEM_WORD1.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_LAST_ITEM_POINTEE_WORD0.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_LAST_ITEM_POINTEE_WORD1.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_LAST_TIMER_CALLBACK_PTR.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_SEND_LAST_TIMER_ARG_PTR.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_SCAN_START_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_GET_AP_LIST_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_CLEAR_AP_LIST_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_SET_PROMIS_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_SET_RXCB_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_REGISTER_MGMT_FRAME_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_SET_COUNTRY_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_SEND_SET_PS_PROCESS_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_RECV_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_RECV_FIRST_TASK_PTR.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_RECV_LAST_TASK_PTR.store(0, Ordering::Relaxed);
@@ -345,7 +487,20 @@ pub fn wifi_os_diag_reset() {
     WIFI_OS_QUEUE_RECV_LAST_ITEM_POINTEE_WORD0.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_RECV_LAST_ITEM_POINTEE_WORD1.store(0, Ordering::Relaxed);
     WIFI_OS_QUEUE_RECV_LAST_CALLER_PTR.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_SCAN_START_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_GET_AP_LIST_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_CLEAR_AP_LIST_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_SET_PROMIS_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_SET_RXCB_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_REGISTER_MGMT_FRAME_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_SET_COUNTRY_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    WIFI_OS_QUEUE_RECV_SET_PS_PROCESS_COUNT.store(0, Ordering::Relaxed);
     WIFI_OS_EVENT_POST_COUNT.store(0, Ordering::Relaxed);
+    WIFI_LOG_CALLBACK_COUNT.store(0, Ordering::Relaxed);
+    for slot in 0..WIFI_OS_QUEUE_SAMPLE_CAP {
+        WIFI_LOG_RECENT_ORDINALS[slot].store(0, Ordering::Relaxed);
+        WIFI_LOG_RECENT_CALLER_PTR[slot].store(0, Ordering::Relaxed);
+    }
 }
 
 #[cfg(feature = "wifi")]
@@ -355,6 +510,7 @@ pub fn wifi_os_diag_snapshot() -> WifiOsDiagSnapshot {
         sem_take_isr: WIFI_OS_SEM_TAKE_ISR_COUNT.load(Ordering::Relaxed),
         sem_give: WIFI_OS_SEM_GIVE_COUNT.load(Ordering::Relaxed),
         sem_give_isr: WIFI_OS_SEM_GIVE_ISR_COUNT.load(Ordering::Relaxed),
+        task_yield_from_isr: WIFI_OS_TASK_YIELD_FROM_ISR_COUNT.load(Ordering::Relaxed),
         queue_send: WIFI_OS_QUEUE_SEND_COUNT.load(Ordering::Relaxed),
         queue_send_first_task_ptr: WIFI_OS_QUEUE_SEND_FIRST_TASK_PTR.load(Ordering::Relaxed),
         queue_send_last_task_ptr: WIFI_OS_QUEUE_SEND_LAST_TASK_PTR.load(Ordering::Relaxed),
@@ -401,6 +557,9 @@ pub fn wifi_os_diag_snapshot() -> WifiOsDiagSnapshot {
         queue_send_recent_item_pointee_word1: core::array::from_fn(|idx| {
             WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1[idx].load(Ordering::Relaxed)
         }),
+        queue_send_recent_caller_ptr: core::array::from_fn(|idx| {
+            WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR[idx].load(Ordering::Relaxed)
+        }),
         queue_send_recent_timer_callback_ptr: core::array::from_fn(|idx| {
             WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR[idx].load(Ordering::Relaxed)
         }),
@@ -414,9 +573,26 @@ pub fn wifi_os_diag_snapshot() -> WifiOsDiagSnapshot {
             .load(Ordering::Relaxed),
         queue_send_last_item_pointee_word1: WIFI_OS_QUEUE_SEND_LAST_ITEM_POINTEE_WORD1
             .load(Ordering::Relaxed),
+        queue_send_last_caller_ptr: WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR.load(Ordering::Relaxed),
         queue_send_last_timer_callback_ptr: WIFI_OS_QUEUE_SEND_LAST_TIMER_CALLBACK_PTR
             .load(Ordering::Relaxed),
         queue_send_last_timer_arg_ptr: WIFI_OS_QUEUE_SEND_LAST_TIMER_ARG_PTR
+            .load(Ordering::Relaxed),
+        queue_send_scan_start_process_count: WIFI_OS_QUEUE_SEND_SCAN_START_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_get_ap_list_process_count: WIFI_OS_QUEUE_SEND_GET_AP_LIST_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_clear_ap_list_process_count: WIFI_OS_QUEUE_SEND_CLEAR_AP_LIST_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_set_promis_process_count: WIFI_OS_QUEUE_SEND_SET_PROMIS_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_set_rxcb_process_count: WIFI_OS_QUEUE_SEND_SET_RXCB_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_register_mgmt_frame_process_count:
+            WIFI_OS_QUEUE_SEND_REGISTER_MGMT_FRAME_PROCESS_COUNT.load(Ordering::Relaxed),
+        queue_send_set_country_process_count: WIFI_OS_QUEUE_SEND_SET_COUNTRY_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_send_set_ps_process_count: WIFI_OS_QUEUE_SEND_SET_PS_PROCESS_COUNT
             .load(Ordering::Relaxed),
         queue_recv: WIFI_OS_QUEUE_RECV_COUNT.load(Ordering::Relaxed),
         queue_recv_first_task_ptr: WIFI_OS_QUEUE_RECV_FIRST_TASK_PTR.load(Ordering::Relaxed),
@@ -467,8 +643,36 @@ pub fn wifi_os_diag_snapshot() -> WifiOsDiagSnapshot {
         queue_recv_last_item_pointee_word1: WIFI_OS_QUEUE_RECV_LAST_ITEM_POINTEE_WORD1
             .load(Ordering::Relaxed),
         queue_recv_last_caller_ptr: WIFI_OS_QUEUE_RECV_LAST_CALLER_PTR.load(Ordering::Relaxed),
+        queue_recv_scan_start_process_count: WIFI_OS_QUEUE_RECV_SCAN_START_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_get_ap_list_process_count: WIFI_OS_QUEUE_RECV_GET_AP_LIST_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_clear_ap_list_process_count: WIFI_OS_QUEUE_RECV_CLEAR_AP_LIST_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_set_promis_process_count: WIFI_OS_QUEUE_RECV_SET_PROMIS_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_set_rxcb_process_count: WIFI_OS_QUEUE_RECV_SET_RXCB_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_register_mgmt_frame_process_count:
+            WIFI_OS_QUEUE_RECV_REGISTER_MGMT_FRAME_PROCESS_COUNT.load(Ordering::Relaxed),
+        queue_recv_set_country_process_count: WIFI_OS_QUEUE_RECV_SET_COUNTRY_PROCESS_COUNT
+            .load(Ordering::Relaxed),
+        queue_recv_set_ps_process_count: WIFI_OS_QUEUE_RECV_SET_PS_PROCESS_COUNT
+            .load(Ordering::Relaxed),
         event_post: WIFI_OS_EVENT_POST_COUNT.load(Ordering::Relaxed),
+        wifi_log_callback_count: WIFI_LOG_CALLBACK_COUNT.load(Ordering::Relaxed),
+        wifi_log_recent_ordinals: core::array::from_fn(|idx| {
+            WIFI_LOG_RECENT_ORDINALS[idx].load(Ordering::Relaxed)
+        }),
+        wifi_log_recent_caller_ptr: core::array::from_fn(|idx| {
+            WIFI_LOG_RECENT_CALLER_PTR[idx].load(Ordering::Relaxed)
+        }),
     }
+}
+
+#[cfg(feature = "wifi")]
+pub fn wifi_os_diag_record_task_yield_from_isr() {
+    WIFI_OS_TASK_YIELD_FROM_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
 #[cfg(feature = "wifi")]
@@ -606,6 +810,22 @@ fn current_queue_recv_caller_ptr() -> usize {
 }
 
 #[cfg(feature = "wifi")]
+#[cfg(xtensa)]
+fn current_queue_send_caller_ptr() -> usize {
+    let caller_ptr: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, a0", out(reg) caller_ptr);
+    }
+    caller_ptr
+}
+
+#[cfg(feature = "wifi")]
+#[cfg(not(xtensa))]
+fn current_queue_send_caller_ptr() -> usize {
+    0
+}
+
+#[cfg(feature = "wifi")]
 fn record_queue_send_recent_sample(
     ordinals: &[AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP],
     queues: &[AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP],
@@ -613,6 +833,7 @@ fn record_queue_send_recent_sample(
     item_word0: &[AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP],
     item_pointee_word0: &[AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP],
     item_pointee_word1: &[AtomicU32; WIFI_OS_QUEUE_SAMPLE_CAP],
+    caller_ptr: &[AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP],
     timer_callback_ptr: &[AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP],
     timer_arg_ptr: &[AtomicUsize; WIFI_OS_QUEUE_SAMPLE_CAP],
     ordinal: u32,
@@ -621,6 +842,7 @@ fn record_queue_send_recent_sample(
     last_item_word0: u32,
     last_item_pointee_word0: u32,
     last_item_pointee_word1: u32,
+    last_caller_ptr: usize,
     last_timer_callback_ptr: usize,
     last_timer_arg_ptr: usize,
 ) {
@@ -631,6 +853,7 @@ fn record_queue_send_recent_sample(
     item_word0[idx].store(last_item_word0, Ordering::Relaxed);
     item_pointee_word0[idx].store(last_item_pointee_word0, Ordering::Relaxed);
     item_pointee_word1[idx].store(last_item_pointee_word1, Ordering::Relaxed);
+    caller_ptr[idx].store(last_caller_ptr, Ordering::Relaxed);
     timer_callback_ptr[idx].store(last_timer_callback_ptr, Ordering::Relaxed);
     timer_arg_ptr[idx].store(last_timer_arg_ptr, Ordering::Relaxed);
 }
@@ -781,8 +1004,16 @@ fn record_queue_recv_item_words(queue: *mut c_void, item: *mut c_void) {
 /// *************************************************************************
 #[allow(unused)]
 pub unsafe extern "C" fn semphr_create(max: u32, init: u32) -> *mut c_void {
-    let sem = sem_create(max, init);
+    wifi_init_runtime_trace_raw("semphr_create.before");
+    let sem = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_create(max, init) }
+    } else {
+        sem_create(max, init)
+    };
     wifi_init_runtime_trace("semphr_create");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb semphr_create.after ptr={:p}", sem);
+    }
     trace!("semphr_create - max {} init {}", max, init);
     sem
 }
@@ -803,7 +1034,11 @@ pub unsafe extern "C" fn semphr_create(max: u32, init: u32) -> *mut c_void {
 #[allow(unused)]
 pub unsafe extern "C" fn semphr_delete(semphr: *mut c_void) {
     trace!("semphr_delete {:?}", semphr);
-    sem_delete(semphr);
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_delete(semphr) };
+    } else {
+        sem_delete(semphr);
+    }
 }
 
 /// **************************************************************************
@@ -823,10 +1058,19 @@ pub unsafe extern "C" fn semphr_delete(semphr: *mut c_void) {
 #[ram]
 pub unsafe extern "C" fn semphr_take(semphr: *mut c_void, tick: u32) -> i32 {
     wifi_init_runtime_trace("semphr_take");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb semphr_take ptr={:p} tick={}", semphr, tick);
+    }
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_TAKE_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_take {:?} block_time_tick {}", semphr, tick);
-    sem_take(semphr, blob_ticks_to_micros(tick))
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_take(semphr, tick) }
+    } else if crate::compat::legacy_runtime_policy::legacy_blocking_semaphore_ticks_enabled() {
+        sem_take(semphr, tick)
+    } else {
+        sem_take(semphr, blob_ticks_to_micros(tick))
+    }
 }
 
 #[ram]
@@ -838,10 +1082,10 @@ pub unsafe extern "C" fn semphr_take_from_isr(
     WIFI_OS_SEM_TAKE_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_take_from_isr {:?}", semphr);
     if wifi_use_legacy_semaphore_from_isr_diag_enabled() {
-        if !higher_priority_task_waken.is_null() {
-            unsafe { higher_priority_task_waken.write(false) };
-        }
-        semphr_take(semphr, 0)
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_take_from_isr(
+            semphr,
+            higher_priority_task_waken,
+        ) }
     } else {
         sem_try_take_from_isr(semphr, higher_priority_task_waken)
     }
@@ -863,10 +1107,17 @@ pub unsafe extern "C" fn semphr_take_from_isr(
 #[ram]
 pub unsafe extern "C" fn semphr_give(semphr: *mut c_void) -> i32 {
     wifi_init_runtime_trace("semphr_give");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb semphr_give ptr={:p}", semphr);
+    }
     #[cfg(feature = "wifi")]
     WIFI_OS_SEM_GIVE_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_give {:?}", semphr);
-    sem_give(semphr)
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_give(semphr) }
+    } else {
+        sem_give(semphr)
+    }
 }
 
 #[ram]
@@ -878,10 +1129,10 @@ pub unsafe extern "C" fn semphr_give_from_isr(
     WIFI_OS_SEM_GIVE_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
     trace!(">>>> semphr_give_from_isr {:?}", semphr);
     if wifi_use_legacy_semaphore_from_isr_diag_enabled() {
-        if !higher_priority_task_waken.is_null() {
-            unsafe { higher_priority_task_waken.write(false) };
-        }
-        semphr_give(semphr)
+        unsafe { crate::compat::common_adapter_legacy_backend::semphr_give_from_isr(
+            semphr,
+            higher_priority_task_waken,
+        ) }
     } else {
         sem_try_give_from_isr(semphr, higher_priority_task_waken)
     }
@@ -964,7 +1215,9 @@ pub unsafe extern "C" fn read_mac(mac: *mut u8, type_: u32) -> c_int {
 // other functions
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __esp_radio_puts(s: *const c_char) {
-    WIFI_LOG_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    let ordinal = WIFI_LOG_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    #[cfg(feature = "wifi")]
+    record_wifi_log_recent_sample(ordinal, current_wifi_log_caller_ptr());
     if wifi_log_callback_suppressed() {
         let _ = s;
         return;
@@ -977,6 +1230,29 @@ pub unsafe extern "C" fn __esp_radio_puts(s: *const c_char) {
 
 static WIFI_INIT_CB_TRACE_COUNT: AtomicU32 = AtomicU32::new(0);
 static WIFI_LOG_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(feature = "wifi")]
+#[cfg(xtensa)]
+fn current_wifi_log_caller_ptr() -> usize {
+    let caller_ptr: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, a0", out(reg) caller_ptr);
+    }
+    caller_ptr
+}
+
+#[cfg(feature = "wifi")]
+#[cfg(not(xtensa))]
+fn current_wifi_log_caller_ptr() -> usize {
+    0
+}
+
+#[cfg(feature = "wifi")]
+fn record_wifi_log_recent_sample(ordinal: u32, caller_ptr: usize) {
+    let idx = (ordinal as usize) % WIFI_OS_QUEUE_SAMPLE_CAP;
+    WIFI_LOG_RECENT_ORDINALS[idx].store(ordinal, Ordering::Relaxed);
+    WIFI_LOG_RECENT_CALLER_PTR[idx].store(caller_ptr, Ordering::Relaxed);
+}
 
 fn wifi_init_runtime_trace_enabled() -> bool {
     matches!(
@@ -1002,6 +1278,12 @@ fn wifi_init_runtime_trace(message: &str) {
     if wifi_init_runtime_trace_enabled() {
         let _ = message;
         WIFI_INIT_CB_TRACE_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn wifi_init_runtime_trace_raw(message: &str) {
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb {message}");
     }
 }
 
@@ -1101,7 +1383,9 @@ pub unsafe extern "C" fn __esp_radio_gettimeofday(tv: *mut timeval, _tz: *mut ()
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __esp_radio_esp_timer_get_time() -> i64 {
     trace!("esp_timer_get_time");
-    if wifi_use_legacy_esp_timer_get_time_diag_enabled() {
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::esp_timer_get_time() }
+    } else if wifi_use_legacy_esp_timer_get_time_diag_enabled() {
         esp_hal::time::Instant::now()
             .duration_since_epoch()
             .as_micros() as i64
@@ -1300,8 +1584,18 @@ pub fn set_phy_calibration_data(data: &[u8; core::mem::size_of::<esp_phy_calibra
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn queue_create(queue_len: u32, item_size: u32) -> *mut c_void {
-    let queue = crate::compat::queue::queue_create(queue_len as i32, item_size as i32).cast();
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb queue_create.before len={} item={}", queue_len, item_size);
+    }
+    let queue = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_create(queue_len, item_size) }
+    } else {
+        crate::compat::queue::queue_create(queue_len as i32, item_size as i32).cast()
+    };
     wifi_init_runtime_trace("queue_create.after");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb queue_create.after ptr={:p}", queue);
+    }
     queue
 }
 
@@ -1319,7 +1613,11 @@ pub unsafe extern "C" fn queue_create(queue_len: u32, item_size: u32) -> *mut c_
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn queue_delete(queue: *mut c_void) {
-    crate::compat::queue::queue_delete(queue.cast());
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_delete(queue) };
+    } else {
+        crate::compat::queue::queue_delete(queue.cast());
+    }
 }
 
 /// **************************************************************************
@@ -1349,13 +1647,17 @@ pub unsafe extern "C" fn queue_send(
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
         let task_ptr = current_task_ptr_for_diag();
+        let caller_ptr = current_queue_send_caller_ptr();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
+        let (item_word0, item_pointee_word0, item_pointee_word1) =
+            queue_send_item_snapshot(queue, item.cast_const());
         record_first_last_task_ptr(
             &WIFI_OS_QUEUE_SEND_FIRST_TASK_PTR,
             &WIFI_OS_QUEUE_SEND_LAST_TASK_PTR,
             &WIFI_OS_QUEUE_SEND_TASK_CHANGES,
             task_ptr,
         );
+        WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR.store(caller_ptr, Ordering::Relaxed);
         record_queue_send_sample(
             &WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES,
             &WIFI_OS_QUEUE_SEND_SAMPLE_TASKS,
@@ -1380,6 +1682,7 @@ pub unsafe extern "C" fn queue_send(
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+            &WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_ARG_PTR,
             ordinal,
@@ -1388,15 +1691,21 @@ pub unsafe extern "C" fn queue_send(
             item_word0,
             item_pointee_word0,
             item_pointee_word1,
+            caller_ptr,
             timer_callback_ptr,
             timer_arg_ptr,
         );
         record_queue_send_item_words(queue, item.cast_const());
+        record_queue_process_target(true, item_pointee_word1);
     }
     let rc = crate::compat::queue::queue_send_to_back(
         queue.cast(),
         item.cast_const(),
-        blob_ticks_to_micros(block_time_tick),
+        if crate::compat::legacy_runtime_policy::legacy_blocking_queue_ticks_enabled() {
+            block_time_tick
+        } else {
+            blob_ticks_to_micros(block_time_tick)
+        },
     );
     wifi_init_runtime_trace("queue_send.after");
     rc
@@ -1425,13 +1734,25 @@ pub unsafe extern "C" fn queue_send_from_isr(
 ) -> i32 {
     #[cfg(feature = "wifi")]
     WIFI_OS_QUEUE_SEND_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
-    if wifi_use_legacy_queue_send_from_isr_diag_enabled() {
+    if wifi_use_legacy_common_adapter_enabled() {
+        #[cfg(feature = "wifi")]
+        WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+        return unsafe { crate::compat::common_adapter_legacy_backend::queue_send_from_isr(
+            queue,
+            item,
+            higher_priority_task_waken,
+        ) };
+    } else if wifi_use_legacy_queue_send_from_isr_diag_enabled() {
         #[cfg(feature = "wifi")]
         WIFI_OS_QUEUE_SEND_ISR_LEGACY_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
         if !higher_priority_task_waken.is_null() {
             unsafe { *(higher_priority_task_waken as *mut u32) = 1 };
         }
-        return unsafe { queue_send_to_back(queue, item, 1000) };
+        let rc = unsafe { queue_send_to_back(queue, item, 1000) };
+        if rc == 1 {
+            unsafe { crate::wifi::os_adapter::task_yield_from_isr() };
+        }
+        return rc;
     }
     crate::compat::queue::queue_try_send_to_back_from_isr(
         queue.cast(),
@@ -1465,6 +1786,7 @@ pub unsafe extern "C" fn queue_send_to_back(
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
         let task_ptr = current_task_ptr_for_diag();
+        let caller_ptr = current_queue_send_caller_ptr();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
         let (item_word0, item_pointee_word0, item_pointee_word1) =
             queue_send_item_snapshot(queue, item.cast_const());
@@ -1474,6 +1796,7 @@ pub unsafe extern "C" fn queue_send_to_back(
             &WIFI_OS_QUEUE_SEND_TASK_CHANGES,
             task_ptr,
         );
+        WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR.store(caller_ptr, Ordering::Relaxed);
         record_queue_send_sample(
             &WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES,
             &WIFI_OS_QUEUE_SEND_SAMPLE_TASKS,
@@ -1498,6 +1821,7 @@ pub unsafe extern "C" fn queue_send_to_back(
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+            &WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_ARG_PTR,
             ordinal,
@@ -1506,16 +1830,29 @@ pub unsafe extern "C" fn queue_send_to_back(
             item_word0,
             item_pointee_word0,
             item_pointee_word1,
+            caller_ptr,
             timer_callback_ptr,
             timer_arg_ptr,
         );
         record_queue_send_item_words(queue, item.cast_const());
     }
-    let rc = crate::compat::queue::queue_send_to_back(
-        queue.cast(),
-        item,
-        blob_ticks_to_micros(block_time_tick),
-    );
+    let rc = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_send_to_back(
+            queue,
+            item,
+            block_time_tick,
+        ) }
+    } else {
+        crate::compat::queue::queue_send_to_back(
+            queue.cast(),
+            item,
+            if crate::compat::legacy_runtime_policy::legacy_blocking_queue_ticks_enabled() {
+                block_time_tick
+            } else {
+                blob_ticks_to_micros(block_time_tick)
+            },
+        )
+    };
     wifi_init_runtime_trace("queue_send_to_back.after");
     rc
 }
@@ -1545,6 +1882,7 @@ pub unsafe extern "C" fn queue_send_to_front(
     {
         let ordinal = WIFI_OS_QUEUE_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
         let task_ptr = current_task_ptr_for_diag();
+        let caller_ptr = current_queue_send_caller_ptr();
         let (timer_callback_ptr, timer_arg_ptr) = current_timer_exec_snapshot();
         let (item_word0, item_pointee_word0, item_pointee_word1) =
             queue_send_item_snapshot(queue, item.cast_const());
@@ -1554,6 +1892,7 @@ pub unsafe extern "C" fn queue_send_to_front(
             &WIFI_OS_QUEUE_SEND_TASK_CHANGES,
             task_ptr,
         );
+        WIFI_OS_QUEUE_SEND_LAST_CALLER_PTR.store(caller_ptr, Ordering::Relaxed);
         record_queue_send_sample(
             &WIFI_OS_QUEUE_SEND_SAMPLE_QUEUES,
             &WIFI_OS_QUEUE_SEND_SAMPLE_TASKS,
@@ -1578,6 +1917,7 @@ pub unsafe extern "C" fn queue_send_to_front(
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD0,
             &WIFI_OS_QUEUE_SEND_RECENT_ITEM_POINTEE_WORD1,
+            &WIFI_OS_QUEUE_SEND_RECENT_CALLER_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_CALLBACK_PTR,
             &WIFI_OS_QUEUE_SEND_RECENT_TIMER_ARG_PTR,
             ordinal,
@@ -1586,16 +1926,29 @@ pub unsafe extern "C" fn queue_send_to_front(
             item_word0,
             item_pointee_word0,
             item_pointee_word1,
+            caller_ptr,
             timer_callback_ptr,
             timer_arg_ptr,
         );
         record_queue_send_item_words(queue, item.cast_const());
     }
-    let rc = crate::compat::queue::queue_send_to_front(
-        queue.cast(),
-        item,
-        blob_ticks_to_micros(block_time_tick),
-    );
+    let rc = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_send_to_front(
+            queue,
+            item,
+            block_time_tick,
+        ) }
+    } else {
+        crate::compat::queue::queue_send_to_front(
+            queue.cast(),
+            item,
+            if crate::compat::legacy_runtime_policy::legacy_blocking_queue_ticks_enabled() {
+                block_time_tick
+            } else {
+                blob_ticks_to_micros(block_time_tick)
+            },
+        )
+    };
     wifi_init_runtime_trace("queue_send_to_front.after");
     rc
 }
@@ -1621,8 +1974,19 @@ pub unsafe extern "C" fn queue_recv(
     block_time_ms: u32,
 ) -> i32 {
     wifi_init_runtime_trace("queue_recv.before");
-    let rc =
-        crate::compat::queue::queue_receive(queue.cast(), item, blob_ticks_to_micros(block_time_ms));
+    let rc = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_recv(queue, item, block_time_ms) }
+    } else {
+        crate::compat::queue::queue_receive(
+            queue.cast(),
+            item,
+            if crate::compat::legacy_runtime_policy::legacy_blocking_queue_ticks_enabled() {
+                block_time_ms
+            } else {
+                blob_ticks_to_micros(block_time_ms)
+            },
+        )
+    };
     wifi_init_runtime_trace("queue_recv.after");
     #[cfg(feature = "wifi")]
     if rc != 0 {
@@ -1636,6 +2000,10 @@ pub unsafe extern "C" fn queue_recv(
             task_ptr,
         );
         record_queue_recv_item_words(queue, item);
+        record_queue_process_target(
+            false,
+            WIFI_OS_QUEUE_RECV_LAST_ITEM_POINTEE_WORD1.load(Ordering::Relaxed),
+        );
         WIFI_OS_QUEUE_RECV_LAST_CALLER_PTR.store(caller_ptr, Ordering::Relaxed);
         record_queue_recv_sample(
             &WIFI_OS_QUEUE_RECV_SAMPLE_QUEUES,
@@ -1677,11 +2045,19 @@ pub unsafe extern "C" fn queue_recv_from_isr(
 ) -> i32 {
     #[cfg(feature = "wifi")]
     WIFI_OS_QUEUE_RECV_ISR_COUNT.fetch_add(1, Ordering::Relaxed);
-    crate::compat::queue::queue_try_receive_from_isr(
-        queue.cast(),
-        item,
-        higher_priority_task_waken.cast(),
-    )
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_recv_from_isr(
+            queue,
+            item,
+            higher_priority_task_waken,
+        ) }
+    } else {
+        crate::compat::queue::queue_try_receive_from_isr(
+            queue.cast(),
+            item,
+            higher_priority_task_waken.cast(),
+        )
+    }
 }
 
 /// **************************************************************************
@@ -1698,7 +2074,11 @@ pub unsafe extern "C" fn queue_recv_from_isr(
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn queue_msg_waiting(queue: *mut c_void) -> u32 {
-    crate::compat::queue::queue_messages_waiting(queue.cast())
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::queue_msg_waiting(queue) }
+    } else {
+        crate::compat::queue::queue_messages_waiting(queue.cast())
+    }
 }
 
 #[allow(unused)]
@@ -1729,7 +2109,17 @@ pub unsafe extern "C" fn __esp_radio_esp_event_post(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __esp_radio_vTaskDelay(ticks: u32) {
-    unsafe {
-        crate::compat::common::__esp_radio_usleep(crate::time::blob_ticks_to_micros(ticks));
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { crate::compat::common_adapter_legacy_backend::vtask_delay(ticks) };
+    } else {
+        unsafe {
+            crate::compat::common::__esp_radio_usleep(
+                if crate::compat::legacy_runtime_policy::legacy_vtaskdelay_ticks_enabled() {
+                    ticks
+                } else {
+                    crate::time::blob_ticks_to_micros(ticks)
+                },
+            );
+        }
     }
 }

@@ -1,6 +1,4 @@
-use core::cmp;
-
-use crate::probe::{SD_SECTOR_SIZE, SdCardProbe, SdProbeError};
+use crate::probe::{SdProbeError, SD_SECTOR_SIZE};
 
 const DIR_ENTRY_SIZE: usize = 32;
 const DIR_ENTRIES_PER_SECTOR: usize = SD_SECTOR_SIZE / DIR_ENTRY_SIZE;
@@ -62,7 +60,7 @@ impl From<SdProbeError> for SdFatError {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct FatDirEntry {
     pub name: [u8; FAT_NAME_MAX],
     pub name_len: u8,
@@ -122,12 +120,6 @@ struct DirFound {
     lfn_locations: [DirLocation; MAX_LFN_SLOTS],
     lfn_count: u8,
     record: DirRecord,
-}
-
-#[derive(Clone, Copy)]
-struct DirLookup {
-    found: Option<DirFound>,
-    free: Option<[DirLocation; MAX_LFN_SLOTS + 1]>,
 }
 
 #[derive(Clone, Copy)]

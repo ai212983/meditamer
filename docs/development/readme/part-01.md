@@ -72,7 +72,7 @@ Current commit-msg hook:
 
 Current pre-push hook:
 
-- Runs strict firmware clippy via `cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
+- Runs strict firmware clippy via `cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
 - Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
 
 CI includes a dedicated secret-scan workflow (`.github/workflows/secret_scan.yml`) that runs `scripts/ci/check_secrets.sh` on pull requests and pushes to `master`.
@@ -143,7 +143,7 @@ Notes for this workspace:
 
 - The firmware is `no_std` with heavy feature/cfg gating; analyzer results can include inactive-code and unresolved-import noise outside active build paths.
 - The baseline script intentionally runs with `--disable-build-scripts --disable-proc-macros` for stable, fast CI signal.
-- Authoritative correctness gates remain `cargo check` and strict `cargo clippy` on `--bins --lib`.
+- Authoritative correctness gates remain `cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` and strict `cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` on `--bins --lib`.
 
 Formatting enforcement:
 
@@ -213,5 +213,5 @@ The default Xtensa runner (`scripts/build/xtensa_runner.sh`) flashes firmware wi
 an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:
 
 ```bash
-ESPFLASH_RUN_MONITOR=1 cargo run
+ESPFLASH_RUN_MONITOR=1 cargo +esp run -Zbuild-std=core,alloc --target xtensa-esp32-none-elf
 ```

@@ -15,11 +15,14 @@ This RFC is sharded to keep Markdown files under the documentation LOC policy.
 - [Part 09](./rfc-upload-throughput-next-phase/part-09.md)
 - [Part 10](./rfc-upload-throughput-next-phase/part-10.md)
 - [Part 11](./rfc-upload-throughput-next-phase/part-11.md)
+  - [Part 11, continuation 2](./rfc-upload-throughput-next-phase/part-11-02.md)
+  - [Part 11, continuation 3](./rfc-upload-throughput-next-phase/part-11-03.md)
+- [Part 12](./rfc-upload-throughput-next-phase/part-12.md)
 
 ## Notes
 
 - Decision summary and preflight shortcut:
   `docs/development/wifi-upload-decision-ledger.md`.
 - Keep checklist updates and experiment logs in the latest part
-  (`part-11.md`).
+  (`part-12.md`).
 - Start a new part once a file approaches `220` LOC.

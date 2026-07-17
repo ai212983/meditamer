@@ -46,7 +46,7 @@ const fn parse_ascii_usize(value: &str) -> Option<usize> {
     Some(parsed)
 }
 
-pub(super) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
+pub(super) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
     wifi_active_scan_config(
         WIFI_SCAN_RESULT_MAX,
         policy.scan_active_min_ms as u64,
@@ -57,7 +57,7 @@ pub(super) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'stati
 pub(super) fn directed_active_scan_config(
     target_ssid: &str,
     policy: WifiRuntimePolicy,
-) -> ScanConfig<'_> {
+) -> ScanConfig {
     wifi_directed_active_scan_config(
         target_ssid,
         WIFI_SCAN_RESULT_MAX,
@@ -66,10 +66,7 @@ pub(super) fn directed_active_scan_config(
     )
 }
 
-pub(super) fn channel_active_scan_config(
-    channel: u8,
-    policy: WifiRuntimePolicy,
-) -> ScanConfig<'static> {
+pub(super) fn channel_active_scan_config(channel: u8, policy: WifiRuntimePolicy) -> ScanConfig {
     wifi_channel_active_scan_config(
         channel,
         WIFI_SCAN_RESULT_MAX,
@@ -78,10 +75,10 @@ pub(super) fn channel_active_scan_config(
     )
 }
 
-pub(super) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
+pub(super) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
     wifi_passive_scan_config(WIFI_SCAN_RESULT_MAX, policy.scan_passive_ms as u64)
 }
 
-pub(super) fn raw_broad_scan_config() -> ScanConfig<'static> {
+pub(super) fn raw_broad_scan_config() -> ScanConfig {
     wifi_raw_broad_scan_config(WIFI_SCAN_RESULT_MAX)
 }

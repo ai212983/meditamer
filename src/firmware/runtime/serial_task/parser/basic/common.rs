@@ -1,3 +1,6 @@
+use crate::firmware::runtime::{
+    scheduling::SchedulerProfile, serial_task::commands::SchedulerOperation,
+};
 use crate::firmware::types::TimeSyncCommand;
 
 use super::super::util::{find_subslice, parse_i32_ascii, parse_u64_ascii, trim_ascii_whitespace};
@@ -46,6 +49,31 @@ pub(in super::super) fn parse_repaint_marble_command(line: &[u8]) -> bool {
 pub(in super::super) fn parse_metrics_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"METRICS" || cmd == b"PERF"
+}
+
+pub(in super::super) fn parse_touch_sched_reset_command(line: &[u8]) -> bool {
+    trim_ascii_whitespace(line) == b"TOUCHSCHEDRESET"
+}
+
+pub(in super::super) fn parse_scheduler_command(line: &[u8]) -> Option<SchedulerOperation> {
+    let trimmed = trim_ascii_whitespace(line);
+    if trimmed.eq_ignore_ascii_case(b"SCHEDPROFILE") {
+        return Some(SchedulerOperation::Status);
+    }
+    let value = trim_ascii_whitespace(trimmed.strip_prefix(b"SCHEDPROFILE ")?);
+    if value.eq_ignore_ascii_case(b"AUTO") {
+        Some(SchedulerOperation::Automatic)
+    } else if value.eq_ignore_ascii_case(b"INTERACTIVE") {
+        Some(SchedulerOperation::Profile(SchedulerProfile::Interactive))
+    } else if value.eq_ignore_ascii_case(b"TOUCH") || value.eq_ignore_ascii_case(b"TOUCH_WIZARD") {
+        Some(SchedulerOperation::Profile(SchedulerProfile::TouchWizard))
+    } else if value.eq_ignore_ascii_case(b"UPLOAD") {
+        Some(SchedulerOperation::Profile(SchedulerProfile::Upload))
+    } else if value.eq_ignore_ascii_case(b"DIAGNOSTICS") {
+        Some(SchedulerOperation::Profile(SchedulerProfile::Diagnostics))
+    } else {
+        None
+    }
 }
 
 pub(in super::super) fn parse_metrics_net_command(line: &[u8]) -> bool {

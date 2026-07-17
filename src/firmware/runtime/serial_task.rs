@@ -6,8 +6,10 @@ mod line_reader;
 mod metrics;
 mod parser;
 mod queue;
+mod status;
 mod task_state;
 
+use embassy_futures::yield_now;
 use embassy_time::{with_timeout, Duration};
 
 use line_reader::{LineReadEvent, SerialLineReader};
@@ -19,7 +21,7 @@ use super::super::{touch::debug_log::uart_write_all, types::SerialUart};
 #[embassy_executor::task]
 pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     let mut line_reader = SerialLineReader::new();
-    let mut rx = [0u8; 1];
+    let mut rx = [0u8; 128];
     let mut state = SerialTaskState::new();
 
     state.write_trace_headers(&mut uart).await;
@@ -27,9 +29,14 @@ pub(crate) async fn time_sync_task(mut uart: SerialUart) {
     loop {
         state.drain_runtime_samples(&mut uart).await;
 
-        if let Ok(Ok(1)) = with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
-            handle_uart_byte(&mut uart, &mut line_reader, &mut state, rx[0]).await;
+        if let Ok(Ok(read)) =
+            with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await
+        {
+            for byte in rx[..read].iter().copied() {
+                handle_uart_byte(&mut uart, &mut line_reader, &mut state, byte).await;
+            }
         }
+        yield_now().await;
     }
 }
 

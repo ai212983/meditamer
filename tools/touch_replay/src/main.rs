@@ -99,15 +99,7 @@ fn run() -> Result<(), String> {
     // when captured traces stop immediately after the last physical sample.
     if let Some(last_ms) = events.last().map(|e| e.t_ms).or(last_sample_ms) {
         let tail_ms = last_ms.saturating_add(200);
-        let normalized = NormalizedTouchSample {
-            touch_count: 0,
-            points: [
-                NormalizedTouchPoint::default(),
-                NormalizedTouchPoint::default(),
-            ],
-            raw: [0u8; 8],
-        };
-        let (count, primary) = normalizer.normalize(tail_ms, normalized);
+        let (count, primary) = normalizer.advance(tail_ms);
         let core_sample = TouchSample {
             touch_count: count,
             points: [

@@ -1,9 +1,9 @@
-use sdcard::fat;
+use sdcard::fat::{FatEngine, FatPayloadId, FatRequest, FatResult};
 
 use crate::firmware::storage::transfer_buffers;
 
 use super::{
-    elapsed_ms_u32, ensure_upload_ready, map_fat_error_to_upload_code, upload_result,
+    elapsed_ms_u32, ensure_upload_ready, map_fat_result_to_upload_code, upload_result,
     SdProbeDriver, SdUploadResult, SdUploadResultCode, SdUploadSession, SD_UPLOAD_CHUNK_MAX,
 };
 use embassy_time::Instant;
@@ -16,6 +16,7 @@ pub(super) async fn handle_chunk(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     let Some(active) = session.as_mut() else {
         return upload_result(false, SdUploadResultCode::SessionNotActive, 0);
@@ -67,27 +68,31 @@ pub(super) async fn handle_chunk(
         }
     };
     let payload_lock_ms = elapsed_ms_u32(payload_lock_started_at);
-    let mut append_diag = fat::FatAppendWriteDiag::default();
-    if let Err(err) = fat::append_session_write_with_diag(
+    let append_started_at = Instant::now();
+    let mut output = [];
+    let result = super::super::super::engine_driver::run_fat_request(
+        FatRequest::UploadChunk {
+            input: FatPayloadId::Primary,
+            input_len: data_len as u32,
+        },
         sd_probe,
-        &mut active.append_session,
+        fat_engine,
         &chunk_data.as_mut_slice()[..data_len],
-        &mut append_diag,
+        &mut output,
     )
-    .await
-    {
+    .await;
+    let append_total_ms = elapsed_ms_u32(append_started_at);
+    if !matches!(result, FatResult::Done) {
         esp_println::println!(
-            "sd_upload: chunk append_session_write failed err={:?} bytes_written={} data_len={} append_total_ms={} append_capacity_ms={} append_write_data_ms={}",
-            err,
+            "sd_upload: chunk engine failed result={:?} bytes_written={} data_len={} append_total_ms={}",
+            result,
             active.bytes_written,
             data_len,
-            append_diag.total_ms,
-            append_diag.ensure_capacity_ms,
-            append_diag.write_data_ms,
+            append_total_ms,
         );
         return upload_result(
             false,
-            map_fat_error_to_upload_code(&err),
+            map_fat_result_to_upload_code(&result),
             active.bytes_written,
         );
     }
@@ -99,9 +104,9 @@ pub(super) async fn handle_chunk(
         chunk_total_ms,
         ensure_ready_ms,
         payload_lock_ms,
-        append_diag.total_ms,
-        append_diag.ensure_capacity_ms,
-        append_diag.write_data_ms,
+        append_total_ms,
+        0,
+        append_total_ms,
     );
     upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
 }

@@ -6,6 +6,10 @@
 #[cfg_attr(esp32s2, path = "esp32s2.rs")]
 #[cfg_attr(esp32s3, path = "esp32s3.rs")]
 pub(crate) mod os_adapter_chip_specific;
+pub(crate) mod legacy_backend;
+pub(crate) mod legacy_system_backend;
+pub(crate) mod legacy_interrupt_backend;
+pub(crate) mod legacy_misc_backend;
 
 use allocator_api2::boxed::Box;
 use enumset::EnumSet;
@@ -26,6 +30,66 @@ use crate::{
     memory_fence::memory_fence,
     time::{blob_ticks_to_micros, millis_to_blob_ticks},
 };
+
+unsafe extern "C" {
+    static mut g_ic: u8;
+    static mut scannum: u8;
+}
+
+fn diag_read_u16(base: usize, offset: usize) -> u16 {
+    if base == 0 {
+        return 0;
+    }
+    unsafe { ((base + offset) as *const u16).read_volatile() }
+}
+
+fn diag_read_u32(base: usize, offset: usize) -> u32 {
+    if base == 0 {
+        return 0;
+    }
+    unsafe { ((base + offset) as *const u32).read_volatile() }
+}
+
+fn diag_read_ptr(base: usize, offset: usize) -> usize {
+    diag_read_u32(base, offset) as usize
+}
+
+fn log_scan_list_snapshot(label: &str) {
+    let g_ic_ptr = core::ptr::addr_of!(g_ic) as usize;
+    let scannum_ptr = core::ptr::addr_of!(scannum) as usize;
+    let head_ptr = diag_read_ptr(g_ic_ptr, 0x130);
+    let tail_ptr = diag_read_ptr(g_ic_ptr, 0x134);
+    esp_println::println!(
+        "esp_radio: scan_list_snapshot label={} scannum=0x{:04x} head_ptr=0x{:08x} tail_ptr=0x{:08x} ic_ptr_1b4=0x{:08x}",
+        label,
+        diag_read_u16(scannum_ptr, 0),
+        head_ptr,
+        tail_ptr,
+        diag_read_ptr(g_ic_ptr, 0x1b4),
+    );
+    if head_ptr != 0 {
+        esp_println::println!(
+            "esp_radio: scan_list_snapshot_head label={} ptr=0x{:08x} word_00=0x{:08x} word_04=0x{:08x} word_08=0x{:08x} word_0c=0x{:08x}",
+            label,
+            head_ptr,
+            diag_read_u32(head_ptr, 0x00),
+            diag_read_u32(head_ptr, 0x04),
+            diag_read_u32(head_ptr, 0x08),
+            diag_read_u32(head_ptr, 0x0c),
+        );
+    }
+    if tail_ptr != 0 {
+        esp_println::println!(
+            "esp_radio: scan_list_snapshot_tail label={} ptr=0x{:08x} word_00=0x{:08x} word_04=0x{:08x} word_08=0x{:08x} word_0c=0x{:08x}",
+            label,
+            tail_ptr,
+            diag_read_u32(tail_ptr, 0x00),
+            diag_read_u32(tail_ptr, 0x04),
+            diag_read_u32(tail_ptr, 0x08),
+            diag_read_u32(tail_ptr, 0x0c),
+        );
+    }
+}
 
 fn wifi_init_runtime_trace_enabled() -> bool {
     matches!(
@@ -92,23 +156,15 @@ fn wifi_use_legacy_task_delay_diag_enabled() -> bool {
 }
 
 fn wifi_use_legacy_coex_status_get_diag_enabled() -> bool {
-    matches!(
-        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_COEX_STATUS_GET_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("ESP_RADIO_USE_LEGACY_COEX_STATUS_GET_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    crate::compat::legacy_runtime_policy::legacy_coex_status_get_enabled()
 }
 
 fn wifi_use_legacy_task_yield_from_isr_diag_enabled() -> bool {
-    matches!(
-        option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TASK_YIELD_FROM_ISR_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("ESP_RADIO_USE_LEGACY_TASK_YIELD_FROM_ISR_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    crate::compat::legacy_runtime_policy::legacy_task_yield_from_isr_enabled()
+}
+
+fn wifi_use_legacy_common_adapter_enabled() -> bool {
+    crate::compat::legacy_runtime_policy::backend_legacy_port_enabled()
 }
 
 fn record_recent_ptr(
@@ -130,6 +186,7 @@ static WIFI_SCAN_DONE_EVENTPOST_NUMBER: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_DONE_EVENTPOST_ID: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_DONE_EVENTPOST_AP_NUM_RC: AtomicU32 = AtomicU32::new(0);
 static WIFI_SCAN_DONE_EVENTPOST_AP_NUM: AtomicU32 = AtomicU32::new(0);
+static mut WIFI_STATIC_QUEUE_HANDLE: *mut c_void = core::ptr::null_mut();
 static WIFI_THREAD_SEM_GET_COUNT: AtomicU32 = AtomicU32::new(0);
 static WIFI_TASK_DELAY_COUNT: AtomicU32 = AtomicU32::new(0);
 static WIFI_TASK_DELAY_MAX_TICK: AtomicU32 = AtomicU32::new(0);
@@ -740,7 +797,10 @@ pub unsafe extern "C" fn wifi_int_restore(_wifi_int_mux: *mut c_void, tmp: u32) 
 /// *************************************************************************
 pub unsafe extern "C" fn task_yield_from_isr() {
     trace!("task_yield_from_isr");
-    if wifi_use_legacy_task_yield_from_isr_diag_enabled() {
+    crate::common_adapter::wifi_os_diag_record_task_yield_from_isr();
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::task_yield_from_isr() };
+    } else if wifi_use_legacy_task_yield_from_isr_diag_enabled() {
         crate::preempt::yield_task();
     } else {
         crate::preempt::yield_task_from_isr();
@@ -762,9 +822,16 @@ pub unsafe extern "C" fn task_yield_from_isr() {
 /// *************************************************************************
 pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
     wifi_init_runtime_trace("wifi_thread_semphr_get.before");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb wifi_thread_semphr_get.before");
+    }
     WIFI_THREAD_SEM_GET_COUNT.fetch_add(1, Ordering::Relaxed);
     let task_ptr = crate::preempt::current_task() as *mut c_void;
-    let sem_ptr = thread_sem_get();
+    let sem_ptr = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::wifi_thread_semphr_get() }
+    } else {
+        thread_sem_get()
+    };
     record_first_last_ptr(
         &WIFI_THREAD_SEM_FIRST_TASK_PTR,
         &WIFI_THREAD_SEM_LAST_TASK_PTR,
@@ -778,6 +845,9 @@ pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
         sem_ptr as usize,
     );
     wifi_init_runtime_trace("wifi_thread_semphr_get.after");
+    if wifi_init_runtime_trace_enabled() {
+        esp_println::println!("esp_radio: initcb wifi_thread_semphr_get.after sem={:p} task={:p}", sem_ptr, task_ptr);
+    }
     sem_ptr
 }
 
@@ -795,7 +865,11 @@ pub unsafe extern "C" fn wifi_thread_semphr_get() -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_create() -> *mut c_void {
-    let mutex = crate::compat::mutex::mutex_create(false);
+    let mutex = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::mutex_create() }
+    } else {
+        crate::compat::mutex::mutex_create(false)
+    };
     wifi_init_runtime_trace("mutex_create");
     trace!("mutex_create");
     mutex
@@ -815,7 +889,11 @@ pub unsafe extern "C" fn mutex_create() -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn recursive_mutex_create() -> *mut c_void {
-    let mutex = crate::compat::mutex::mutex_create(true);
+    let mutex = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::recursive_mutex_create() }
+    } else {
+        crate::compat::mutex::mutex_create(true)
+    };
     wifi_init_runtime_trace("recursive_mutex_create");
     trace!("recursive_mutex_create");
     mutex
@@ -835,7 +913,11 @@ pub unsafe extern "C" fn recursive_mutex_create() -> *mut c_void {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_delete(mutex: *mut c_void) {
-    crate::compat::mutex::mutex_delete(mutex);
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::mutex_delete(mutex) };
+    } else {
+        crate::compat::mutex::mutex_delete(mutex);
+    }
 }
 
 /// **************************************************************************
@@ -853,7 +935,11 @@ pub unsafe extern "C" fn mutex_delete(mutex: *mut c_void) {
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_lock(mutex: *mut c_void) -> i32 {
     wifi_init_runtime_trace("mutex_lock");
-    crate::compat::mutex::mutex_lock(mutex)
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::mutex_lock(mutex) }
+    } else {
+        crate::compat::mutex::mutex_lock(mutex)
+    }
 }
 
 /// **************************************************************************
@@ -871,7 +957,11 @@ pub unsafe extern "C" fn mutex_lock(mutex: *mut c_void) -> i32 {
 /// *************************************************************************
 pub unsafe extern "C" fn mutex_unlock(mutex: *mut c_void) -> i32 {
     wifi_init_runtime_trace("mutex_unlock");
-    crate::compat::mutex::mutex_unlock(mutex)
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::mutex_unlock(mutex) }
+    } else {
+        crate::compat::mutex::mutex_unlock(mutex)
+    }
 }
 
 /// **************************************************************************
@@ -971,14 +1061,27 @@ fn common_task_create(
             extern "C" fn(*mut esp_wifi_sys::c_types::c_void),
         >(task_func);
 
-        let task = crate::preempt::task_create(
-            task_name,
-            task_func,
-            param,
-            prio,
-            core_id,
-            stack_depth as usize,
-        );
+        let task = if wifi_use_legacy_common_adapter_enabled() {
+            legacy_backend::task_create(
+                task_func as *mut c_void,
+                name,
+                stack_depth,
+                param,
+                prio,
+                task_handle,
+                core_id,
+            );
+            *(task_handle as *mut usize) as *mut c_void
+        } else {
+            crate::preempt::task_create(
+                task_name,
+                task_func,
+                param,
+                prio,
+                core_id,
+                stack_depth as usize,
+            )
+        };
         record_wifi_task_create(
             task_func as usize,
             task_name,
@@ -1083,7 +1186,9 @@ pub unsafe extern "C" fn task_create(
 pub unsafe extern "C" fn task_delete(task_handle: *mut c_void) {
     trace!("task delete called for {:?}", task_handle);
 
-    unsafe {
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::task_delete(task_handle) };
+    } else {
         crate::preempt::schedule_task_deletion(task_handle);
     }
 }
@@ -1106,7 +1211,9 @@ pub unsafe extern "C" fn task_delay(tick: u32) {
     trace!("task_delay tick {}", tick);
     WIFI_TASK_DELAY_COUNT.fetch_add(1, Ordering::Relaxed);
     atomic_update_max(&WIFI_TASK_DELAY_MAX_TICK, tick);
-    if wifi_use_legacy_task_delay_diag_enabled() {
+    if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::task_delay(tick) };
+    } else if wifi_use_legacy_task_delay_diag_enabled() {
         let wait_us = u64::from(blob_ticks_to_micros(tick));
         let start_us = esp_hal::time::Instant::now().duration_since_epoch().as_micros();
         while esp_hal::time::Instant::now()
@@ -1141,7 +1248,11 @@ pub unsafe extern "C" fn task_ms_to_tick(ms: u32) -> i32 {
     trace!("task_ms_to_tick ms {}", ms);
     WIFI_TASK_MS_TO_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
     atomic_update_max(&WIFI_TASK_MS_TO_TICK_MAX_MS, ms);
-    let ticks = millis_to_blob_ticks(ms) as i32;
+    let ticks = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::task_ms_to_tick(ms) }
+    } else {
+        millis_to_blob_ticks(ms) as i32
+    };
     wifi_init_runtime_trace("task_ms_to_tick.after");
     ticks
 }
@@ -1157,7 +1268,11 @@ pub unsafe extern "C" fn task_ms_to_tick(ms: u32) -> i32 {
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn task_get_current_task() -> *mut c_void {
-    let res = crate::preempt::current_task() as *mut c_void;
+    let res = if wifi_use_legacy_common_adapter_enabled() {
+        unsafe { legacy_backend::task_get_current_task() }
+    } else {
+        crate::preempt::current_task() as *mut c_void
+    };
     let count = WIFI_TASK_GET_CURRENT_TASK_COUNT.fetch_add(1, Ordering::Relaxed);
     record_first_last_ptr(
         &WIFI_TASK_GET_CURRENT_TASK_FIRST_PTR,
@@ -1191,6 +1306,17 @@ pub unsafe extern "C" fn task_get_current_task() -> *mut c_void {
 /// *************************************************************************
 pub unsafe extern "C" fn task_get_max_priority() -> i32 {
     trace!("task_get_max_priority");
+    if wifi_use_legacy_common_adapter_enabled() {
+        return unsafe { legacy_backend::task_get_max_priority() };
+    } else if matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) {
+        return 255;
+    }
     crate::preempt::max_task_priority() as i32
 }
 
@@ -1273,8 +1399,10 @@ pub unsafe extern "C" fn event_post(
     trace!("EVENT: {:?}", event);
 
     if matches!(event, WifiEvent::ScanDone) {
+        log_scan_list_snapshot("event_post_before_get_ap_num");
         let mut ap_num: u16 = 0;
         let ap_num_rc = unsafe { crate::binary::include::esp_wifi_scan_get_ap_num(&mut ap_num) };
+        log_scan_list_snapshot("event_post_after_get_ap_num");
         let scan = unsafe {
             &*(event_data.cast::<crate::binary::include::wifi_event_sta_scan_done_t>())
         };
@@ -2113,6 +2241,19 @@ pub unsafe extern "C" fn wifi_create_queue(queue_len: c_int, item_size: c_int) -
         (queue_len, item_size)
     };
     let queue = crate::compat::queue::queue_create(queue_len, item_size);
+    if matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) {
+        unsafe {
+            WIFI_STATIC_QUEUE_HANDLE = queue;
+            wifi_init_runtime_trace("wifi_create_queue.after");
+            return core::ptr::addr_of_mut!(WIFI_STATIC_QUEUE_HANDLE).cast();
+        }
+    }
 
     let queue_ptr: *mut *mut c_void = Box::leak(Box::new_in(queue, InternalMemory));
     wifi_init_runtime_trace("wifi_create_queue.after");
@@ -2134,6 +2275,22 @@ pub unsafe extern "C" fn wifi_create_queue(queue_len: c_int, item_size: c_int) -
 ///
 /// *************************************************************************
 pub unsafe extern "C" fn wifi_delete_queue(queue: *mut c_void) {
+    if matches!(
+        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) || matches!(
+        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    ) {
+        unsafe {
+            if core::ptr::eq(queue, core::ptr::addr_of_mut!(WIFI_STATIC_QUEUE_HANDLE).cast()) {
+                crate::compat::queue::queue_delete(WIFI_STATIC_QUEUE_HANDLE);
+                WIFI_STATIC_QUEUE_HANDLE = core::ptr::null_mut();
+            }
+        }
+        return;
+    }
+
     let queue_ptr: *mut *mut c_void = queue.cast();
 
     let boxed = unsafe { Box::from_raw_in(queue_ptr, InternalMemory) };
@@ -2199,6 +2356,10 @@ pub unsafe extern "C" fn coex_disable() {
 /// *************************************************************************
 pub unsafe extern "C" fn coex_status_get() -> u32 {
     trace!("coex_status_get");
+
+    if wifi_use_legacy_common_adapter_enabled() {
+        return unsafe { legacy_backend::coex_status_get() };
+    }
 
     #[cfg(coex)]
     {

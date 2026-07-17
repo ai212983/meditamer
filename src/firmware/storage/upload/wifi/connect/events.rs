@@ -1,4 +1,3 @@
-use super::blob_state_diag::{log_scan_done_failure_blob_diag, log_scan_done_list_diag};
 use super::*;
 pub(super) fn state_mem_stage(state: NetState) -> Option<&'static str> {
     match state {
@@ -14,97 +13,7 @@ pub(super) fn state_mem_stage(state: NetState) -> Option<&'static str> {
 }
 
 pub(super) fn install_wifi_event_logger() {
-    if WIFI_EVENT_LOGGER_INSTALLED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-
-    event::StaDisconnected::update_handler(|event| {
-        let reason = event.reason();
-        WIFI_LAST_DISCONNECT_REASON.store(reason, Ordering::Relaxed);
-        WIFI_DISCONNECTED_EVENT.store(true, Ordering::Relaxed);
-        if cfg!(debug_assertions) {
-            diag_reassoc!(
-                "upload_http: event sta_disconnected reason={} ({}) rssi={}",
-                reason,
-                disconnect_reason_label(reason),
-                event.rssi()
-            );
-        }
-    });
-
-    if !cfg!(debug_assertions) {
-        return;
-    }
-
-    event::WifiReady::update_handler(|_| {
-        diag_reassoc!("upload_http: event wifi_ready");
-    });
-
-    event::StaStart::update_handler(|_| {
-        WIFI_LAST_STA_START_AT_MS.store(monotonic_now_ms_u32(), Ordering::Relaxed);
-        diag_reassoc!("upload_http: event sta_start");
-    });
-
-    event::StaStop::update_handler(|_| {
-        WIFI_LAST_STA_STOP_AT_MS.store(monotonic_now_ms_u32(), Ordering::Relaxed);
-        diag_reassoc!("upload_http: event sta_stop");
-    });
-
-    event::ScanDone::update_handler(|event| {
-        WIFI_LAST_SCAN_DONE_AT_MS.store(monotonic_now_ms_u32(), Ordering::Relaxed);
-        WIFI_LAST_SCAN_DONE_COUNT.store(u32::from(event.number()), Ordering::Relaxed);
-        WIFI_LAST_SCAN_DONE_ID.store(u32::from(event.id()), Ordering::Relaxed);
-        WIFI_LAST_SCAN_DONE_STATUS.store(event.status(), Ordering::Relaxed);
-        log_scan_done_list_diag(
-            u32::from(event.status()),
-            u32::from(event.number()),
-            u32::from(event.id()),
-        );
-        if event.status() != 0 {
-            log_scan_done_failure_blob_diag(
-                u32::from(event.status()),
-                u32::from(event.number()),
-                u32::from(event.id()),
-            );
-        }
-        maybe_end_first_start_idf_log_diag("scan_done");
-        diag_reassoc!(
-            "upload_http: event scan_done status={} count={} scan_id={}",
-            event.status(),
-            event.number(),
-            event.id()
-        );
-    });
-
-    event::StaAuthmodeChange::update_handler(|event| {
-        diag_reassoc!(
-            "upload_http: event sta_authmode_change old_mode={} new_mode={}",
-            event.old_mode(),
-            event.new_mode(),
-        );
-    });
-
-    event::StaBeaconTimeout::update_handler(|_| {
-        diag_reassoc!("upload_http: event sta_beacon_timeout");
-    });
-
-    event::StaConnected::update_handler(|event| {
-        let ssid_len = (event.ssid_len() as usize).min(event.ssid().len());
-        let ssid = core::str::from_utf8(&event.ssid()[..ssid_len]).unwrap_or("<non_utf8>");
-        let bssid = event.bssid();
-        diag_reassoc!(
-            "upload_http: event sta_connected ssid={} channel={} authmode={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            ssid,
-            event.channel(),
-            event.authmode(),
-            bssid.first().copied().unwrap_or(0),
-            bssid.get(1).copied().unwrap_or(0),
-            bssid.get(2).copied().unwrap_or(0),
-            bssid.get(3).copied().unwrap_or(0),
-            bssid.get(4).copied().unwrap_or(0),
-            bssid.get(5).copied().unwrap_or(0),
-        );
-    });
+    WIFI_EVENT_LOGGER_INSTALLED.store(true, Ordering::Relaxed);
 }
 
 pub(super) fn disconnect_reason_label(reason: u8) -> &'static str {

@@ -33,23 +33,25 @@ Hardware module note:
 ## Current Rust status in this repo
 
 - Implemented now:
-  - I2C bus infrastructure (`src/lib.rs`)
+  - Shared async I2C bus infrastructure
   - Internal/External IO expander setup (`0x20`/`0x21`)
   - EPD PMIC control (`0x48`), frontlight, buzzer
   - Sensor interrupt pins are configured (`INT_APDS`, `INT1_LSM`, `INT2_LSM`, `FG_GPOUT`)
+  - LSM6DS3 driver, adaptive 20/125 Hz acquisition, tap event pipeline, and face-down classification
+  - BQ27441 state-of-charge reads
+  - Elan touchscreen acquisition and gesture pipeline
 - Not implemented yet:
-  - Actual APDS9960/BME688/LSM6DS3/BQ27441 drivers
-  - Touchscreen driver (`TS_ADDR = 0x15`) integration
+  - APDS9960 and BME688 drivers
+  - LSM6DS3 FIFO-backed 416 Hz frame capture
   - PMIC temperature read helper equivalent to Arduino `readTemperature()`
 
 ## Suggested implementation order (Rust)
 
 1. BME688 (straightforward polling path, easy validation with stable readings)
-2. LSM6DS3 (simple WHO_AM_I + accel/gyro reads)
-3. APDS9960 (more register/config work; start with proximity/ambient before gestures)
-4. BQ27441 fuel gauge (requires capacity setup for realistic SoC)
-5. Touchscreen (interrupt + coordinate transform handling)
-6. PMIC temperature helper (small utility, useful for diagnostics)
+2. APDS9960 (start with proximity/ambient before gestures)
+3. LSM6DS3 FIFO batching if full 416 Hz application-level motion is justified
+4. BQ27441 capacity/current/health expansion
+5. PMIC temperature helper
 
 ## Useful interaction ideas
 

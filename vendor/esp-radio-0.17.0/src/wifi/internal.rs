@@ -85,7 +85,7 @@ unsafe extern "C" fn is_in_isr_wrapper() -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub(crate) static __ESP_RADIO_G_WIFI_OSI_FUNCS: wifi_osi_funcs_t = wifi_osi_funcs_t {
+pub(crate) static mut __ESP_RADIO_G_WIFI_OSI_FUNCS: wifi_osi_funcs_t = wifi_osi_funcs_t {
     _version: ESP_WIFI_OS_ADAPTER_VERSION as i32,
     _env_is_chip: Some(env_is_chip),
     _set_intr: Some(set_intr),
@@ -268,8 +268,16 @@ pub struct WifiInitConfigDiag {
     pub tx_hetb_queue_num: i32,
     pub dump_hesigb_enable: bool,
     pub magic: i32,
+    pub osi_set_intr_ptr: usize,
+    pub osi_clear_intr_ptr: usize,
     pub osi_set_isr_ptr: usize,
+    pub osi_ints_on_ptr: usize,
+    pub osi_ints_off_ptr: usize,
+    pub osi_wifi_int_disable_ptr: usize,
+    pub osi_wifi_int_restore_ptr: usize,
+    pub osi_task_yield_from_isr_ptr: usize,
     pub osi_queue_create_ptr: usize,
+    pub osi_queue_send_from_isr_ptr: usize,
     pub osi_queue_recv_ptr: usize,
     pub osi_task_create_ptr: usize,
     pub osi_task_create_pinned_ptr: usize,
@@ -321,8 +329,16 @@ pub(crate) fn wifi_init_config_diag() -> WifiInitConfigDiag {
         tx_hetb_queue_num: config.tx_hetb_queue_num,
         dump_hesigb_enable: config.dump_hesigb_enable,
         magic: config.magic,
+        osi_set_intr_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._set_intr)),
+        osi_clear_intr_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._clear_intr)),
         osi_set_isr_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._set_isr)),
+        osi_ints_on_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._ints_on)),
+        osi_ints_off_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._ints_off)),
+        osi_wifi_int_disable_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._wifi_int_disable)),
+        osi_wifi_int_restore_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._wifi_int_restore)),
+        osi_task_yield_from_isr_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._task_yield_from_isr)),
         osi_queue_create_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._queue_create)),
+        osi_queue_send_from_isr_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._queue_send_from_isr)),
         osi_queue_recv_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._queue_recv)),
         osi_task_create_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._task_create)),
         osi_task_create_pinned_ptr: osi.map_or(0, |v| fn_ptr_addr!(v._task_create_pinned_to_core)),

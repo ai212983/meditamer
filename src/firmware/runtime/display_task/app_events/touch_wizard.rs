@@ -1,18 +1,38 @@
-fn handle_touch_irq_event(
-    _context: &mut DisplayContext,
+async fn handle_touch_status_event(
+    status: TouchStatus,
+    context: &mut DisplayContext,
     state: &mut DisplayLoopState,
-    upload_enabled: bool,
 ) {
-    if upload_enabled {
-        return;
+    match status {
+        TouchStatus::Ready { .. } => {
+            state.touch_ready = true;
+            if state.in_touch_wizard_mode() && !state.touch_wizard.is_active() {
+                setup_touch_wizard_screen(context, state).await;
+            }
+            state.touch_startup_settled = true;
+        }
+        TouchStatus::Initializing => {
+            state.touch_ready = false;
+            state.touch_contact_active = false;
+            state.touch_last_nonzero_at = None;
+            if state.in_touch_wizard_mode() {
+                state.touch_wizard = TouchCalibrationWizard::new(false);
+                render_touch_wizard_waiting_screen(&mut context.inkplate).await;
+                state.screen_initialized = true;
+            }
+        }
+        TouchStatus::Fault => {
+            state.touch_ready = false;
+            state.touch_contact_active = false;
+            state.touch_last_nonzero_at = None;
+            if state.in_touch_wizard_mode() {
+                state.touch_wizard = TouchCalibrationWizard::new(false);
+                render_touch_wizard_waiting_screen(&mut context.inkplate).await;
+                state.screen_initialized = true;
+            }
+            state.touch_startup_settled = true;
+        }
     }
-    state.touch_irq_pending = state.touch_irq_pending.saturating_add(1);
-    let now = Instant::now();
-    state.touch_irq_burst_until = now + Duration::from_millis(TOUCH_IRQ_BURST_MS);
-    if state.touch_next_sample_at > now {
-        state.touch_next_sample_at = now;
-    }
-    state.touch_idle_fallback_at = now + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
 }
 
 async fn handle_start_touch_calibration_wizard_event(
@@ -20,11 +40,7 @@ async fn handle_start_touch_calibration_wizard_event(
     state: &mut DisplayLoopState,
     upload_enabled: bool,
 ) {
-    if cfg!(feature = "wifi-debug-slim-app") {
-        let _ = (context, state);
-        return;
-    }
-    if upload_enabled {
+    if cfg!(feature = "wifi-debug-slim-app") || upload_enabled {
         return;
     }
     let _ = state
@@ -35,16 +51,10 @@ async fn handle_start_touch_calibration_wizard_event(
         state.touch_ready
     );
     state.touch_last_nonzero_at = None;
-    state.touch_irq_pending = 0;
-    state.touch_irq_burst_until = Instant::now();
-    TOUCH_IRQ_LOW.store(false, Ordering::Relaxed);
-    state.touch_idle_fallback_at =
-        Instant::now() + Duration::from_millis(TOUCH_SAMPLE_IDLE_FALLBACK_MS);
     state.backlight_cycle_start = None;
     state.backlight_level = 0;
-    let _ = context.inkplate.frontlight_off();
+    let _ = context.inkplate.frontlight_off().await;
     request_touch_pipeline_reset();
-    state.touch_next_sample_at = Instant::now();
     setup_touch_wizard_screen(context, state).await;
 }
 

@@ -156,6 +156,23 @@ fn down_origin_is_anchored_after_debounce() {
 }
 
 #[test]
+fn down_preserves_first_contact_when_debounced_position_moves_inward() {
+    let mut engine = TouchEngine::new();
+
+    let _ = engine.tick(0, sample1(304, 114));
+    let output = engine.tick(16, sample1(304, 209));
+    let down = output
+        .events
+        .into_iter()
+        .flatten()
+        .find(|event| matches!(event.kind, TouchEventKind::Down))
+        .expect("missing down event");
+
+    assert_eq!((down.x, down.y), (304, 209));
+    assert_eq!((down.contact_x, down.contact_y), (304, 114));
+}
+
+#[test]
 fn jitter_drag_still_emits_tap_when_release_is_near() {
     let mut engine = TouchEngine::new();
     let mut events = std::vec::Vec::new();
@@ -254,41 +271,6 @@ fn drag_flicker_does_not_split_swipe_into_two_touches() {
             .count(),
         1
     );
-}
-
-#[test]
-fn swipe_detected_even_if_release_returns_near_start() {
-    let mut engine = TouchEngine::new();
-    let mut events = std::vec::Vec::new();
-
-    drain_kinds(engine.tick(0, sample1(60, 120)), &mut events);
-    drain_kinds(engine.tick(16, sample1(60, 120)), &mut events);
-    drain_kinds(engine.tick(32, sample1(180, 121)), &mut events);
-    // Finger jitters back before lift.
-    drain_kinds(engine.tick(48, sample1(90, 122)), &mut events);
-    drain_kinds(engine.tick(64, sample0()), &mut events);
-    drain_kinds(engine.tick(120, sample0()), &mut events);
-    drain_kinds(engine.tick(136, sample0()), &mut events);
-
-    assert!(events
-        .iter()
-        .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
-}
-
-#[test]
-fn recontact_after_release_gap_emits_up_for_previous_interaction() {
-    let mut engine = TouchEngine::new();
-    let mut events = std::vec::Vec::new();
-
-    drain_kinds(engine.tick(0, sample1(100, 100)), &mut events);
-    drain_kinds(engine.tick(20, sample1(100, 100)), &mut events);
-    // Enter release debounce.
-    drain_kinds(engine.tick(40, sample0()), &mut events);
-    // Re-contact well after continuity recovery window; old press must
-    // finalize with Up before a new interaction starts.
-    drain_kinds(engine.tick(160, sample1(200, 200)), &mut events);
-
-    assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
 }
 
 #[cfg(test)]

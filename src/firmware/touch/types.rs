@@ -1,7 +1,7 @@
 use crate::drivers::inkplate::TouchSample;
 use esp_hal::gpio::Input;
 
-pub(crate) type TouchIrqPin = Input<'static>;
+pub(crate) type Gpio36InputPin = Input<'static>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TouchSwipeDirection {
@@ -28,6 +28,8 @@ pub(crate) struct TouchEvent {
     pub(crate) t_ms: u64,
     pub(crate) x: u16,
     pub(crate) y: u16,
+    pub(crate) contact_x: u16,
+    pub(crate) contact_y: u16,
     pub(crate) start_x: u16,
     pub(crate) start_y: u16,
     pub(crate) duration_ms: u16,
@@ -48,6 +50,19 @@ pub(crate) struct TouchSampleFrame {
 pub(crate) enum TouchPipelineInput {
     Sample(TouchSampleFrame),
     Reset,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TouchStatus {
+    Initializing,
+    Ready { x_res: u16, y_res: u16 },
+    Fault,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TouchActivitySnapshot {
+    pub(crate) active: bool,
+    pub(crate) last_nonzero_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy)]

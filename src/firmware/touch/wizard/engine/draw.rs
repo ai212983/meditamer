@@ -13,6 +13,13 @@ use super::*;
 
 mod debug;
 pub(super) use debug::draw_swipe_debug;
+mod layout;
+pub(super) use layout::{
+    continue_button_bounds, precision_menu_button_bounds, swipe_mark_button_bounds,
+    test_return_bounds, test_toggle_bounds,
+};
+
+pub(super) type ButtonBounds = (i32, i32, i32, i32);
 
 pub(super) fn draw_frame(display: &mut InkplateDriver, width: i32, height: i32) {
     let style = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
@@ -30,9 +37,19 @@ pub(super) fn draw_centered_text(
     text: &str,
     center_y: i32,
 ) {
+    draw_centered_text_at(display, renderer, text, SCREEN_WIDTH / 2, center_y);
+}
+
+fn draw_centered_text_at(
+    display: &mut InkplateDriver,
+    renderer: &u8g2_fonts::FontRenderer,
+    text: &str,
+    center_x: i32,
+    center_y: i32,
+) {
     let _ = renderer.render_aligned(
         text,
-        Point::new(SCREEN_WIDTH / 2, center_y),
+        Point::new(center_x, center_y),
         VerticalPosition::Center,
         HorizontalAlignment::Center,
         FontColor::Transparent(BinaryColor::On),
@@ -57,21 +74,87 @@ pub(super) fn draw_left_text(
     );
 }
 
-pub(super) fn draw_target(display: &mut InkplateDriver, x: i32, y: i32) {
-    let style = PrimitiveStyle::with_stroke(BinaryColor::On, 2);
-    let _ = Circle::new(
-        Point::new(x - TARGET_RADIUS_PX, y - TARGET_RADIUS_PX),
-        (TARGET_RADIUS_PX * 2).max(1) as u32,
-    )
-    .into_styled(style)
-    .draw(display);
+pub(super) fn draw_calibration_targets(
+    display: &mut InkplateDriver,
+    targets: [SwipePoint; CALIBRATION_CORNER_COUNT],
+    observations: [Option<TapObservation>; CALIBRATION_CORNER_COUNT],
+) {
+    for (index, target) in targets.iter().enumerate() {
+        let radius = if observations[index].is_some() { 8 } else { 11 };
+        let style = if observations[index].is_some() {
+            PrimitiveStyle::with_fill(BinaryColor::On)
+        } else {
+            PrimitiveStyle::with_stroke(BinaryColor::On, 2)
+        };
+        let _ = Circle::new(
+            Point::new(target.x - radius, target.y - radius),
+            (radius * 2) as u32,
+        )
+        .into_styled(style)
+        .draw(display);
+    }
+}
 
-    let _ = Line::new(Point::new(x - 10, y), Point::new(x + 10, y))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
-    let _ = Line::new(Point::new(x, y - 10), Point::new(x, y + 10))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
+pub(super) fn draw_precision_menu_buttons(display: &mut InkplateDriver, width: i32, height: i32) {
+    let (calibrate, test, continue_button) = precision_menu_button_bounds(width, height);
+    draw_button(display, calibrate, "CALIBRATE");
+    draw_button(display, test, "TEST");
+    draw_button(display, continue_button, "CONTINUE");
+}
+
+pub(super) fn draw_test_toggle(
+    display: &mut InkplateDriver,
+    width: i32,
+    height: i32,
+    mode: TestCoordinateMode,
+) {
+    let label = match mode {
+        TestCoordinateMode::Calibrated => "CALIBRATED: CIRCLE",
+        TestCoordinateMode::Uncalibrated => "UNCALIBRATED: X",
+    };
+    draw_button(display, test_toggle_bounds(width, height), label);
+}
+
+pub(super) fn draw_return_button(display: &mut InkplateDriver, width: i32, height: i32) {
+    draw_button(display, test_return_bounds(width, height), "RETURN");
+}
+
+pub(super) fn draw_test_touch(
+    display: &mut InkplateDriver,
+    touch: TestTouch,
+    mode: TestCoordinateMode,
+) {
+    let point = match mode {
+        TestCoordinateMode::Calibrated => touch.calibrated,
+        TestCoordinateMode::Uncalibrated => touch.raw,
+    };
+    match mode {
+        TestCoordinateMode::Calibrated => {
+            let radius = 12;
+            let _ = Circle::new(
+                Point::new(point.x - radius, point.y - radius),
+                (radius * 2) as u32,
+            )
+            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+            .draw(display);
+        }
+        TestCoordinateMode::Uncalibrated => {
+            let radius = 10;
+            let style = PrimitiveStyle::with_stroke(BinaryColor::On, 2);
+            let _ = Line::new(
+                Point::new(point.x - radius, point.y - radius),
+                Point::new(point.x + radius, point.y + radius),
+            )
+            .into_styled(style)
+            .draw(display);
+            let _ = Line::new(
+                Point::new(point.x - radius, point.y + radius),
+                Point::new(point.x + radius, point.y - radius),
+            )
+            .into_styled(style)
+            .draw(display);
+        }
+    }
 }
 
 pub(super) fn draw_swipe_case_target(display: &mut InkplateDriver, case: SwipeCaseSpec) {
@@ -175,6 +258,23 @@ pub(super) fn draw_continue_button(
     draw_centered_text(display, &META_FONT, label, top + h / 2);
 }
 
+fn draw_button(display: &mut InkplateDriver, bounds: ButtonBounds, label: &str) {
+    let (left, top, width, height) = bounds;
+    let _ = Rectangle::new(
+        Point::new(left, top),
+        Size::new(width.max(1) as u32, height.max(1) as u32),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+    .draw(display);
+    draw_centered_text_at(
+        display,
+        &META_FONT,
+        label,
+        left + width / 2,
+        top + height / 2,
+    );
+}
+
 pub(super) fn draw_swipe_mark_button(display: &mut InkplateDriver, width: i32, height: i32) {
     let (left, top, w, h) = swipe_mark_button_bounds(width, height);
     let _ = Rectangle::new(
@@ -184,50 +284,4 @@ pub(super) fn draw_swipe_mark_button(display: &mut InkplateDriver, width: i32, h
     .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
     .draw(display);
     draw_centered_text(display, &META_FONT, "I JUST SWIPED", top + h / 2);
-}
-
-pub(super) fn continue_button_bounds(width: i32, height: i32) -> (i32, i32, i32, i32) {
-    let w = CONTINUE_BUTTON_WIDTH.min(width - 24).max(80);
-    let h = CONTINUE_BUTTON_HEIGHT;
-    let left = (width - w) / 2;
-    let top = height - 108;
-    (left, top, w, h)
-}
-
-pub(super) fn swipe_mark_button_bounds(width: i32, height: i32) -> (i32, i32, i32, i32) {
-    let w = SWIPE_MARK_BUTTON_WIDTH.min(width - 24).max(100);
-    let h = SWIPE_MARK_BUTTON_HEIGHT;
-    let left = (width - w) / 2;
-    let top = height - 166;
-    (left, top, w, h)
-}
-
-pub(super) fn draw_tap_attempt_feedback(
-    display: &mut InkplateDriver,
-    target_x: i32,
-    target_y: i32,
-    tap: TapAttempt,
-) {
-    let _ = Line::new(Point::new(target_x, target_y), Point::new(tap.x, tap.y))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
-
-    if tap.hit {
-        let _ = Circle::new(Point::new(tap.x - 5, tap.y - 5), 10)
-            .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-            .draw(display);
-    } else {
-        let _ = Line::new(
-            Point::new(tap.x - 7, tap.y - 7),
-            Point::new(tap.x + 7, tap.y + 7),
-        )
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
-        let _ = Line::new(
-            Point::new(tap.x - 7, tap.y + 7),
-            Point::new(tap.x + 7, tap.y - 7),
-        )
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-        .draw(display);
-    }
 }

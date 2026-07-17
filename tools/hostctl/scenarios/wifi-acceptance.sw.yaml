@@ -6,6 +6,12 @@ document:
 do:
   - prepare_payload:
       call: "prepare_payload"
+      then: "wait_runtime_ready"
+  - wait_runtime_ready:
+      call: "wait_runtime_ready"
+      then: "boot_discovery_gate"
+  - boot_discovery_gate:
+      call: "boot_discovery_gate"
       then: "start_run"
   - start_run:
       call: "start_run"
@@ -13,6 +19,9 @@ do:
         hostctl:
           result:
             merge: true
+      then: "prepare_measurement"
+  - prepare_measurement:
+      call: "prepare_measurement"
       then: "cycle_gate"
   - cycle_gate:
       switch:
@@ -20,7 +29,7 @@ do:
             when: ".cycle <= .cycles"
             then: "net_apply_config"
         - default:
-            then: "print_summary"
+            then: "assert_runtime_health"
   - net_apply_config:
       call: "net_apply_config"
       then: "net_start"
@@ -131,3 +140,7 @@ do:
       then: "cycle_gate"
   - print_summary:
       call: "print_summary"
+      then: "__end__"
+  - assert_runtime_health:
+      call: "assert_runtime_health"
+      then: "print_summary"

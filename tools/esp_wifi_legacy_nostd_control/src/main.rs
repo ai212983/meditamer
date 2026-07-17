@@ -1,7 +1,21 @@
 #![no_std]
 #![no_main]
+#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
 
 mod blob_state;
+mod parse_wrap_diag;
+mod bss_wrap_diag;
+mod profile_wrap_diag;
+mod scan_cmd_helper_wrap_diag;
+mod scan_process_wrap_diag;
+mod scan_list_diag;
+mod start_path_wrap_diag;
+mod timer_wrap_diag;
+mod chm_timer_slot_live_diag;
+mod wdev_fiq_wrap_diag;
+mod wdev_branch_wrap_diag;
+mod wdev_process_rx_wrap_diag;
+mod rx_dispatch_wrap_diag;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -19,7 +33,7 @@ use esp_wifi_sys::include::{
     wifi_promiscuous_pkt_type_t_WIFI_PKT_DATA, wifi_promiscuous_pkt_type_t_WIFI_PKT_MGMT,
     wifi_promiscuous_pkt_type_t_WIFI_PKT_MISC, wifi_second_chan_t,
     wifi_second_chan_t_WIFI_SECOND_CHAN_NONE, WIFI_PROMIS_FILTER_MASK_CTRL,
-    WIFI_PROMIS_FILTER_MASK_DATA, WIFI_PROMIS_FILTER_MASK_MGMT,
+    WIFI_PROMIS_FILTER_MASK_DATA, WIFI_PROMIS_FILTER_MASK_MGMT, wifi_osi_funcs_t,
 };
 unsafe extern "C" {
     fn esp_rom_delay_us(us: u32);
@@ -209,12 +223,27 @@ fn run_idf_explicit_compare() {
     println!(
         "legacy_nostd_wifi_control: idf_explicit_compare begin=true active_min_ms=10 active_max_ms=20 passive_ms=0 home_chan_dwell_ms=0 show_hidden=true channel=0"
     );
+    parse_wrap_diag::reset_parse_wrap_diag();
+    bss_wrap_diag::reset_bss_wrap_diag();
+    profile_wrap_diag::reset_profile_wrap_diag();
+    scan_cmd_helper_wrap_diag::reset_scan_cmd_helper_wrap_diag();
+    scan_process_wrap_diag::reset_scan_process_wrap_diag();
+    timer_wrap_diag::reset_timer_wrap_diag();
+    wdev_fiq_wrap_diag::reset_wdev_fiq_wrap_diag();
+    wdev_branch_wrap_diag::reset_wdev_branch_wrap_diag();
+    wdev_process_rx_wrap_diag::reset_wdev_process_rx_wrap_diag();
+    rx_dispatch_wrap_diag::reset_rx_dispatch_wrap_diag();
     let scan_rc = unsafe { esp_wifi_scan_start(&scan_config, true) };
     print_wifi_mac_isr_diag("idf_explicit_compare_postcall");
     print_wifi_rx_cb_diag("idf_explicit_compare_postcall");
     print_wifi_isr_hook_diag("idf_explicit_compare_postcall");
     print_legacy_diag("idf_explicit_compare_postcall");
+    wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("idf_explicit_compare", "postcall");
+    wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("idf_explicit_compare", "postcall");
+    wdev_process_rx_wrap_diag::print_wdev_process_rx_wrap_diag("idf_explicit_compare", "postcall");
+    rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("idf_explicit_compare", "postcall");
     blob_state::print_blob_state("idf_explicit_compare_postcall");
+    chm_timer_slot_live_diag::print_chm_timer_slot_live("idf_explicit_compare", "postcall");
     if scan_rc != ESP_OK as i32 {
         println!(
             "legacy_nostd_wifi_control: idf_explicit_compare=scan_start_err scan_rc={}",
@@ -223,15 +252,48 @@ fn run_idf_explicit_compare() {
         return;
     }
 
+    scan_list_diag::print_scan_list_probe("idf_explicit_compare", "before_get_ap_num");
+    scan_list_diag::print_scan_prelink_summary("idf_explicit_compare", "before_get_ap_num");
+    parse_wrap_diag::print_parse_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    bss_wrap_diag::print_bss_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    profile_wrap_diag::print_profile_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    scan_cmd_helper_wrap_diag::print_scan_cmd_helper_wrap_diag(
+        "idf_explicit_compare",
+        "before_get_ap_num",
+    );
+    scan_process_wrap_diag::print_scan_process_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    timer_wrap_diag::print_timer_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    wdev_process_rx_wrap_diag::print_wdev_process_rx_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("idf_explicit_compare", "before_get_ap_num");
+    chm_timer_slot_live_diag::print_chm_timer_slot_live("idf_explicit_compare", "before_get_ap_num");
     let mut ap_num = 0u16;
     let ap_num_rc = unsafe { esp_wifi_scan_get_ap_num(&mut ap_num) };
     if ap_num_rc != ESP_OK as i32 {
+        scan_list_diag::print_scan_list_probe("idf_explicit_compare", "get_ap_num_err");
+        scan_list_diag::print_scan_prelink_summary("idf_explicit_compare", "get_ap_num_err");
         println!(
             "legacy_nostd_wifi_control: idf_explicit_compare=get_ap_num_err scan_rc={} ap_num_rc={}",
             scan_rc, ap_num_rc
         );
         return;
     }
+    scan_list_diag::print_scan_list_probe("idf_explicit_compare", "after_get_ap_num");
+    scan_list_diag::print_scan_prelink_summary("idf_explicit_compare", "after_get_ap_num");
+    parse_wrap_diag::print_parse_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    bss_wrap_diag::print_bss_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    profile_wrap_diag::print_profile_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    scan_cmd_helper_wrap_diag::print_scan_cmd_helper_wrap_diag(
+        "idf_explicit_compare",
+        "after_get_ap_num",
+    );
+    scan_process_wrap_diag::print_scan_process_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    timer_wrap_diag::print_timer_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("idf_explicit_compare", "after_get_ap_num");
+    chm_timer_slot_live_diag::print_chm_timer_slot_live("idf_explicit_compare", "after_get_ap_num");
 
     let mut returned = core::cmp::min(ap_num as usize, IDF_EXPLICIT_MAX_RECORDS) as u16;
     let mut records = [unsafe { core::mem::zeroed::<wifi_ap_record_t>() }; IDF_EXPLICIT_MAX_RECORDS];
@@ -240,6 +302,35 @@ fn run_idf_explicit_compare() {
     } else {
         unsafe { esp_wifi_scan_get_ap_records(&mut returned, records.as_mut_ptr()) }
     };
+    if records_rc != ESP_OK as i32 {
+        scan_list_diag::print_scan_list_probe("idf_explicit_compare", "get_ap_records_err");
+        scan_list_diag::print_scan_prelink_summary("idf_explicit_compare", "get_ap_records_err");
+        parse_wrap_diag::print_parse_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        bss_wrap_diag::print_bss_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        profile_wrap_diag::print_profile_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        scan_cmd_helper_wrap_diag::print_scan_cmd_helper_wrap_diag(
+            "idf_explicit_compare",
+            "get_ap_records_err",
+        );
+        scan_process_wrap_diag::print_scan_process_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        timer_wrap_diag::print_timer_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("idf_explicit_compare", "get_ap_records_err");
+        chm_timer_slot_live_diag::print_chm_timer_slot_live("idf_explicit_compare", "get_ap_records_err");
+    } else {
+        scan_list_diag::print_scan_list_probe("idf_explicit_compare", "after_get_ap_records");
+        scan_list_diag::print_scan_prelink_summary("idf_explicit_compare", "after_get_ap_records");
+        parse_wrap_diag::print_parse_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        bss_wrap_diag::print_bss_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        profile_wrap_diag::print_profile_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        scan_cmd_helper_wrap_diag::print_scan_cmd_helper_wrap_diag(
+            "idf_explicit_compare",
+            "after_get_ap_records",
+        );
+        scan_process_wrap_diag::print_scan_process_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        timer_wrap_diag::print_timer_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("idf_explicit_compare", "after_get_ap_records");
+        chm_timer_slot_live_diag::print_chm_timer_slot_live("idf_explicit_compare", "after_get_ap_records");
+    }
 
     println!(
         "legacy_nostd_wifi_control: idf_explicit_compare=ok scan_rc={} ap_num_rc={} records_rc={} ap_num={} records_returned={}",
@@ -318,13 +409,14 @@ fn print_legacy_diag(label: &str) {
             esp_wifi::diagnostic_queue_send_recent(idx);
         if ordinal != 0 {
             println!(
-                "legacy_nostd_wifi_control: queue_send_recent label={} idx={} ordinal={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x}",
+                "legacy_nostd_wifi_control: queue_send_recent label={} idx={} ordinal={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x} caller_ptr=0x{:08x}",
                 label,
                 idx,
                 ordinal,
                 item_word0,
                 pointee_word0,
                 pointee_word1,
+                esp_wifi::diagnostic_queue_send_recent_caller_ptr(idx),
             );
         }
     }
@@ -333,13 +425,14 @@ fn print_legacy_diag(label: &str) {
             esp_wifi::diagnostic_queue_recv_recent(idx);
         if ordinal != 0 {
             println!(
-                "legacy_nostd_wifi_control: queue_recv_recent label={} idx={} ordinal={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x}",
+                "legacy_nostd_wifi_control: queue_recv_recent label={} idx={} ordinal={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x} caller_ptr=0x{:08x}",
                 label,
                 idx,
                 ordinal,
                 item_word0,
                 pointee_word0,
                 pointee_word1,
+                esp_wifi::diagnostic_queue_recv_recent_caller_ptr(idx),
             );
         }
     }
@@ -409,7 +502,21 @@ fn print_wifi_isr_hook_diag(label: &str) {
 }
 
 fn print_wifi_init_config_diag(label: &str) {
+    macro_rules! fn_ptr_addr {
+        ($expr:expr) => {
+            match $expr {
+                Some(f) => f as *const () as usize,
+                None => 0,
+            }
+        };
+    }
+
     let diag = esp_wifi::diagnostic_wifi_init_config_diag();
+    let osi = if diag.osi_funcs_ptr == 0 {
+        None
+    } else {
+        Some(unsafe { &*(diag.osi_funcs_ptr as *const wifi_osi_funcs_t) })
+    };
     println!(
         "legacy_nostd_wifi_control: wifi_init_config_diag label={} config_ptr=0x{:08x} osi_funcs_ptr=0x{:08x} static_rx_buf_num={} dynamic_rx_buf_num={} static_tx_buf_num={} dynamic_tx_buf_num={} rx_mgmt_buf_type={} rx_mgmt_buf_num={} cache_tx_buf_num={} ampdu_rx_enable={} ampdu_tx_enable={} amsdu_tx_enable={} nvs_enable={} nano_enable={} rx_ba_win={} wifi_task_core_id={} feature_caps=0x{:016x} sta_disconnected_pm={} tx_hetb_queue_num={} dump_hesigb_enable={} magic=0x{:08x}",
         label,
@@ -436,9 +543,17 @@ fn print_wifi_init_config_diag(label: &str) {
         diag.magic,
     );
     println!(
-        "legacy_nostd_wifi_control: wifi_osi_diag label={} set_isr=0x{:08x} queue_create=0x{:08x} queue_recv=0x{:08x} task_create=0x{:08x} task_create_pinned=0x{:08x} task_get_current=0x{:08x} wifi_thread_semphr_get=0x{:08x} timer_arm_us=0x{:08x} event_post=0x{:08x} malloc_internal=0x{:08x}",
+        "legacy_nostd_wifi_control: wifi_osi_diag label={} set_intr=0x{:08x} clear_intr=0x{:08x} set_isr=0x{:08x} ints_on=0x{:08x} ints_off=0x{:08x} wifi_int_disable=0x{:08x} wifi_int_restore=0x{:08x} task_yield_from_isr=0x{:08x} queue_send_from_isr=0x{:08x} queue_create=0x{:08x} queue_recv=0x{:08x} task_create=0x{:08x} task_create_pinned=0x{:08x} task_get_current=0x{:08x} wifi_thread_semphr_get=0x{:08x} timer_arm_us=0x{:08x} event_post=0x{:08x} malloc_internal=0x{:08x}",
         label,
+        osi.map_or(0, |v| fn_ptr_addr!(v._set_intr)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._clear_intr)),
         diag.osi_set_isr_ptr,
+        osi.map_or(0, |v| fn_ptr_addr!(v._ints_on)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._ints_off)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._wifi_int_disable)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._wifi_int_restore)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._task_yield_from_isr)),
+        osi.map_or(0, |v| fn_ptr_addr!(v._queue_send_from_isr)),
         diag.osi_queue_create_ptr,
         diag.osi_queue_recv_ptr,
         diag.osi_task_create_ptr,
@@ -512,10 +627,14 @@ fn main() -> ! {
         panic!("legacy_nostd_wifi_control: set_mode err={:?}", err);
     }
     println!("legacy_nostd_wifi_control: set_mode=sta");
+    start_path_wrap_diag::reset_start_path_wrap_diag();
     if let Err(err) = controller.start() {
         panic!("legacy_nostd_wifi_control: start err={:?}", err);
     }
     println!("legacy_nostd_wifi_control: start=ok");
+    start_path_wrap_diag::print_start_path_wrap_diag("after_start");
+    timer_wrap_diag::print_timer_wrap_diag("after_start", "after_start");
+    chm_timer_slot_live_diag::print_chm_timer_slot_live("after_start", "after_start");
     print_wifi_task_create_diag("after_start");
     print_wifi_mac_isr_diag("after_start");
     print_wifi_rx_cb_diag("after_start");
@@ -538,6 +657,9 @@ fn main() -> ! {
     print_wifi_rx_cb_diag("after_idf_explicit_compare");
     print_wifi_isr_hook_diag("after_idf_explicit_compare");
     print_legacy_diag("after_idf_explicit_compare");
+    wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("after_idf_explicit_compare", "steady_snapshot");
+    wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("after_idf_explicit_compare", "steady_snapshot");
+    rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("after_idf_explicit_compare", "steady_snapshot");
     blob_state::print_blob_state("after_idf_explicit_compare");
 
     match controller.scan_n(16) {
@@ -560,7 +682,11 @@ fn main() -> ! {
     print_wifi_mac_isr_diag("after_scan");
     print_wifi_rx_cb_diag("after_scan");
     print_wifi_isr_hook_diag("after_scan");
+    print_wifi_init_config_diag("after_scan");
     print_legacy_diag("after_scan");
+    wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("after_scan", "steady_snapshot");
+    wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("after_scan", "steady_snapshot");
+    rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("after_scan", "steady_snapshot");
     blob_state::print_blob_state("after_scan");
 
     match controller.stop() {
@@ -569,7 +695,11 @@ fn main() -> ! {
     }
 
     loop {
+        print_wifi_init_config_diag("steady");
         print_legacy_diag("steady");
+        wdev_fiq_wrap_diag::print_wdev_fiq_wrap_diag("steady", "steady_snapshot");
+        wdev_branch_wrap_diag::print_wdev_branch_wrap_diag("steady", "steady_snapshot");
+        rx_dispatch_wrap_diag::print_rx_dispatch_wrap_diag("steady", "steady_snapshot");
         unsafe { esp_rom_delay_us(1_000_000) };
     }
 }

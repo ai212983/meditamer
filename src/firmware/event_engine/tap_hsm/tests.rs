@@ -42,3 +42,17 @@ fn long_gap_in_tap_seq2_rejects_without_triggering() {
     assert_eq!(late.trace.state_id, EngineStateId::TapSeq2);
     assert_eq!(late.trace.reject_reason, RejectReason::GapTooLong);
 }
+
+#[test]
+fn sampling_discontinuity_clears_partial_sequence_and_motion_history() {
+    let mut engine = EventEngine::default();
+
+    let _ = engine.tick(candidate_frame(1_000));
+    let _ = engine.sampling_discontinuity(1_050);
+    let resumed = engine.tick(candidate_frame(1_100));
+
+    assert!(!resumed.actions.contains_backlight_trigger());
+    assert_eq!(resumed.trace.state_id, EngineStateId::Idle);
+    assert_eq!(resumed.trace.seq_count, 0);
+    assert_eq!(resumed.trace.jerk_l1, 0);
+}

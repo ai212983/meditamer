@@ -137,70 +137,12 @@ pub(crate) fn apply_runtime_setup_overrides_and_log() {
 
 pub(crate) fn initialize_runtime_sta(
     wifi: esp_hal::peripherals::WIFI<'static>,
-) -> Result<(WifiController<'static>, WifiDevice<'static>), &'static str> {
-    if super::backend::legacy_port_runtime_enabled() {
-        return super::backend::initialize_runtime_sta(wifi, country_us_override_enabled());
+) -> Result<(WifiController<'static>, WifiDevice), &'static str> {
+    if wifi_setup_reinit_diag_enabled() || wifi_precreate_timer_task_diag_enabled() {
+        println!("upload_http: legacy wifi reinit/timer diagnostics unavailable on esp-radio 1.0");
     }
-
-    if wifi_setup_reinit_diag_enabled() {
-        static RADIO_CTRL: static_cell::StaticCell<RadioController> =
-            static_cell::StaticCell::new();
-
-        wifi_setup_stage_trace("esp_radio_init.before");
-        let radio_ctrl = match init_radio() {
-            Ok(ctrl) => ctrl,
-            Err(err) => {
-                println!("asset-upload-http: esp_radio::init err={:?}", err);
-                return Err("asset-upload-http: esp_radio::init failed");
-            }
-        };
-        wifi_setup_stage_trace("esp_radio_init.after");
-
-        if wifi_precreate_timer_task_diag_enabled() {
-            esp_rtos::precreate_esp_radio_timer_task();
-            esp_rtos::yield_for_esp_radio_diag();
-            println!("upload_http: wifi_precreate_timer_task_diag result=ok");
-        }
-
-        let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
-        println!("upload_http: wifi_setup_reinit_diag phase=first_init begin=true");
-        wifi_setup_stage_trace("esp_radio_wifi_new.first.before");
-        let (first_controller, first_ifaces) =
-            match new_runtime(radio_ctrl, wifi, wifi_runtime_config()) {
-                Ok(parts) => parts,
-                Err(err) => {
-                    println!("asset-upload-http: wifi init err={:?}", err);
-                    return Err("asset-upload-http: wifi init failed");
-                }
-            };
-        wifi_setup_stage_trace("esp_radio_wifi_new.first.after");
-        println!("upload_http: wifi_setup_reinit_diag phase=first_init result=ok");
-        drop(first_ifaces);
-        drop(first_controller);
-        println!("upload_http: wifi_setup_reinit_diag phase=drop result=ok");
-
-        wifi_setup_stage_trace("esp_radio_wifi_new.second.before");
-        match new_runtime(
-            radio_ctrl,
-            unsafe { esp_hal::peripherals::WIFI::steal() },
-            wifi_runtime_config(),
-        ) {
-            Ok((controller, ifaces)) => {
-                wifi_setup_stage_trace("esp_radio_wifi_new.second.after");
-                println!("upload_http: wifi_setup_reinit_diag phase=second_init result=ok");
-                Ok((controller, ifaces.sta))
-            }
-            Err(err) => {
-                println!("asset-upload-http: wifi reinit err={:?}", err);
-                Err("asset-upload-http: wifi reinit failed")
-            }
-        }
-    } else {
-        if wifi_precreate_timer_task_diag_enabled() {
-            println!(
-                "upload_http: wifi_precreate_timer_task_diag skipped=backend_dispatched_runtime"
-            );
-        }
-        super::backend::initialize_runtime_sta(wifi, country_us_override_enabled())
-    }
+    wifi_setup_stage_trace("esp_radio_wifi_new.before");
+    let result = super::backend::initialize_runtime_sta(wifi, country_us_override_enabled());
+    wifi_setup_stage_trace("esp_radio_wifi_new.after");
+    result
 }

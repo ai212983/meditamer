@@ -4,7 +4,10 @@ use anyhow::{anyhow, Context};
 use reqwest::blocking::Client;
 
 use super::{
-    errors::{format_error_chain, inspect_io_error_flags, inspect_reqwest_error_flags, is_transport_reset_error},
+    errors::{
+        format_error_chain, inspect_io_error_flags, inspect_reqwest_error_flags,
+        is_transport_reset_error,
+    },
     request::health_timeout_s,
     retry::is_transport_reset_chunk_fallback_error,
     TRANSPORT_RESET_CHUNK_FALLBACK_MARKER,

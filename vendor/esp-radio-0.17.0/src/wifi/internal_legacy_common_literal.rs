@@ -13,6 +13,11 @@ use crate::{
     wifi::{self, internal_legacy_event_literal, os_adapter::WIFI_EVENTS, WifiEvent},
 };
 
+unsafe extern "C" {
+    static mut g_ic: u8;
+    static mut scannum: u8;
+}
+
 static mut WIFI_STATIC_QUEUE_HANDLE: *mut c_void = core::ptr::null_mut();
 
 #[derive(Clone, Copy)]
@@ -33,6 +38,61 @@ static INTERNAL_LEGACY_SCAN_DONE_NUMBER: AtomicU32 = AtomicU32::new(0);
 static INTERNAL_LEGACY_SCAN_DONE_ID: AtomicU32 = AtomicU32::new(0);
 static INTERNAL_LEGACY_SCAN_DONE_AP_NUM_RC: AtomicU32 = AtomicU32::new(0);
 static INTERNAL_LEGACY_SCAN_DONE_AP_NUM: AtomicU32 = AtomicU32::new(0);
+
+fn diag_read_u16(base: usize, offset: usize) -> u16 {
+    if base == 0 {
+        return 0;
+    }
+    unsafe { ((base + offset) as *const u16).read_volatile() }
+}
+
+fn diag_read_u32(base: usize, offset: usize) -> u32 {
+    if base == 0 {
+        return 0;
+    }
+    unsafe { ((base + offset) as *const u32).read_volatile() }
+}
+
+fn diag_read_ptr(base: usize, offset: usize) -> usize {
+    diag_read_u32(base, offset) as usize
+}
+
+fn log_scan_list_snapshot(label: &str) {
+    let g_ic_ptr = core::ptr::addr_of!(g_ic) as usize;
+    let scannum_ptr = core::ptr::addr_of!(scannum) as usize;
+    let head_ptr = diag_read_ptr(g_ic_ptr, 0x130);
+    let tail_ptr = diag_read_ptr(g_ic_ptr, 0x134);
+    esp_println::println!(
+        "esp_radio: internal_scan_list_snapshot label={} scannum=0x{:04x} head_ptr=0x{:08x} tail_ptr=0x{:08x} ic_ptr_1b4=0x{:08x}",
+        label,
+        diag_read_u16(scannum_ptr, 0),
+        head_ptr,
+        tail_ptr,
+        diag_read_ptr(g_ic_ptr, 0x1b4),
+    );
+    if head_ptr != 0 {
+        esp_println::println!(
+            "esp_radio: internal_scan_list_snapshot_head label={} ptr=0x{:08x} word_00=0x{:08x} word_04=0x{:08x} word_08=0x{:08x} word_0c=0x{:08x}",
+            label,
+            head_ptr,
+            diag_read_u32(head_ptr, 0x00),
+            diag_read_u32(head_ptr, 0x04),
+            diag_read_u32(head_ptr, 0x08),
+            diag_read_u32(head_ptr, 0x0c),
+        );
+    }
+    if tail_ptr != 0 {
+        esp_println::println!(
+            "esp_radio: internal_scan_list_snapshot_tail label={} ptr=0x{:08x} word_00=0x{:08x} word_04=0x{:08x} word_08=0x{:08x} word_0c=0x{:08x}",
+            label,
+            tail_ptr,
+            diag_read_u32(tail_ptr, 0x00),
+            diag_read_u32(tail_ptr, 0x04),
+            diag_read_u32(tail_ptr, 0x08),
+            diag_read_u32(tail_ptr, 0x0c),
+        );
+    }
+}
 
 fn legacy_random_u32() -> u32 {
     let mut rng = esp_hal::rng::Rng::new();
@@ -278,8 +338,10 @@ pub(crate) unsafe extern "C" fn event_post(
     INTERNAL_LEGACY_EVENT_POST_LAST_EVENT_ID.store(event_id as u32, Ordering::Relaxed);
     let event = WifiEvent::from_i32(event_id).expect("invalid wifi event id");
     if matches!(event, WifiEvent::ScanDone) {
+        log_scan_list_snapshot("event_post_before_get_ap_num");
         let mut ap_num: u16 = 0;
         let ap_num_rc = unsafe { crate::binary::include::esp_wifi_scan_get_ap_num(&mut ap_num) };
+        log_scan_list_snapshot("event_post_after_get_ap_num");
         let scan = unsafe {
             &*(event_data.cast::<crate::binary::include::wifi_event_sta_scan_done_t>())
         };

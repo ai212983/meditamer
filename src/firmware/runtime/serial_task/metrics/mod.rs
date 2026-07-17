@@ -3,6 +3,7 @@ use crate::firmware::{telemetry, touch::debug_log::uart_write_all, types::Serial
 use super::commands::{TelemetryDomain, TelemetrySetOperation};
 
 mod metrics_dump;
+mod metrics_imu;
 mod metrics_net;
 mod telemetry_control;
 
@@ -46,3 +47,5 @@ fn on_off(mask: u32, domain: u32) -> &'static str {
         "off"
     }
 }
+
+use metrics_imu::write_metrics_imu_line;

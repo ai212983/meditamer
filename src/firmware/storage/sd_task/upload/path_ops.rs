@@ -1,10 +1,12 @@
-use sdcard::fat;
+use sdcard::fat::{FatEngine, FatEngineError, FatRequest, FatResult, SdFatError};
+
+use crate::firmware::telemetry;
 
 use super::super::super::super::types::{
     SdProbeDriver, SdUploadResult, SdUploadResultCode, SD_PATH_MAX,
 };
 use super::super::{SD_UPLOAD_PATH_BUF_MAX, SD_UPLOAD_ROOT, SD_UPLOAD_TMP_BASENAME};
-use super::helpers::{ensure_upload_ready, map_fat_error_to_upload_code, upload_result};
+use super::helpers::{ensure_upload_ready, map_fat_result_to_upload_code, upload_result};
 use super::types::SdUploadSession;
 
 #[inline(never)]
@@ -15,8 +17,11 @@ pub(super) async fn handle_mkdir(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
-    esp_println::println!("sd_upload: mkdir enter");
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+        esp_println::println!("sd_upload: mkdir enter");
+    }
     if session.is_some() {
         esp_println::println!("sd_upload: mkdir busy(active session)");
         return upload_result(false, SdUploadResultCode::Busy, 0);
@@ -37,16 +42,29 @@ pub(super) async fn handle_mkdir(
             return upload_result(false, code, 0);
         }
     };
-    esp_println::println!("sd_upload: mkdir path={}", path_str);
+    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+        esp_println::println!("sd_upload: mkdir path={}", path_str);
+    }
 
-    match fat::mkdir(sd_probe, path_str).await {
-        Ok(()) | Err(fat::SdFatError::AlreadyExists) => {
-            esp_println::println!("sd_upload: mkdir ok/already_exists");
+    let mut output = [];
+    let result = super::super::engine_driver::run_fat_request(
+        FatRequest::Mkdir { path, path_len },
+        sd_probe,
+        fat_engine,
+        &[],
+        &mut output,
+    )
+    .await;
+    match result {
+        FatResult::Done | FatResult::Error(FatEngineError::Fat(SdFatError::AlreadyExists)) => {
+            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+                esp_println::println!("sd_upload: mkdir ok/already_exists");
+            }
             upload_result(true, SdUploadResultCode::Ok, 0)
         }
-        Err(err) => {
-            esp_println::println!("sd_upload: mkdir fat error={:?}", err);
-            upload_result(false, map_fat_error_to_upload_code(&err), 0)
+        result => {
+            esp_println::println!("sd_upload: mkdir engine error={:?}", result);
+            upload_result(false, map_fat_result_to_upload_code(&result), 0)
         }
     }
 }
@@ -59,6 +77,7 @@ pub(super) async fn handle_remove(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     if session.is_some() {
         return upload_result(false, SdUploadResultCode::Busy, 0);
@@ -68,14 +87,24 @@ pub(super) async fn handle_remove(
         return upload_result(false, code, 0);
     }
 
-    let path_str = match parse_upload_path(&path, path_len) {
-        Ok(path) => path,
-        Err(code) => return upload_result(false, code, 0),
-    };
+    if let Err(code) = parse_upload_path(&path, path_len) {
+        return upload_result(false, code, 0);
+    }
 
-    match fat::remove(sd_probe, path_str).await {
-        Ok(()) | Err(fat::SdFatError::NotFound) => upload_result(true, SdUploadResultCode::Ok, 0),
-        Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+    let mut output = [];
+    let result = super::super::engine_driver::run_fat_request(
+        FatRequest::Remove { path, path_len },
+        sd_probe,
+        fat_engine,
+        &[],
+        &mut output,
+    )
+    .await;
+    match result {
+        FatResult::Done | FatResult::Error(FatEngineError::Fat(SdFatError::NotFound)) => {
+            upload_result(true, SdUploadResultCode::Ok, 0)
+        }
+        result => upload_result(false, map_fat_result_to_upload_code(&result), 0),
     }
 }
 
@@ -87,6 +116,7 @@ pub(super) async fn handle_stat(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     if session.is_some() {
         return upload_result(false, SdUploadResultCode::Busy, 0);
@@ -96,14 +126,22 @@ pub(super) async fn handle_stat(
         return upload_result(false, code, 0);
     }
 
-    let path_str = match parse_upload_path(&path, path_len) {
-        Ok(path) => path,
-        Err(code) => return upload_result(false, code, 0),
-    };
+    if let Err(code) = parse_upload_path(&path, path_len) {
+        return upload_result(false, code, 0);
+    }
 
-    match fat::stat(sd_probe, path_str).await {
-        Ok(entry) => upload_result(true, SdUploadResultCode::Ok, entry.size),
-        Err(err) => upload_result(false, map_fat_error_to_upload_code(&err), 0),
+    let mut output = [];
+    let result = super::super::engine_driver::run_fat_request(
+        FatRequest::Stat { path, path_len },
+        sd_probe,
+        fat_engine,
+        &[],
+        &mut output,
+    )
+    .await;
+    match result {
+        FatResult::Stat(entry) => upload_result(true, SdUploadResultCode::Ok, entry.size),
+        result => upload_result(false, map_fat_result_to_upload_code(&result), 0),
     }
 }
 

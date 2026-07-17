@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use event_config_compiler::{
-    generate_from_path, parse_events_file, render_generated_config, validate_config,
-    ConfigCompilerError,
+    generate_from_path, parse_events_file, parse_events_str, render_generated_config,
+    validate_config, ConfigCompilerError,
 };
 
 fn repo_root() -> PathBuf {
@@ -12,6 +12,28 @@ fn repo_root() -> PathBuf {
         .parent()
         .expect("missing repo root")
         .to_path_buf()
+}
+
+#[test]
+fn validates_adaptive_imu_sampling_limits() {
+    let contents = fs::read_to_string(fixture("valid_default.toml")).expect("missing fixture");
+    let mut events = parse_events_str(&contents, None).expect("fixture should parse");
+
+    events.imu.sampling.active_hz = 126;
+    let err = validate_config(&events).expect_err("direct polling above 125 Hz must fail");
+    assert!(err.to_string().contains("active_hz must be <= 125"));
+
+    events.imu.sampling.active_hz = 100;
+    events.imu.sampling.idle_hz = 101;
+    let err = validate_config(&events).expect_err("active must not be below idle");
+    assert!(err
+        .to_string()
+        .contains("active_hz must be >= imu.sampling.idle_hz"));
+
+    events.imu.sampling.idle_hz = 20;
+    events.imu.sampling.active_hold_ms = 899;
+    let err = validate_config(&events).expect_err("hold must span the final tap window");
+    assert!(err.to_string().contains("active_hold_ms"));
 }
 
 fn fixture(name: &str) -> PathBuf {

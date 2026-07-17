@@ -235,7 +235,7 @@ impl TapHsm {
         let _ = context;
         match event {
             TapHsmEvent::ImuFault { now_ms } => {
-                self.clear_sequence();
+                self.reset_sampling_history();
                 self.update_fault_trace(EngineStateId::SensorFaultBackoff, *now_ms);
                 Transition(State::sensor_fault_backoff())
             }

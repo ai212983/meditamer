@@ -10,11 +10,11 @@ Use this document for day-to-day changes (threshold tuning, state-machine update
 
 The runtime path is:
 
-1. `display_task` samples IMU data (`tap_src`, `int1`, accel, gyro).
-2. Raw values are wrapped into `SensorFrame`.
-3. `EventEngine::tick` runs feature extraction and HSM transitions.
-4. Engine emits `EngineAction`s and `EngineTraceSample`.
-5. Firmware executes actions (currently `BacklightTrigger`) and streams trace lines over UART.
+1. `imu_acquisition_task` owns the LSM6DS3 driver and adaptively polls at the configured idle or active rate.
+2. Timestamped `SensorFrame` values cross a bounded channel into `imu_pipeline_task`.
+3. `EventEngine::tick` runs feature extraction and HSM transitions without HAL access.
+4. The pipeline emits trace rows and publishes coalesced semantic display actions.
+5. `display_task` applies frontlight/app-state effects without owning IMU timing or registers.
 
 Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/runtime/display_task/mod.rs`.
 
@@ -51,9 +51,14 @@ Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside 
 - `src/firmware/event_engine/registry.rs`
   - Event registration table for enabled/disabled event kinds.
 
+- `src/firmware/imu/`
+  - Owns adaptive acquisition, event-pipeline state, touch/upload suppression, action delivery, and scheduling metrics.
+
+- `src/drivers/inkplate/imu.rs`
+  - Owns LSM6DS3 transactions and read-only INT1/INT2 board-signal reads.
+
 - `src/firmware/runtime/display_task/mod.rs`
-  - Integrates engine in `display_task`.
-  - Converts IMU samples to `SensorFrame`, handles `BacklightTrigger`, and writes trace CSV.
+  - Executes semantic IMU actions and retains frontlight/render ownership.
 
 ## Config Editing Workflow
 
@@ -70,6 +75,9 @@ Validation rules enforced in `build.rs` include:
 - ordering constraints (`min_gap_ms <= max_gap_ms <= last_max_gap_ms`),
 - positive thresholds,
 - at least one non-zero weight.
+- supported sensor ODR and direct-polling rates,
+- `idle_hz <= active_hz <= 125`,
+- an active hold that spans the final tap-sequence window.
 
 If validation fails, Cargo prints an actionable panic message from `build.rs`.
 
@@ -151,6 +159,14 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh release
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/touch/tap_capture.sh logs/tap_trace_test.log
 ```
 
+Notes:
+
+- `scripts/device/flash.sh` now runs the canonical `hostctl flash-capture`
+  workflow and preserves `flash.log`, `capture.log`, and `summary.txt` under
+  `logs/` unless you override the artifact path.
+- Use `scripts/device/monitor.sh` only for passive serial attach after the
+  flash/capture step; boot capture belongs to `flash-capture`.
+
 Quick trace filtering:
 
 ```bash
@@ -160,6 +176,7 @@ rg '^tap_trace' logs/tap_trace_test.log
 ## Guardrails
 
 - Keep feature extraction pure (`src/firmware/event_engine/features.rs` should not call HAL).
-- Keep runtime orchestration in `display_task`; avoid hardware side-effects inside engine code.
+- Keep acquisition and event classification in `src/firmware/imu`; display only executes semantic actions.
+- Keep direct polling at or below 125 Hz on the shared 100 kHz bus. A future 416 Hz path must use FIFO batching.
 - Keep config-driven thresholds/timing in `config/events.toml`; avoid hardcoding detector constants in the main path.
 - Preserve deterministic, traceable reject behavior when adding new logic.

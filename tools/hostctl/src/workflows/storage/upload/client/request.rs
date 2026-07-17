@@ -9,15 +9,13 @@ use reqwest::{blocking::Client, Method};
 
 use super::{
     config::{
-        should_use_direct_burst_sender, upload_direct_burst_bytes,
-        upload_direct_burst_mode_active, upload_force_connection_close,
-        upload_send_diag_deep_enabled, upload_send_diag_enabled, upload_tcp_nodelay_enabled,
+        should_use_direct_burst_sender, upload_direct_burst_bytes, upload_direct_burst_mode_active,
+        upload_force_connection_close, upload_send_diag_deep_enabled, upload_send_diag_enabled,
+        upload_tcp_nodelay_enabled,
     },
     direct_stream::request_raw_timed_direct_stream,
     errors::elapsed_ms_u32,
-    RequestBodyCadence,
-    RequestTiming,
-    TimedResponse,
+    RequestBodyCadence, RequestTiming, TimedResponse,
 };
 
 struct InstrumentedBodyReader {
@@ -166,8 +164,8 @@ pub(crate) fn request_raw_timed(
     let body_bytes = body.as_ref().map_or(0usize, |payload| payload.len());
     let cadence = Arc::new(Mutex::new(RequestBodyCadence::default()));
     if let Some(body) = body {
-        let use_reader_body =
-            burst_read_cap.is_some() || (upload_send_diag_enabled() && upload_send_diag_deep_enabled());
+        let use_reader_body = burst_read_cap.is_some()
+            || (upload_send_diag_enabled() && upload_send_diag_deep_enabled());
         if use_reader_body {
             let reader = InstrumentedBodyReader::new_with_max_read(
                 body,

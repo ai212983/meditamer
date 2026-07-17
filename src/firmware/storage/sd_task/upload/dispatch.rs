@@ -6,6 +6,7 @@ use super::types::{
     UploadStreamCommand,
 };
 use embassy_time::Instant;
+use sdcard::fat::FatEngine;
 
 pub(super) async fn process_upload_request(
     request: SdUploadRequest,
@@ -13,6 +14,7 @@ pub(super) async fn process_upload_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     let queue_wait_ms = elapsed_since_ms_u32(request.enqueued_at_ms);
     match split_upload_command(request.command) {
@@ -24,11 +26,20 @@ pub(super) async fn process_upload_request(
                 sd_probe,
                 powered,
                 upload_mounted,
+                fat_engine,
             )
             .await
         }
         UploadCommandGroup::Path(path) => {
-            process_upload_path_request(path, session, sd_probe, powered, upload_mounted).await
+            process_upload_path_request(
+                path,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+                fat_engine,
+            )
+            .await
         }
     }
 }
@@ -41,6 +52,7 @@ async fn process_upload_stream_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     match command {
         UploadStreamCommand::Begin {
@@ -56,6 +68,7 @@ async fn process_upload_stream_request(
                 sd_probe,
                 powered,
                 upload_mounted,
+                fat_engine,
             )
             .await
         }
@@ -68,6 +81,7 @@ async fn process_upload_stream_request(
                 sd_probe,
                 powered,
                 upload_mounted,
+                fat_engine,
             )
             .await;
             result.chunk_queue_wait_ms = queue_wait_ms;
@@ -76,10 +90,10 @@ async fn process_upload_stream_request(
             result
         }
         UploadStreamCommand::Commit => {
-            handle_commit(session, sd_probe, powered, upload_mounted).await
+            handle_commit(session, sd_probe, powered, upload_mounted, fat_engine).await
         }
         UploadStreamCommand::Abort => {
-            handle_abort(session, sd_probe, powered, upload_mounted).await
+            handle_abort(session, sd_probe, powered, upload_mounted, fat_engine).await
         }
     }
 }
@@ -114,16 +128,44 @@ async fn process_upload_path_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     match command {
         UploadPathCommand::Mkdir { path, path_len } => {
-            handle_mkdir(path, path_len, session, sd_probe, powered, upload_mounted).await
+            handle_mkdir(
+                path,
+                path_len,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+                fat_engine,
+            )
+            .await
         }
         UploadPathCommand::Remove { path, path_len } => {
-            handle_remove(path, path_len, session, sd_probe, powered, upload_mounted).await
+            handle_remove(
+                path,
+                path_len,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+                fat_engine,
+            )
+            .await
         }
         UploadPathCommand::Stat { path, path_len } => {
-            handle_stat(path, path_len, session, sd_probe, powered, upload_mounted).await
+            handle_stat(
+                path,
+                path_len,
+                session,
+                sd_probe,
+                powered,
+                upload_mounted,
+                fat_engine,
+            )
+            .await
         }
     }
 }

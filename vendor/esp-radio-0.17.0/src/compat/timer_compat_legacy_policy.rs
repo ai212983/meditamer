@@ -1,4 +1,5 @@
 use crate::binary::c_types;
+use crate::compat::legacy_runtime_policy::backend_legacy_port_enabled;
 
 unsafe extern "C" {
     fn cnx_connect_timeout(arg: *mut c_types::c_void);
@@ -13,13 +14,7 @@ pub(crate) fn compat_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
-        option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_enabled()
 }
 
 fn suppress_connect_timeout_arm_enabled() -> bool {

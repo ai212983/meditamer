@@ -26,13 +26,13 @@ pub(super) fn collect_scan_results(
     for ap in results.iter() {
         diag_reassoc!(
             "upload_http: scan ap ssid={} channel={} bssid={} rssi={} auth={:?}",
-            ap.ssid,
+            ap.ssid.as_str(),
             ap.channel,
             format_bssid(ap.bssid),
             ap.signal_strength,
             ap.auth_method
         );
-        if ap.ssid == target_ssid {
+        if ap.ssid.as_str() == target_ssid {
             insert_or_update_candidate(
                 candidates,
                 TargetApCandidate {

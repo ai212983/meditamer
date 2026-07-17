@@ -1,5 +1,4 @@
 use embassy_time::Instant;
-use sdcard::fat;
 use sdcard::probe::SdWriteMetrics;
 
 use super::super::super::super::types::{SdUploadCommand, SD_PATH_MAX};
@@ -89,14 +88,18 @@ impl SdUploadChunkTimingMetrics {
             .saturating_add(chunk_non_append_ms);
         self.chunk_non_append_ms_max = self.chunk_non_append_ms_max.max(chunk_non_append_ms);
         let chunk_residual_ms = chunk_queue_wait_ms.saturating_add(chunk_non_append_ms);
-        self.chunk_residual_ms_total = self.chunk_residual_ms_total.saturating_add(chunk_residual_ms);
+        self.chunk_residual_ms_total = self
+            .chunk_residual_ms_total
+            .saturating_add(chunk_residual_ms);
         self.chunk_residual_ms_max = self.chunk_residual_ms_max.max(chunk_residual_ms);
 
         let accounted_ms = ensure_ready_ms
             .saturating_add(payload_lock_ms)
             .saturating_add(append_total_ms);
         let chunk_overhead_ms = chunk_total_ms.saturating_sub(accounted_ms);
-        self.chunk_overhead_ms_total = self.chunk_overhead_ms_total.saturating_add(chunk_overhead_ms);
+        self.chunk_overhead_ms_total = self
+            .chunk_overhead_ms_total
+            .saturating_add(chunk_overhead_ms);
         self.chunk_overhead_ms_max = self.chunk_overhead_ms_max.max(chunk_overhead_ms);
     }
 }
@@ -106,7 +109,6 @@ pub(in super::super) struct SdUploadSession {
     pub(super) final_path_len: u8,
     pub(super) temp_path: [u8; SD_UPLOAD_PATH_BUF_MAX],
     pub(super) temp_path_len: u8,
-    pub(super) append_session: fat::FatAppendSession,
     pub(super) expected_size: u32,
     pub(super) bytes_written: u32,
     pub(super) last_activity_at: Instant,

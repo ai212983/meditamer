@@ -1,6 +1,17 @@
 ## Flash
 
-Flash (auto-detects serial port when exactly one candidate is present):
+Canonical flash and boot-capture entrypoint:
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 \
+RUSTUP_TOOLCHAIN=stable \
+cargo run --manifest-path tools/hostctl/Cargo.toml --target "$(rustup run stable rustc -vV | awk '/^host:/ {print $2}')" -- \
+  flash-capture \
+  --profile debug \
+  --log logs/flash_capture_manual
+```
+
+Compatibility wrapper:
 
 ```bash
 scripts/device/flash.sh [debug|release]
@@ -8,21 +19,29 @@ scripts/device/flash.sh [debug|release]
 
 Default is `release` when no argument is provided.
 
-Recommended explicit invocation (best for multi-device setups):
+Recommended explicit wrapper invocation:
 
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/device/flash.sh debug
 ```
 
-Optional flash env vars:
+`hostctl flash-capture` defaults:
 
-- `ESPFLASH_BAUD` (default `460800` in `scripts/device/flash.sh`)
-- `FLASH_TIMEOUT_SEC` (default `360`; watchdog timeout per primary flash attempt)
-- `FLASH_STATUS_INTERVAL_SEC` (default `15`; heartbeat interval while flashing)
-- `ESPFLASH_ENABLE_FALLBACK` (`1` default; retries with `--no-stub` on failure/timeout)
-- `ESPFLASH_FALLBACK_BAUD` (default `115200`)
-- `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default; avoids crates.io version-check delay)
+- `--flash-mode auto`
+- `--capture-mode boot`
+- `/dev/cu.*` preferred over `/dev/tty.*`
+- artifact directory with `flash.log`, `capture.log`, and `summary.txt`
+
+Optional flash env vars consumed by the workflow:
+
+- `ESPFLASH_BAUD` (default `460800` for full flash)
+- `ESPFLASH_FALLBACK_BAUD` (default `115200` for app-only fallback)
+- `FLASH_TIMEOUT_SEC` (default `360`)
+- `ESPFLASH_ENABLE_FALLBACK` (`1` default; app-only fallback via ESP-IDF `esptool.py`)
+- `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default)
 - `FLASH_SET_TIME_AFTER_FLASH` (`1` default; set `0` to skip automatic `TIMESET`)
+- `HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS` (default `8000`)
+- `HOSTCTL_FLASH_CAPTURE_LOG_PATH` (optional artifact directory override for `scripts/device/flash.sh`)
 
 ### Port Selection
 
@@ -51,8 +70,9 @@ You can also narrow autodetection with `ESPFLASH_PORT_HINT` (substring match).
 
 If flashing appears "stuck":
 
-- `scripts/device/flash.sh` now prints `Flashing in progress...` every `FLASH_STATUS_INTERVAL_SEC` seconds.
-- A flash watchdog aborts after `FLASH_TIMEOUT_SEC`; with fallback enabled, it retries automatically using `--no-stub`.
+- `hostctl flash-capture` first tries full `espflash` and then falls back to app-only `esptool.py` when enabled.
+- the fallback path uses the ESP-IDF virtualenv Python and avoids `save-image --merge`
+- the wrapper preserves the old `FLASH_TIMEOUT_SEC` and fallback env knobs
 
 If serial port is busy:
 
@@ -62,11 +82,89 @@ lsof /dev/cu.usbserial-540
 
 Stop monitor/holder processes, then re-run flash.
 
-Force slow fallback path directly:
+Force app-only fallback directly:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_BAUD=115200 ESPFLASH_ENABLE_FALLBACK=0 scripts/device/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 \
+HOSTCTL_FLASH_CAPTURE_FLASH_MODE=app-only \
+ESPFLASH_FALLBACK_BAUD=115200 \
+scripts/device/flash.sh debug
 ```
+
+### C Wi-Fi Control App
+
+Use the official-style ESP-IDF control app when you need to compare this board
+against mature C Wi-Fi lifecycle behavior instead of the Rust `esp-radio`
+stack:
+
+```bash
+scripts/device/wifi_control_idf.sh build
+scripts/device/wifi_control_idf.sh flash
+scripts/device/wifi_control_idf.sh monitor
+```
+
+Behavior:
+
+- default build is scan-only because `CONFIG_WIFI_CONTROL_SSID` defaults empty
+- if you later set a non-empty SSID/password in the app config, the same app
+  switches to STA-connect mode
+
+ESP-IDF selection:
+
+- wrapper prefers `IDF_APP_ROOT` if set
+- otherwise it auto-picks the newest local install under
+  `.embuild/espressif/esp-idf/v*`
+- for an external install, also export `IDF_TOOLS_PATH` before invoking the
+  wrapper so `export.sh` uses the matching toolchain
+- the wrapper now auto-resets a stale non-CMake
+  `.embuild/idf_apps/wifi_control/build` directory left by failed early runs
+
+Recommended when comparing against the current Wi-Fi blackout:
+
+```bash
+export IDF_APP_ROOT="$HOME/.esp-idf/v5.5.2"
+export IDF_TOOLS_PATH="$HOME/.espressif"
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/wifi_control_idf.sh flash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/wifi_control_idf.sh monitor
+```
+
+### Wi-Fi Partition Dumps
+
+Use the repo-local helper when debugging Wi-Fi discovery blackout or lower-level
+flash state:
+
+```bash
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/dump_wifi_partitions.sh
+```
+
+The helper writes a timestamped artifact directory under `logs/flash_dumps/`
+and captures:
+
+- `nvs` MD5 and raw dump
+- `phy_init` MD5 and raw dump
+- first-byte hexdumps for both partitions
+- stdout/stderr logs for every `espflash` command
+- `summary.txt` with port, baud, read profile, MD5s, and output sizes
+
+Default raw-read transport profile is intentionally conservative because it was
+the stable path for `nvs` in blackout debugging:
+
+- `ESPFLASH_BAUD=115200`
+- `WIFI_FLASH_DUMP_BLOCK_SIZE=0x100`
+- `WIFI_FLASH_DUMP_MAX_IN_FLIGHT=1`
+
+Optional env vars:
+
+- `WIFI_FLASH_DUMP_OUTPUT_ROOT` (default `./logs/flash_dumps`)
+- `WIFI_FLASH_DUMP_TIMESTAMP` (default current local timestamp)
+- `WIFI_FLASH_DUMP_NVS_ADDRESS` (default `0x9000`)
+- `WIFI_FLASH_DUMP_NVS_LENGTH` (default `0x6000`)
+- `WIFI_FLASH_DUMP_PHY_INIT_ADDRESS` (default `0xF000`)
+- `WIFI_FLASH_DUMP_PHY_INIT_LENGTH` (default `0x1000`)
+- `WIFI_FLASH_DUMP_HEXDUMP_BYTES` (default `128`)
+
+Keep using repo-local absolute/anchored paths for artifacts. Do not rely on
+wrapper defaults that may execute from `/tmp`.
 
 ## Monitor
 
@@ -77,12 +175,16 @@ scripts/device/monitor.sh
 Optional monitor env vars:
 
 - `ESPFLASH_BAUD` (default `115200`)
-- `ESPFLASH_MONITOR_BEFORE` (default `default-reset`)
-- `ESPFLASH_MONITOR_AFTER` (default `hard-reset`)
+- `ESPFLASH_MONITOR_BEFORE` (default `no-reset-no-sync`)
+- `ESPFLASH_MONITOR_AFTER` (default `no-reset`)
 - `ESPFLASH_MONITOR_MODE` (`espflash` default, `raw` for direct serial read without reset/sync)
 - `ESPFLASH_MONITOR_PERSIST_RAW` (`1` default: keep raw monitor alive across unplug/replug, `0` to exit on disconnect)
 - `ESPFLASH_MONITOR_RAW_BACKEND` (`auto` default; `tio` preferred if installed, fallback `cat`)
 - `ESPFLASH_MONITOR_OUTPUT_MODE` (`normal` default; `hex` can help diagnose garbled UART output)
+
+`scripts/device/monitor.sh` is now the passive attach/debug helper. Use
+`hostctl flash-capture` for boot-phase capture; do not rely on `espflash monitor`
+reset sequences for early boot logging on this board.
 
 When raw backend is `tio`, exit the monitor with `Ctrl+T` then `q`.
 
@@ -110,129 +212,5 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 ESPFLASH_MONITOR_MODE=espflash scripts/devic
 
 Raw monitor mode (`ESPFLASH_MONITOR_MODE=raw`) does not decode defmt frames.
 
-## Time Sync
 
-Firmware accepts a UART command on `UART0` (`115200` baud):
-
-```text
-TIMESET <unix_epoch_utc_seconds> <tz_offset_minutes>
-```
-
-Examples:
-
-- `TIMESET 1762531200 -300` (UTC-05:00)
-- `TIMESET 1762531200 60` (UTC+01:00)
-
-Recommended host helper:
-
-```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/device/timeset.sh
-```
-
-Optional explicit values:
-
-```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/device/timeset.sh 1762531200 -300
-```
-
-If you prefer manual write:
-
-```bash
-stty -f /dev/cu.usbserial-540 115200 cs8 -cstopb -parenb -ixon -ixoff -crtscts -echo raw
-printf 'TIMESET %s %s\r\n' "$(date -u +%s)" "-300" > /dev/cu.usbserial-540
-```
-
-## Allocator Diagnostics
-
-Firmware accepts allocator status commands on `UART0` (`115200` baud):
-
-```text
-PSRAM
-```
-
-Aliases: `HEAP`, `ALLOCATOR`.
-
-Response format:
-
-```text
-PSRAM feature_enabled=<bool> state=<state> total_bytes=<n> used_bytes=<n> free_bytes=<n> peak_used_bytes=<n> internal_free_bytes=<n> external_free_bytes=<n> min_free_bytes=<n> min_internal_free_bytes=<n> min_external_free_bytes=<n> large_alloc_external_ok=<n> large_alloc_internal_ok=<n> large_alloc_fail=<n>
-```
-
-- `internal_free_bytes` tracks capability-constrained internal RAM available for Wi-Fi/radio allocations.
-- `min_*` values are boot-lifetime low-water marks to identify monotonic pressure during soak runs.
-- `large_alloc_*` counters show where `alloc_large_byte_buffer` requests landed (external vs internal fallback).
-
-Allocator probe command:
-
-```text
-PSRAMALLOC <bytes>
-```
-
-Alias: `HEAPALLOC <bytes>`.
-
-Probe responses:
-
-```text
-PSRAMALLOC OK bytes=<n> placement=<placement> len=<n>
-PSRAMALLOC ERR bytes=<n> reason=<reason>
-```
-
-## Runtime Service Modes
-
-Runtime mode controls are available over `UART0` (`115200` baud):
-
-```text
-STATE GET
-STATE SET upload=on
-STATE SET upload=off
-STATE SET assets=on
-STATE SET assets=off
-STATE SET base=day
-STATE SET base=touch_wizard
-STATE SET day_bg=suminagashi
-STATE SET day_bg=shanshui
-STATE SET overlay=none
-STATE SET overlay=clock
-STATE DIAG kind=debug targets=SD|WIFI
-DIAG GET
-```
-
-Response format:
-
-```text
-STATE phase=<...> base=<...> day_bg=<...> overlay=<...> upload=<on|off> assets=<on|off> diag_kind=<...> targets=<NONE|SD|WIFI|DISPLAY|TOUCH|IMU>
-DIAG state=<idle|running|done|failed|canceled> targets=<...> step=<...> code=<...>
-```
-
-Notes:
-
-- App state is persisted in flash and restored on boot.
-- `STATE SET` returns `OK` only after the state update is applied by runtime tasks.
-- `STATE SET upload=off` rejects upload operations and releases upload transfer buffers.
-- `STATE SET assets=off` disables SD asset reads, clears runtime graphics cache, and releases asset-read transfer buffers.
-- On `psram-alloc` builds, transfer buffers are allocated in PSRAM on-demand and released when the mode is disabled.
-
-Quick RAM check sequence:
-
-```text
-PSRAM
-STATE SET upload=on
-PSRAM
-STATE SET upload=off
-PSRAM
-STATE SET assets=off
-PSRAM
-STATE SET assets=on
-PSRAM
-```
-
-Automated smoke run (mode toggles + PSRAM snapshots):
-
-```bash
-scripts/device/runtime_modes_smoke.sh
-```
-
-Optional env var:
-
-- `HOSTCTL_MODE_SMOKE_SETTLE_MS` (default `0`; can be raised if extra post-command delay is desired)
-
+_Runtime setup continues in [Part 07](./part-07.md)._

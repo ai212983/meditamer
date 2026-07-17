@@ -1,6 +1,4 @@
-use core::fmt::Write;
-
-use crate::{fat, power_off, power_on_for_io, probe};
+use crate::{power_off, power_on_for_io, probe};
 
 #[derive(Clone, Copy)]
 pub enum SdPowerAction {
@@ -65,7 +63,9 @@ where
                 gib_frac
             );
         }
-        Err(err) => match err {
+        Err(err) => {
+            sd_probe.recover_after_timeout();
+            match err {
             probe::SdProbeError::Spi(spi_err) => {
                 esp_println::println!("sdprobe[{}]: not_detected spi_error={:?}", reason, spi_err);
             }
@@ -150,11 +150,23 @@ where
                     response
                 );
             }
-            probe::SdProbeError::WriteBusyTimeout => {
-                esp_println::println!("sdprobe[{}]: not_detected write_busy_timeout", reason);
+            probe::SdProbeError::DmaTransferTimeout => {
+                esp_println::println!("sdprobe[{}]: not_detected dma_transfer_timeout", reason);
+            }
+            probe::SdProbeError::WriteBusyTimeout { elapsed_ms, polls } => {
+                esp_println::println!(
+                    "sdprobe[{}]: not_detected write_busy_timeout elapsed_ms={} polls={}",
+                    reason,
+                    elapsed_ms,
+                    polls
+                );
             }
             probe::SdProbeError::WriteLengthInvalid(len) => {
-                esp_println::println!("sdprobe[{}]: not_detected write_len_invalid={}", reason, len);
+                esp_println::println!(
+                    "sdprobe[{}]: not_detected write_len_invalid={}",
+                    reason,
+                    len
+                );
             }
             probe::SdProbeError::NotInitialized => {
                 esp_println::println!("sdprobe[{}]: not_detected not_initialized", reason);
@@ -162,7 +174,8 @@ where
             probe::SdProbeError::CapacityDecodeFailed => {
                 esp_println::println!("sdprobe[{}]: not_detected capacity_decode_failed", reason);
             }
-        },
+            }
+        }
     }
 
     if power_off_io(power, power_mode).is_err() {
@@ -193,6 +206,7 @@ where
     }
 
     if let Err(err) = sd_probe.init().await {
+        sd_probe.recover_after_timeout();
         esp_println::println!("sdrw[{}]: init_error={:?}", reason, err);
         let _ = power_off_io(power, power_mode);
         return SdRuntimeResultCode::InitFailed;

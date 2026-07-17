@@ -1,24 +1,17 @@
+#[path = "runtime_startup.rs"]
+mod runtime_startup;
+
 #[embassy_executor::task]
 pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
     let boot_started_at = Instant::now();
     let mut powered = false;
     let mut upload_mounted = false;
     let mut upload_session: Option<SdUploadSession> = None;
+    let mut fat_engine = FatEngine::new();
     let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
-    let mut consecutive_failures = 0u8;
-    let mut backoff_until: Option<Instant> = None;
-
-    // Keep boot probe behavior, but now report completion through result channel.
-    let boot_req = SdRequest {
-        id: 0,
-        command: SdCommand::Probe,
-    };
-    let boot_result = process_request(boot_req, &mut sd_probe, &mut powered, &mut no_power).await;
-    publish_result(boot_result);
-    if !boot_result.ok {
-        consecutive_failures = 1;
-        backoff_until = Some(Instant::now() + Duration::from_millis(failure_backoff_ms(1)));
-    }
+    let (mut consecutive_failures, mut backoff_until) =
+        runtime_startup::initialize(&mut sd_probe, &mut powered, &mut no_power, &mut fat_engine)
+            .await;
 
     #[cfg(feature = "asset-upload-http")]
     if crate::firmware::storage::transfer_buffers::lock_upload_chunk_buffer()
@@ -46,6 +39,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                     &mut sd_probe,
                     &mut powered,
                     &mut upload_mounted,
+                    &mut fat_engine,
                 )
                 .await;
                 publish_upload_result(result);
@@ -66,6 +60,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await;
                     publish_upload_result(result);
@@ -95,6 +90,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await
                     {
@@ -107,6 +103,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await;
                     publish_wifi_config_response(response);
@@ -121,6 +118,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await
                     {
@@ -142,6 +140,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await;
                     publish_upload_result(result);
@@ -166,6 +165,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await
                     {
@@ -178,6 +178,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await;
                     publish_wifi_config_response(response);
@@ -192,6 +193,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await
                     {
@@ -213,6 +215,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                         &mut sd_probe,
                         &mut powered,
                         &mut upload_mounted,
+                        &mut fat_engine,
                     )
                     .await;
                     publish_upload_result(result);
@@ -228,6 +231,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             &mut powered,
             &mut upload_mounted,
             &mut upload_session,
+            &mut fat_engine,
         )
         .await;
 
@@ -238,7 +242,15 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
                 // by the idle-abort/mode-off checks at the top of this loop.
                 continue;
             }
-            if powered && duration_ms_since(boot_started_at) < SD_BOOT_POWER_OFF_GRACE_MS as u32 {
+            // The boot probe can finish while the display task is still in its
+            // initial e-paper refresh and unable to service the shared I2C
+            // expander. Keep the card powered until the display has announced
+            // runtime readiness; a fixed grace period alone raced slow full
+            // refreshes and produced a spurious power-off timeout.
+            if powered
+                && (!crate::firmware::runtime::scheduling::runtime_ready()
+                    || duration_ms_since(boot_started_at) < SD_BOOT_POWER_OFF_GRACE_MS as u32)
+            {
                 continue;
             }
             if powered && !request_sd_power(SdPowerRequest::Off).await {
@@ -246,14 +258,22 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             }
             powered = false;
             sd_probe.invalidate();
+            fat_engine.invalidate();
             upload_mounted = false;
             continue;
         };
 
-        let result = process_request(request, &mut sd_probe, &mut powered, &mut no_power).await;
+        let result = process_request(
+            request,
+            &mut sd_probe,
+            &mut powered,
+            &mut no_power,
+            &mut fat_engine,
+        )
+        .await;
         publish_result(result);
 
-        if result.ok {
+        if result.ok || !result.recover_bus {
             consecutive_failures = 0;
             backoff_until = None;
         } else {
@@ -265,6 +285,7 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
             }
             powered = false;
             sd_probe.invalidate();
+            fat_engine.invalidate();
             upload_mounted = false;
         }
     }

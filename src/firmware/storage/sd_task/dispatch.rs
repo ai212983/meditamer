@@ -1,16 +1,23 @@
-use embassy_time::{Instant, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
+use sdcard::fat::FatEngine;
 use sdcard::runtime as sd_ops;
 
 use super::super::super::types::{
     SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult, SdResultCode,
 };
-use super::{duration_ms_since, request_sd_power, SD_RETRY_DELAY_MS, SD_RETRY_MAX_ATTEMPTS};
+use super::engine_driver::run_fat_engine_command;
+use super::manual_io::{run_probe, run_rw_verify};
+use super::{
+    duration_ms_since, request_sd_power, SD_POWER_CYCLE_OFF_MS, SD_RETRY_DELAY_MS,
+    SD_RETRY_MAX_ATTEMPTS,
+};
 
 pub(super) async fn process_request(
     request: SdRequest,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
+    fat_engine: &mut FatEngine,
 ) -> SdResult {
     let kind = sd_command_kind(request.command);
 
@@ -18,11 +25,12 @@ pub(super) async fn process_request(
         return result;
     }
 
-    if let Some(result) = ensure_initialized_for_request(&request, kind, sd_probe).await {
+    if let Some(result) = ensure_initialized_for_request(&request, kind, sd_probe, fat_engine).await
+    {
         return result;
     }
 
-    run_request_with_retries(request, kind, sd_probe, powered, power).await
+    run_request_with_retries(request, kind, sd_probe, powered, power, fat_engine).await
 }
 
 async fn ensure_powered_for_request(
@@ -44,6 +52,7 @@ async fn ensure_powered_for_request(
         code: SdResultCode::PowerOnFailed,
         attempts: 0,
         duration_ms: 0,
+        recover_bus: true,
     })
 }
 
@@ -51,12 +60,32 @@ async fn ensure_initialized_for_request(
     request: &SdRequest,
     kind: SdCommandKind,
     sd_probe: &mut SdProbeDriver,
+    fat_engine: &mut FatEngine,
 ) -> Option<SdResult> {
     if matches!(request.command, SdCommand::Probe) || sd_probe.is_initialized() {
         return None;
     }
 
-    if let Err(err) = sd_probe.init().await {
+    let init = match with_timeout(Duration::from_secs(2), sd_probe.init()).await {
+        Ok(result) => result,
+        Err(err) => {
+            sd_probe.recover_after_timeout();
+            fat_engine.invalidate();
+            esp_println::println!("sdtask: init_timeout id={} err={:?}", request.id, err);
+            return Some(SdResult {
+                id: request.id,
+                kind,
+                ok: false,
+                code: SdResultCode::InitFailed,
+                attempts: 0,
+                duration_ms: 0,
+                recover_bus: true,
+            });
+        }
+    };
+    if let Err(err) = init {
+        sd_probe.recover_after_timeout();
+        fat_engine.invalidate();
         esp_println::println!("sdtask: init_error id={} err={:?}", request.id, err);
         return Some(SdResult {
             id: request.id,
@@ -65,6 +94,7 @@ async fn ensure_initialized_for_request(
             code: SdResultCode::InitFailed,
             attempts: 0,
             duration_ms: 0,
+            recover_bus: true,
         });
     }
 
@@ -77,24 +107,41 @@ async fn run_request_with_retries(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
+    fat_engine: &mut FatEngine,
 ) -> SdResult {
     let start = Instant::now();
     let mut attempts = 0u8;
     let mut code = SdResultCode::OperationFailed;
+    let mut recover_bus = false;
 
     while attempts < SD_RETRY_MAX_ATTEMPTS {
         attempts = attempts.saturating_add(1);
-        code = run_sd_command("request", request.command, sd_probe, power).await;
+        let retryable;
+        code = match reinitialize_after_retry(request.id, sd_probe, fat_engine).await {
+            Ok(()) => {
+                let outcome =
+                    run_sd_command("request", request.command, sd_probe, power, fat_engine).await;
+                retryable = outcome.1;
+                outcome.0
+            }
+            Err(init_code) => {
+                retryable = sd_result_should_retry(init_code);
+                init_code
+            }
+        };
+        recover_bus = retryable;
         if code == SdResultCode::Ok {
             break;
         }
-        if !sd_result_should_retry(code) {
+        if !retryable {
             break;
         }
 
         if attempts < SD_RETRY_MAX_ATTEMPTS {
-            if let Some(result) =
-                retry_after_power_cycle(start, request.id, kind, attempts, sd_probe, powered).await
+            if let Some(result) = retry_after_power_cycle(
+                start, request.id, kind, attempts, sd_probe, powered, fat_engine,
+            )
+            .await
             {
                 return result;
             }
@@ -109,6 +156,41 @@ async fn run_request_with_retries(
         code,
         attempts,
         duration_ms,
+        recover_bus: code != SdResultCode::Ok && recover_bus,
+    }
+}
+
+async fn reinitialize_after_retry(
+    request_id: u32,
+    sd_probe: &mut SdProbeDriver,
+    fat_engine: &mut FatEngine,
+) -> Result<(), SdResultCode> {
+    if sd_probe.is_initialized() {
+        return Ok(());
+    }
+
+    match with_timeout(Duration::from_secs(2), sd_probe.init()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(err)) => {
+            sd_probe.recover_after_timeout();
+            fat_engine.invalidate();
+            esp_println::println!(
+                "sdtask: retry_init_error id={} err={:?}",
+                request_id,
+                err
+            );
+            Err(SdResultCode::InitFailed)
+        }
+        Err(err) => {
+            sd_probe.recover_after_timeout();
+            fat_engine.invalidate();
+            esp_println::println!(
+                "sdtask: retry_init_timeout id={} err={:?}",
+                request_id,
+                err
+            );
+            Err(SdResultCode::InitFailed)
+        }
     }
 }
 
@@ -119,12 +201,14 @@ async fn retry_after_power_cycle(
     attempts: u8,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> Option<SdResult> {
     Timer::after_millis(SD_RETRY_DELAY_MS).await;
 
     if !request_sd_power(SdPowerRequest::Off).await {
         *powered = false;
         sd_probe.invalidate();
+        fat_engine.invalidate();
         return Some(SdResult {
             id: request_id,
             kind,
@@ -132,11 +216,14 @@ async fn retry_after_power_cycle(
             code: SdResultCode::PowerOffFailed,
             attempts,
             duration_ms: duration_ms_since(start),
+            recover_bus: true,
         });
     }
 
     *powered = false;
     sd_probe.invalidate();
+    fat_engine.invalidate();
+    Timer::after_millis(SD_POWER_CYCLE_OFF_MS).await;
 
     if request_sd_power(SdPowerRequest::On).await {
         *powered = true;
@@ -150,6 +237,7 @@ async fn retry_after_power_cycle(
         code: SdResultCode::PowerOnFailed,
         attempts,
         duration_ms: duration_ms_since(start),
+        recover_bus: true,
     })
 }
 
@@ -157,79 +245,15 @@ async fn run_sd_command(
     reason: &str,
     command: SdCommand,
     sd_probe: &mut SdProbeDriver,
-    power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
-) -> SdResultCode {
-    let power_mode = sd_ops::SdPowerMode::AlreadyOn;
-
-    match command {
-        SdCommand::Probe => sd_ops::run_sd_probe(reason, sd_probe, power, power_mode).await,
-        SdCommand::RwVerify { lba } => {
-            sd_ops::run_sd_rw_verify(reason, lba, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatList { path, path_len } => {
-            sd_ops::run_sd_fat_ls(reason, &path, path_len, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatRead { path, path_len } => {
-            sd_ops::run_sd_fat_read(reason, &path, path_len, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatWrite {
-            path,
-            path_len,
-            data,
-            data_len,
-        } => {
-            sd_ops::run_sd_fat_write(
-                reason, &path, path_len, &data, data_len, sd_probe, power, power_mode,
-            )
-            .await
-        }
-        SdCommand::FatStat { path, path_len } => {
-            sd_ops::run_sd_fat_stat(reason, &path, path_len, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatMkdir { path, path_len } => {
-            sd_ops::run_sd_fat_mkdir(reason, &path, path_len, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatRemove { path, path_len } => {
-            sd_ops::run_sd_fat_remove(reason, &path, path_len, sd_probe, power, power_mode).await
-        }
-        SdCommand::FatRename {
-            src_path,
-            src_path_len,
-            dst_path,
-            dst_path_len,
-        } => {
-            sd_ops::run_sd_fat_rename(
-                reason,
-                &src_path,
-                src_path_len,
-                &dst_path,
-                dst_path_len,
-                sd_probe,
-                power,
-                power_mode,
-            )
-            .await
-        }
-        SdCommand::FatAppend {
-            path,
-            path_len,
-            data,
-            data_len,
-        } => {
-            sd_ops::run_sd_fat_append(
-                reason, &path, path_len, &data, data_len, sd_probe, power, power_mode,
-            )
-            .await
-        }
-        SdCommand::FatTruncate {
-            path,
-            path_len,
-            size,
-        } => {
-            sd_ops::run_sd_fat_truncate(reason, &path, path_len, size, sd_probe, power, power_mode)
-                .await
-        }
-    }
+    _power: &mut impl FnMut(sd_ops::SdPowerAction) -> Result<(), ()>,
+    fat_engine: &mut FatEngine,
+) -> (SdResultCode, bool) {
+    let code = match command {
+        SdCommand::Probe => run_probe(reason, sd_probe).await,
+        SdCommand::RwVerify { lba } => run_rw_verify(reason, lba, sd_probe).await,
+        command => return run_fat_engine_command(command, sd_probe, fat_engine).await,
+    };
+    (code, sd_result_should_retry(code))
 }
 
 pub(super) fn sd_result_should_retry(code: SdResultCode) -> bool {

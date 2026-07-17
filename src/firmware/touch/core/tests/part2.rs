@@ -217,3 +217,38 @@ fn post_swipe_new_touch_far_from_release_starts_new_interaction() {
         .count();
     assert!(down_count >= 2);
 }
+
+#[test]
+fn swipe_detected_even_if_release_returns_near_start() {
+    let mut engine = TouchEngine::new();
+    let mut events = std::vec::Vec::new();
+
+    drain_kinds(engine.tick(0, sample1(60, 120)), &mut events);
+    drain_kinds(engine.tick(16, sample1(60, 120)), &mut events);
+    drain_kinds(engine.tick(32, sample1(180, 121)), &mut events);
+    // Finger jitters back before lift.
+    drain_kinds(engine.tick(48, sample1(90, 122)), &mut events);
+    drain_kinds(engine.tick(64, sample0()), &mut events);
+    drain_kinds(engine.tick(120, sample0()), &mut events);
+    drain_kinds(engine.tick(136, sample0()), &mut events);
+
+    assert!(events
+        .iter()
+        .any(|k| matches!(k, TouchEventKind::Swipe(TouchSwipeDirection::Right))));
+}
+
+#[test]
+fn recontact_after_release_gap_emits_up_for_previous_interaction() {
+    let mut engine = TouchEngine::new();
+    let mut events = std::vec::Vec::new();
+
+    drain_kinds(engine.tick(0, sample1(100, 100)), &mut events);
+    drain_kinds(engine.tick(20, sample1(100, 100)), &mut events);
+    // Enter release debounce.
+    drain_kinds(engine.tick(40, sample0()), &mut events);
+    // Re-contact well after continuity recovery window; old press must
+    // finalize with Up before a new interaction starts.
+    drain_kinds(engine.tick(160, sample1(200, 200)), &mut events);
+
+    assert!(events.iter().any(|k| matches!(k, TouchEventKind::Up)));
+}

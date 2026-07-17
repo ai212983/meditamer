@@ -1,4 +1,5 @@
 use embassy_time::Instant;
+use sdcard::fat::FatEngine;
 
 use super::super::super::types::{
     SdProbeDriver, SdUploadRequest, SdUploadResult, SdUploadResultCode,
@@ -19,8 +20,17 @@ pub(super) async fn process_upload_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
-    dispatch::process_upload_request(request, session, sd_probe, powered, upload_mounted).await
+    dispatch::process_upload_request(
+        request,
+        session,
+        sd_probe,
+        powered,
+        upload_mounted,
+        fat_engine,
+    )
+    .await
 }
 
 #[cfg(all(test, not(target_os = "none")))]

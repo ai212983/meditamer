@@ -6,6 +6,7 @@ use crate::firmware::storage::upload::wifi::backend::{
 };
 use embassy_time::Duration;
 use enumset::EnumSet;
+use esp_wifi_sys::include::{wifi_active_scan_time_t, wifi_scan_time_t};
 
 fn idf_default_scan_timing_enabled() -> bool {
     matches!(

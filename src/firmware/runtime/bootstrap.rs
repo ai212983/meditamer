@@ -1,8 +1,11 @@
-use crate::drivers::{inkplate::InkplateHal, platform::HalI2c};
-use embassy_time::{Duration, Instant, Ticker};
+use crate::drivers::inkplate::{imu::InkplateImu, touch::InkplateTouch, InkplateHal};
+use embassy_embedded_hal::{adapter::BlockingAsync, shared_bus::asynch::i2c::I2cDevice};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::{
-    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig},
     i2c::master::{Config as I2cConfig, I2c, SoftwareTimeout},
+    interrupt::software::SoftwareInterruptControl,
     spi::{
         master::{Config as SpiConfig, Spi},
         Mode as SpiMode,
@@ -10,25 +13,22 @@ use esp_hal::{
     time::{Duration as HalDuration, Rate},
     timer::timg::TimerGroup,
     uart::{Config as UartConfig, Uart},
+    Blocking,
 };
 
-use super::super::config::{
-    APP_EVENTS, BATTERY_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS, UART_BAUD,
-};
-use super::super::types::{AppEvent, DisplayContext, PanelPinHold};
+use super::super::config::UART_BAUD;
+use super::super::types::{DisplayContext, PanelPinHold};
 use super::super::{
     app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
-    psram, storage, telemetry, touch,
+    psram, storage, telemetry,
 };
-#[cfg(feature = "asset-upload-http")]
-use crate::firmware::storage::upload::wifi::backend_legacy_port;
 use sdcard::probe;
+use static_cell::StaticCell;
 
-fn backend_legacy_port_diag_enabled() -> bool {
-    option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG")
-        .or(option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"))
-        .is_some_and(|raw| raw != "0")
-}
+mod tasks;
+use tasks::{board_runtime_task, BoardRuntimeResources};
+
+use super::scheduling::{spawn as spawn_task, TaskClass};
 
 pub fn run() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -43,7 +43,7 @@ pub fn run() -> ! {
     esp_alloc::heap_allocator!(size: 48 * 1024);
 
     #[cfg(feature = "psram-alloc")]
-    let allocator_status = psram::init_allocator(&peripherals.PSRAM);
+    let allocator_status = psram::init_allocator(peripherals.PSRAM);
     #[cfg(not(feature = "psram-alloc"))]
     psram::init_allocator();
     psram::log_allocator_status();
@@ -57,12 +57,8 @@ pub fn run() -> ! {
     }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
-    if backend_legacy_port_diag_enabled() {
-        let timg1 = TimerGroup::new(peripherals.TIMG1);
-        backend_legacy_port::install_legacy_preempt_timer(timg1.timer0);
-        esp_println::println!("upload_http: legacy_port setup_timer staged=true");
-    }
+    let software_interrupts = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, software_interrupts.software_interrupt0);
     telemetry::log_stack_headroom("boot_after_rtos_start");
 
     let uart_cfg = UartConfig::default().with_baudrate(UART_BAUD);
@@ -95,6 +91,19 @@ pub fn run() -> ! {
         .with_sck(peripherals.GPIO14)
         .with_mosi(peripherals.GPIO13)
         .with_miso(peripherals.GPIO12);
+    let sd_spi = {
+        let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) =
+            esp_hal::dma_buffers!(probe::SD_DMA_BUFFER_SIZE, probe::SD_DMA_BUFFER_SIZE);
+        let rx = DmaRxBuf::new(rx_descriptors, rx_buffer)
+            .expect("failed to allocate SPI2 DMA RX buffer");
+        let tx = DmaTxBuf::new(tx_descriptors, tx_buffer)
+            .expect("failed to allocate SPI2 DMA TX buffer");
+        sd_spi
+            .with_dma(peripherals.DMA_SPI2)
+            .with_buffers(rx, tx)
+            .into_async()
+    };
+    esp_println::println!("sd_spi: mode=dma");
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
@@ -113,10 +122,10 @@ pub fn run() -> ! {
         }
     };
 
-    let touch_irq = Input::new(
-        peripherals.GPIO36,
-        InputConfig::default().with_pull(Pull::Up),
-    );
+    // GPIO36 is the board's shared active-low WAKE-button/touch-interrupt line.
+    // ESP32 input-only GPIOs have no internal pull resistor; the board provides
+    // the required external 100 kOhm pull-up.
+    let gpio36_input = Input::new(peripherals.GPIO36, InputConfig::default());
 
     let panel_pins = PanelPinHold {
         _cl: Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default()),
@@ -140,17 +149,19 @@ pub fn run() -> ! {
         .expect("failed to init I2C0")
         .with_sda(peripherals.GPIO21)
         .with_scl(peripherals.GPIO22);
-    let i2c = HalI2c::new(i2c);
-    let mut inkplate = match InkplateHal::new(i2c, crate::drivers::platform::BusyDelay::new()) {
+    static I2C_BUS: StaticCell<
+        Mutex<CriticalSectionRawMutex, BlockingAsync<I2c<'static, Blocking>>>,
+    > = StaticCell::new();
+    let i2c_bus = I2C_BUS.init(Mutex::new(BlockingAsync::new(i2c)));
+    let display_i2c = I2cDevice::new(i2c_bus);
+    let touch_i2c = I2cDevice::new(i2c_bus);
+    let imu_i2c = I2cDevice::new(i2c_bus);
+    let inkplate = match InkplateHal::new(display_i2c, crate::drivers::platform::BusyDelay::new()) {
         Ok(driver) => driver,
         Err(_) => halt_forever(),
     };
-
-    if inkplate.init_core().is_err() {
-        halt_forever();
-    }
-    let _ = inkplate.set_wakeup(true);
-    let _ = inkplate.frontlight_off();
+    let touch_driver = InkplateTouch::new(touch_i2c);
+    let imu_driver = InkplateImu::new(imu_i2c);
 
     let display_context = DisplayContext {
         inkplate,
@@ -168,62 +179,52 @@ pub fn run() -> ! {
 
         #[cfg(feature = "asset-upload-http")]
         if let Some(upload_http_runtime) = upload_http_runtime {
-            spawner.must_spawn(storage::upload::wifi_connection_task(
-                upload_http_runtime.wifi_controller,
-                upload_http_runtime.initial_credentials,
-                upload_http_runtime.stack,
-            ));
+            spawn_task(
+                spawner,
+                TaskClass::Wifi,
+                storage::upload::wifi_connection_task(
+                    upload_http_runtime.wifi_controller,
+                    upload_http_runtime.initial_credentials,
+                    upload_http_runtime.stack,
+                )
+                .unwrap(),
+            );
             if !boot_scan_only_diag_active {
-                spawner.must_spawn(storage::upload::net_task(upload_http_runtime.net_runner));
-                spawner.must_spawn(storage::upload::http_server_task(upload_http_runtime.stack));
+                spawn_task(
+                    spawner,
+                    TaskClass::Network,
+                    storage::upload::net_task(upload_http_runtime.net_runner).unwrap(),
+                );
+                spawn_task(
+                    spawner,
+                    TaskClass::Http,
+                    storage::upload::http_server_task(upload_http_runtime.stack).unwrap(),
+                );
             }
         }
 
         if boot_scan_only_diag_active {
-            esp_println::println!(
-                "runtime: boot_scan_only_diag active; non-wifi tasks skipped"
-            );
+            esp_println::println!("runtime: boot_scan_only_diag active; non-wifi tasks skipped");
             esp_println::println!("sdprobe: boot_scan_only_diag active; sd_task skipped");
         } else {
-            spawner.must_spawn(touch::tasks::touch_pipeline_task());
-            spawner.must_spawn(touch::tasks::touch_irq_task(touch_irq));
-            spawner.must_spawn(super::display_task::display_task(display_context));
-            spawner.must_spawn(super::diagnostics::diagnostics_task());
-            spawner.must_spawn(clock_task());
-            spawner.must_spawn(battery_task());
-            spawner.must_spawn(storage::sd_task(sd_probe));
-            spawner.must_spawn(super::serial_task::time_sync_task(uart));
+            spawner.spawn(
+                board_runtime_task(
+                    spawner,
+                    BoardRuntimeResources {
+                        display_context,
+                        touch_driver,
+                        imu_driver,
+                        gpio36_input,
+                        sd_probe,
+                        uart,
+                        cpu_control: peripherals.CPU_CTRL,
+                        software_interrupt1: software_interrupts.software_interrupt1,
+                    },
+                )
+                .unwrap(),
+            );
         }
     });
-}
-
-#[embassy_executor::task]
-async fn clock_task() {
-    let boot_instant = Instant::now();
-    APP_EVENTS
-        .send(AppEvent::Refresh { uptime_seconds: 0 })
-        .await;
-    let mut ticker = Ticker::every(Duration::from_secs(REFRESH_INTERVAL_SECONDS as u64));
-
-    loop {
-        ticker.next().await;
-        let uptime_seconds = Instant::now()
-            .saturating_duration_since(boot_instant)
-            .as_secs()
-            .min(u32::MAX as u64) as u32;
-        APP_EVENTS.send(AppEvent::Refresh { uptime_seconds }).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn battery_task() {
-    APP_EVENTS.send(AppEvent::BatteryTick).await;
-    let mut ticker = Ticker::every(Duration::from_secs(BATTERY_INTERVAL_SECONDS as u64));
-
-    loop {
-        ticker.next().await;
-        APP_EVENTS.send(AppEvent::BatteryTick).await;
-    }
 }
 
 unsafe fn make_static<T>(value: &mut T) -> &'static mut T {

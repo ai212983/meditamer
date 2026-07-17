@@ -3,6 +3,7 @@ use embassy_futures::select::{select3, Either3};
 #[cfg(feature = "asset-upload-http")]
 use embassy_time::with_timeout;
 use embassy_time::{Duration, Instant, Timer};
+use sdcard::fat::FatEngine;
 use sdcard::runtime as sd_ops;
 
 #[cfg(feature = "asset-upload-http")]
@@ -22,8 +23,11 @@ use super::super::types::{
 
 mod asset_read;
 mod dispatch;
+mod engine_driver;
 mod logging;
+mod manual_io;
 mod power;
+mod serial_log;
 #[cfg(not(feature = "asset-upload-http"))]
 mod receive;
 #[cfg(all(test, not(target_os = "none")))]
@@ -51,6 +55,7 @@ const SD_IDLE_POWER_OFF_MS: u64 = 1_500;
 const SD_BOOT_POWER_OFF_GRACE_MS: u64 = 6_000;
 const SD_RETRY_MAX_ATTEMPTS: u8 = 3;
 const SD_RETRY_DELAY_MS: u64 = 120;
+const SD_POWER_CYCLE_OFF_MS: u64 = 250;
 const SD_BACKOFF_BASE_MS: u64 = 300;
 const SD_BACKOFF_MAX_MS: u64 = 2_400;
 const SD_POWER_ON_RESPONSE_TIMEOUT_MS: u64 = 1_500;
@@ -67,4 +72,3 @@ const SD_UPLOAD_SESSION_IDLE_ABORT_MS: u32 = 120_000;
 const WIFI_CONFIG_DIR: &str = "/config";
 #[cfg(feature = "asset-upload-http")]
 const WIFI_CONFIG_PATH: &str = "/config/wifi.cfg";
-

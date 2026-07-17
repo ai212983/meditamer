@@ -1,60 +1,45 @@
 extern crate alloc;
 
-use embassy_time::Duration;
-use enumset::EnumSet;
-use esp_radio::wifi::Interfaces;
-use esp_radio::InitializationError;
-use static_cell::StaticCell;
-
-pub(crate) type RadioController = esp_radio::Controller<'static>;
-pub(crate) type WifiError = esp_radio::wifi::WifiError;
-pub(crate) type WifiDriverConfig = esp_radio::wifi::Config;
-pub(crate) type WifiController<'a> = esp_radio::wifi::WifiController<'a>;
-pub(crate) type WifiDevice<'a> = esp_radio::wifi::WifiDevice<'a>;
-pub(crate) type WifiInterfaces<'a> = Interfaces<'a>;
-
-pub(crate) use esp_radio::wifi::{
-    AccessPointInfo, AuthMethod, ClientConfig, ModeConfig, PowerSaveMode, Protocol, ScanConfig,
-    ScanMethod, ScanTypeConfig, WifiMode,
+use esp_hal::time::Duration;
+use esp_radio::wifi::{
+    scan::ScanTypeConfig,
+    sta::{ScanMethod, StationConfig},
+    AuthenticationMethod, Config, DisconnectReason, Interface, PowerSaveMode, Protocols,
 };
 
-pub(crate) fn init_radio() -> Result<RadioController, InitializationError> {
-    esp_radio::init()
+pub(crate) use esp_radio::wifi::{
+    ap::AccessPointInfo, scan::ScanConfig, ControllerConfig, WifiController, WifiError,
+};
+
+pub(crate) type WifiDriverConfig = ControllerConfig;
+pub(crate) type WifiDevice = Interface;
+pub(crate) type AuthMethod = AuthenticationMethod;
+pub(crate) type ModeConfig = Config;
+
+pub(crate) fn backend_name() -> &'static str {
+    "esp-radio-1.0"
 }
 
 pub(crate) fn wifi_runtime_config(country_us_override: bool) -> WifiDriverConfig {
+    // Instrumented debug code needs a deeper queue to sustain the accepted
+    // throughput floor. Optimized release code drains two slots fast enough,
+    // and the smaller bound preserves the internal-memory reserve.
+    let rx_queue_size = if cfg!(debug_assertions) { 4 } else { 2 };
+    let config = WifiDriverConfig::default().with_rx_queue_size(rx_queue_size);
     if country_us_override {
-        WifiDriverConfig::default().with_country_code(esp_radio::wifi::CountryInfo::from(*b"US"))
+        config.with_country_info(esp_radio::wifi::CountryInfo::from(*b"US"))
     } else {
-        WifiDriverConfig::default()
+        config
     }
-}
-
-pub(crate) fn new_runtime(
-    radio: &'static RadioController,
-    wifi: esp_hal::peripherals::WIFI<'static>,
-    config: WifiDriverConfig,
-) -> Result<(WifiController<'static>, WifiInterfaces<'static>), WifiError> {
-    esp_radio::wifi::new(radio, wifi, config)
 }
 
 pub(crate) fn initialize_runtime_sta(
     wifi: esp_hal::peripherals::WIFI<'static>,
     country_us_override: bool,
-) -> Result<(WifiController<'static>, WifiDevice<'static>), &'static str> {
-    static RADIO_CTRL: StaticCell<RadioController> = StaticCell::new();
-
-    let radio_ctrl = match init_radio() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            esp_println::println!("asset-upload-http: esp_radio::init err={:?}", err);
-            return Err("asset-upload-http: esp_radio::init failed");
-        }
-    };
-
-    let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
-    match new_runtime(radio_ctrl, wifi, wifi_runtime_config(country_us_override)) {
-        Ok((controller, ifaces)) => Ok((controller, ifaces.sta)),
+) -> Result<(WifiController<'static>, WifiDevice), &'static str> {
+    let sta = Interface::station();
+    match WifiController::new(wifi, wifi_runtime_config(country_us_override)) {
+        Ok(controller) => Ok((controller, sta)),
         Err(err) => {
             esp_println::println!("asset-upload-http: wifi init err={:?}", err);
             Err("asset-upload-http: wifi init failed")
@@ -66,55 +51,62 @@ pub(crate) fn wifi_set_config(
     controller: &mut WifiController<'_>,
     conf: &ModeConfig,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::set_config(controller, conf)
+    controller.set_config(conf)
 }
 
+// esp-radio 1.0 starts and changes mode through ControllerConfig/set_config.
+// These compatibility operations keep the existing recovery state machine
+// source-compatible without reaching into private driver lifecycle APIs.
 pub(crate) fn wifi_set_mode(
-    controller: &mut WifiController<'_>,
-    mode: WifiMode,
+    _controller: &mut WifiController<'_>,
+    _mode: WifiMode,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::set_mode(controller, mode)
+    Ok(())
 }
 
-pub(crate) fn wifi_is_started(controller: &WifiController<'_>) -> Result<bool, WifiError> {
-    esp_radio::wifi::WifiController::is_started(controller)
+pub(crate) fn wifi_is_started(_controller: &WifiController<'_>) -> Result<bool, WifiError> {
+    Ok(true)
+}
+
+pub(crate) fn wifi_is_connected(controller: &WifiController<'_>) -> bool {
+    controller.is_connected()
 }
 
 pub(crate) fn wifi_set_power_saving(
     controller: &mut WifiController<'_>,
     ps: PowerSaveMode,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::set_power_saving(controller, ps)
+    controller.set_power_saving(ps)
 }
 
 pub(crate) fn wifi_set_protocol(
     controller: &mut WifiController<'_>,
-    protocols: EnumSet<Protocol>,
+    protocols: Protocols,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::set_protocol(controller, protocols)
+    controller.set_protocols(protocols)
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct WifiMode;
+
 pub(crate) fn wifi_sta_mode() -> WifiMode {
-    WifiMode::Sta
+    WifiMode
 }
 
 pub(crate) fn wifi_power_save_none() -> PowerSaveMode {
     PowerSaveMode::None
 }
 
-pub(crate) fn wifi_standard_bgn_protocols() -> EnumSet<Protocol> {
-    Protocol::P802D11B | Protocol::P802D11BG | Protocol::P802D11BGN
+pub(crate) fn wifi_standard_bgn_protocols() -> Protocols {
+    Protocols::default()
 }
 
 pub(crate) fn wifi_rssi(controller: &WifiController<'_>) -> Result<i32, WifiError> {
-    esp_radio::wifi::WifiController::rssi(controller)
+    controller.rssi()
 }
 
 pub(crate) fn wifi_error_is_no_mem(err: &WifiError) -> bool {
-    matches!(
-        err,
-        WifiError::InternalError(esp_radio::wifi::InternalWifiError::NoMem)
-    )
+    matches!(err, WifiError::OutOfMemory)
 }
 
 pub(crate) fn wifi_client_mode_config(
@@ -134,31 +126,27 @@ pub(crate) fn wifi_client_mode_config(
     } else {
         ScanMethod::AllChannels
     };
-    let mut client = ClientConfig::default()
-        .with_ssid(ssid.into())
+    let mut station = StationConfig::default()
+        .with_ssid(ssid)
         .with_password(password.into())
         .with_auth_method(auth_method)
         .with_scan_method(scan_method);
     if let Some(channel) = channel_hint {
-        client = client.with_channel(channel);
+        station = station.with_channel(channel);
     }
     if let Some(bssid) = bssid_hint {
-        client = client.with_bssid(bssid);
+        station = station.with_bssid(bssid);
     }
-    ModeConfig::Client(client)
+    ModeConfig::Station(station)
 }
 
-pub(crate) fn wifi_active_scan_config(
-    max_results: usize,
-    min_ms: u64,
-    max_ms: u64,
-) -> ScanConfig<'static> {
+pub(crate) fn wifi_active_scan_config(max_results: usize, min_ms: u64, max_ms: u64) -> ScanConfig {
     ScanConfig::default()
         .with_show_hidden(true)
         .with_max(max_results)
         .with_scan_type(ScanTypeConfig::Active {
-            min: Duration::from_millis(min_ms).into(),
-            max: Duration::from_millis(max_ms).into(),
+            min: Duration::from_millis(min_ms),
+            max: Duration::from_millis(max_ms),
         })
 }
 
@@ -167,7 +155,7 @@ pub(crate) fn wifi_directed_active_scan_config(
     max_results: usize,
     min_ms: u64,
     max_ms: u64,
-) -> ScanConfig<'_> {
+) -> ScanConfig {
     wifi_active_scan_config(max_results, min_ms, max_ms).with_ssid(ssid)
 }
 
@@ -176,20 +164,18 @@ pub(crate) fn wifi_channel_active_scan_config(
     max_results: usize,
     min_ms: u64,
     max_ms: u64,
-) -> ScanConfig<'static> {
+) -> ScanConfig {
     wifi_active_scan_config(max_results, min_ms, max_ms).with_channel(channel)
 }
 
-pub(crate) fn wifi_passive_scan_config(max_results: usize, passive_ms: u64) -> ScanConfig<'static> {
+pub(crate) fn wifi_passive_scan_config(max_results: usize, passive_ms: u64) -> ScanConfig {
     ScanConfig::default()
         .with_show_hidden(true)
         .with_max(max_results)
-        .with_scan_type(ScanTypeConfig::Passive(
-            Duration::from_millis(passive_ms).into(),
-        ))
+        .with_scan_type(ScanTypeConfig::Passive(Duration::from_millis(passive_ms)))
 }
 
-pub(crate) fn wifi_raw_broad_scan_config(max_results: usize) -> ScanConfig<'static> {
+pub(crate) fn wifi_raw_broad_scan_config(max_results: usize) -> ScanConfig {
     ScanConfig::default()
         .with_show_hidden(true)
         .with_max(max_results)
@@ -197,27 +183,91 @@ pub(crate) fn wifi_raw_broad_scan_config(max_results: usize) -> ScanConfig<'stat
 
 pub(crate) async fn wifi_scan_with_config_async(
     controller: &mut WifiController<'_>,
-    config: ScanConfig<'_>,
+    config: ScanConfig,
 ) -> Result<alloc::vec::Vec<AccessPointInfo>, WifiError> {
-    esp_radio::wifi::WifiController::scan_with_config_async(controller, config).await
+    let result = controller.scan_async(&config).await;
+    if let Ok(access_points) = &result {
+        super::super::WIFI_LAST_SCAN_DONE_AT_MS.store(
+            super::super::connect::monotonic_now_ms_u32(),
+            core::sync::atomic::Ordering::Relaxed,
+        );
+        super::super::WIFI_LAST_SCAN_DONE_COUNT.store(
+            access_points.len() as u32,
+            core::sync::atomic::Ordering::Relaxed,
+        );
+        super::super::WIFI_LAST_SCAN_DONE_STATUS.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
+    result
 }
 
-pub(crate) async fn wifi_start_async(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::start_async(controller).await
+pub(crate) async fn wifi_start_async(
+    _controller: &mut WifiController<'_>,
+) -> Result<(), WifiError> {
+    Ok(())
 }
 
 pub(crate) async fn wifi_stop_async(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::stop_async(controller).await
+    if controller.is_connected() {
+        record_disconnect(controller.disconnect_async().await.map(|info| info.reason))?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn wifi_connect_async(
     controller: &mut WifiController<'_>,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::connect_async(controller).await
+    match controller.connect_async().await {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            record_disconnect_error(&err);
+            Err(err)
+        }
+    }
 }
 
 pub(crate) async fn wifi_disconnect_async(
     controller: &mut WifiController<'_>,
 ) -> Result<(), WifiError> {
-    esp_radio::wifi::WifiController::disconnect_async(controller).await
+    if !controller.is_connected() {
+        return Ok(());
+    }
+    record_disconnect(controller.disconnect_async().await.map(|info| info.reason))
+}
+
+fn record_disconnect(result: Result<DisconnectReason, WifiError>) -> Result<(), WifiError> {
+    match result {
+        Ok(reason) => {
+            record_disconnect_reason(reason);
+            Ok(())
+        }
+        Err(err) => {
+            record_disconnect_error(&err);
+            Err(err)
+        }
+    }
+}
+
+fn record_disconnect_error(err: &WifiError) {
+    if let WifiError::Disconnected(info) = err {
+        record_disconnect_reason(info.reason);
+    }
+}
+
+fn record_disconnect_reason(reason: DisconnectReason) {
+    let reason = match reason {
+        DisconnectReason::AuthenticationExpired => 2,
+        DisconnectReason::FourWayHandshakeTimeout => 15,
+        DisconnectReason::BeaconTimeout => 200,
+        DisconnectReason::NoAccessPointFound => 201,
+        DisconnectReason::AuthenticationFailed => 202,
+        DisconnectReason::AssociationFailed => 203,
+        DisconnectReason::HandshakeTimeout => 204,
+        DisconnectReason::ConnectionFailed => 205,
+        DisconnectReason::NoAccessPointFoundWithCompatibleSecurity => 210,
+        DisconnectReason::NoAccessPointFoundInAuthmodeThreshold => 211,
+        DisconnectReason::NoAccessPointFoundInRssiThreshold => 212,
+        _ => 1,
+    };
+    super::super::WIFI_LAST_DISCONNECT_REASON.store(reason, core::sync::atomic::Ordering::Relaxed);
+    super::super::WIFI_DISCONNECTED_EVENT.store(true, core::sync::atomic::Ordering::Relaxed);
 }

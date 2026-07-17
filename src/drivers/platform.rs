@@ -1,60 +1,57 @@
-use esp_hal::{
-    i2c::master::{Error as I2cError, I2c},
-    time::{Duration, Instant},
-    Blocking,
-};
+use embedded_hal_async::i2c::I2c;
+use esp_hal::time::{Duration, Instant};
 
 pub trait DelayOps {
     fn delay_us(&self, micros: u32);
     fn delay_ms(&self, millis: u32);
 }
 
+#[allow(async_fn_in_trait)]
 pub trait I2cOps {
     type Error;
 
-    fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error>;
-    fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error>;
-    fn write_read(&mut self, addr: u8, bytes: &[u8], buffer: &mut [u8]) -> Result<(), Self::Error>;
-    fn probe(&mut self, addr: u8) -> Result<bool, Self::Error>;
-    fn reset(&mut self) -> Result<(), Self::Error>;
+    async fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error>;
+    async fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error>;
+    async fn write_read(
+        &mut self,
+        addr: u8,
+        bytes: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<(), Self::Error>;
+    async fn probe(&mut self, addr: u8) -> Result<bool, Self::Error>;
+    async fn reset(&mut self) -> Result<(), Self::Error>;
 }
 
-pub struct HalI2c<'d> {
-    bus: I2c<'d, Blocking>,
-}
+impl<T> I2cOps for T
+where
+    T: I2c,
+{
+    type Error = T::Error;
 
-impl<'d> HalI2c<'d> {
-    pub fn new(bus: I2c<'d, Blocking>) -> Self {
-        Self { bus }
-    }
-}
-
-impl I2cOps for HalI2c<'_> {
-    type Error = I2cError;
-
-    fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
-        self.bus.read(addr, buffer)
+    async fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        I2c::read(self, addr, buffer).await
     }
 
-    fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error> {
-        self.bus.write(addr, bytes)
+    async fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error> {
+        I2c::write(self, addr, bytes).await
     }
 
-    fn write_read(&mut self, addr: u8, bytes: &[u8], buffer: &mut [u8]) -> Result<(), Self::Error> {
-        self.bus.write_read(addr, bytes, buffer)
+    async fn write_read(
+        &mut self,
+        addr: u8,
+        bytes: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        I2c::write_read(self, addr, bytes, buffer).await
     }
 
-    fn probe(&mut self, addr: u8) -> Result<bool, Self::Error> {
-        match self.bus.write(addr, &[0x00]) {
-            Ok(()) => Ok(true),
-            Err(I2cError::AcknowledgeCheckFailed(_)) => Ok(false),
-            Err(err) => Err(err),
-        }
+    async fn probe(&mut self, addr: u8) -> Result<bool, Self::Error> {
+        Ok(I2c::write(self, addr, &[0x00]).await.is_ok())
     }
 
-    fn reset(&mut self) -> Result<(), Self::Error> {
-        // `esp-hal` resets the peripheral state on each transaction path.
-        // Keep the trait hook for parity with ESP-IDF migration behavior.
+    async fn reset(&mut self) -> Result<(), Self::Error> {
+        // esp-hal resets peripheral state on transaction paths. Retain the
+        // hook so device drivers can use the same recovery sequence.
         Ok(())
     }
 }

@@ -27,6 +27,8 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 ## What It Runs
 
 1. Flash firmware using `scripts/device/flash.sh` (unless explicitly disabled).
+   This wrapper runs `hostctl flash-capture`, which is orchestrated by
+   `tools/hostctl/scenarios/flash-capture.sw.yaml`.
 2. Run UART protocol probes (`PING`, `STATE GET`, `TIMESET`, `PSRAM`).
 3. Run boot soak (`scripts/device/soak_boot.sh`) for repeated cold boot markers.
 4. Emit summary with pass/fail stage and failure class.
@@ -35,6 +37,7 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 
 - Exact board/variant context is known (`esp32` target for this project).
 - `HOSTCTL_PORT` points to the intended device in multi-device setups.
+- Prefer `/dev/cu.*` ports over `/dev/tty.*` on macOS.
 - No other process owns the serial port (`lsof <port>` is clean).
 - Use `HOSTCTL_*` env vars; the wrapper rejects legacy `ESPFLASH_*` names for hostctl paths.
 
@@ -76,6 +79,8 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 4. Attach artifacts in report:
    - `uart_log=...`
    - `soak_logs=...`
+   - `flash.log`, `capture.log`, `summary.txt` from the flash-capture artifact
+     directory when flash ran
 5. Apply one targeted fix for the reported class, then rerun.
 6. Do not claim completion unless all of `flash_ok`, `probe_ok`, and `soak_ok` are true.
 
@@ -101,4 +106,5 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 ## Notes
 
 - This workflow intentionally uses `scripts/device/flash.sh` as the flash primitive per project policy.
+- For early boot evidence, rely on flash-capture artifacts, not `espflash monitor` reset flows.
 - Keep retries bounded; repeated failures without new evidence should escalate with collected logs.

@@ -44,6 +44,11 @@ impl EventEngine {
         self.finish(context)
     }
 
+    pub fn sampling_discontinuity(&mut self, now_ms: u64) -> EngineOutput {
+        let _ = self.imu_fault(now_ms);
+        self.imu_recovered(now_ms)
+    }
+
     fn finish(&self, context: DispatchContext) -> EngineOutput {
         EngineOutput {
             actions: context.actions,

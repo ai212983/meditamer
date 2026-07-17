@@ -17,7 +17,8 @@ reject_legacy_env_vars "runtime_modes_smoke.sh" \
     MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS \
     MODE_SMOKE_POST_UPLOAD_TIMESET_REPEATS
 
-args=(test runtime-modes-smoke)
+suite="${HOSTCTL_MODE_SMOKE_SUITE:-full}"
+args=(test runtime-modes-smoke --suite "$suite")
 if [[ -n "${1:-}" ]]; then
     args+=("$1")
 fi

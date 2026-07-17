@@ -3,6 +3,7 @@ use esp_hal::{
     system::Cpu,
     time::{Duration, Instant, Rate},
 };
+use portable_atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 #[cfg(feature = "embassy")]
 use crate::TIMER_QUEUE;
@@ -20,6 +21,79 @@ use crate::{
 pub(crate) mod embassy;
 
 const TIMESLICE_DURATION: Duration = Rate::from_hz(TICK_RATE).as_duration();
+
+static TIMER_WAKE_SCHEDULE_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_SCHEDULE_ACCEPT_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_SCHEDULE_PAST_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_SCHEDULE_INFINITE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_SCHEDULE_LAST_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_WAKE_SCHEDULE_LAST_WAKE_AT_US: AtomicU64 = AtomicU64::new(0);
+static TIMER_WAKE_TICK_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_HANDLE_ALARM_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_HANDLE_ALARM_SKIP_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_HANDLE_ALARM_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_READY_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_WAKE_LAST_READY_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_WAKE_LAST_NOW_US: AtomicU64 = AtomicU64::new(0);
+static TIMER_WAKE_LAST_CURRENT_ALARM_US: AtomicU64 = AtomicU64::new(0);
+static TIMER_WAKE_LAST_QUEUE_NEXT_WAKEUP_US: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+pub struct SchedulerTimerWakeDiag {
+    pub schedule_call_count: u32,
+    pub schedule_accept_count: u32,
+    pub schedule_past_count: u32,
+    pub schedule_infinite_count: u32,
+    pub schedule_last_task_ptr: usize,
+    pub schedule_last_wake_at_us: u64,
+    pub tick_count: u32,
+    pub handle_alarm_call_count: u32,
+    pub handle_alarm_skip_count: u32,
+    pub handle_alarm_process_count: u32,
+    pub ready_count: u32,
+    pub last_ready_task_ptr: usize,
+    pub last_now_us: u64,
+    pub last_current_alarm_us: u64,
+    pub last_queue_next_wakeup_us: u64,
+}
+
+pub fn reset_scheduler_timer_wake_diag() {
+    TIMER_WAKE_SCHEDULE_CALL_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_SCHEDULE_ACCEPT_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_SCHEDULE_PAST_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_SCHEDULE_INFINITE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_SCHEDULE_LAST_TASK_PTR.store(0, Ordering::Relaxed);
+    TIMER_WAKE_SCHEDULE_LAST_WAKE_AT_US.store(0, Ordering::Relaxed);
+    TIMER_WAKE_TICK_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_HANDLE_ALARM_CALL_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_HANDLE_ALARM_SKIP_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_HANDLE_ALARM_PROCESS_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_READY_COUNT.store(0, Ordering::Relaxed);
+    TIMER_WAKE_LAST_READY_TASK_PTR.store(0, Ordering::Relaxed);
+    TIMER_WAKE_LAST_NOW_US.store(0, Ordering::Relaxed);
+    TIMER_WAKE_LAST_CURRENT_ALARM_US.store(0, Ordering::Relaxed);
+    TIMER_WAKE_LAST_QUEUE_NEXT_WAKEUP_US.store(0, Ordering::Relaxed);
+}
+
+pub fn scheduler_timer_wake_diag() -> SchedulerTimerWakeDiag {
+    SchedulerTimerWakeDiag {
+        schedule_call_count: TIMER_WAKE_SCHEDULE_CALL_COUNT.load(Ordering::Relaxed),
+        schedule_accept_count: TIMER_WAKE_SCHEDULE_ACCEPT_COUNT.load(Ordering::Relaxed),
+        schedule_past_count: TIMER_WAKE_SCHEDULE_PAST_COUNT.load(Ordering::Relaxed),
+        schedule_infinite_count: TIMER_WAKE_SCHEDULE_INFINITE_COUNT.load(Ordering::Relaxed),
+        schedule_last_task_ptr: TIMER_WAKE_SCHEDULE_LAST_TASK_PTR.load(Ordering::Relaxed),
+        schedule_last_wake_at_us: TIMER_WAKE_SCHEDULE_LAST_WAKE_AT_US.load(Ordering::Relaxed),
+        tick_count: TIMER_WAKE_TICK_COUNT.load(Ordering::Relaxed),
+        handle_alarm_call_count: TIMER_WAKE_HANDLE_ALARM_CALL_COUNT.load(Ordering::Relaxed),
+        handle_alarm_skip_count: TIMER_WAKE_HANDLE_ALARM_SKIP_COUNT.load(Ordering::Relaxed),
+        handle_alarm_process_count: TIMER_WAKE_HANDLE_ALARM_PROCESS_COUNT.load(Ordering::Relaxed),
+        ready_count: TIMER_WAKE_READY_COUNT.load(Ordering::Relaxed),
+        last_ready_task_ptr: TIMER_WAKE_LAST_READY_TASK_PTR.load(Ordering::Relaxed),
+        last_now_us: TIMER_WAKE_LAST_NOW_US.load(Ordering::Relaxed),
+        last_current_alarm_us: TIMER_WAKE_LAST_CURRENT_ALARM_US.load(Ordering::Relaxed),
+        last_queue_next_wakeup_us: TIMER_WAKE_LAST_QUEUE_NEXT_WAKEUP_US.load(Ordering::Relaxed),
+    }
+}
 
 #[cfg(feature = "esp-radio")]
 fn legacy_preempt_builtin_timer_diag_enabled() -> bool {
@@ -149,13 +223,19 @@ impl TimeDriver {
     }
 
     pub(crate) fn handle_alarm(&mut self, now: u64, on_task_ready: impl FnMut(TaskPtr)) {
+        TIMER_WAKE_HANDLE_ALARM_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+        TIMER_WAKE_LAST_NOW_US.store(now, Ordering::Relaxed);
+        TIMER_WAKE_LAST_CURRENT_ALARM_US.store(self.current_alarm, Ordering::Relaxed);
+        TIMER_WAKE_LAST_QUEUE_NEXT_WAKEUP_US.store(self.timer_queue.next_wakeup(), Ordering::Relaxed);
         if now < self.current_alarm {
+            TIMER_WAKE_HANDLE_ALARM_SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
             trace!(
                 "Not processing RTOS timer queue. Now: {}, expected next wakeup: {}",
                 now, self.current_alarm
             );
             return;
         }
+        TIMER_WAKE_HANDLE_ALARM_PROCESS_COUNT.fetch_add(1, Ordering::Relaxed);
         trace!("Processing RTOS timer queue at {}", now);
         self.current_alarm = u64::MAX;
         self.timer_queue.retain(now, on_task_ready);
@@ -207,6 +287,10 @@ impl TimeDriver {
     }
 
     pub(crate) fn schedule_wakeup(&mut self, mut current_task: TaskPtr, at: Instant) -> bool {
+        TIMER_WAKE_SCHEDULE_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+        TIMER_WAKE_SCHEDULE_LAST_TASK_PTR.store(current_task.as_ptr() as usize, Ordering::Relaxed);
+        TIMER_WAKE_SCHEDULE_LAST_WAKE_AT_US
+            .store(at.duration_since_epoch().as_micros(), Ordering::Relaxed);
         let state = current_task.state();
         #[cfg(feature = "esp-radio")]
         let allow_legacy_non_ready = crate::esp_radio::backend_legacy_port_runtime_enabled()
@@ -220,6 +304,7 @@ impl TimeDriver {
 
         // Target time is infinite, suspend task without waking up via timer.
         if at == Instant::EPOCH + Duration::MAX {
+            TIMER_WAKE_SCHEDULE_INFINITE_COUNT.fetch_add(1, Ordering::Relaxed);
             current_task.set_state(TaskState::Sleeping);
             debug!("Suspending task: {:?}", current_task);
             return true;
@@ -227,10 +312,12 @@ impl TimeDriver {
 
         // Target time is in the past, don't sleep.
         if at <= Instant::now() {
+            TIMER_WAKE_SCHEDULE_PAST_COUNT.fetch_add(1, Ordering::Relaxed);
             debug!("Target time is in the past");
             return false;
         }
 
+        TIMER_WAKE_SCHEDULE_ACCEPT_COUNT.fetch_add(1, Ordering::Relaxed);
         current_task.set_state(TaskState::Sleeping);
 
         let timestamp = at.duration_since_epoch().as_micros();
@@ -248,6 +335,7 @@ impl TimeDriver {
 
 #[esp_hal::ram]
 extern "C" fn timer_tick_handler() {
+    TIMER_WAKE_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "rtos-trace")]
     rtos_trace::trace::marker_begin(TraceEvents::TimerTickHandler as u32);
 
@@ -279,6 +367,8 @@ extern "C" fn timer_tick_handler() {
 
         // Process timer queue. This will wake up ready tasks, and set a new alarm.
         time_driver.handle_alarm(now, |ready_task| {
+            TIMER_WAKE_READY_COUNT.fetch_add(1, Ordering::Relaxed);
+            TIMER_WAKE_LAST_READY_TASK_PTR.store(ready_task.as_ptr() as usize, Ordering::Relaxed);
             debug_assert_eq!(
                 ready_task.state(),
                 crate::task::TaskState::Sleeping,

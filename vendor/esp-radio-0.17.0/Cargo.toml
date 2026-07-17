@@ -310,6 +310,9 @@ optional = true
 [dependencies.cfg-if]
 version = "1"
 
+[dependencies.critical-section]
+version = "1"
+
 [dependencies.defmt]
 version = "1.0.1"
 optional = true

@@ -76,6 +76,12 @@ fn parses_ping_command() {
 }
 
 #[test]
+fn parses_touch_scheduler_reset_command() {
+    let cmd = parse_serial_command(b"TOUCHSCHEDRESET");
+    assert!(matches!(cmd, Some(SerialCommand::TouchSchedReset)));
+}
+
+#[test]
 fn parses_heap_allocator_status_alias() {
     let cmd = parse_serial_command(b"HEAP");
     assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));

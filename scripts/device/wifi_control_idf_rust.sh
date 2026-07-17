@@ -8,34 +8,17 @@ app_dir="$repo_root/tools/esp_idf_wifi_control_rust"
 target_triple="xtensa-esp32-espidf"
 profile="${RUST_APP_PROFILE:-debug}"
 
+# shellcheck source=../lib/esp_idf_env.sh
+source "$script_dir/../lib/esp_idf_env.sh"
 # shellcheck source=../lib/serial_port.sh
 source "$script_dir/../lib/serial_port.sh"
 
-resolve_idf_root() {
-    if [[ -n "${IDF_APP_ROOT:-}" ]]; then
-        printf '%s\n' "$IDF_APP_ROOT"
-        return 0
-    fi
-    return 1
-}
-
 ensure_idf_env() {
-    local idf_root
-    if ! idf_root="$(resolve_idf_root)"; then
-        echo "Set IDF_APP_ROOT explicitly for the external ESP-IDF install." >&2
-        exit 1
-    fi
-    if [[ ! -f "$idf_root/export.sh" ]]; then
-        echo "ESP-IDF export.sh not found at $idf_root/export.sh" >&2
-        exit 1
-    fi
-    # shellcheck disable=SC1090
-    source "$idf_root/export.sh" >/dev/null
+    esp_idf_source_env "wifi_control_idf_rust.sh" explicit || exit 1
     if ! command -v cargo >/dev/null 2>&1; then
-        echo "cargo unavailable after sourcing $idf_root/export.sh" >&2
+        echo "cargo unavailable after sourcing $ESP_IDF_ROOT_RESOLVED/export.sh" >&2
         exit 1
     fi
-    echo "wifi_control_idf_rust.sh: using ESP-IDF root: $idf_root" >&2
 }
 
 target_dir() {

@@ -1,8 +1,11 @@
-use super::super::{backend_legacy_port, ScanConfig};
+use super::super::{
+    wifi_active_scan_config, wifi_channel_active_scan_config, wifi_directed_active_scan_config,
+    wifi_passive_scan_config, ScanConfig,
+};
 use crate::firmware::types::WifiRuntimePolicy;
 
-pub(crate) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
-    backend_legacy_port::legacy_active_scan_config(
+pub(crate) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
+    wifi_active_scan_config(
         scan_result_max(),
         policy.scan_active_min_ms as u64,
         policy.scan_active_max_ms as u64,
@@ -12,8 +15,8 @@ pub(crate) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'stati
 pub(crate) fn directed_active_scan_config(
     target_ssid: &str,
     policy: WifiRuntimePolicy,
-) -> ScanConfig<'_> {
-    backend_legacy_port::legacy_directed_active_scan_config(
+) -> ScanConfig {
+    wifi_directed_active_scan_config(
         target_ssid,
         scan_result_max(),
         policy.scan_active_min_ms as u64,
@@ -21,11 +24,8 @@ pub(crate) fn directed_active_scan_config(
     )
 }
 
-pub(crate) fn channel_active_scan_config(
-    channel: u8,
-    policy: WifiRuntimePolicy,
-) -> ScanConfig<'static> {
-    backend_legacy_port::legacy_channel_active_scan_config(
+pub(crate) fn channel_active_scan_config(channel: u8, policy: WifiRuntimePolicy) -> ScanConfig {
+    wifi_channel_active_scan_config(
         channel,
         scan_result_max(),
         policy.scan_active_min_ms as u64,
@@ -33,11 +33,8 @@ pub(crate) fn channel_active_scan_config(
     )
 }
 
-pub(crate) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig<'static> {
-    backend_legacy_port::legacy_passive_scan_config(
-        scan_result_max(),
-        policy.scan_passive_ms as u64,
-    )
+pub(crate) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
+    wifi_passive_scan_config(scan_result_max(), policy.scan_passive_ms as u64)
 }
 
 const WIFI_SCAN_RESULT_MAX_DEFAULT: usize = 64;

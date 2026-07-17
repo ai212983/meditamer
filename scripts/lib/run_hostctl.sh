@@ -133,16 +133,17 @@ load_repo_env_file_if_present() {
 }
 
 run_hostctl() {
-    local script_dir repo_root manifest_path toolchain host_target
+    local script_dir repo_root manifest_path toolchain host_target host_target_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     repo_root="$(cd "$script_dir/../.." && pwd)"
     manifest_path="$repo_root/tools/hostctl/Cargo.toml"
-    toolchain="${RUSTUP_TOOLCHAIN:-stable}"
+    toolchain="${HOSTCTL_HOST_RUSTUP_TOOLCHAIN:-stable}"
 
     # hostctl is intentionally launched from /tmp to avoid workspace-target
     # bleed, so force repo-relative env paths to absolute first.
     _run_hostctl_normalize_path_env_vars \
         HOSTCTL_LOG_JSON_PATH \
+        HOSTCTL_FLASH_CAPTURE_LOG_PATH \
         HOSTCTL_NET_LOG_PATH \
         HOSTCTL_NET_POLICY_PATH \
         HOSTCTL_NET_DISCOVERY_PROFILE_PATH \
@@ -154,10 +155,22 @@ run_hostctl() {
         echo "could not determine host target triple" >&2
         return 1
     fi
+    host_target_dir="$repo_root/target/host-tools/hostctl/$host_target"
 
     if (
         cd /tmp
-        RUSTUP_TOOLCHAIN="$toolchain" cargo run \
+        env \
+            -u RUSTUP_TOOLCHAIN \
+            -u CARGO_BUILD_TARGET \
+            -u CARGO_TARGET_DIR \
+            -u CARGO_ENCODED_RUSTFLAGS \
+            -u CARGO_UNSTABLE_BUILD_STD \
+            -u RUSTFLAGS \
+            -u RUSTDOCFLAGS \
+            -u RUSTC_WRAPPER \
+            -u RUSTC_WORKSPACE_WRAPPER \
+            CARGO_TARGET_DIR="$host_target_dir" \
+            rustup run "$toolchain" cargo run \
             --locked \
             --target "$host_target" \
             --manifest-path "$manifest_path" \

@@ -1,8 +1,6 @@
 extern crate alloc;
 
-use super::super::{
-    backend_esp_radio, AccessPointInfo, ScanConfig, WifiController, WifiError,
-};
+use super::super::{backend_esp_radio, AccessPointInfo, ScanConfig, WifiController, WifiError};
 use crate::firmware::storage::upload::wifi::backend_legacy_port;
 
 fn use_legacy_port() -> bool {

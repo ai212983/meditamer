@@ -6,12 +6,52 @@ document:
 do:
   - baseline_state:
       call: "state_get"
+      then: "initial_suite_gate"
+  - initial_suite_gate:
+      switch:
+        - no_storage:
+            when: ".suite == \"no-storage\""
+            then: "no_storage_upload_off"
+        - default:
+            then: "full_ready"
+  - no_storage_upload_off:
+      call: "apply_mode"
+      with:
+        command: "STATE SET upload=off"
+        expect_upload: "off"
+        expect_ready: false
+      then: "no_storage_assets_on"
+  - no_storage_assets_on:
+      call: "apply_mode"
+      with:
+        command: "STATE SET assets=on"
+        expect_assets: "on"
+        expect_ready: false
+      then: "no_storage_ready"
+  - no_storage_ready:
+      call: "state_get"
+      with:
+        expect_upload: "off"
+        expect_assets: "on"
+        expect_ready: true
+      then: "baseline_psram"
+  - full_ready:
+      call: "state_get"
+      with:
+        expect_ready: true
       then: "baseline_psram"
   - baseline_psram:
       call: "psram_snapshot"
       with:
         label: "baseline"
-      then: "upload_on"
+      then: "action_suite_gate"
+  - action_suite_gate:
+      switch:
+        - no_storage:
+            when: ".suite == \"no-storage\""
+            then: "assets_off"
+        - default:
+            then: "upload_on"
   - upload_on:
       call: "apply_mode"
       with:

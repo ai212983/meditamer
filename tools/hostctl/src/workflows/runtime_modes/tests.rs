@@ -72,7 +72,9 @@ mod tests {
                     }
 
                     let response = if command == "STATE GET" {
-                        format!("STATE phase=idle base=day upload={upload} assets={assets}")
+                        format!(
+                            "STATE phase=idle base=day upload={upload} assets={assets} ready=true"
+                        )
                     } else if command == "STATE SET upload=on" {
                         upload = "on".to_string();
                         "STATE OK".to_string()
@@ -110,7 +112,7 @@ mod tests {
         let workflow = load_workflow(&scenario_path)?;
         let console = SerialConsole::from_port_for_tests(Box::new(slave), Some(&log_path))?;
         let mut runtime = RuntimeModesScenarioRuntime::new(&mut logger, console, 0, 0, 0);
-        let _ = execute_workflow(&workflow, &mut runtime, &json!({}))?;
+        let _ = execute_workflow(&workflow, &mut runtime, &json!({ "suite": "full" }))?;
         responder
             .join()
             .map_err(|_| anyhow!("fake UART responder thread panicked"))?;

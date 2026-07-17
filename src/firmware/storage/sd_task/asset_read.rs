@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "asset-upload-http", allow(dead_code))]
 
-use sdcard::fat;
+use sdcard::fat::{FatEngine, FatEngineError, FatPayloadId, FatRequest, FatResult, SdFatError};
 
 use super::super::super::types::{
     SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdProbeDriver,
@@ -16,6 +16,7 @@ pub(super) async fn process_asset_read_request(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdAssetReadResponse {
     if upload_session.is_some() {
         return asset_read_response(false, SdAssetReadResultCode::Busy, 0);
@@ -34,9 +35,26 @@ pub(super) async fn process_asset_read_request(
         Ok(buffer) => buffer,
         Err(_) => return asset_read_response(false, SdAssetReadResultCode::OperationFailed, 0),
     };
-    match fat::read_file(sd_probe, path, data.as_mut_slice()).await {
-        Ok(data_len) => asset_read_response(true, SdAssetReadResultCode::Ok, data_len as u16),
-        Err(err) => asset_read_response(false, map_fat_error_to_asset_code(&err), 0),
+    let mut fat_path = [0u8; sdcard::SD_PATH_MAX];
+    fat_path[..path.len()].copy_from_slice(path.as_bytes());
+    let result = super::engine_driver::run_fat_request(
+        FatRequest::Read {
+            path: fat_path,
+            path_len: path.len() as u8,
+            output: FatPayloadId::Primary,
+            output_capacity: data.as_mut_slice().len() as u32,
+        },
+        sd_probe,
+        fat_engine,
+        &[],
+        data.as_mut_slice(),
+    )
+    .await;
+    match result {
+        FatResult::Read { bytes } => {
+            asset_read_response(true, SdAssetReadResultCode::Ok, bytes as u16)
+        }
+        result => asset_read_response(false, map_fat_result_to_asset_code(&result), 0),
     }
 }
 
@@ -62,11 +80,17 @@ fn map_upload_ready_error(
     }
 }
 
-fn map_fat_error_to_asset_code(error: &fat::SdFatError) -> SdAssetReadResultCode {
-    match error {
-        fat::SdFatError::InvalidPath => SdAssetReadResultCode::InvalidPath,
-        fat::SdFatError::NotFound => SdAssetReadResultCode::NotFound,
-        fat::SdFatError::BufferTooSmall { .. } => SdAssetReadResultCode::SizeMismatch,
+fn map_fat_result_to_asset_code(result: &FatResult) -> SdAssetReadResultCode {
+    match result {
+        FatResult::Error(FatEngineError::Fat(SdFatError::InvalidPath)) => {
+            SdAssetReadResultCode::InvalidPath
+        }
+        FatResult::Error(FatEngineError::Fat(SdFatError::NotFound)) => {
+            SdAssetReadResultCode::NotFound
+        }
+        FatResult::Error(FatEngineError::Fat(SdFatError::BufferTooSmall { .. })) => {
+            SdAssetReadResultCode::SizeMismatch
+        }
         _ => SdAssetReadResultCode::OperationFailed,
     }
 }

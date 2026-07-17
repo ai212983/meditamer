@@ -83,6 +83,7 @@ impl NetFailureClass {
 pub(crate) struct NetStatusSnapshot {
     pub(crate) state: &'static str,
     pub(crate) link: bool,
+    pub(crate) radio_quiesced: bool,
     pub(crate) ipv4: [u8; 4],
     pub(crate) listener: bool,
     pub(crate) listener_enabled: bool,

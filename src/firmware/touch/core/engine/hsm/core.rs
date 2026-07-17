@@ -109,6 +109,8 @@ impl TouchHsm {
             t_ms: now_ms,
             x: point.x,
             y: point.y,
+            contact_x: self.origin_point.x,
+            contact_y: self.origin_point.y,
             start_x: start.x,
             start_y: start.y,
             duration_ms: self.interaction_duration_ms(now_ms),

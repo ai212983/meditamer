@@ -166,6 +166,8 @@ use crate::wifi::os_adapter::{
 #[cfg(feature = "wifi")]
 use crate::compat::timer_compat::{reset_timer_compat_diag, timer_compat_diag, TimerCompatDiag};
 #[cfg(feature = "wifi")]
+use crate::compat::timer_compat::TimerCompatRetargetDiag;
+#[cfg(feature = "wifi")]
 use crate::compat::{
     common_legacy_queue::common_legacy_queue_diag,
     common_legacy_literal::common_legacy_literal_diag,
@@ -224,15 +226,83 @@ unsafe extern "C" {
     fn __esp_rtos_diag_timer_callback_last_timeout_us() -> u32;
     fn __esp_rtos_diag_timer_callback_last_lateness_us() -> u32;
     fn __esp_rtos_diag_timer_callback_max_lateness_us() -> u32;
+    fn __esp_rtos_diag_timer_callback_sideeffect_arm_count() -> u32;
+    fn __esp_rtos_diag_timer_callback_sideeffect_disarm_count() -> u32;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_kind() -> u32;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_current_ptr() -> usize;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_current_arg_ptr() -> usize;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_target_timer_ptr() -> usize;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_target_callback_ptr() -> usize;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_target_arg_ptr() -> usize;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_timeout_us() -> u64;
+    fn __esp_rtos_diag_timer_callback_sideeffect_last_repeat() -> bool;
+    fn __esp_rtos_diag_timer_callback_recent_ordinal(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_callback_recent_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_callback_recent_arg_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_callback_recent_exec_at_us(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_callback_recent_due_at_us(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_callback_recent_timeout_us(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_callback_recent_lateness_us(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_live_callback_ptr(timer_ptr: usize) -> usize;
+    fn __esp_rtos_diag_timer_live_callback_arg_ptr(timer_ptr: usize) -> usize;
+    fn __esp_rtos_diag_timer_live_is_active(timer_ptr: usize) -> bool;
+    fn __esp_rtos_diag_timer_live_started_us(timer_ptr: usize) -> u64;
+    fn __esp_rtos_diag_timer_live_next_due_us(timer_ptr: usize) -> u64;
+    fn __esp_rtos_diag_timer_live_period_us(timer_ptr: usize) -> u64;
+    fn __esp_rtos_diag_timer_live_periodic(timer_ptr: usize) -> bool;
+    fn __esp_rtos_diag_timer_arm_count() -> u32;
+    fn __esp_rtos_diag_timer_arm_recent_ordinal(index: usize) -> u32;
+    fn __esp_rtos_diag_timer_arm_recent_timer_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_arm_recent_callback_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_arm_recent_arg_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_arm_recent_caller_ptr(index: usize) -> usize;
+    fn __esp_rtos_diag_timer_arm_recent_timeout_us(index: usize) -> u64;
+    fn __esp_rtos_diag_timer_arm_recent_periodic(index: usize) -> bool;
     fn __esp_rtos_diag_esp_radio_timer_task_entry_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_resume_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_loop_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_legacy_compat_branch_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_legacy_driver_branch_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_default_branch_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_from_ensure_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_from_wake_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_from_enqueue_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_last_mode() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_last_source() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_create_last_ptr() -> usize;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_skip_inactive_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_skip_not_due_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_last_skip_callback_ptr() -> usize;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_last_skip_arg_ptr() -> usize;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_last_skip_now_us() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_process_last_skip_due_us() -> u32;
+    fn __esp_rtos_diag_reset_scheduler_timer_wake_diag();
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_call_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_accept_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_past_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_infinite_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_last_task_ptr() -> usize;
+    fn __esp_rtos_diag_scheduler_timer_wake_schedule_last_wake_at_us() -> u64;
+    fn __esp_rtos_diag_scheduler_timer_wake_tick_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_handle_alarm_call_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_handle_alarm_skip_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_handle_alarm_process_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_ready_count() -> u32;
+    fn __esp_rtos_diag_scheduler_timer_wake_last_ready_task_ptr() -> usize;
+    fn __esp_rtos_diag_scheduler_timer_wake_last_now_us() -> u64;
+    fn __esp_rtos_diag_scheduler_timer_wake_last_current_alarm_us() -> u64;
+    fn __esp_rtos_diag_scheduler_timer_wake_last_queue_next_wakeup_us() -> u64;
     fn __esp_rtos_diag_esp_radio_timer_task_mark_ready_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_pop_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_selected_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_true_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_false_count() -> u32;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_last_task_ptr() -> usize;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_last_wake_at_us() -> u64;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_last_result() -> bool;
+    fn __esp_rtos_diag_esp_radio_timer_task_sleep_task_mismatch_count() -> u32;
     fn __esp_rtos_diag_esp_radio_timer_task_ptr() -> usize;
     fn __esp_rtos_diag_legacy_task_model_entry_count() -> usize;
     fn __esp_rtos_diag_legacy_task_model_current_index() -> usize;
@@ -589,6 +659,15 @@ pub fn diagnostic_reset_wifi_mac_isr_count() {
     reset_wifi_mac_isr_count();
 }
 
+#[cfg(all(feature = "wifi", esp32))]
+#[doc(hidden)]
+pub fn diagnostic_wifi_mac_isr_target() -> (usize, usize) {
+    unsafe {
+        let (fnc, arg) = crate::wifi::ISR_INTERRUPT_1;
+        (fnc as usize, arg as usize)
+    }
+}
+
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
 pub fn diagnostic_wifi_os_diag_reset() {
@@ -723,6 +802,14 @@ pub struct CommonLegacyQueueDiag {
     pub send_isr_count: u32,
     pub recv_isr_count: u32,
     pub last_queue_ptr: usize,
+    pub recent_send_ordinals: [u32; 8],
+    pub recent_send_item_word0: [u32; 8],
+    pub recent_send_item_pointee_word0: [u32; 8],
+    pub recent_send_item_pointee_word1: [u32; 8],
+    pub recent_recv_ordinals: [u32; 8],
+    pub recent_recv_item_word0: [u32; 8],
+    pub recent_recv_item_pointee_word0: [u32; 8],
+    pub recent_recv_item_pointee_word1: [u32; 8],
 }
 
 #[cfg(feature = "wifi")]
@@ -736,6 +823,14 @@ pub fn diagnostic_common_legacy_queue_diag() -> CommonLegacyQueueDiag {
         send_isr_count: diag.send_isr_count,
         recv_isr_count: diag.recv_isr_count,
         last_queue_ptr: diag.last_queue_ptr,
+        recent_send_ordinals: diag.recent_send_ordinals,
+        recent_send_item_word0: diag.recent_send_item_word0,
+        recent_send_item_pointee_word0: diag.recent_send_item_pointee_word0,
+        recent_send_item_pointee_word1: diag.recent_send_item_pointee_word1,
+        recent_recv_ordinals: diag.recent_recv_ordinals,
+        recent_recv_item_word0: diag.recent_recv_item_word0,
+        recent_recv_item_pointee_word0: diag.recent_recv_item_pointee_word0,
+        recent_recv_item_pointee_word1: diag.recent_recv_item_pointee_word1,
     }
 }
 
@@ -819,6 +914,31 @@ pub fn diagnostic_timer_compat_diag() -> TimerCompatDiag {
 
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
+pub unsafe fn diagnostic_retarget_timer_callbacks(
+    from_callback_ptr: usize,
+    to_callback_ptr: usize,
+) -> TimerCompatRetargetDiag {
+    unsafe { crate::compat::timer_compat::diagnostic_retarget_callbacks(from_callback_ptr, to_callback_ptr) }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub unsafe fn diagnostic_retarget_timer_callbacks_with_arg_filter(
+    from_callback_ptr: usize,
+    to_callback_ptr: usize,
+    arg_filter: Option<usize>,
+) -> TimerCompatRetargetDiag {
+    unsafe {
+        crate::compat::timer_compat::diagnostic_retarget_callbacks_with_arg_filter(
+            from_callback_ptr,
+            to_callback_ptr,
+            arg_filter,
+        )
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
 pub fn diagnostic_reset_timer_callback_exec_diag() {
     unsafe { __esp_rtos_diag_reset_timer_callback_exec() };
 }
@@ -835,6 +955,48 @@ pub struct TimerCallbackExecDiag {
     pub last_timeout_us: u32,
     pub last_lateness_us: u32,
     pub max_lateness_us: u32,
+    pub sideeffect_arm_count: u32,
+    pub sideeffect_disarm_count: u32,
+    pub sideeffect_last_kind: u32,
+    pub sideeffect_last_current_ptr: usize,
+    pub sideeffect_last_current_arg_ptr: usize,
+    pub sideeffect_last_target_timer_ptr: usize,
+    pub sideeffect_last_target_callback_ptr: usize,
+    pub sideeffect_last_target_arg_ptr: usize,
+    pub sideeffect_last_timeout_us: u64,
+    pub sideeffect_last_repeat: bool,
+    pub recent_ordinals: [u32; 6],
+    pub recent_callback_ptrs: [usize; 6],
+    pub recent_arg_ptrs: [usize; 6],
+    pub recent_exec_at_us: [u32; 6],
+    pub recent_due_at_us: [u32; 6],
+    pub recent_timeout_us: [u32; 6],
+    pub recent_lateness_us: [u32; 6],
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub struct TimerLiveDiag {
+    pub callback_ptr: usize,
+    pub callback_arg_ptr: usize,
+    pub is_active: bool,
+    pub started_us: u64,
+    pub next_due_us: u64,
+    pub period_us: u64,
+    pub periodic: bool,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub struct TimerArmDiag {
+    pub count: u32,
+    pub recent_ordinals: [u32; 6],
+    pub recent_timer_ptrs: [usize; 6],
+    pub recent_callback_ptrs: [usize; 6],
+    pub recent_arg_ptrs: [usize; 6],
+    pub recent_caller_ptrs: [usize; 6],
+    pub recent_timeout_us: [u64; 6],
+    pub recent_periodic: [bool; 6],
 }
 
 #[cfg(feature = "wifi")]
@@ -846,11 +1008,51 @@ pub struct TimerTaskRuntimeDiag {
     pub legacy_compat_branch_count: u32,
     pub legacy_driver_branch_count: u32,
     pub default_branch_count: u32,
+    pub create_count: u32,
+    pub create_from_ensure_count: u32,
+    pub create_from_wake_count: u32,
+    pub create_from_enqueue_count: u32,
+    pub create_last_mode: u32,
+    pub create_last_source: u32,
+    pub create_last_ptr: usize,
+    pub process_skip_inactive_count: u32,
+    pub process_skip_not_due_count: u32,
+    pub process_last_skip_callback_ptr: usize,
+    pub process_last_skip_arg_ptr: usize,
+    pub process_last_skip_now_us: u32,
+    pub process_last_skip_due_us: u32,
     pub mark_ready_count: u32,
     pub pop_count: u32,
     pub selected_count: u32,
+    pub sleep_count: u32,
+    pub sleep_true_count: u32,
+    pub sleep_false_count: u32,
+    pub sleep_last_task_ptr: usize,
+    pub sleep_last_wake_at_us: u64,
+    pub sleep_last_result: bool,
+    pub sleep_task_mismatch_count: u32,
     pub task_ptr: usize,
     pub legacy_compat_enabled: bool,
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub struct SchedulerTimerWakeDiag {
+    pub schedule_call_count: u32,
+    pub schedule_accept_count: u32,
+    pub schedule_past_count: u32,
+    pub schedule_infinite_count: u32,
+    pub schedule_last_task_ptr: usize,
+    pub schedule_last_wake_at_us: u64,
+    pub tick_count: u32,
+    pub handle_alarm_call_count: u32,
+    pub handle_alarm_skip_count: u32,
+    pub handle_alarm_process_count: u32,
+    pub ready_count: u32,
+    pub last_ready_task_ptr: usize,
+    pub last_now_us: u64,
+    pub last_current_alarm_us: u64,
+    pub last_queue_next_wakeup_us: u64,
 }
 
 #[cfg(feature = "wifi")]
@@ -901,6 +1103,25 @@ pub struct LegacyPreemptBuiltinDiag {
 #[cfg(feature = "wifi")]
 #[doc(hidden)]
 pub fn diagnostic_timer_callback_exec_diag() -> TimerCallbackExecDiag {
+    let mut recent_ordinals = [0u32; 6];
+    let mut recent_callback_ptrs = [0usize; 6];
+    let mut recent_arg_ptrs = [0usize; 6];
+    let mut recent_exec_at_us = [0u32; 6];
+    let mut recent_due_at_us = [0u32; 6];
+    let mut recent_timeout_us = [0u32; 6];
+    let mut recent_lateness_us = [0u32; 6];
+    let mut idx = 0usize;
+    while idx < 6 {
+        recent_ordinals[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_ordinal(idx) };
+        recent_callback_ptrs[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_ptr(idx) };
+        recent_arg_ptrs[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_arg_ptr(idx) };
+        recent_exec_at_us[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_exec_at_us(idx) };
+        recent_due_at_us[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_due_at_us(idx) };
+        recent_timeout_us[idx] = unsafe { __esp_rtos_diag_timer_callback_recent_timeout_us(idx) };
+        recent_lateness_us[idx] =
+            unsafe { __esp_rtos_diag_timer_callback_recent_lateness_us(idx) };
+        idx += 1;
+    }
     TimerCallbackExecDiag {
         current_callback_ptr: unsafe { __esp_rtos_diag_timer_callback_current_ptr() },
         current_arg_ptr: unsafe { __esp_rtos_diag_timer_callback_current_arg_ptr() },
@@ -911,6 +1132,86 @@ pub fn diagnostic_timer_callback_exec_diag() -> TimerCallbackExecDiag {
         last_timeout_us: unsafe { __esp_rtos_diag_timer_callback_last_timeout_us() },
         last_lateness_us: unsafe { __esp_rtos_diag_timer_callback_last_lateness_us() },
         max_lateness_us: unsafe { __esp_rtos_diag_timer_callback_max_lateness_us() },
+        sideeffect_arm_count: unsafe { __esp_rtos_diag_timer_callback_sideeffect_arm_count() },
+        sideeffect_disarm_count: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_disarm_count()
+        },
+        sideeffect_last_kind: unsafe { __esp_rtos_diag_timer_callback_sideeffect_last_kind() },
+        sideeffect_last_current_ptr: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_current_ptr()
+        },
+        sideeffect_last_current_arg_ptr: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_current_arg_ptr()
+        },
+        sideeffect_last_target_timer_ptr: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_target_timer_ptr()
+        },
+        sideeffect_last_target_callback_ptr: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_target_callback_ptr()
+        },
+        sideeffect_last_target_arg_ptr: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_target_arg_ptr()
+        },
+        sideeffect_last_timeout_us: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_timeout_us()
+        },
+        sideeffect_last_repeat: unsafe {
+            __esp_rtos_diag_timer_callback_sideeffect_last_repeat()
+        },
+        recent_ordinals,
+        recent_callback_ptrs,
+        recent_arg_ptrs,
+        recent_exec_at_us,
+        recent_due_at_us,
+        recent_timeout_us,
+        recent_lateness_us,
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_timer_live_diag(timer_ptr: usize) -> TimerLiveDiag {
+    TimerLiveDiag {
+        callback_ptr: unsafe { __esp_rtos_diag_timer_live_callback_ptr(timer_ptr) },
+        callback_arg_ptr: unsafe { __esp_rtos_diag_timer_live_callback_arg_ptr(timer_ptr) },
+        is_active: unsafe { __esp_rtos_diag_timer_live_is_active(timer_ptr) },
+        started_us: unsafe { __esp_rtos_diag_timer_live_started_us(timer_ptr) },
+        next_due_us: unsafe { __esp_rtos_diag_timer_live_next_due_us(timer_ptr) },
+        period_us: unsafe { __esp_rtos_diag_timer_live_period_us(timer_ptr) },
+        periodic: unsafe { __esp_rtos_diag_timer_live_periodic(timer_ptr) },
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_timer_arm_diag() -> TimerArmDiag {
+    let mut recent_ordinals = [0u32; 6];
+    let mut recent_timer_ptrs = [0usize; 6];
+    let mut recent_callback_ptrs = [0usize; 6];
+    let mut recent_arg_ptrs = [0usize; 6];
+    let mut recent_caller_ptrs = [0usize; 6];
+    let mut recent_timeout_us = [0u64; 6];
+    let mut recent_periodic = [false; 6];
+    let mut idx = 0usize;
+    while idx < 6 {
+        recent_ordinals[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_ordinal(idx) };
+        recent_timer_ptrs[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_timer_ptr(idx) };
+        recent_callback_ptrs[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_callback_ptr(idx) };
+        recent_arg_ptrs[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_arg_ptr(idx) };
+        recent_caller_ptrs[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_caller_ptr(idx) };
+        recent_timeout_us[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_timeout_us(idx) };
+        recent_periodic[idx] = unsafe { __esp_rtos_diag_timer_arm_recent_periodic(idx) };
+        idx += 1;
+    }
+    TimerArmDiag {
+        count: unsafe { __esp_rtos_diag_timer_arm_count() },
+        recent_ordinals,
+        recent_timer_ptrs,
+        recent_callback_ptrs,
+        recent_arg_ptrs,
+        recent_caller_ptrs,
+        recent_timeout_us,
+        recent_periodic,
     }
 }
 
@@ -930,11 +1231,103 @@ pub fn diagnostic_timer_task_runtime_diag() -> TimerTaskRuntimeDiag {
         default_branch_count: unsafe {
             __esp_rtos_diag_esp_radio_timer_task_default_branch_count()
         },
+        create_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_create_count() },
+        create_from_ensure_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_create_from_ensure_count()
+        },
+        create_from_wake_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_create_from_wake_count()
+        },
+        create_from_enqueue_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_create_from_enqueue_count()
+        },
+        create_last_mode: unsafe { __esp_rtos_diag_esp_radio_timer_task_create_last_mode() },
+        create_last_source: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_create_last_source()
+        },
+        create_last_ptr: unsafe { __esp_rtos_diag_esp_radio_timer_task_create_last_ptr() },
+        process_skip_inactive_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_skip_inactive_count()
+        },
+        process_skip_not_due_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_skip_not_due_count()
+        },
+        process_last_skip_callback_ptr: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_last_skip_callback_ptr()
+        },
+        process_last_skip_arg_ptr: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_last_skip_arg_ptr()
+        },
+        process_last_skip_now_us: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_last_skip_now_us()
+        },
+        process_last_skip_due_us: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_process_last_skip_due_us()
+        },
         mark_ready_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_mark_ready_count() },
         pop_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_pop_count() },
         selected_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_selected_count() },
+        sleep_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_sleep_count() },
+        sleep_true_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_sleep_true_count() },
+        sleep_false_count: unsafe { __esp_rtos_diag_esp_radio_timer_task_sleep_false_count() },
+        sleep_last_task_ptr: unsafe { __esp_rtos_diag_esp_radio_timer_task_sleep_last_task_ptr() },
+        sleep_last_wake_at_us: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_sleep_last_wake_at_us()
+        },
+        sleep_last_result: unsafe { __esp_rtos_diag_esp_radio_timer_task_sleep_last_result() },
+        sleep_task_mismatch_count: unsafe {
+            __esp_rtos_diag_esp_radio_timer_task_sleep_task_mismatch_count()
+        },
         task_ptr: unsafe { __esp_rtos_diag_esp_radio_timer_task_ptr() },
         legacy_compat_enabled: crate::compat::timer_compat_legacy::compat_enabled(),
+    }
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_reset_scheduler_timer_wake_diag() {
+    unsafe { __esp_rtos_diag_reset_scheduler_timer_wake_diag() };
+}
+
+#[cfg(feature = "wifi")]
+#[doc(hidden)]
+pub fn diagnostic_scheduler_timer_wake_diag() -> SchedulerTimerWakeDiag {
+    SchedulerTimerWakeDiag {
+        schedule_call_count: unsafe { __esp_rtos_diag_scheduler_timer_wake_schedule_call_count() },
+        schedule_accept_count: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_schedule_accept_count()
+        },
+        schedule_past_count: unsafe { __esp_rtos_diag_scheduler_timer_wake_schedule_past_count() },
+        schedule_infinite_count: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_schedule_infinite_count()
+        },
+        schedule_last_task_ptr: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_schedule_last_task_ptr()
+        },
+        schedule_last_wake_at_us: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_schedule_last_wake_at_us()
+        },
+        tick_count: unsafe { __esp_rtos_diag_scheduler_timer_wake_tick_count() },
+        handle_alarm_call_count: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_handle_alarm_call_count()
+        },
+        handle_alarm_skip_count: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_handle_alarm_skip_count()
+        },
+        handle_alarm_process_count: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_handle_alarm_process_count()
+        },
+        ready_count: unsafe { __esp_rtos_diag_scheduler_timer_wake_ready_count() },
+        last_ready_task_ptr: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_last_ready_task_ptr()
+        },
+        last_now_us: unsafe { __esp_rtos_diag_scheduler_timer_wake_last_now_us() },
+        last_current_alarm_us: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_last_current_alarm_us()
+        },
+        last_queue_next_wakeup_us: unsafe {
+            __esp_rtos_diag_scheduler_timer_wake_last_queue_next_wakeup_us()
+        },
     }
 }
 

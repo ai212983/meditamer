@@ -19,6 +19,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct RuntimeModesSmokeOptions {
     pub output_path: Option<PathBuf>,
+    pub suite: String,
 }
 
 fn open_console(output_path: &Path) -> Result<SerialConsole> {
@@ -36,32 +37,39 @@ fn query_mode_status(
     console: &mut SerialConsole,
     expect_upload: Option<&str>,
     expect_assets: Option<&str>,
+    expect_ready: bool,
 ) -> Result<String> {
     let pattern = Regex::new(r"STATE phase=.* base=.* upload=(on|off) assets=(on|off)")?;
-    let mut line = None;
-    for _ in 0..8 {
+    let mut last_line = None;
+    // Opening the UART resets the board. The first response can therefore be
+    // delayed by the current synchronous full e-paper boot render.
+    for _ in 0..24 {
         let mark = console.mark();
         console.send_line("STATE GET")?;
-        line = console.wait_for_regex_since(mark, &pattern, Duration::from_secs(4))?;
-        if line.is_some() {
-            break;
+        if let Some(line) =
+            console.wait_for_regex_since(mark, &pattern, Duration::from_secs(4))?
+        {
+            let upload_matches = expect_upload
+                .map(|expected| line.contains(&format!("upload={expected}")))
+                .unwrap_or(true);
+            let assets_matches = expect_assets
+                .map(|expected| line.contains(&format!("assets={expected}")))
+                .unwrap_or(true);
+            let ready_matches = !expect_ready || line.contains("ready=true");
+            if upload_matches && assets_matches && ready_matches {
+                return Ok(line);
+            }
+            last_line = Some(line);
         }
         thread::sleep(Duration::from_millis(500));
     }
-    let line = line.ok_or_else(|| anyhow!("missing STATE GET response"))?;
-
-    if let Some(expected) = expect_upload {
-        if !line.contains(&format!("upload={expected}")) {
-            return Err(anyhow!("STATE GET expected upload={expected}, got: {line}"));
-        }
-    }
-    if let Some(expected) = expect_assets {
-        if !line.contains(&format!("assets={expected}")) {
-            return Err(anyhow!("STATE GET expected assets={expected}, got: {line}"));
-        }
-    }
-
-    Ok(line)
+    Err(anyhow!(
+        "STATE GET did not converge (upload={:?} assets={:?} ready={}): {}",
+        expect_upload,
+        expect_assets,
+        expect_ready,
+        last_line.unwrap_or_else(|| "<no response>".to_string())
+    ))
 }
 
 fn capture_psram_snapshot(console: &mut SerialConsole) -> Result<String> {
@@ -79,6 +87,7 @@ fn apply_mode(
     command: &str,
     expect_upload: Option<&str>,
     expect_assets: Option<&str>,
+    expect_ready: bool,
     settle_ms: u64,
 ) -> Result<String> {
     for _ in 0..8 {
@@ -90,12 +99,25 @@ fn apply_mode(
                 if settle_ms > 0 {
                     thread::sleep(Duration::from_millis(settle_ms));
                 }
-                return query_mode_status(console, expect_upload, expect_assets);
+                return query_mode_status(console, expect_upload, expect_assets, expect_ready);
             }
             AckStatus::Busy | AckStatus::None => {
                 thread::sleep(Duration::from_secs(1));
             }
             AckStatus::Err => {
+                if line.as_deref().is_some_and(|line| line.contains("reason=timeout")) {
+                    if let Ok(status) = query_mode_status(
+                        console,
+                        expect_upload,
+                        expect_assets,
+                        expect_ready,
+                    )
+                    {
+                        return Ok(status);
+                    }
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
                 return Err(anyhow!(
                     "mode command returned error: {}",
                     line.unwrap_or_else(|| "STATE ERR".to_string())
@@ -181,7 +203,16 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
             "state_get" => {
                 let expect_upload = args.get("expect_upload").and_then(|v| v.as_str());
                 let expect_assets = args.get("expect_assets").and_then(|v| v.as_str());
-                let line = query_mode_status(&mut self.console, expect_upload, expect_assets)?;
+                let expect_ready = args
+                    .get("expect_ready")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let line = query_mode_status(
+                    &mut self.console,
+                    expect_upload,
+                    expect_assets,
+                    expect_ready,
+                )?;
                 self.mode_samples.push(line);
                 Ok(())
             }
@@ -201,11 +232,16 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
                     .ok_or_else(|| anyhow!("apply_mode requires command"))?;
                 let expect_upload = args.get("expect_upload").and_then(|v| v.as_str());
                 let expect_assets = args.get("expect_assets").and_then(|v| v.as_str());
+                let expect_ready = args
+                    .get("expect_ready")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
                 let line = apply_mode(
                     &mut self.console,
                     command,
                     expect_upload,
                     expect_assets,
+                    expect_ready,
                     self.settle_ms,
                 )?;
                 self.mode_samples.push(line);
@@ -216,7 +252,7 @@ impl WorkflowRuntime for RuntimeModesScenarioRuntime<'_> {
                 Ok(())
             }
             "run_post_upload_status_probe" => {
-                let line = query_mode_status(&mut self.console, Some("on"), None)?;
+                let line = query_mode_status(&mut self.console, Some("on"), None, true)?;
                 self.mode_samples.push(line);
                 Ok(())
             }

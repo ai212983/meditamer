@@ -153,7 +153,13 @@ pub(crate) fn setup_smp<const IRQ: u8>(mut irq: SoftwareInterrupt<'static, IRQ>)
 fn task_switch_interrupt(context: &mut CpuContext) {
     unsafe { xtensa_lx_rt::xtensa_lx::interrupt::clear(SW_INTERRUPT) };
 
-    SCHEDULER.with(|scheduler| scheduler.switch_task(context));
+    if crate::esp_radio::backend_legacy_port_runtime_enabled() {
+        crate::esp_radio::legacy_builtin_scheduler_switch_task(context);
+    } else if crate::esp_radio::legacy_preempt_builtin_initialized() {
+        crate::esp_radio::legacy_preempt_builtin_switch_task(context);
+    } else {
+        SCHEDULER.with(|scheduler| scheduler.switch_task(context));
+    }
 }
 
 #[inline]

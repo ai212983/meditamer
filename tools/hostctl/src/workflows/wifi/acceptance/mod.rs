@@ -20,7 +20,6 @@ use crate::{
     },
 };
 
-use boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig};
 use host_wifi::ensure_host_wifi_association;
 
 #[derive(Clone, Debug)]
@@ -98,32 +97,6 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
         env_utils::parse_env_u32("HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA", 0)?;
     let reuse_upload_client =
         env_utils::parse_env_bool01("HOSTCTL_NET_REUSE_UPLOAD_CLIENT", false)?;
-    let require_boot_discovery_gate =
-        env_utils::parse_env_bool01("HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE", true)?;
-    let boot_discovery_cfg = BootDiscoveryGateConfig {
-        max_boot_uptime_ms: env_utils::parse_env_u32(
-            "HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS",
-            30_000,
-        )?,
-        timeout_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS", 180_000)?,
-        settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 6_000)?,
-        allow_ready_only_fallback: env_utils::parse_env_bool01(
-            "HOSTCTL_NET_BOOT_DISCOVERY_READY_ONLY_FALLBACK",
-            false,
-        )?,
-    };
-
-    if require_boot_discovery_gate {
-        run_boot_discovery_gate(
-            logger,
-            &mut console,
-            &ssid,
-            &password,
-            policy,
-            boot_discovery_cfg,
-        )?;
-    }
-
     let workflow = load_workflow(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-acceptance.sw.yaml"),
     )?;

@@ -1,6 +1,6 @@
 use super::{
-    format_health_status_error, is_ready_without_listener, should_force_recover_before_start,
-    should_retry_wait_ready_after_recover,
+    format_health_status_error, is_ready_without_listener, metric_u32,
+    should_force_recover_before_start, should_retry_wait_ready_after_recover,
 };
 use crate::workflows::wifi::common::NetStatus;
 use reqwest::StatusCode;
@@ -90,4 +90,18 @@ fn wait_ready_retry_classifier_ignores_non_retryable_failures() {
     assert!(!should_retry_wait_ready_after_recover(
         "net_wait_ready: overall timeout"
     ));
+}
+
+#[test]
+fn runtime_health_metric_parser_reads_exact_keys() {
+    let touch = "METRICS TOUCH_SCHED loop_gap_max_ms=8 active_gap_max_ms=16";
+    assert_eq!(metric_u32(touch, "loop_gap_max_ms"), Some(8));
+    assert_eq!(metric_u32(touch, "active_gap_max_ms"), Some(16));
+    assert_eq!(metric_u32(touch, "gap_max_ms"), None);
+
+    let memory = "PSRAM min_internal_free_bytes=16968";
+    assert_eq!(
+        metric_u32(memory, "min_internal_free_bytes"),
+        Some(16_968)
+    );
 }

@@ -6,12 +6,13 @@ use crate::firmware::{
     types::SerialUart,
 };
 
-use super::{write_line, write_metrics_net_lines};
+use super::{write_line, write_metrics_imu_line, write_metrics_net_lines};
 
 pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
     let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
     let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
     let snapshot = telemetry::snapshot();
+    let touch_scheduling = crate::firmware::touch::scheduling::snapshot();
 
     let mut line = heapless::String::<160>::new();
     let _ = write!(
@@ -20,6 +21,37 @@ pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
         last_ms, max_ms
     );
     write_line(uart, line).await;
+
+    let mut stack_line = heapless::String::<96>::new();
+    let _ = write!(
+        &mut stack_line,
+        "stack_diag: tag=minimum headroom={}\r\n",
+        telemetry::minimum_stack_headroom_bytes()
+    );
+    write_line(uart, stack_line).await;
+
+    let mut touch_stack_line = heapless::String::<96>::new();
+    let _ = write!(
+        &mut touch_stack_line,
+        "touch_core_stack_diag: tag=minimum headroom={}\r\n",
+        telemetry::minimum_touch_core_stack_headroom_bytes()
+    );
+    write_line(uart, touch_stack_line).await;
+
+    let mut touch_line = heapless::String::<256>::new();
+    let _ = write!(
+        &mut touch_line,
+        "METRICS TOUCH_SCHED loop_n={} loop_gap_max_ms={} loop_gap_over_8={} active_n={} active_gap_max_ms={} active_gap_over_16={}\r\n",
+        touch_scheduling.loop_count,
+        touch_scheduling.loop_gap_max_ms,
+        touch_scheduling.loop_gap_over_8_ms,
+        touch_scheduling.active_sample_count,
+        touch_scheduling.active_sample_gap_max_ms,
+        touch_scheduling.active_sample_gap_over_16_ms,
+    );
+    write_line(uart, touch_line).await;
+
+    write_metrics_imu_line(uart).await;
 
     let mut wifi_line = heapless::String::<256>::new();
     let _ = write!(

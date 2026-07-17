@@ -1,8 +1,5 @@
 use super::*;
 mod attempt;
-mod blob_state_diag;
-mod boot_scan_diag;
-mod boot_scan_idf_compare;
 mod config;
 mod driver_state;
 mod error;
@@ -18,24 +15,20 @@ mod task_state;
 mod timeout;
 mod timing;
 use attempt::perform_connect_attempt;
-use boot_scan_diag::maybe_run_boot_scan_only_diag;
 use config::mode_config_from_credentials;
 use driver_state::{
-    log_boot_scan_only_driver_state, maybe_log_first_start_driver_state,
-    maybe_log_pre_start_driver_state, maybe_log_scan_entry_driver_state,
+    maybe_log_first_start_driver_state, maybe_log_pre_start_driver_state,
+    maybe_log_scan_entry_driver_state,
 };
 use error::handle_connect_error;
 use events::{
     disconnect_reason_label, install_wifi_event_logger, is_auth_disconnect_reason,
     is_discovery_disconnect_reason, next_probe_channel, state_mem_stage,
 };
-use idf_log_diag::{maybe_begin_first_start_idf_log_diag, maybe_end_first_start_idf_log_diag};
+use idf_log_diag::maybe_begin_first_start_idf_log_diag;
 use idf_scan_compare::maybe_run_scan_entry_idf_compare_diag;
 use prepare::prepare_connection_attempt;
-use promisc_diag::{
-    maybe_handle_post_start_promisc_diag, maybe_run_boot_scan_only_promisc_diag,
-    maybe_run_scan_entry_promisc_diag,
-};
+use promisc_diag::{maybe_handle_post_start_promisc_diag, maybe_run_scan_entry_promisc_diag};
 use recovery::{
     disconnect_and_stop_with_timeout, disconnect_with_timeout,
     maybe_software_reset_on_zero_discovery_hard_guard,
@@ -46,7 +39,6 @@ use success::handle_connect_success;
 use task_state::{ConnectionAttempt, WifiTaskState};
 use timeout::handle_connect_timeout;
 
-pub(crate) use boot_scan_diag::boot_scan_only_diag_enabled;
 pub(super) use config::{wifi_credentials, wifi_credentials_from_parts};
 pub(super) use timing::{
     active_scan_timeout_ms, directed_scan_timeout_ms, passive_scan_timeout_ms,
@@ -62,7 +54,6 @@ pub(super) async fn run_wifi_connection_task(
     telemetry::set_wifi_link_connected(false);
     let started_at = Instant::now();
     let mut state = WifiTaskState::new(_credentials, started_at);
-    maybe_run_boot_scan_only_diag(&mut controller, state.credentials.is_some()).await;
     publish_config(state.credentials, state.runtime_policy);
     publish_state(
         state.net_state,
@@ -84,6 +75,10 @@ pub(super) async fn run_wifi_connection_task(
         perform_connect_attempt(&mut controller, &stack, &mut state).await;
         state.credentials = Some(active);
     }
+}
+
+pub(crate) const fn boot_scan_only_diag_enabled() -> bool {
+    false
 }
 
 pub(super) fn monotonic_now_ms_u32() -> u32 {

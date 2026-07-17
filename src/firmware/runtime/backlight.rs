@@ -5,16 +5,16 @@ use super::super::{
     types::InkplateDriver,
 };
 
-pub(crate) fn trigger_backlight_cycle(
+pub(crate) async fn trigger_backlight_cycle(
     display: &mut InkplateDriver,
     backlight_cycle_start: &mut Option<Instant>,
     backlight_level: &mut u8,
 ) {
     *backlight_cycle_start = Some(Instant::now());
-    apply_backlight_level(display, backlight_level, BACKLIGHT_MAX_BRIGHTNESS);
+    apply_backlight_level(display, backlight_level, BACKLIGHT_MAX_BRIGHTNESS).await;
 }
 
-pub(crate) fn run_backlight_timeline(
+pub(crate) async fn run_backlight_timeline(
     display: &mut InkplateDriver,
     backlight_cycle_start: &mut Option<Instant>,
     backlight_level: &mut u8,
@@ -37,17 +37,21 @@ pub(crate) fn run_backlight_timeline(
         0
     };
 
-    apply_backlight_level(display, backlight_level, target_level);
+    apply_backlight_level(display, backlight_level, target_level).await;
 }
 
-fn apply_backlight_level(display: &mut InkplateDriver, current_level: &mut u8, next_level: u8) {
+async fn apply_backlight_level(
+    display: &mut InkplateDriver,
+    current_level: &mut u8,
+    next_level: u8,
+) {
     if *current_level == next_level {
         return;
     }
 
-    let _ = display.set_brightness(next_level);
+    let _ = display.set_brightness(next_level).await;
     if next_level == 0 {
-        let _ = display.frontlight_off();
+        let _ = display.frontlight_off().await;
     }
     *current_level = next_level;
 }

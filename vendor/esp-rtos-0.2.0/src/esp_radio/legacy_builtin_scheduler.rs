@@ -7,7 +7,7 @@ use embassy_sync::blocking_mutex::Mutex;
 use esp_sync::RawMutex;
 use portable_atomic::{AtomicUsize, Ordering};
 
-use crate::{semaphore::Semaphore, task::CpuContext, InternalMemory};
+use crate::{task::CpuContext, InternalMemory};
 
 const MAX_ENTRIES: usize = 8;
 const TASK_ROLE_LEN: usize = 16;
@@ -21,7 +21,7 @@ fn write_role(dst: &mut [u8; TASK_ROLE_LEN], role: &str) {
 
 pub(crate) struct LegacyContext {
     pub(crate) cpu_context: CpuContext,
-    pub(crate) thread_semaphore: Option<Semaphore>,
+    pub(crate) thread_semaphore: u32,
     pub(crate) next: *mut LegacyContext,
     pub(crate) task_role: [u8; TASK_ROLE_LEN],
     pub(crate) _allocated_stack: Box<[MaybeUninit<u8>], InternalMemory>,
@@ -41,7 +41,7 @@ impl LegacyContext {
 
         Self {
             cpu_context: crate::task::new_task_context(task_fn, param, stack_top),
-            thread_semaphore: None,
+            thread_semaphore: 0,
             next: core::ptr::null_mut(),
             task_role,
             _allocated_stack: stack,
@@ -100,14 +100,16 @@ impl LegacyBuiltinSchedulerState {
         let context = Box::new_in(
             LegacyContext {
                 cpu_context: CpuContext::new(),
-                thread_semaphore: None,
+                thread_semaphore: 0,
                 next: core::ptr::null_mut(),
                 task_role: {
                     let mut task_role = [0; TASK_ROLE_LEN];
                     write_role(&mut task_role, "main");
                     task_role
                 },
-                _allocated_stack: Box::<[u8], _>::new_uninit_slice_in(0, InternalMemory),
+                // The synthetic main task does not use stack storage, but the
+                // current allocator rejects zero-sized boxed slices.
+                _allocated_stack: Box::<[u8], _>::new_uninit_slice_in(1, InternalMemory),
             },
             InternalMemory,
         );
@@ -126,10 +128,7 @@ impl LegacyBuiltinSchedulerState {
     pub(crate) fn current_task_thread_semaphore_ptr(&mut self) -> *mut c_void {
         unsafe {
             let task = &mut *self.current_task;
-            let sem = task
-                .thread_semaphore
-                .get_or_insert_with(|| Semaphore::new_counting(0, 1));
-            sem as *mut _ as *mut c_void
+            &mut task.thread_semaphore as *mut _ as *mut c_void
         }
     }
 
@@ -267,6 +266,10 @@ pub(crate) fn schedule_task_deletion(task_handle: *mut c_void) -> bool {
     with_state(|state| state.schedule_task_deletion(task_handle))
 }
 
+pub(crate) fn max_task_priority() -> u32 {
+    255
+}
+
 pub(crate) fn switch_task(trap_frame: &mut CpuContext) {
     with_state(|state| state.switch_task(trap_frame));
 }
@@ -309,5 +312,26 @@ pub(crate) fn task_role_at(index: usize) -> [u8; TASK_ROLE_LEN] {
             }
         }
         unsafe { (*ptr).task_role }
+    })
+}
+
+pub(crate) fn task_role_ptr_for_task_ptr(task_ptr: usize) -> *const u8 {
+    with_state(|state| {
+        let mut ptr = state.current_task;
+        if ptr.is_null() {
+            return core::ptr::null();
+        }
+        for _ in 0..MAX_ENTRIES {
+            if ptr as usize == task_ptr {
+                return unsafe { (*ptr).task_role.as_ptr() };
+            }
+            unsafe {
+                ptr = (*ptr).next;
+            }
+            if ptr.is_null() || ptr == state.current_task {
+                break;
+            }
+        }
+        core::ptr::null()
     })
 }

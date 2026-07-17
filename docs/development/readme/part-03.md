@@ -25,6 +25,34 @@ METRICS NET_ACCEPT arm_gap_n=<n> arm_gap_us=<n> arm_gap_us_max=<n> arm_gap_after
 `UPLOAD_DECOMP` reports phase decomposition (payload copy, SD queue/send, SD task wait, commit) plus bounded per-request chunk latency summary maxima.
 `UPLOAD_RTT` reports SD roundtrip counts and timing totals/maxima by command phase.
 
+### Runtime Scheduling Profiles
+
+Embassy task priorities are selected from a centralized behavior profile. In automatic mode the
+runtime chooses `interactive`, `touch`, `upload`, or `diagnostics` from the current app state.
+Diagnostics has precedence over the touch wizard, and the touch wizard has precedence over upload.
+
+Use the serial control to inspect or temporarily override the automatic choice:
+
+```text
+SCHEDPROFILE
+SCHEDPROFILE AUTO
+SCHEDPROFILE INTERACTIVE
+SCHEDPROFILE TOUCH
+SCHEDPROFILE UPLOAD
+SCHEDPROFILE DIAGNOSTICS
+```
+
+The response reports the active and automatically selected profiles, the volatile override, and
+runtime-readiness state. `AUTO` removes the override; overrides are intentionally not persisted
+across reboot.
+
+Profile policy is defined in `src/firmware/runtime/scheduling.rs`. Touch acquisition runs alone on
+the core-1 Embassy executor; its core assignment is fixed across profiles. Touch processing remains
+the highest-priority input task on core 0. Upload balances Wi-Fi, network, HTTP, and SD workers at
+the same priority so no pipeline stage can starve another. Diagnostics prioritizes serial control
+and diagnostics work. Core-0 priorities control executor polling; they do not interrupt an
+already-running synchronous section or provide priority inheritance for a shared peripheral lock.
+
 ### Runtime Telemetry Domain Control
 
 Use runtime telemetry domain toggles to reduce log pressure without reflashing.
@@ -68,7 +96,10 @@ Optional env vars:
 - `HOSTCTL_SDCARD_FLASH_FIRST=1` to flash first (mode arg defaults to `debug`)
 - `HOSTCTL_SDCARD_VERIFY_LBA` (default `2048`)
 - `HOSTCTL_SDCARD_BASE_PATH` to override test directory path on SD card
-- `HOSTCTL_SDCARD_SUITE` (`all` default, `baseline`, `burst`, or `failures`)
+- `HOSTCTL_SDCARD_SUITE` (`all` default, `baseline`, `burst`, `failures`, `cutover`, or `no-card`)
+- `no-card` verifies 20 bounded `init_failed`/`NoResponse` absent-card probes plus stack, memory,
+  touch scheduling, panic, reset, and timeout gates; it does not provide SD/FAT correctness or
+  throughput evidence
 - `HOSTCTL_SDCARD_SDWAIT_TIMEOUT_MS` (default `300000`)
 
 Burst/backpressure regression only:
@@ -76,4 +107,3 @@ Burst/backpressure regression only:
 ```bash
 HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_burst_regression.sh
 ```
-

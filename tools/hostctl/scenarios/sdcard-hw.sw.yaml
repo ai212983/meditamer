@@ -4,6 +4,194 @@ document:
   name: "sdcard-hw"
   version: "1.0.0"
 do:
+  - boot_runtime_ready:
+      call: "poll_command_pattern"
+      with:
+        name: "boot_runtime_ready"
+        command: "STATE GET"
+        response_pattern: "^STATE phase="
+        expected_pattern: "^STATE phase=.* ready=true$"
+        timeout_ms: 30000
+        interval_ms: 100
+      then: "initial_suite_gate"
+  - initial_suite_gate:
+      switch:
+        - no_card:
+            when: ".suite == \"no-card\""
+            then: "no_card_upload_off"
+        - default:
+            then: "upload_mode_off"
+  - no_card_upload_off:
+      call: "poll_command_pattern"
+      with:
+        name: "no_card_upload_off"
+        command: "STATE GET"
+        response_pattern: "^STATE phase="
+        expected_pattern: "^STATE phase=.* upload=off .* ready=true$"
+        timeout_ms: 8000
+        interval_ms: 100
+      then: "upload_paused"
+  - upload_mode_off:
+      call: "raw_expect_pattern"
+      with:
+        name: "upload_mode_off"
+        command: "STATE SET upload=off"
+        expected_pattern: "^STATE OK"
+        timeout_ms: 8000
+      then: "upload_paused"
+  - upload_paused:
+      call: "poll_command_pattern"
+      with:
+        name: "upload_paused"
+        command: "NET STATUS"
+        response_pattern: "^NET_STATUS "
+        expected_pattern: '^NET_STATUS .*"state":"Idle".*"link":false.*"radio_quiesced":true.*"ipv4":"0.0.0.0".*"listener":false'
+        timeout_ms: 20000
+        interval_ms: 100
+      then: "storage_capability_gate"
+  - storage_capability_gate:
+      switch:
+        - no_card:
+            when: ".suite == \"no-card\""
+            then: "no_card_telemetry"
+        - default:
+            then: "boot_storage_ready"
+  - no_card_telemetry:
+      call: "raw_expect_pattern"
+      with:
+        name: "no_card_telemetry"
+        command: "TELEMSET SD ON"
+        expected_pattern: "^TELEMSET OK .*sd=on"
+      then: "no_card_touch_reset"
+  - no_card_touch_reset:
+      call: "raw_expect_pattern"
+      with:
+        name: "no_card_touch_reset"
+        command: "TOUCHSCHEDRESET"
+        expected_pattern: "^TOUCHSCHEDRESET OK"
+      then: "no_card_probes"
+  - no_card_probes:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "no_card_probe_{iteration}"
+          command: "SDPROBE"
+          ack_tag: "SDPROBE"
+          expected_status: "error"
+          expected_code: "init_failed"
+          expected_pattern: "retry_init_error.*NoResponse"
+      then: "no_card_summary"
+  - no_card_summary:
+      call: "cutover_summary"
+      with:
+        label: "SD_NO_CARD_SUMMARY"
+      then: "complete"
+  - boot_storage_ready:
+      call: "run_step"
+      with:
+        name: "boot_storage_ready"
+        command: "SDPROBE"
+        ack_tag: "SDPROBE"
+        expected_status: "ok"
+        expected_code: "ok"
+        expected_pattern: "card_detected"
+      then: "cutover_gate"
+  - cutover_gate:
+      switch:
+        - cutover:
+            when: ".suite == \"cutover\""
+            then: "cutover_telemetry"
+        - default:
+            then: "probe"
+  - cutover_telemetry:
+      call: "raw_expect_pattern"
+      with:
+        name: "cutover_telemetry"
+        command: "TELEMSET SD ON"
+        expected_pattern: "^TELEMSET OK .*sd=on"
+      then: "cutover_touch_reset"
+  - cutover_touch_reset:
+      call: "raw_expect_pattern"
+      with:
+        name: "cutover_touch_reset"
+        command: "TOUCHSCHEDRESET"
+        expected_pattern: "^TOUCHSCHEDRESET OK"
+      then: "cutover_probes"
+  - cutover_probes:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "cutover_probe_{iteration}"
+          command: "SDPROBE"
+          ack_tag: "SDPROBE"
+          expected_status: "ok"
+          expected_code: "ok"
+          expected_pattern: "card_detected"
+      then: "cutover_nested_root"
+  - cutover_nested_root:
+      call: "run_step"
+      with:
+        name: "cutover_nested_root"
+        command: "SDFATMKDIR {nested_root}"
+        ack_tag: "SDFATMKDIR"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "cutover_nested_dirs"
+  - cutover_nested_dirs:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "cutover_nested_dir_{iteration}"
+          command: "SDFATMKDIR {nested_root}/d{iteration}"
+          ack_tag: "SDFATMKDIR"
+          expected_status: "ok"
+          expected_code: "ok"
+      then: "cutover_nested_writes"
+  - cutover_nested_writes:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "cutover_nested_write_{iteration}"
+          command: "SDFATWRITE {nested_root}/d{iteration}/io.txt nested"
+          ack_tag: "SDFATWRITE"
+          expected_status: "ok"
+          expected_code: "ok"
+      then: "cutover_nested_remove_files"
+  - cutover_nested_remove_files:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "cutover_nested_remove_file_{iteration}"
+          command: "SDFATRM {nested_root}/d{iteration}/io.txt"
+          ack_tag: "SDFATRM"
+          expected_status: "ok"
+          expected_code: "ok"
+      then: "cutover_nested_remove_dirs"
+  - cutover_nested_remove_dirs:
+      call: "repeat_step"
+      with:
+        repetitions: 20
+        step:
+          name: "cutover_nested_remove_dir_{iteration}"
+          command: "SDFATRM {nested_root}/d{iteration}"
+          ack_tag: "SDFATRM"
+          expected_status: "ok"
+          expected_code: "ok"
+      then: "cutover_nested_remove_root"
+  - cutover_nested_remove_root:
+      call: "run_step"
+      with:
+        name: "cutover_nested_remove_root"
+        command: "SDFATRM {nested_root}"
+        ack_tag: "SDFATRM"
+        expected_status: "ok"
+        expected_code: "ok"
+      then: "probe"
   - probe:
       call: "run_step"
       with:
@@ -16,6 +204,9 @@ do:
       then: "baseline_gate"
   - baseline_gate:
       switch:
+        - run_baseline_cutover:
+            when: ".suite == \"cutover\""
+            then: "baseline_mkdir"
         - run_baseline_all:
             when: ".suite == \"all\""
             then: "baseline_mkdir"
@@ -126,6 +317,9 @@ do:
       then: "burst_gate"
   - burst_gate:
       switch:
+        - run_burst_cutover:
+            when: ".suite == \"cutover\""
+            then: "burst_batch_start"
         - run_burst_all:
             when: ".suite == \"all\""
             then: "burst_batch_start"
@@ -176,6 +370,9 @@ do:
       then: "failure_gate"
   - failure_gate:
       switch:
+        - run_failure_cutover:
+            when: ".suite == \"cutover\""
+            then: "fail_mkdir_nonempty"
         - run_failure_all:
             when: ".suite == \"all\""
             then: "fail_mkdir_nonempty"
@@ -183,7 +380,7 @@ do:
             when: ".suite == \"failures\""
             then: "fail_mkdir_nonempty"
         - default:
-            then: "complete"
+            then: "final_gate"
   - fail_mkdir_nonempty:
       call: "run_step"
       with:
@@ -321,6 +518,16 @@ do:
         command: "SDFATWRITE {base_path}/overflow.txt {long_payload}"
         expected_pattern: "^CMD ERR"
         timeout_ms: 20000
+      then: "final_gate"
+  - final_gate:
+      switch:
+        - cutover_summary:
+            when: ".suite == \"cutover\""
+            then: "cutover_summary"
+        - default:
+            then: "complete"
+  - cutover_summary:
+      call: "cutover_summary"
       then: "complete"
   - complete:
       call: "complete"

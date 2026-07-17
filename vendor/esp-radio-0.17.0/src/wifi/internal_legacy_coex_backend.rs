@@ -1,8 +1,7 @@
 use core::ffi::c_void;
 
 use super::{
-    internal_legacy_backend_wrappers as legacy_wrappers,
-    internal_legacy_common_backend as legacy_common,
+    internal_legacy_common_literal as legacy_common,
     internal_legacy_timer_backend as legacy_timers,
     os_adapter::legacy_interrupt_backend as legacy_interrupts,
     slowclk_cal_get,

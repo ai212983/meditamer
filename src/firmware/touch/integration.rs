@@ -56,7 +56,8 @@ pub(crate) async fn handle_touch_event(
                 &mut context.inkplate,
                 backlight_cycle_start,
                 backlight_level,
-            );
+            )
+            .await;
         }
         TouchEventKind::LongPress => {
             *update_count = 0;

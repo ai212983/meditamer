@@ -8,16 +8,16 @@ where
     I2C: I2cOps,
     D: DelayOps,
 {
-    pub(super) fn vscan_start(&mut self) -> Result<(), I2C::Error> {
+    pub(super) async fn vscan_start(&mut self) -> Result<(), I2C::Error> {
         self.set_ckv(true);
         self.delay.delay_us(7);
-        self.digital_write_internal(IO_INT_ADDR, SPV, false)?;
+        self.digital_write_internal(IO_INT_ADDR, SPV, false).await?;
         self.delay.delay_us(10);
         self.set_ckv(false);
         self.delay.delay_us(1);
         self.set_ckv(true);
         self.delay.delay_us(8);
-        self.digital_write_internal(IO_INT_ADDR, SPV, true)?;
+        self.digital_write_internal(IO_INT_ADDR, SPV, true).await?;
         self.delay.delay_us(10);
         self.set_ckv(false);
         self.delay.delay_us(1);

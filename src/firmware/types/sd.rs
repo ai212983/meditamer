@@ -82,6 +82,7 @@ pub(crate) struct SdResult {
     pub(crate) code: SdResultCode,
     pub(crate) attempts: u8,
     pub(crate) duration_ms: u32,
+    pub(crate) recover_bus: bool,
 }
 
 pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;

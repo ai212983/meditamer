@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    io::Write,
-    path::PathBuf,
-};
+use std::{fs, io::Write, path::PathBuf};
 
 use anyhow::Result;
 use reqwest::Method;

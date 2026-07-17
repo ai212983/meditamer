@@ -103,3 +103,53 @@ fn sdcard_fixture_all_runs_all_sections() -> Result<()> {
         .any(|entry| entry == "raw_expect_pattern:fail_oversize_payload_cmd_err"));
     Ok(())
 }
+
+#[test]
+fn sdcard_fixture_cutover_runs_preflight_full_suite_and_summary() -> Result<()> {
+    let traces = run_sdcard_fixture("cutover")?;
+    assert!(traces
+        .iter()
+        .any(|entry| entry == "raw_expect_pattern:cutover_telemetry"));
+    assert!(traces
+        .iter()
+        .any(|entry| entry == "poll_command_pattern"));
+    assert_eq!(
+        traces.iter().filter(|entry| *entry == "repeat_step").count(),
+        5
+    );
+    assert!(traces.iter().any(|entry| entry == "run_step:mkdir"));
+    assert!(traces.iter().any(|entry| entry == "burst_batch_start"));
+    assert!(traces
+        .iter()
+        .any(|entry| entry == "run_step:fail_mkdir_nonempty"));
+    assert!(traces.iter().any(|entry| entry == "cutover_summary"));
+    Ok(())
+}
+
+#[test]
+fn sdcard_fixture_no_card_runs_only_absence_and_runtime_gates() -> Result<()> {
+    let traces = run_sdcard_fixture("no-card")?;
+    assert!(traces
+        .iter()
+        .any(|entry| entry == "raw_expect_pattern:no_card_telemetry"));
+    assert!(traces
+        .iter()
+        .any(|entry| entry == "raw_expect_pattern:no_card_touch_reset"));
+    assert!(!traces
+        .iter()
+        .any(|entry| entry == "raw_expect_pattern:upload_mode_off"));
+    assert_eq!(
+        traces.iter().filter(|entry| *entry == "repeat_step").count(),
+        1
+    );
+    assert!(traces.iter().any(|entry| entry == "cutover_summary"));
+    assert!(!traces
+        .iter()
+        .any(|entry| entry == "run_step:boot_storage_ready"));
+    assert!(!traces.iter().any(|entry| entry == "run_step:mkdir"));
+    assert!(!traces.iter().any(|entry| entry == "burst_batch_start"));
+    assert!(!traces
+        .iter()
+        .any(|entry| entry == "run_step:fail_mkdir_nonempty"));
+    Ok(())
+}

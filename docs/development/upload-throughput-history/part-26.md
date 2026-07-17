@@ -166,33 +166,112 @@ Why this matters:
   - legacy built-in scheduler switching
   - legacy Xtensa interrupt-mask and periodic timeslice behavior
 
-## 2026-03-09: routing esp-radio scheduler-facing task handles through the first legacy built-in scheduler state still does not restore RX visibility
+## 2026-03-09: true legacy `timer_compat` restores isolated current `esp-radio` scans, but not the full firmware boot-scan path
 
-- Wired a new diagnostic path so current `esp-radio` task creation/current-task/thread-semaphore/task-deletion calls can route through the in-tree legacy built-in scheduler state:
-  - `vendor/esp-rtos-0.2.0/src/esp_radio/legacy_builtin_scheduler.rs`
-  - `vendor/esp-rtos-0.2.0/src/esp_radio/mod.rs`
+- Ported a source-level legacy `compat/timer_compat` implementation from the working `esp-wifi 0.15.1` generation into the current stack:
+  - `vendor/esp-radio-0.17.0/src/compat/timer_compat_legacy.rs`
+  - `vendor/esp-radio-0.17.0/src/compat/timer_compat.rs`
+  - `vendor/esp-radio-0.17.0/src/compat/mod.rs`
+  - `vendor/esp-radio-0.17.0/src/lib.rs`
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/timer_queue.rs`
+- New diagnostic knob:
+  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG=1`
 
-Validation:
-- isolated current standalone comparator with:
-  - `MEDITAMER_WIFI_ESP_RTOS_USE_LEGACY_BUILTIN_SCHEDULER_DIAG=1`
+Validation 1: isolated current standalone `esp-radio`
 - artifacts:
-  - `logs/esp_radio_nostd_wifi_control_legacybuiltin_20260309_berlin/monitor.log`
-  - `logs/esp_radio_nostd_wifi_control_legacybuiltin_20260309_berlin/summary.txt`
-
-Observed result:
-- startup still reached:
+  - `logs/esp_radio_nostd_wifi_control_legacytimercompat_20260309_berlin/monitor.log`
+- observed result:
   - `begin=true`
   - `esp_radio_init=ok`
   - `wifi_new=ok`
   - `start=ok`
-- wrapped scan still ended at:
-  - `scan=ok count=0`
-- scan-tail queue families stayed materially the same:
-  - `0x6`
-  - `0x10`
-  - `0x7 / 0x8 / 0x0`
-  - consumer-side `0x17`
+  - `scan=ok count=5`
+  - APs listed:
+    - `<nearby-ssid-1>`
+    - `<nearby-ssid-3>`
+    - `<test-ssid-primary>`
+    - `<test-ssid-guest>`
+    - `<nearby-ssid-2>`
+  - `stop=ok`
+
+Validation 2: main firmware boot-scan path with the same legacy timer-compat branch
+- artifacts:
+  - `logs/boot_scan_legacytimercompat_main_20260309_berlin/monitor.log`
+- observed result:
+  - `upload_http: boot_scan_only_promisc_diag ... total=0`
+  - `upload_http: boot_scan_only_diag idf_compare=scan_start_err scan_rc=12300`
+  - `upload_http: boot_scan_only_diag idf_explicit_compare=ok ... ap_num=0`
+  - `upload_http: boot_scan_only_diag scan=ok ... result_count=0`
 
 Why this matters:
-- this is the first source-level branch where esp-radio scheduler-facing task handles stop using the normal current-task/thread-semaphore path and start using a dedicated legacy built-in scheduler state surface
-- RX visibility still does not return, so the remaining gap is deeper than the first legacy built-in scheduler state substitution too
+- this is the first current `esp-radio` branch that restores non-zero scan results in the isolated standalone current stack
+- the same source-level timer port is not sufficient to restore the full firmware boot-scan path
+- the boundary has moved upward:
+  - no longer “current core runtime can never scan”
+  - now “full firmware path or added diagnostic sequence still suppresses discovery”
+
+## 2026-03-10: removing `sd_task` from the boot-scan window still does not restore the full firmware path
+
+- Added a boot-scan guard so runtime bootstrap skips spawning `sd_task` while the boot-scan diagnostic is active:
+  - `src/firmware/runtime/bootstrap.rs`
+  - `src/firmware/storage/upload/mod.rs`
+  - `src/firmware/storage/upload/wifi.rs`
+  - `src/firmware/storage/upload/wifi/connect/boot_scan_diag.rs`
+  - `src/firmware/storage/upload/wifi/connect/mod.rs`
+
+Validation:
+- main firmware with:
+  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG=1`
+  - `MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG=1`
+  - no explicit-IDF compare flag
+  - no boot-scan promisc flag
+- artifacts:
+  - `logs/boot_scan_legacytimercompat_min_nosd_20260309_berlin/monitor.log`
+
+Observed result:
+- runtime confirms the suppression:
+  - `sdprobe: boot_scan_only_diag active; sd_task skipped`
+- wrapped scan still fails earlier:
+  - `boot_scan_only_diag outcome=scan_timeout timeout_ms=15000`
+- final direct-IDF compare still returns zero:
+  - `idf_compare=ok ... ap_num=0`
+- raw `ScanDone` list is still empty:
+  - `event scan_done_list status=1 count=0`
+
+Why this matters:
+- this closes the obvious firmware-only concurrency suspect from the reduced path
+- the remaining full-firmware failure is not explained by `sd_task` interference during the boot-scan window
+
+## 2026-03-10: exact legacy `timer_task()` yield-loop semantics regress earlier than the already-coherent legacy timer-compat path
+
+- Ported the old `esp-wifi 0.15.1` `timer_task()` loop shape into the current standalone comparator under:
+  - `MEDITAMER_WIFI_ESP_RTOS_USE_EXACT_LEGACY_TIMER_COMPAT_LOOP_DIAG=1`
+- Implementation:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/timer_queue.rs`
+
+Validation:
+- isolated current standalone comparator with:
+  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG=1`
+  - `MEDITAMER_WIFI_ESP_RTOS_USE_EXACT_LEGACY_TIMER_COMPAT_LOOP_DIAG=1`
+- artifacts:
+  - `logs/esp_radio_nostd_wifi_control_exactlegacytimerloop_20260310_berlin/monitor.log`
+  - `logs/esp_radio_nostd_wifi_control_exactlegacytimerloop_20260310_berlin/summary.txt`
+
+Observed result:
+- startup still reaches:
+  - `begin=true`
+  - `esp_radio_init=ok`
+  - `wifi_new=ok`
+  - `start=ok`
+- but the bounded capture never reaches:
+  - pre-scan promisc output
+  - `after_scan` timer-compat counters
+  - wrapped `scan=...`
+
+Why this matters:
+- the already-corrected legacy timer-compat path with live timer execution was coherent but still RX-dark
+- forcing the exact old yield-only `timer_task()` loop does not improve that branch; it regresses earlier and no longer reaches the scan phase inside the same bounded standalone validation window
+- this closes another timer-loop cloning branch and reinforces that the remaining gap is deeper than timer-task loop shape alone
+
+
+_Continued in [Part 26, continuation 2](./part-26-02.md)._

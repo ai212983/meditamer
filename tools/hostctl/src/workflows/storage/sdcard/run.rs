@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    io::{force_upload_mode_off, maybe_flash_first, open_console},
+    io::{maybe_flash_first, open_console},
     runtime::SdcardScenarioRuntime,
     types::{suite_name, SdcardHwOptions, SdcardSuite},
 };
@@ -43,8 +43,6 @@ pub fn run_sdcard_hw(logger: &mut Logger, opts: SdcardHwOptions) -> Result<()> {
         env_utils::require_port()?
     ));
     logger.info(format!("Test root path: {base_path}"));
-    force_upload_mode_off(logger, &mut console)?;
-
     let workflow = load_workflow(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/sdcard-hw.sw.yaml"),
     )?;
@@ -58,6 +56,7 @@ pub fn run_sdcard_hw(logger: &mut Logger, opts: SdcardHwOptions) -> Result<()> {
     let file_a = format!("{rename_root}/a.txt");
     let file_b = format!("{rename_root}/b.txt");
     let long_payload = "x".repeat(260);
+    let nested_root = format!("/n{run_tag}");
 
     let vars = HashMap::from([
         ("run_tag".to_string(), run_tag),
@@ -72,6 +71,7 @@ pub fn run_sdcard_hw(logger: &mut Logger, opts: SdcardHwOptions) -> Result<()> {
         ("file_a".to_string(), file_a),
         ("file_b".to_string(), file_b),
         ("long_payload".to_string(), long_payload),
+        ("nested_root".to_string(), nested_root),
     ]);
 
     let mut runtime = SdcardScenarioRuntime::new(logger, &mut console, vars, sdwait_timeout_ms);

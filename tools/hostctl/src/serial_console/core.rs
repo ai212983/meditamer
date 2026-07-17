@@ -212,8 +212,7 @@ impl SerialConsole {
     pub fn last_regex_since(&self, start_mark: usize, regex: &Regex) -> Option<String> {
         self.read_recent_lines(start_mark)
             .into_iter()
-            .filter(|line| regex.is_match(line))
-            .last()
+            .rfind(|line| regex.is_match(line))
     }
 
     pub fn command_wait_regex(

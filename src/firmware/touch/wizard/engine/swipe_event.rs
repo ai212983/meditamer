@@ -12,7 +12,6 @@ impl TouchCalibrationWizard {
     ) -> bool {
         let prev_phase = self.phase;
         let prev_hint = self.hint;
-        let prev_last_tap = self.last_tap;
         let prev_last_swipe = self.last_swipe;
         let prev_case_index = self.swipe_case_index;
         let prev_case_passed = self.swipe_case_passed;
@@ -30,37 +29,6 @@ impl TouchCalibrationWizard {
                 y: event.y as i32,
             };
             self.append_swipe_trace_point(event.x as i32, event.y as i32);
-            if case.is_some_and(|spec| !swipe_start_matches(spec, start)) {
-                self.hint = "Start outside FROM circle. Retry this case.";
-                self.last_swipe = Some(SwipeAttempt {
-                    start,
-                    end,
-                    accepted: false,
-                });
-                self.swipe_trace_pending_points = 0;
-                self.emit_swipe_case_trace(SwipeCaseTraceInput {
-                    t_ms: event.t_ms,
-                    case_index,
-                    case,
-                    verdict: TRACE_VERDICT_SKIP,
-                    classified_direction: Some(direction),
-                    start,
-                    end,
-                    duration_ms: event.duration_ms,
-                    move_count: event.move_count,
-                    max_travel_px: event.max_travel_px,
-                    release_debounce_ms: event.release_debounce_ms,
-                    dropout_count: event.dropout_count,
-                });
-                return self.phase != prev_phase
-                    || self.hint != prev_hint
-                    || self.last_tap != prev_last_tap
-                    || self.last_swipe != prev_last_swipe
-                    || self.swipe_case_index != prev_case_index
-                    || self.swipe_case_passed != prev_case_passed
-                    || self.swipe_case_failed != prev_case_failed
-                    || self.swipe_case_attempts != prev_case_attempts;
-            }
             self.swipe_case_attempts = self.swipe_case_attempts.saturating_add(1);
             let mut case_pass = false;
             if let Some(case) = case {
@@ -119,7 +87,6 @@ impl TouchCalibrationWizard {
         }
         self.phase != prev_phase
             || self.hint != prev_hint
-            || self.last_tap != prev_last_tap
             || self.last_swipe != prev_last_swipe
             || self.swipe_case_index != prev_case_index
             || self.swipe_case_passed != prev_case_passed
@@ -128,7 +95,6 @@ impl TouchCalibrationWizard {
     }
 
     pub(super) fn on_swipe_release(&mut self, event: TouchEvent) -> bool {
-        let prev_last_tap = self.last_tap;
         let prev_last_swipe = self.last_swipe;
         let prev_pending_swipe_release = self.pending_swipe_release;
 
@@ -160,8 +126,7 @@ impl TouchCalibrationWizard {
             });
         }
 
-        self.last_tap != prev_last_tap
-            || self.last_swipe != prev_last_swipe
+        self.last_swipe != prev_last_swipe
             || self.pending_swipe_release != prev_pending_swipe_release
     }
 

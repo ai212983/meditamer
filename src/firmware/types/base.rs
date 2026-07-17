@@ -1,13 +1,19 @@
 use crate::{
-    drivers::inkplate::InkplateHal,
-    drivers::platform::{BusyDelay, HalI2c},
+    drivers::inkplate::{imu::InkplateImu, touch::InkplateTouch, InkplateHal},
+    drivers::platform::BusyDelay,
 };
-use esp_hal::{gpio::Output, uart::Uart, Async};
+use embassy_embedded_hal::{adapter::BlockingAsync, shared_bus::asynch::i2c::I2cDevice};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use esp_hal::{gpio::Output, i2c::master::I2c, uart::Uart, Async, Blocking};
 use sdcard::probe;
 
 use super::super::app_state::AppStateStore;
 
-pub(crate) type InkplateDriver = InkplateHal<HalI2c<'static>, BusyDelay>;
+pub(crate) type SharedI2cDevice =
+    I2cDevice<'static, CriticalSectionRawMutex, BlockingAsync<I2c<'static, Blocking>>>;
+pub(crate) type InkplateDriver = InkplateHal<SharedI2cDevice, BusyDelay>;
+pub(crate) type InkplateImuDriver = InkplateImu<SharedI2cDevice>;
+pub(crate) type InkplateTouchDriver = InkplateTouch<SharedI2cDevice>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};

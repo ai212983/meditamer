@@ -1,6 +1,11 @@
-use super::io::{cache_sd_result, write_sd_result, write_tap_trace_sample, SD_RESULT_CACHE_CAP};
+use super::{
+    io::{cache_sd_result, write_sd_result, write_tap_trace_sample, SD_RESULT_CACHE_CAP},
+    status::format_status,
+};
 use crate::firmware::{
-    config::{SD_RESULTS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES},
+    config::{
+        SD_RESULTS, SD_SERIAL_LINES, SERIAL_STATUS_EVENTS, TAP_TRACE_ENABLED, TAP_TRACE_SAMPLES,
+    },
     touch::{
         config::{
             TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_TRACE_ENABLED,
@@ -14,6 +19,7 @@ use crate::firmware::{
     },
     types::{SdResult, SerialUart},
 };
+use embassy_futures::yield_now;
 
 pub(super) struct SerialTaskState {
     touch_wizard_log: TouchWizardSessionLog,
@@ -96,6 +102,11 @@ impl SerialTaskState {
     }
 
     pub(super) async fn drain_runtime_samples(&mut self, uart: &mut SerialUart) {
+        while let Ok(event) = SERIAL_STATUS_EVENTS.try_receive() {
+            let line = format_status(event);
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
+
         while let Ok(session_event) = TOUCH_WIZARD_SESSION_EVENTS.try_receive() {
             self.touch_wizard_log.on_session_event(session_event);
         }
@@ -133,9 +144,15 @@ impl SerialTaskState {
             }
         }
 
+        while let Ok(line) = SD_SERIAL_LINES.try_receive() {
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+            yield_now().await;
+        }
+
         while let Ok(result) = SD_RESULTS.try_receive() {
             cache_sd_result(&mut self.sd_result_cache, result);
             write_sd_result(uart, result).await;
+            yield_now().await;
         }
     }
 }

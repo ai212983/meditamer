@@ -1,4 +1,7 @@
-impl<'d> SdCardProbe<'d> {
+impl<'d, SPI> SdCardProbe<'d, SPI>
+where
+    SPI: SdSpiBus,
+{
     pub async fn init(&mut self) -> Result<SdProbeStatus, SdProbeError> {
         self.cached_sector_lba = None;
         self.probe().await
@@ -37,6 +40,7 @@ impl<'d> SdCardProbe<'d> {
             if cmd0_r1 == 0x01 {
                 return Ok(());
             }
+            embassy_futures::yield_now().await;
         }
         Err(SdProbeError::Cmd0Failed(cmd0_r1))
     }
@@ -68,10 +72,25 @@ impl<'d> SdCardProbe<'d> {
 
         let mut acmd41_r1 = 0xFFu8;
         for _ in 0..200 {
-            let _ = self.send_command(SD_CMD55, 0, 0x65, &mut []).await?;
-            acmd41_r1 = self
+            match self.send_command(SD_CMD55, 0, 0x65, &mut []).await {
+                Ok(_) => {}
+                Err(SdProbeError::NoResponse(SD_CMD55)) => {
+                    self.retry_delay().await;
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+            acmd41_r1 = match self
                 .send_command(SD_ACMD41, acmd41_arg, 0x77, &mut [])
-                .await?;
+                .await
+            {
+                Ok(r1) => r1,
+                Err(SdProbeError::NoResponse(SD_ACMD41)) => {
+                    self.retry_delay().await;
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
             if acmd41_r1 == 0x00 {
                 return Ok(());
             }
@@ -121,7 +140,7 @@ impl<'d> SdCardProbe<'d> {
         let config = SpiConfig::default()
             .with_mode(SpiMode::_0)
             .with_frequency(Rate::from_khz(SD_INIT_SPI_RATE_KHZ));
-        self.spi.apply_config(&config)?;
+        self.spi.set_config(&config)?;
         Ok(())
     }
 
@@ -129,11 +148,10 @@ impl<'d> SdCardProbe<'d> {
         // Keep this tunable via build-time env so throughput experiments can
         // sweep SD SPI data clock safely without code churn.
         let data_rate_mhz = Self::data_spi_rate_mhz();
-        esp_println::println!("sdprobe: data_spi_mhz={}", data_rate_mhz);
         let config = SpiConfig::default()
             .with_mode(SpiMode::_0)
             .with_frequency(Rate::from_mhz(data_rate_mhz));
-        self.spi.apply_config(&config)?;
+        self.spi.set_config(&config)?;
         Ok(())
     }
 

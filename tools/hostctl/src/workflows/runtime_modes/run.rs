@@ -1,4 +1,10 @@
 pub fn run_runtime_modes_smoke(logger: &mut Logger, opts: RuntimeModesSmokeOptions) -> Result<()> {
+    if !matches!(opts.suite.as_str(), "full" | "no-storage") {
+        return Err(anyhow!(
+            "invalid runtime-mode suite `{}` (use full|no-storage)",
+            opts.suite
+        ));
+    }
     let settle_ms = env_utils::parse_env_u64("HOSTCTL_MODE_SMOKE_SETTLE_MS", 0)?;
     let post_upload_status_repeats =
         env_utils::parse_env_u32("HOSTCTL_MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS", 3)?;
@@ -29,7 +35,7 @@ pub fn run_runtime_modes_smoke(logger: &mut Logger, opts: RuntimeModesSmokeOptio
         post_upload_timeset_repeats,
     );
 
-    let _ = execute_workflow(&workflow, &mut runtime, &json!({}))?;
+    let _ = execute_workflow(&workflow, &mut runtime, &json!({ "suite": opts.suite }))?;
 
     logger.info(format!(
         "Runtime mode smoke passed. Log: {}",

@@ -26,6 +26,7 @@ suite="${HOSTCTL_SDCARD_SUITE:-all}"
 
 args=(test sdcard-hw --build-mode "$build_mode" --suite "$suite")
 if [[ -n "$output_path" ]]; then
+    output_path="$(_run_hostctl_abs_path "$(_run_hostctl_repo_root)" "$output_path")"
     args+=(--output "$output_path")
 fi
 

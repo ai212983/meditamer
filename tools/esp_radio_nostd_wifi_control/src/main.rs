@@ -223,10 +223,13 @@ fn print_wifi_os_diag(label: &str) {
     let diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
     let primitive = esp_radio::diagnostic_wifi_adapter_primitive_diag();
     println!(
-        "nostd_wifi_control: wifi_os_diag label={} sem_take={} sem_give={} queue_send={} queue_send_first_task_ptr=0x{:08x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:08x} queue_send_last_task_role={} queue_send_isr={} queue_recv={} queue_recv_first_task_ptr=0x{:08x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:08x} queue_recv_last_task_role={} queue_recv_isr={} event_post={} send_task_changes={} recv_task_changes={} send_last_item_size={} send_last_item_word0=0x{:08x} recv_last_item_size={} recv_last_item_word0=0x{:08x} recv_last_caller_ptr=0x{:08x}",
+        "nostd_wifi_control: wifi_os_diag label={} sem_take={} sem_take_isr={} sem_give={} sem_give_isr={} task_yield_from_isr={} queue_send={} queue_send_first_task_ptr=0x{:08x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:08x} queue_send_last_task_role={} queue_send_isr={} queue_recv={} queue_recv_first_task_ptr=0x{:08x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:08x} queue_recv_last_task_role={} queue_recv_isr={} event_post={} send_task_changes={} recv_task_changes={} send_last_item_size={} send_last_item_word0=0x{:08x} recv_last_item_size={} recv_last_item_word0=0x{:08x} recv_last_caller_ptr=0x{:08x}",
         label,
         diag.sem_take,
+        diag.sem_take_isr,
         diag.sem_give,
+        diag.sem_give_isr,
+        diag.task_yield_from_isr,
         diag.queue_send,
         diag.queue_send_first_task_ptr,
         format_task_role(diag.queue_send_first_task_ptr),
@@ -483,6 +486,7 @@ fn main() -> ! {
         esp_radio::diagnostic_wifi_mac_isr_count()
     );
     print_wifi_promisc_cb_diag("after_promisc");
+    print_wifi_os_diag("after_promisc");
     if !minimal_log {
         blob_state::print_blob_state("after_promisc");
     }

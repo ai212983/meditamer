@@ -3,7 +3,7 @@
 This folder is the single integration point for touch sampling, normalization, gesture
 classification, wizard UX, and touch debug logging.
 
-Last major update: 2026-02-23.
+Last major update: 2026-07-16.
 
 ## Problem We Are Hunting
 
@@ -27,9 +27,10 @@ the user actually lifts a finger.
 - Full redraws during active gesture windows reduce sampling continuity.
 - Partial redraws and deferred flushes improve reliability.
 
-3. IRQ + periodic fallback works better than pure periodic polling.
-- IRQ-triggered burst sampling catches fast gesture starts.
-- Idle fallback polling prevents lockups when IRQ edges are missed.
+3. Event-driven reads plus periodic recovery work better than continuous controller polling.
+- GPIO36 assertions trigger immediate reads and an 8 ms classification probe cadence.
+- A 250 ms idle recovery read prevents lockups when an assertion is missed.
+- Active contacts are sampled at 8 ms (125 Hz), while gesture time advances independently.
 
 4. Direction detection is mostly good now.
 - Recent runs show `class_dir` usually correct (`right`/`down` matching guided cases).
@@ -41,13 +42,43 @@ the user actually lifts a finger.
 ## Current Architecture
 
 - `types.rs`: touch event/sample types and wizard trace sample formats.
-- `config.rs`: touch constants/channels (`TOUCH_*`) and IRQ state.
-- `tasks.rs`: IRQ task, touch pipeline task, reset/init helpers.
+- `config.rs`: touch constants and channels (`TOUCH_*`).
+- `tasks/acquisition.rs`: GPIO36 ownership, controller lifecycle, and raw sample publication.
+- `tasks/acquisition/state.rs`: pure acquisition timing state.
+- `tasks/pipeline.rs`: normalization and gesture time advancement.
+- `scheduling.rs`: acquisition-loop and active-sample latency telemetry.
 - `normalize.rs`: continuity + filtering for noisy frames.
 - `core.rs`: `statig` gesture engine.
 - `wizard.rs`: guided calibration/debug UX and swipe-case tracing.
 - `debug_log.rs`: on-device session log capture + UART dump formatting.
 - `mod.rs`: adapter from HAL samples to normalized core events.
+
+The calibration wizard captures four corner observations from each `Down` event's
+`contact_x`/`contact_y` fields. Those fields preserve the first physical contact while `x`/`y`
+carry the debounce-stabilized position. Once calibrated, the wizard transforms current,
+first-contact, and stabilized-start coordinates independently for precision tests and guided
+swipes. Starting a new calibration discards the previous transform so a failed retry cannot reuse
+stale values.
+
+## Shared GPIO36 Input
+
+Inkplate 4 TEMPERA wires the active-low WAKE button and touchscreen interrupt to the same ESP32
+GPIO36 input. The firmware therefore treats GPIO36 as a shared input rather than a touch-only IRQ:
+
+- the acquisition task level-polls GPIO36 every 2 ms and classifies its source through controller reads;
+- `input/gpio36.rs` waits through the controller's known zero-frame window before classifying an
+  assertion with no decoded contact as a WAKE-button press;
+- repeated WAKE-button classifications are debounced;
+- the display task receives the classified button event, while ordinary touch samples continue
+  through the existing normalization and gesture pipeline.
+
+Critical low-power operation should use `Gpio36Mode::ButtonOnly` after the touchscreen has been
+explicitly powered down. In shared mode the electrical source cannot be identified from GPIO36
+alone, so classification necessarily depends on reading the touch controller.
+
+For a visual hardware test, set `GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED` to `true`. That opt-in mode
+forces the Day UI, powers down touch, selects `ButtonOnly`, and displays READY/PRESSED/RELEASED
+banners. Production builds keep it `false` and use shared touch/WAKE classification.
 
 Non-touch app files (`display.rs`, `serial.rs`) now consume this module rather than owning touch
 implementation details.
@@ -76,6 +107,10 @@ implementation details.
 4. Quick parse:
 - `awk -F',' '/^touch_wizard_swipe,[0-9]/{print $7}' logs/<dump>.log | sort | uniq -c`
 - Inspect `touch_event` and `touch_trace` sections around bad cases.
+
+5. Send `TOUCHSCHEDRESET` immediately before a workload, then check executor latency with the
+   `METRICS` UART command. `TOUCH_SCHED` reports the maximum acquisition-loop and active-sample
+   gaps used by the SD SPI concurrency gate.
 
 ## Next Session Plan
 

@@ -8,7 +8,7 @@ use super::super::types::SdAssetReadRequest;
 use super::super::types::WifiCredentials;
 use super::super::types::{
     AppEvent, AppStateApplyAck, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
-    SdUploadRequest, SdUploadResult, TapTraceSample,
+    SdUploadRequest, SdUploadResult, SerialStatusEvent, TapTraceSample,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{
@@ -19,6 +19,14 @@ use crate::firmware::app_state::AppStateDiagControl;
 pub(crate) static APP_EVENTS: Channel<CriticalSectionRawMutex, AppEvent, 8> = Channel::new();
 pub(crate) static SD_REQUESTS: Channel<CriticalSectionRawMutex, SdRequest, 8> = Channel::new();
 pub(crate) static SD_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 16> = Channel::new();
+// The FAT runner yields at every I/O boundary, allowing the serial task to
+// drain this diagnostic queue between storage actions.
+pub(crate) static SD_SERIAL_LINES: Channel<CriticalSectionRawMutex, heapless::String<256>, 8> =
+    Channel::new();
+// Runtime producers never write UART directly. Events are lossy diagnostics, so producers use
+// try_send and cannot delay acquisition tasks while the serial task handles a command.
+pub(crate) static SERIAL_STATUS_EVENTS: Channel<CriticalSectionRawMutex, SerialStatusEvent, 8> =
+    Channel::new();
 pub(crate) static SD_DIAG_RESULTS: Channel<CriticalSectionRawMutex, SdResult, 8> = Channel::new();
 pub(crate) static DIAG_CONTROL_EVENTS: Channel<CriticalSectionRawMutex, AppStateDiagControl, 4> =
     Channel::new();

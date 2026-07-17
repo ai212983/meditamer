@@ -40,6 +40,7 @@ async fn ensure_upload_storage_ready(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> Result<(), SdUploadResultCode> {
     if !*powered {
         if !request_sd_power(SdPowerRequest::On).await {
@@ -50,8 +51,20 @@ async fn ensure_upload_storage_ready(
     }
 
     if !*upload_mounted {
-        if !sd_probe.is_initialized() && sd_probe.init().await.is_err() {
-            return Err(SdUploadResultCode::InitFailed);
+        if !sd_probe.is_initialized() {
+            match with_timeout(Duration::from_secs(2), sd_probe.init()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => {
+                    sd_probe.recover_after_timeout();
+                    fat_engine.invalidate();
+                    return Err(SdUploadResultCode::InitFailed);
+                }
+                Err(_) => {
+                    sd_probe.recover_after_timeout();
+                    fat_engine.invalidate();
+                    return Err(SdUploadResultCode::InitFailed);
+                }
+            }
         }
         *upload_mounted = true;
     }
@@ -65,6 +78,7 @@ async fn abort_active_upload_session(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
+    fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     process_upload_request(
         SdUploadRequest {
@@ -75,6 +89,7 @@ async fn abort_active_upload_session(
         sd_probe,
         powered,
         upload_mounted,
+        fat_engine,
     )
     .await
 }

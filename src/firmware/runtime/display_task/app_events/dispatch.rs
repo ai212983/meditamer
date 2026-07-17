@@ -14,9 +14,14 @@ pub(super) async fn handle_app_event(
         AppEvent::TimeSync(cmd) => {
             handle_time_sync_event(cmd, context, state, upload_enabled).await;
         }
-        AppEvent::TouchIrq => {
-            handle_touch_irq_event(context, state, upload_enabled);
+        AppEvent::TouchStatus(status) => {
+            handle_touch_status_event(status, context, state).await;
         }
+        AppEvent::Gpio36Action(action) => {
+            handle_gpio36_action(action, context, state).await;
+        }
+        AppEvent::ImuActionsReady => {}
+        #[cfg(not(feature = "wifi-debug-slim-app"))]
         AppEvent::StartTouchCalibrationWizard => {
             handle_start_touch_calibration_wizard_event(context, state, upload_enabled).await;
         }

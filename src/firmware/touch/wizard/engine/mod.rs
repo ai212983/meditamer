@@ -1,5 +1,6 @@
 use super::super::types::TouchSwipeDirection;
 
+mod calibration;
 mod draw;
 mod events;
 mod flow;
@@ -11,8 +12,9 @@ mod tests;
 
 pub(crate) use render::render_touch_wizard_waiting_screen;
 
-const TARGET_RADIUS_PX: i32 = 26;
-const TARGET_HIT_RADIUS_PX: i32 = TARGET_RADIUS_PX;
+const CALIBRATION_CORNER_COUNT: usize = 4;
+const CALIBRATION_MARGIN_PX: i32 = 52;
+const CALIBRATION_CAPTURE_RADIUS_PX: i32 = 92;
 const SWIPE_TRACE_MAX_POINTS: usize = 32;
 const CONTINUE_BUTTON_WIDTH: i32 = 192;
 const CONTINUE_BUTTON_HEIGHT: i32 = 52;
@@ -32,10 +34,9 @@ const TRACE_VERDICT_SKIP: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WizardPhase {
-    Intro,
-    TapCenter,
-    TapTopLeft,
-    TapBottomRight,
+    PrecisionMenu,
+    Calibrate,
+    PrecisionTest,
     SwipeRight,
     Complete,
     Closed,
@@ -51,7 +52,11 @@ pub(crate) enum WizardDispatch {
 pub(crate) struct TouchCalibrationWizard {
     phase: WizardPhase,
     hint: &'static str,
-    last_tap: Option<TapAttempt>,
+    calibration_observations: [Option<TapObservation>; CALIBRATION_CORNER_COUNT],
+    calibration: Option<TouchCalibration>,
+    calibration_pending_return: bool,
+    test_mode: TestCoordinateMode,
+    last_test_touch: Option<TestTouch>,
     swipe_trace: SwipeTrace,
     last_swipe: Option<SwipeAttempt>,
     swipe_trace_pending_points: u8,
@@ -65,10 +70,33 @@ pub(crate) struct TouchCalibrationWizard {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TapAttempt {
-    x: i32,
-    y: i32,
-    hit: bool,
+struct TapObservation {
+    target: SwipePoint,
+    observed: SwipePoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TouchCalibration {
+    observed_left: i32,
+    observed_right: i32,
+    observed_top: i32,
+    observed_bottom: i32,
+    target_left: i32,
+    target_right: i32,
+    target_top: i32,
+    target_bottom: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestCoordinateMode {
+    Calibrated,
+    Uncalibrated,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TestTouch {
+    raw: SwipePoint,
+    calibrated: SwipePoint,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

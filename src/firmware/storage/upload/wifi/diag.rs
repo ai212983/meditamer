@@ -18,6 +18,7 @@ static NET_FAILURE_CODE: AtomicU8 = AtomicU8::new(0);
 static NET_LADDER_STEP: AtomicU8 = AtomicU8::new(RecoveryLadderStep::RetrySame as u8);
 static NET_ATTEMPT: AtomicU32 = AtomicU32::new(0);
 static NET_UPTIME_MS: AtomicU32 = AtomicU32::new(0);
+static RADIO_QUIESCED: AtomicBool = AtomicBool::new(false);
 
 static NETCFG_CREDENTIALS_SET: AtomicBool = AtomicBool::new(false);
 static NETCFG_SSID_LEN: AtomicU8 = AtomicU8::new(0);
@@ -51,6 +52,14 @@ pub(super) fn publish_state(
     NET_FAILURE_CLASS.store(failure_class as u8, Ordering::Relaxed);
     NET_FAILURE_CODE.store(failure_code, Ordering::Relaxed);
     NET_UPTIME_MS.store(uptime_ms, Ordering::Relaxed);
+}
+
+pub(super) fn publish_radio_quiesced(quiesced: bool) {
+    RADIO_QUIESCED.store(quiesced, Ordering::Release);
+}
+
+pub(super) fn radio_quiesced() -> bool {
+    RADIO_QUIESCED.load(Ordering::Acquire)
 }
 
 pub(super) fn publish_config(credentials: Option<WifiCredentials>, policy: WifiRuntimePolicy) {

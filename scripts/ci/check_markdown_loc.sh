@@ -15,7 +15,9 @@ fi
 
 warn_limit="${MARKDOWN_LOC_WARN:-220}"
 max_limit="${MARKDOWN_LOC_MAX:-300}"
-exclude_regex="${MARKDOWN_LOC_EXCLUDE_REGEX:-^docs/archive/|^tools/.*/deep-research-report(-[0-9]+)?\\.md$}"
+# Third-party vendored documentation follows its upstream layout and is not
+# subject to this repository's project-authored Markdown sharding policy.
+exclude_regex="${MARKDOWN_LOC_EXCLUDE_REGEX:-^vendor/|^docs/archive/|^tools/.*/deep-research-report(-[0-9]+)?\\.md$}"
 
 if ! [[ "$warn_limit" =~ ^[0-9]+$ ]] || ! [[ "$max_limit" =~ ^[0-9]+$ ]]; then
   echo "check_markdown_loc.sh: MARKDOWN_LOC_WARN and MARKDOWN_LOC_MAX must be integers" >&2

@@ -6,6 +6,9 @@ on:
       - "src/main.rs"
       - "src/event_engine/**"
       - "src/inkplate_hal/**"
+      - "src/firmware/storage/sd_task/**"
+      - "packages/sdcard/**"
+      - "scripts/ci/check_fat_engine_stackless.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
@@ -49,6 +52,8 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Firmware clippy
-        run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
+        run: cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --all-features --workspace --bins --lib -- -D warnings
+      - name: FAT engine stackless guard
+        run: scripts/ci/check_fat_engine_stackless.sh
       - name: Firmware build release
-        run: cargo build --locked --release
+        run: cargo +esp build -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --release

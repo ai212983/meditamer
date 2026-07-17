@@ -151,7 +151,7 @@ pub(super) async fn write_state_status_line(uart: &mut SerialUart) {
     let mut line = heapless::String::<256>::new();
     let _ = write!(
         &mut line,
-        "STATE phase={} base={} day_bg={} overlay={} upload={} assets={} diag_kind={} targets={}\r\n",
+        "STATE phase={} base={} day_bg={} overlay={} upload={} assets={} diag_kind={} targets={} ready={}\r\n",
         phase_label(snapshot.phase),
         base_label(snapshot.base),
         day_bg_label(snapshot.day_background),
@@ -168,6 +168,11 @@ pub(super) async fn write_state_status_line(uart: &mut SerialUart) {
         },
         diag_label(snapshot.diag_kind),
         targets.as_str(),
+        if crate::firmware::runtime::scheduling::runtime_ready() {
+            "true"
+        } else {
+            "false"
+        },
     );
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }

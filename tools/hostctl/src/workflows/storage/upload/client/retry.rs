@@ -11,22 +11,16 @@ use super::{
         append_host_diag_line, upload_pre_put_delay_ms, upload_send_diag_enabled,
         upload_transport_reset_chunk_fallback_enabled,
         upload_transport_reset_chunk_fallback_streak_limit,
-        upload_transport_reset_fast_retry_enabled,
-        upload_transport_reset_fast_retry_streak_limit,
+        upload_transport_reset_fast_retry_enabled, upload_transport_reset_fast_retry_streak_limit,
     },
     errors::{
         format_error_chain, inspect_io_error_flags, inspect_reqwest_error_flags,
         is_transport_reset_error,
     },
     request::{health_timeout_s, make_client, request_raw, request_raw_timed},
-    RequestContext,
-    TimedResponse,
-    TRANSPORT_RESET_BACKOFF_MS_MAX,
-    TRANSPORT_RESET_BACKOFF_MS_STEP,
-    TRANSPORT_RESET_CHUNK_FALLBACK_MARKER,
-    TRANSPORT_RESET_RECOVERY_POLL_SEC,
-    RETRY_BACKOFF_MS_MAX,
-    RETRY_BACKOFF_MS_STEP,
+    RequestContext, TimedResponse, RETRY_BACKOFF_MS_MAX, RETRY_BACKOFF_MS_STEP,
+    TRANSPORT_RESET_BACKOFF_MS_MAX, TRANSPORT_RESET_BACKOFF_MS_STEP,
+    TRANSPORT_RESET_CHUNK_FALLBACK_MARKER, TRANSPORT_RESET_RECOVERY_POLL_SEC,
 };
 
 fn wait_network_recovery(

@@ -2,6 +2,34 @@ use super::*;
 
 use crate::firmware::app_state::{BaseMode, DayBackground, DiagKind, OverlayMode};
 use crate::firmware::runtime::serial_task::commands::StateSetOperation;
+use crate::firmware::runtime::{
+    scheduling::SchedulerProfile, serial_task::commands::SchedulerOperation,
+};
+
+#[test]
+fn parses_scheduler_profile_control() {
+    assert!(matches!(
+        parse_scheduler_command(b"SCHEDPROFILE"),
+        Some(SchedulerOperation::Status)
+    ));
+    assert!(matches!(
+        parse_scheduler_command(b"SCHEDPROFILE AUTO"),
+        Some(SchedulerOperation::Automatic)
+    ));
+    assert!(matches!(
+        parse_scheduler_command(b"SCHEDPROFILE UPLOAD"),
+        Some(SchedulerOperation::Profile(SchedulerProfile::Upload))
+    ));
+    assert!(matches!(
+        parse_scheduler_command(b"SCHEDPROFILE TOUCH_WIZARD"),
+        Some(SchedulerOperation::Profile(SchedulerProfile::TouchWizard))
+    ));
+    assert!(matches!(
+        parse_scheduler_command(b"SCHEDPROFILE DIAGNOSTICS"),
+        Some(SchedulerOperation::Profile(SchedulerProfile::Diagnostics))
+    ));
+    assert!(parse_scheduler_command(b"SCHEDPROFILE FAST").is_none());
+}
 
 #[test]
 fn parses_state_set_forms() {

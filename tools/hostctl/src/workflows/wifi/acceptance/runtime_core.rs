@@ -20,6 +20,7 @@ use crate::{
 };
 
 use super::{
+    boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig},
     wait_ready::{wait_ready, wait_state_progress},
     WifiAcceptanceRuntime,
 };
@@ -29,10 +30,13 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
         self.capture_mem_diag_lines()?;
         let result = match action {
             "prepare_payload" => self.handle_prepare_payload(),
+            "wait_runtime_ready" => self.handle_wait_runtime_ready(),
+            "boot_discovery_gate" => self.handle_boot_discovery_gate(),
             "start_run" => {
                 let _ = context;
                 self.handle_start_run()
             }
+            "prepare_measurement" => self.handle_prepare_measurement(),
             "net_apply_config" => self.handle_net_apply_config(),
             "net_start" => self.handle_net_start(),
             "net_wait_state" => {
@@ -63,6 +67,7 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
             "net_recover_once" => self.handle_net_recover_once(),
             "fail_upload" | "net_fail" => self.handle_fail_upload(context),
             "finalize_cycle" => self.handle_finalize_cycle(context),
+            "assert_runtime_health" => self.handle_assert_runtime_health(),
             "print_summary" => self.handle_print_summary(),
             _ => Err(anyhow!("unknown workflow action: {action}")),
         };

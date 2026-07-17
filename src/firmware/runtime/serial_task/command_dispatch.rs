@@ -1,7 +1,10 @@
 use core::fmt::Write;
 
 use super::{
-    commands::{app_state_command_for_serial, serial_command_event_and_responses, SerialCommand},
+    commands::{
+        app_state_command_for_serial, serial_command_event_and_responses, SchedulerOperation,
+        SerialCommand,
+    },
     io::{
         drain_app_state_apply_acks, run_allocator_alloc_probe, run_netcfg_get_command,
         run_netcfg_set_command, run_sdwait_command, wait_app_state_apply_ack,
@@ -26,6 +29,7 @@ pub(super) async fn handle_serial_command(
     cmd: SerialCommand,
 ) {
     match cmd {
+        #[cfg(not(feature = "wifi-debug-slim-app"))]
         SerialCommand::TouchWizardDump => {
             state.write_touch_wizard_dump(uart).await;
         }
@@ -34,6 +38,42 @@ pub(super) async fn handle_serial_command(
         }
         SerialCommand::Metrics => {
             metrics::write_metrics_lines(uart).await;
+        }
+        SerialCommand::TouchSchedReset => {
+            // Exclude the reset command's own UART response from the measurement window.
+            // The serial task cannot process the next command until this branch returns.
+            let _ = uart_write_all(uart, b"TOUCHSCHEDRESET OK\r\n").await;
+            crate::firmware::touch::scheduling::reset();
+            crate::firmware::imu::metrics::reset();
+        }
+        SerialCommand::Scheduler { operation } => {
+            match operation {
+                SchedulerOperation::Status => {}
+                SchedulerOperation::Automatic => {
+                    crate::firmware::runtime::scheduling::set_override(None);
+                }
+                SchedulerOperation::Profile(profile) => {
+                    crate::firmware::runtime::scheduling::set_override(Some(profile));
+                }
+            }
+            let status = crate::firmware::runtime::scheduling::status();
+            let mut line = heapless::String::<128>::new();
+            let override_label = status
+                .override_profile
+                .map_or("auto", |profile| profile.label());
+            let _ = write!(
+                &mut line,
+                "SCHEDPROFILE active={} automatic={} override={} runtime_ready={}\r\n",
+                status.selected.label(),
+                status.automatic.label(),
+                override_label,
+                if crate::firmware::runtime::scheduling::runtime_ready() {
+                    "on"
+                } else {
+                    "off"
+                },
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
         }
         SerialCommand::MetricsNet => {
             metrics::write_metrics_net_lines(uart).await;
@@ -92,9 +132,14 @@ pub(super) async fn handle_serial_command(
             let mut line = heapless::String::<320>::new();
             let _ = write!(
                 &mut line,
-                "NET_STATUS {{\"state\":\"{}\",\"link\":{},\"ipv4\":\"{}.{}.{}.{}\",\"listener\":{},\"listener_enabled\":{},\"failure_class\":\"{}\",\"failure_code\":{},\"ladder_step\":\"{}\",\"attempt\":{},\"uptime_ms\":{}}}\r\n",
+                "NET_STATUS {{\"state\":\"{}\",\"link\":{},\"radio_quiesced\":{},\"ipv4\":\"{}.{}.{}.{}\",\"listener\":{},\"listener_enabled\":{},\"failure_class\":\"{}\",\"failure_code\":{},\"ladder_step\":\"{}\",\"attempt\":{},\"uptime_ms\":{}}}\r\n",
                 status.state,
                 if status.link { "true" } else { "false" },
+                if status.radio_quiesced {
+                    "true"
+                } else {
+                    "false"
+                },
                 status.ipv4[0],
                 status.ipv4[1],
                 status.ipv4[2],

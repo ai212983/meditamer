@@ -1,12 +1,13 @@
 use super::super::super::super::types::InkplateDriver;
 use super::super::super::types::{TouchEvent, TouchEventKind};
+use super::flow::PrecisionMenuAction;
 use super::*;
 
 impl TouchCalibrationWizard {
     pub(crate) async fn handle_event(
         &mut self,
         display: &mut InkplateDriver,
-        event: TouchEvent,
+        raw_event: TouchEvent,
     ) -> WizardDispatch {
         if !self.is_active() {
             return WizardDispatch::Inactive;
@@ -14,6 +15,12 @@ impl TouchCalibrationWizard {
 
         let width = display.width() as i32;
         let height = display.height() as i32;
+        let event = if matches!(self.phase, WizardPhase::Calibrate) {
+            raw_event
+        } else {
+            self.calibrated_event(raw_event, width, height)
+        };
+        let phase_before = self.phase;
         let mut changed = false;
 
         let is_action_tap = matches!(event.kind, TouchEventKind::Tap | TouchEventKind::LongPress);
@@ -23,76 +30,137 @@ impl TouchCalibrationWizard {
         let swipe_mark_hit = is_action_tap
             && self.shows_swipe_mark_button()
             && self.swipe_mark_button_hit(event.x as i32, event.y as i32, width, height);
-        if self.resolve_pending_swipe_release(event, continue_hit, swipe_mark_hit) {
+        if matches!(self.phase, WizardPhase::SwipeRight)
+            && self.resolve_pending_swipe_release(event, continue_hit, swipe_mark_hit)
+        {
             changed = true;
         }
 
-        if swipe_mark_hit {
-            // Handle manual swipe markers before consuming current tap in debug
-            // counters so we can associate marker with the preceding gesture.
-            changed = self.on_manual_swipe_mark(event.t_ms);
-        } else if continue_hit {
-            changed = self.on_continue_button(event.t_ms);
-        } else {
-            self.update_swipe_debug(event);
-            match event.kind {
-                TouchEventKind::Down => {
-                    // Handle tap-target steps on Down for more immediate and reliable feedback.
-                    if self.is_tap_step() || matches!(self.phase, WizardPhase::Intro) {
-                        changed = self.on_tap(event.t_ms, event.x, event.y, width, height);
-                    } else if matches!(self.phase, WizardPhase::SwipeRight) {
-                        let is_ui_touch =
-                            self.continue_button_hit(event.x as i32, event.y as i32, width, height)
-                                || self.swipe_mark_button_hit(
-                                    event.x as i32,
-                                    event.y as i32,
-                                    width,
-                                    height,
-                                );
-                        if !is_ui_touch {
-                            changed = self.on_swipe_trace_down(
-                                event.start_x as i32,
-                                event.start_y as i32,
-                                event.x as i32,
-                                event.y as i32,
-                            );
+        match self.phase {
+            WizardPhase::PrecisionMenu => {
+                if is_action_tap {
+                    match self.precision_menu_action(event.x as i32, event.y as i32, width, height)
+                    {
+                        Some(PrecisionMenuAction::Calibrate) => {
+                            self.start_calibration();
+                            changed = true;
                         }
+                        Some(PrecisionMenuAction::Test) => {
+                            self.open_precision_test();
+                            changed = true;
+                        }
+                        Some(PrecisionMenuAction::Continue) => {
+                            changed = self.on_continue_button(event.t_ms);
+                        }
+                        None => {}
                     }
                 }
-                TouchEventKind::Tap => {
-                    // Keep Tap as Intro fallback, but avoid double-processing tap-step touches
-                    // that were already handled on Down.
-                    if matches!(self.phase, WizardPhase::Intro) {
-                        changed = self.on_tap(event.t_ms, event.x, event.y, width, height);
-                    }
+            }
+            WizardPhase::Calibrate => match raw_event.kind {
+                TouchEventKind::Down if !self.calibration_pending_return => {
+                    changed = self.record_calibration_touch(
+                        raw_event.contact_x as i32,
+                        raw_event.contact_y as i32,
+                        width,
+                        height,
+                    );
                 }
-                TouchEventKind::Up => {
-                    if matches!(self.phase, WizardPhase::SwipeRight) {
-                        changed = self.on_swipe_release(event) || changed;
-                    } else if matches!(self.phase, WizardPhase::Intro) {
-                        changed = self.on_tap(event.t_ms, event.x, event.y, width, height);
-                    }
-                }
-                TouchEventKind::Move => {
-                    if matches!(self.phase, WizardPhase::SwipeRight) {
-                        changed = self.on_swipe_trace_move(event.x as i32, event.y as i32);
-                    }
-                }
-                TouchEventKind::LongPress => {
-                    // Fallback for panels where Tap classification is timing-sensitive.
-                    if matches!(self.phase, WizardPhase::Intro) {
-                        changed = self.on_tap(event.t_ms, event.x, event.y, width, height);
-                    }
-                }
-                TouchEventKind::Swipe(direction) => {
-                    changed = self.on_swipe_event(event, direction);
+                TouchEventKind::Up if self.calibration_pending_return => {
+                    self.return_to_precision_menu();
+                    changed = true;
                 }
                 TouchEventKind::Cancel => {
-                    self.hint = "Touch canceled. Retry current step.";
-                    self.last_tap = None;
+                    if self.calibration_pending_return {
+                        self.return_to_precision_menu();
+                    } else {
+                        self.hint = "Touch canceled. Touch the remaining dots.";
+                    }
+                    changed = true;
+                }
+                _ => {}
+            },
+            WizardPhase::PrecisionTest => {
+                if is_action_tap
+                    && self.test_return_hit(event.x as i32, event.y as i32, width, height)
+                {
+                    self.return_to_precision_menu();
+                    changed = true;
+                } else if is_action_tap
+                    && self.test_toggle_hit(event.x as i32, event.y as i32, width, height)
+                {
+                    self.toggle_test_mode();
+                    changed = true;
+                } else if matches!(event.kind, TouchEventKind::Down)
+                    && !self.test_toggle_hit(event.x as i32, event.y as i32, width, height)
+                    && !self.test_return_hit(event.x as i32, event.y as i32, width, height)
+                {
+                    self.last_test_touch = Some(TestTouch {
+                        raw: SwipePoint {
+                            x: raw_event.contact_x as i32,
+                            y: raw_event.contact_y as i32,
+                        },
+                        calibrated: SwipePoint {
+                            x: event.contact_x as i32,
+                            y: event.contact_y as i32,
+                        },
+                    });
                     changed = true;
                 }
             }
+            WizardPhase::SwipeRight => {
+                if swipe_mark_hit {
+                    // Handle manual swipe markers before consuming current tap in debug
+                    // counters so we can associate marker with the preceding gesture.
+                    changed = self.on_manual_swipe_mark(event.t_ms);
+                } else if continue_hit {
+                    changed = self.on_continue_button(event.t_ms);
+                } else {
+                    self.update_swipe_debug(event);
+                    match event.kind {
+                        TouchEventKind::Down => {
+                            let is_ui_touch = self.continue_button_hit(
+                                event.x as i32,
+                                event.y as i32,
+                                width,
+                                height,
+                            ) || self.swipe_mark_button_hit(
+                                event.x as i32,
+                                event.y as i32,
+                                width,
+                                height,
+                            );
+                            if !is_ui_touch {
+                                changed = self.on_swipe_trace_down(
+                                    event.start_x as i32,
+                                    event.start_y as i32,
+                                    event.x as i32,
+                                    event.y as i32,
+                                );
+                            }
+                        }
+                        TouchEventKind::Tap | TouchEventKind::LongPress => {}
+                        TouchEventKind::Up => {
+                            changed = self.on_swipe_release(event) || changed;
+                        }
+                        TouchEventKind::Move => {
+                            changed = self.on_swipe_trace_move(event.x as i32, event.y as i32);
+                        }
+                        TouchEventKind::Swipe(direction) => {
+                            changed = self.on_swipe_event(event, direction);
+                        }
+                        TouchEventKind::Cancel => {
+                            self.hint = "Touch canceled. Retry current step.";
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            WizardPhase::Complete => {
+                if continue_hit {
+                    changed = self.on_continue_button(event.t_ms);
+                }
+            }
+            WizardPhase::Closed => {}
         }
 
         let finished = matches!(self.phase, WizardPhase::Closed);
@@ -100,75 +168,23 @@ impl TouchCalibrationWizard {
             return WizardDispatch::Finished;
         }
 
-        if changed {
+        // Up and Swipe are emitted as a pair for a classified gesture. Rendering
+        // the raw trace on Up blocks the display loop before it can consume the
+        // paired Swipe, then causes a second refresh when the case advances.
+        // Wait for classification and render the final result once.
+        let waiting_for_swipe_classification = matches!(phase_before, WizardPhase::SwipeRight)
+            && matches!(event.kind, TouchEventKind::Up);
+        // The fourth corner is captured from Down's first-contact coordinates.
+        // Defer that redraw until Up: refreshing e-paper while the contact is
+        // still held can interrupt controller sampling and strand the wizard in
+        // its release handshake.
+        let waiting_for_calibration_release = matches!(phase_before, WizardPhase::Calibrate)
+            && matches!(raw_event.kind, TouchEventKind::Down)
+            && self.calibration_pending_return;
+        if changed && !waiting_for_swipe_classification && !waiting_for_calibration_release {
             self.render_partial(display).await;
         }
         WizardDispatch::Consumed
-    }
-
-    fn on_tap(&mut self, t_ms: u64, x: u16, y: u16, width: i32, height: i32) -> bool {
-        let px = x as i32;
-        let py = y as i32;
-        let prev_phase = self.phase;
-        let prev_hint = self.hint;
-        let prev_last_tap = self.last_tap;
-
-        match self.phase {
-            WizardPhase::Intro => {
-                self.phase = WizardPhase::TapCenter;
-                self.hint = "Step 1 started. Tap center target.";
-                self.last_tap = None;
-            }
-            WizardPhase::TapCenter => {
-                let hit = self.tap_hits_target(px, py, width, height);
-                if hit {
-                    self.phase = WizardPhase::TapTopLeft;
-                    self.hint = "Center accepted.";
-                    self.last_tap = None;
-                } else {
-                    self.hint = "Missed center target. See marker.";
-                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
-                }
-            }
-            WizardPhase::TapTopLeft => {
-                let hit = self.tap_hits_target(px, py, width, height);
-                if hit {
-                    self.phase = WizardPhase::TapBottomRight;
-                    self.hint = "Top-left accepted.";
-                    self.last_tap = None;
-                } else {
-                    self.hint = "Missed top-left target. See marker.";
-                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
-                }
-            }
-            WizardPhase::TapBottomRight => {
-                let hit = self.tap_hits_target(px, py, width, height);
-                if hit {
-                    self.enter_swipe_phase(t_ms, "Tap targets complete. Guided swipes start.");
-                } else {
-                    self.hint = "Missed bottom-right target. See marker.";
-                    self.last_tap = Some(TapAttempt { x: px, y: py, hit });
-                }
-            }
-            WizardPhase::SwipeRight => {
-                self.hint = "Do current guided swipe case.";
-                self.last_tap = None;
-            }
-            WizardPhase::Complete => {
-                self.hint = "Press CONTINUE to exit.";
-                self.last_tap = None;
-            }
-            WizardPhase::Closed => {}
-        }
-
-        self.phase != prev_phase || self.hint != prev_hint || self.last_tap != prev_last_tap
-    }
-
-    fn is_tap_step(&self) -> bool {
-        matches!(
-            self.phase,
-            WizardPhase::TapCenter | WizardPhase::TapTopLeft | WizardPhase::TapBottomRight
-        )
     }
 }
 

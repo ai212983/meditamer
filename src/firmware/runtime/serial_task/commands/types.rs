@@ -4,16 +4,23 @@ use crate::firmware::app_state::{
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::types::NetConfigSet;
 use crate::firmware::types::{AppEvent, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX};
+use crate::firmware::runtime::scheduling::SchedulerProfile;
 
 #[derive(Clone, Copy)]
 pub(super) enum SerialCommand {
     Ping,
     TimeSync(TimeSyncCommand),
+    #[cfg(not(feature = "wifi-debug-slim-app"))]
     TouchWizard,
+    #[cfg(not(feature = "wifi-debug-slim-app"))]
     TouchWizardDump,
     Repaint,
     RepaintMarble,
     Metrics,
+    TouchSchedReset,
+    Scheduler {
+        operation: SchedulerOperation,
+    },
     MetricsNet,
     TelemetryStatus,
     TelemetrySet {
@@ -101,6 +108,13 @@ pub(super) enum SerialCommand {
     NetListenerSet {
         enabled: bool,
     },
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum SchedulerOperation {
+    Status,
+    Automatic,
+    Profile(SchedulerProfile),
 }
 
 #[derive(Clone, Copy)]

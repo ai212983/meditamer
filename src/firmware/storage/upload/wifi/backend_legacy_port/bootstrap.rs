@@ -1,3 +1,8 @@
+use core::cell::RefCell;
+
+use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
+use esp_hal::timer::timg::Timer;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LegacyBootstrapStep {
     EnableWifiPowerDomain,
@@ -70,4 +75,25 @@ pub(crate) fn legacy_timer_compat_init_tasks_enabled() -> bool {
         option_env!("WIFI_BACKEND_LEGACY_PORT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
+}
+
+static LEGACY_PREEMPT_TIMER: Mutex<CriticalSectionRawMutex, RefCell<Option<Timer<'static>>>> =
+    Mutex::new(RefCell::new(None));
+
+pub(crate) fn install_legacy_preempt_timer(timer: Timer<'static>) {
+    LEGACY_PREEMPT_TIMER.lock(|shared| {
+        let slot = &mut *shared.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(timer);
+        }
+    });
+}
+
+pub(crate) fn setup_legacy_preempt_timer() -> bool {
+    let timer = LEGACY_PREEMPT_TIMER.lock(|shared| shared.borrow_mut().take());
+    let Some(timer) = timer else {
+        return false;
+    };
+    esp_rtos::legacy_preempt_builtin_setup_timer(timer);
+    true
 }

@@ -1,4 +1,10 @@
-use super::{blob_state_diag::log_blob_state_diag, *};
+use super::{
+    blob_state_diag::{
+        log_blob_state_diag, log_scan_list_probe_diag, log_scan_prelink_summary_diag,
+    },
+    wdev_branch_wrap_diag::set_force_comparator_event_sequence_diag_armed,
+    *,
+};
 
 const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE: bool = parse_nonzero_flag(
     match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPARE") {
@@ -12,7 +18,24 @@ const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071: bool = parse_nonzero_flag
         None => option_env!("WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071"),
     },
 );
+const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN: bool = parse_nonzero_flag(
+    match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN") {
+        Some(value) => Some(value),
+        None => match option_env!("WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN") {
+            Some(value) => Some(value),
+            None => Some("1"),
+        },
+    },
+);
+const WIFI_BOOT_SCAN_ONLY_DIAG_MAC_EVENT_W1_OR_COMPARATOR_BITS: bool = parse_nonzero_flag(
+    match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_DIAG_MAC_EVENT_W1_OR_COMPARATOR_BITS") {
+        Some(value) => Some(value),
+        None => option_env!("WIFI_BOOT_SCAN_ONLY_DIAG_MAC_EVENT_W1_OR_COMPARATOR_BITS"),
+    },
+);
 const WIFI_BOOT_SCAN_ONLY_DIAG_IDF_MAX_RECORDS: usize = 10;
+const MAC_EVENT_W1_ADDR: usize = 0x3ff73c44;
+const MAC_EVENT_W1_COMPARATOR_DELTA: u32 = 0x0200_0200;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -49,6 +72,7 @@ fn log_idf_explicit_postcall_diag(stage: &str, scan_rc: i32) {
         adapter_diag.task_get_current_task_count,
     );
     log_blob_state_diag(stage);
+    super::boot_scan_diag::log_boot_scan_only_diag_counters_external(stage);
     super::super::backend_legacy_port::log_runtime_state(stage);
 }
 
@@ -63,16 +87,24 @@ const fn wifi_use_idf_default_scan_timing_diag_enabled() -> bool {
 }
 
 fn log_idf_scan_results(label: &str, scan_rc: i32) {
+    log_scan_list_probe_diag(label, "before_get_ap_num");
+    log_scan_prelink_summary_diag(label, "before_get_ap_num");
     let mut ap_num = 0u16;
     let ap_num_rc = unsafe { esp_wifi_sys::include::esp_wifi_scan_get_ap_num(&mut ap_num) };
     if ap_num_rc != esp_wifi_sys::include::ESP_OK as i32 {
+        log_scan_list_probe_diag(label, "get_ap_num_err");
+        log_scan_prelink_summary_diag(label, "get_ap_num_err");
         let _ = unsafe { esp_wifi_sys::include::esp_wifi_clear_ap_list() };
+        log_scan_list_probe_diag(label, "after_clear_ap_list");
+        log_scan_prelink_summary_diag(label, "after_clear_ap_list");
         println!(
             "upload_http: boot_scan_only_diag {label}=get_ap_num_err scan_rc={} ap_num_rc={}",
             scan_rc, ap_num_rc
         );
         return;
     }
+    log_scan_list_probe_diag(label, "after_get_ap_num");
+    log_scan_prelink_summary_diag(label, "after_get_ap_num");
 
     let mut returned =
         core::cmp::min(ap_num as usize, WIFI_BOOT_SCAN_ONLY_DIAG_IDF_MAX_RECORDS) as u16;
@@ -86,13 +118,19 @@ fn log_idf_scan_results(label: &str, scan_rc: i32) {
         }
     };
     if records_rc != esp_wifi_sys::include::ESP_OK as i32 {
+        log_scan_list_probe_diag(label, "get_ap_records_err");
+        log_scan_prelink_summary_diag(label, "get_ap_records_err");
         let _ = unsafe { esp_wifi_sys::include::esp_wifi_clear_ap_list() };
+        log_scan_list_probe_diag(label, "after_clear_ap_list");
+        log_scan_prelink_summary_diag(label, "after_clear_ap_list");
         println!(
             "upload_http: boot_scan_only_diag {label}=get_ap_records_err scan_rc={} ap_num_rc={} records_rc={} ap_num={}",
             scan_rc, ap_num_rc, records_rc, ap_num
         );
         return;
     }
+    log_scan_list_probe_diag(label, "after_get_ap_records");
+    log_scan_prelink_summary_diag(label, "after_get_ap_records");
 
     println!(
         "upload_http: boot_scan_only_diag {label}=ok scan_rc={} ap_num_rc={} records_rc={} ap_num={} records_returned={}",
@@ -115,6 +153,24 @@ fn log_idf_scan_results(label: &str, scan_rc: i32) {
             record.authmode
         );
     }
+}
+
+fn maybe_apply_mac_event_w1_or_comparator_bits_diag() {
+    if !WIFI_BOOT_SCAN_ONLY_DIAG_MAC_EVENT_W1_OR_COMPARATOR_BITS {
+        return;
+    }
+    let ptr = MAC_EVENT_W1_ADDR as *mut u32;
+    let before = unsafe { ptr.read_volatile() };
+    let after = before | MAC_EVENT_W1_COMPARATOR_DELTA;
+    unsafe { ptr.write_volatile(after) };
+    println!(
+        "upload_http: boot_scan_only_diag mac_event_w1_or_diag addr=0x{:08x} before=0x{:08x} mask=0x{:08x} after=0x{:08x}",
+        MAC_EVENT_W1_ADDR as u32,
+        before,
+        MAC_EVENT_W1_COMPARATOR_DELTA,
+        after,
+    );
+    log_blob_state_diag("idf_explicit_compare_prestart_forced");
 }
 
 pub(super) fn run_boot_scan_only_idf_null_compare() {
@@ -145,7 +201,7 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
         ssid: core::ptr::null_mut(),
         bssid: core::ptr::null_mut(),
         channel: 0,
-        show_hidden: true,
+        show_hidden: WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN,
         scan_type: esp_wifi_sys::include::wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE,
         scan_time: esp_wifi_sys::include::wifi_scan_time_t {
             active: esp_wifi_sys::include::wifi_active_scan_time_t {
@@ -165,7 +221,7 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
         ssid: core::ptr::null_mut(),
         bssid: core::ptr::null_mut(),
         channel: 0,
-        show_hidden: true,
+        show_hidden: WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN,
         scan_type: esp_wifi_sys::include::wifi_scan_type_t_WIFI_SCAN_TYPE_ACTIVE,
         scan_time: esp_wifi_sys::include::wifi_scan_time_t {
             active: esp_wifi_sys::include::wifi_active_scan_time_t {
@@ -183,15 +239,18 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
     let use_compat071 = WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_COMPAT071;
 
     println!(
-        "upload_http: boot_scan_only_diag idf_explicit_compare begin=true compat071={} active_min_ms={} active_max_ms={} passive_ms=0 home_chan_dwell_ms={} show_hidden=true channel=0 size_current={} size_compat071={}",
+        "upload_http: boot_scan_only_diag idf_explicit_compare begin=true compat071={} active_min_ms={} active_max_ms={} passive_ms=0 home_chan_dwell_ms={} show_hidden={} channel=0 size_current={} size_compat071={}",
         use_compat071 as u8,
         active_min_ms,
         active_max_ms,
         home_chan_dwell_time,
+        WIFI_BOOT_SCAN_ONLY_DIAG_IDF_EXPLICIT_SHOW_HIDDEN as u8,
         core::mem::size_of::<esp_wifi_sys::include::wifi_scan_config_t>(),
         core::mem::size_of::<WifiScanConfigCompat071>(),
     );
     log_blob_state_diag("idf_explicit_compare_prestart");
+    maybe_apply_mac_event_w1_or_comparator_bits_diag();
+    set_force_comparator_event_sequence_diag_armed(true);
     let scan_rc = unsafe {
         if use_compat071 {
             esp_wifi_sys::include::esp_wifi_scan_start(
@@ -204,6 +263,7 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
     };
     log_idf_explicit_postcall_diag("idf_explicit_compare_postcall", scan_rc);
     if scan_rc != esp_wifi_sys::include::ESP_OK as i32 {
+        set_force_comparator_event_sequence_diag_armed(false);
         println!(
             "upload_http: boot_scan_only_diag idf_explicit_compare=scan_start_err scan_rc={}",
             scan_rc
@@ -211,5 +271,6 @@ pub(super) fn maybe_run_boot_scan_only_idf_explicit_compare() -> bool {
         return true;
     }
     log_idf_scan_results("idf_explicit_compare", scan_rc);
+    set_force_comparator_event_sequence_diag_armed(false);
     true
 }

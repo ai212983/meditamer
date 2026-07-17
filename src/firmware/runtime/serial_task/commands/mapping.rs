@@ -13,6 +13,7 @@ pub(super) fn serial_command_event_and_responses(
             b"TIMESET OK\r\n",
             b"TIMESET BUSY\r\n",
         ),
+        #[cfg(not(feature = "wifi-debug-slim-app"))]
         SerialCommand::TouchWizard => (
             Some(AppEvent::StartTouchCalibrationWizard),
             None,
@@ -135,11 +136,14 @@ pub(super) fn serial_command_event_and_responses(
             b"SDFATTRUNC OK\r\n",
             b"SDFATTRUNC BUSY\r\n",
         ),
+        #[cfg(not(feature = "wifi-debug-slim-app"))]
         SerialCommand::TouchWizardDump => {
             unreachable!("touch wizard dump command is handled inline")
         }
         SerialCommand::Ping => unreachable!("ping command is handled inline"),
         SerialCommand::Metrics
+        | SerialCommand::TouchSchedReset
+        | SerialCommand::Scheduler { .. }
         | SerialCommand::MetricsNet
         | SerialCommand::TelemetryStatus
         | SerialCommand::TelemetrySet { .. } => {

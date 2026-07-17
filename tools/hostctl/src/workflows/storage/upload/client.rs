@@ -64,20 +64,19 @@ pub(crate) use retry::{
 };
 
 #[allow(unused_imports)]
-use direct_stream::request_raw_timed_direct_stream;
-#[allow(unused_imports)]
-use errors::{
-    elapsed_ms_u32, format_error_chain, inspect_io_error_flags, inspect_reqwest_error_flags,
-    is_transport_reset_error,
-};
-#[allow(unused_imports)]
 use config::{
     append_host_diag_line, should_use_direct_burst_sender, upload_direct_burst_bytes,
     upload_direct_burst_mode_active, upload_direct_burst_sender_enabled,
     upload_force_connection_close, upload_pre_put_delay_ms, upload_send_diag_deep_enabled,
     upload_send_diag_enabled, upload_tcp_nodelay_enabled,
     upload_transport_reset_chunk_fallback_enabled,
-    upload_transport_reset_chunk_fallback_streak_limit,
-    upload_transport_reset_fast_retry_enabled,
+    upload_transport_reset_chunk_fallback_streak_limit, upload_transport_reset_fast_retry_enabled,
     upload_transport_reset_fast_retry_streak_limit,
+};
+#[allow(unused_imports)]
+use direct_stream::request_raw_timed_direct_stream;
+#[allow(unused_imports)]
+use errors::{
+    elapsed_ms_u32, format_error_chain, inspect_io_error_flags, inspect_reqwest_error_flags,
+    is_transport_reset_error,
 };

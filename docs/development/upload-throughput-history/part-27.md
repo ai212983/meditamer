@@ -146,21 +146,60 @@ Why this matters:
 - The remaining target is now between `WIFI_MAC` interrupt activity and packet delivery to
   promiscuous/scan admission, not higher-level scheduling or wrapper API shape.
 
+## 2026-03-10: vendoring plan documented to stop hook-level strategic drift
+
+- Added the anti-drift source of truth:
+  - `docs/development/wifi-legacy-vendoring-plan.md`
+- Wired references from:
+  - `docs/development/wifi-upload-decision-ledger.md`
+  - `docs/development/README.md`
+  - `docs/development/upload-throughput-history.md`
+- Purpose:
+  - freeze the strategic decision that future Wi-Fi work should advance the
+    true `backend_legacy_port` / vendored legacy runtime path
+  - prevent further default drift back into generic `esp-radio` hook A/B work
+
+## 2026-03-10: `backend_legacy_port` now uses explicit vendored legacy `init_tasks()` bootstrap
+
+- Replaced the remaining generic timer-task precreate in the legacy backend path with an explicit
+  vendored `init_legacy_wifi_tasks()` helper:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/legacy_tasks.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/runtime.rs`
+  - `src/firmware/storage/upload/wifi/backend_legacy_port/controller.rs`
+- That helper now creates the legacy Wi-Fi timer task directly and yields once, matching the old
+  `esp-wifi 0.15.1` `tasks::init_tasks()` contract more closely than the old
+  `precreate_esp_radio_timer_task()` shortcut.
+- Ported the next slice of legacy runtime behavior by giving the helper a dedicated
+  `legacy_timer_task` entrypoint in:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/timer_queue.rs`
+- Also split the oversized vendored `esp_radio` runtime entrypoint so the port can keep moving
+  without growing a monolith:
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/policy.rs`
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/task_create_diag.rs`
+  - `vendor/esp-rtos-0.2.0/src/esp_radio/semaphore_impl.rs`
+- Build status:
+  - `cargo check` passes
+
+Why this matters:
+- This is a true `backend_legacy_port` / vendored-runtime port step, not a new generic hook A/B.
+- The remaining gap is now the behavior of the ported legacy timer/runtime itself, not whether the
+  backend still hides behind generic timer-task helpers.
+
 
 ## 2026-03-10 Raw Promisc and Alloc Follow-up
 
 - Ported the legacy `g_misc_nvs` assignment into current `esp-radio` `wifi_init()` for `esp32/esp32s3`.
-- Validated isolated current raw-promisc control at `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_gmiscnvs_20260310_berlin/summary.txt`.
+- Validated isolated current raw-promisc control at `logs/esp_radio_nostd_wifi_control_gmiscnvs_20260310_berlin/summary.txt`.
 - Result unchanged: promisc enable latched, `WIFI_MAC` interrupts advanced, packet delivery stayed zero, `scan=ok count=0`.
 - Then completed the missing legacy alloc parity in current `wifi` OS adapter by routing `zalloc_internal`, `wifi_calloc`, and `wifi_zalloc` through plain `calloc` under the existing legacy alloc knob.
-- Validated isolated current raw-promisc control at `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_legacyalloc2_20260310_berlin/summary.txt`.
+- Validated isolated current raw-promisc control at `logs/esp_radio_nostd_wifi_control_legacyalloc2_20260310_berlin/summary.txt`.
 - Result unchanged again: zero raw-promisc packets, `WIFI_MAC` interrupts advanced, `scan=ok count=0`.
 - This closes two more low-level deltas: `g_misc_nvs` assignment and incomplete legacy calloc/zalloc routing are not sufficient causes of the RX-dark state.
 
 ## 2026-03-10 Current standalone proves the boundary is before `recv_cb_sta/ap`
 
 - The existing isolated current standalone log already contains the decisive callback-side evidence:
-  - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_gmiscnvs_20260310_berlin/monitor.log`
+  - `logs/esp_radio_nostd_wifi_control_gmiscnvs_20260310_berlin/monitor.log`
 - In that run:
   - `wifi_mac_isr_diag label=after_promisc count=11`
   - `wifi_mac_isr_diag label=after_scan count=39`
@@ -231,60 +270,5 @@ Why this matters:
   - main firmware `backend_legacy_port` does not
 - So the next target is the exact runtime difference between those two current-generation paths, not more generic scan/promisc wrapper A/Bs.
 
-## 2026-03-10 Current worktree no longer reproduces the earlier standalone `legacy queue_send_from_isr` positive control
 
-- Re-ran the isolated current standalone on the current worktree with only:
-  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_QUEUE_SEND_FROM_ISR_DIAG=1`
-- Validation log:
-  - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_isrsend_only_control_20260310_191306/monitor.log`
-- Result on the current worktree:
-  - `scan=ok count=0`
-  - `wifi_mac_isr_diag label=after_scan count=39`
-  - `wifi_promisc_cb_diag label=after_scan count=0`
-- Then bisected the three lower legacy-runtime slices individually, keeping the same legacy ISR-send branch on:
-  - timer only:
-    - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_timer_only_20260310_190942/monitor.log`
-    - `scan=ok count=0`
-    - `wifi_promisc_cb_diag label=after_scan count=0`
-  - scheduler only:
-    - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_scheduler_only_20260310_191037/monitor.log`
-    - `wifi_promisc_cb_diag label=after_scan count=0`
-  - preempt timer only:
-    - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_preempt_only_20260310_191133/monitor.log`
-    - `scan=ok count=0`
-    - `wifi_promisc_cb_diag label=after_scan count=0`
-- This invalidates the earlier “legacy ISR-send alone still restores packet delivery in the current worktree” assumption as a durable conclusion.
-- Practical implication:
-  - the earlier positive standalone ISR-send result remains historically useful
-  - but on the current worktree, that path must be treated as regressed until re-established
-  - the per-slice bisect above is therefore informative, but not yet a final causal split
-
-## 2026-03-10 Exact legacy IRQ-delivery bundle still does not restore packet delivery on the current worktree
-
-- Re-ran the isolated current standalone with the full ISR-delivery wrapper bundle enabled:
-  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_QUEUE_SEND_FROM_ISR_DIAG=1`
-  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_SEMAPHORE_FROM_ISR_DIAG=1`
-  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TASK_YIELD_FROM_ISR_DIAG=1`
-  - `MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_COEX_STATUS_GET_DIAG=1`
-- Validation log:
-  - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_radio_nostd_wifi_control_irqbundle_20260310_193543/monitor_retry.log`
-- Result:
-  - startup still reached `begin=true`, `esp_radio_init=ok`, `wifi_new=ok`, `start=ok`
-  - pre-scan raw promisc still stayed fully dark:
-    - `wifi_mac_isr_diag label=after_promisc count=7`
-    - `wifi_promisc_cb_diag label=after_promisc count=0`
-    - `promisc_diag ... total=0 mgmt=0 ctrl=0 data=0 misc=0`
-  - wrapped scan still ended at:
-    - `scan=ok count=0`
-    - `wifi_mac_isr_diag label=after_scan count=35`
-    - `wifi_promisc_cb_diag label=after_scan count=0`
-- This closes the remaining easy blob-facing ISR wrapper class on the current worktree:
-  - queue-send-from-ISR semantics
-  - semaphore-from-ISR semantics
-  - ISR yield semantics
-  - legacy `coex_status_get` fallback
-- The surviving boundary is now below those wrapper hooks:
-  - live `WIFI_MAC` IRQs
-  - zero delivered packets to raw promisc callback
-  - zero delivered packets to internal RX callbacks
-  - zero scan admission
+_Continued in [Part 27, continuation 2](./part-27-02.md)._

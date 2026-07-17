@@ -10,12 +10,15 @@ use esp_radio_rtos_driver::{
     register_timer_implementation,
     timer::{TimerImplementation, TimerPtr},
 };
-use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
+use portable_atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use esp_sync::NonReentrantMutex;
 
 use crate::{
     SCHEDULER,
-    esp_radio::{legacy_builtin_scheduler_runtime_mode_enabled, legacy_scheduler},
+    esp_radio::{
+        backend_legacy_port_runtime_enabled, legacy_builtin_scheduler_runtime_mode_enabled,
+        legacy_scheduler,
+    },
     task::{TaskExt, TaskPtr},
 };
 
@@ -26,6 +29,8 @@ unsafe extern "C" {
 }
 
 static TIMER_QUEUE: TimerQueue = TimerQueue::new();
+const TIMER_EXEC_RING_CAP: usize = 6;
+const TIMER_ARM_RING_CAP: usize = 6;
 static TIMER_CALLBACK_EXEC_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_ENTRY_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_RESUME_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -34,9 +39,29 @@ static TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_DEFAULT_BRANCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_CREATE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_FROM_ENSURE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_FROM_WAKE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_FROM_ENQUEUE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_LAST_MODE: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_LAST_SOURCE: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_CREATE_LAST_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_PROCESS_SKIP_INACTIVE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_PROCESS_SKIP_NOT_DUE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_PROCESS_LAST_SKIP_CALLBACK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_PROCESS_LAST_SKIP_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_PROCESS_LAST_SKIP_NOW_US: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_PROCESS_LAST_SKIP_DUE_US: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_MARK_READY_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_POP_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_TASK_SELECTED_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_SLEEP_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_SLEEP_TRUE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_SLEEP_FALSE_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_TASK_SLEEP_LAST_TASK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TASK_SLEEP_LAST_WAKE_AT_US: AtomicU64 = AtomicU64::new(0);
+static TIMER_TASK_SLEEP_LAST_RESULT: AtomicBool = AtomicBool::new(false);
+static TIMER_TASK_SLEEP_TASK_MISMATCH_COUNT: AtomicU32 = AtomicU32::new(0);
 static TIMER_CALLBACK_CURRENT_PTR: AtomicUsize = AtomicUsize::new(0);
 static TIMER_CALLBACK_CURRENT_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
 static TIMER_CALLBACK_LAST_PTR: AtomicUsize = AtomicUsize::new(0);
@@ -46,6 +71,78 @@ static TIMER_CALLBACK_LAST_DUE_AT_US: AtomicU32 = AtomicU32::new(0);
 static TIMER_CALLBACK_LAST_TIMEOUT_US: AtomicU32 = AtomicU32::new(0);
 static TIMER_CALLBACK_LAST_LATENESS_US: AtomicU32 = AtomicU32::new(0);
 static TIMER_CALLBACK_MAX_LATENESS_US: AtomicU32 = AtomicU32::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_ARM_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_DISARM_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_KIND: AtomicU32 = AtomicU32::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_TIMER_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_CALLBACK_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_ARG_PTR: AtomicUsize = AtomicUsize::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_TIMEOUT_US: AtomicU64 = AtomicU64::new(0);
+static TIMER_CALLBACK_SIDEEFFECT_LAST_REPEAT: AtomicBool = AtomicBool::new(false);
+static TIMER_CALLBACK_RECENT_ORDINALS: [AtomicU32; TIMER_EXEC_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_PTRS: [AtomicUsize; TIMER_EXEC_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_ARG_PTRS: [AtomicUsize; TIMER_EXEC_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_EXEC_AT_US: [AtomicU32; TIMER_EXEC_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_DUE_AT_US: [AtomicU32; TIMER_EXEC_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_TIMEOUT_US: [AtomicU32; TIMER_EXEC_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_CALLBACK_RECENT_LATENESS_US: [AtomicU32; TIMER_EXEC_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_EXEC_RING_CAP];
+static TIMER_ARM_COUNT: AtomicU32 = AtomicU32::new(0);
+static TIMER_ARM_RECENT_ORDINALS: [AtomicU32; TIMER_ARM_RING_CAP] =
+    [const { AtomicU32::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_TIMER_PTRS: [AtomicUsize; TIMER_ARM_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_CALLBACK_PTRS: [AtomicUsize; TIMER_ARM_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_ARG_PTRS: [AtomicUsize; TIMER_ARM_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_CALLER_PTRS: [AtomicUsize; TIMER_ARM_RING_CAP] =
+    [const { AtomicUsize::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_TIMEOUT_US: [AtomicU64; TIMER_ARM_RING_CAP] =
+    [const { AtomicU64::new(0) }; TIMER_ARM_RING_CAP];
+static TIMER_ARM_RECENT_PERIODIC: [AtomicBool; TIMER_ARM_RING_CAP] =
+    [const { AtomicBool::new(false) }; TIMER_ARM_RING_CAP];
+
+#[cfg(xtensa)]
+fn current_arm_caller_ptr() -> usize {
+    let caller_ptr: usize;
+    unsafe {
+        core::arch::asm!("mov {0}, a0", out(reg) caller_ptr);
+    }
+    caller_ptr
+}
+
+#[cfg(not(xtensa))]
+fn current_arm_caller_ptr() -> usize {
+    0
+}
+
+fn record_timer_arm(
+    timer_ptr: usize,
+    callback_ptr: usize,
+    arg_ptr: usize,
+    caller_ptr: usize,
+    timeout_us: u64,
+    periodic: bool,
+) {
+    let ordinal = TIMER_ARM_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let idx = (ordinal as usize) % TIMER_ARM_RING_CAP;
+    TIMER_ARM_RECENT_ORDINALS[idx].store(ordinal, Ordering::Relaxed);
+    TIMER_ARM_RECENT_TIMER_PTRS[idx].store(timer_ptr, Ordering::Relaxed);
+    TIMER_ARM_RECENT_CALLBACK_PTRS[idx].store(callback_ptr, Ordering::Relaxed);
+    TIMER_ARM_RECENT_ARG_PTRS[idx].store(arg_ptr, Ordering::Relaxed);
+    TIMER_ARM_RECENT_CALLER_PTRS[idx].store(caller_ptr, Ordering::Relaxed);
+    TIMER_ARM_RECENT_TIMEOUT_US[idx].store(timeout_us, Ordering::Relaxed);
+    TIMER_ARM_RECENT_PERIODIC[idx].store(periodic, Ordering::Relaxed);
+}
 
 fn use_legacy_timer_loop_diag_enabled() -> bool {
     matches!(
@@ -64,7 +161,7 @@ fn use_legacy_timer_task_driver_diag_enabled() -> bool {
     ) || matches!(
         option_env!("ESP_RTOS_USE_LEGACY_TIMER_TASK_DRIVER_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_runtime_enabled()
 }
 
 fn use_legacy_timer_compat_driver_diag_enabled() -> bool {
@@ -72,12 +169,9 @@ fn use_legacy_timer_compat_driver_diag_enabled() -> bool {
         option_env!("MEDITAMER_WIFI_ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     ) || matches!(
-        option_env!("MEDITAMER_WIFI_BACKEND_LEGACY_PORT_DIAG"),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    ) || matches!(
         option_env!("ESP_RADIO_USE_LEGACY_TIMER_COMPAT_DIAG"),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
-    )
+    ) || backend_legacy_port_runtime_enabled()
 }
 
 fn use_exact_legacy_timer_compat_loop_diag_enabled() -> bool {
@@ -114,6 +208,40 @@ pub struct TimerCallbackExecDiag {
     pub last_lateness_us: u32,
     /// Maximum observed lateness since the last reset.
     pub max_lateness_us: u32,
+    /// Recent callback execution ordinals.
+    pub recent_ordinals: [u32; TIMER_EXEC_RING_CAP],
+    /// Recent callback pointers.
+    pub recent_callback_ptrs: [usize; TIMER_EXEC_RING_CAP],
+    /// Recent callback arg pointers.
+    pub recent_arg_ptrs: [usize; TIMER_EXEC_RING_CAP],
+    /// Recent execution timestamps.
+    pub recent_exec_at_us: [u32; TIMER_EXEC_RING_CAP],
+    /// Recent due timestamps.
+    pub recent_due_at_us: [u32; TIMER_EXEC_RING_CAP],
+    /// Recent timeout values.
+    pub recent_timeout_us: [u32; TIMER_EXEC_RING_CAP],
+    /// Recent lateness values.
+    pub recent_lateness_us: [u32; TIMER_EXEC_RING_CAP],
+    /// Number of `arm()` calls issued from inside a current-substrate timer callback.
+    pub sideeffect_arm_count: u32,
+    /// Number of `disarm()` calls issued from inside a current-substrate timer callback.
+    pub sideeffect_disarm_count: u32,
+    /// Last side-effect kind: `0` none, `1` arm, `2` disarm.
+    pub sideeffect_last_kind: u32,
+    /// Current callback pointer that caused the last side effect.
+    pub sideeffect_last_current_ptr: usize,
+    /// Current callback arg pointer that caused the last side effect.
+    pub sideeffect_last_current_arg_ptr: usize,
+    /// Target timer pointer of the last side effect.
+    pub sideeffect_last_target_timer_ptr: usize,
+    /// Target callback pointer of the last side effect.
+    pub sideeffect_last_target_callback_ptr: usize,
+    /// Target callback arg pointer of the last side effect.
+    pub sideeffect_last_target_arg_ptr: usize,
+    /// Timeout associated with the last side-effect arm.
+    pub sideeffect_last_timeout_us: u64,
+    /// Repeat flag associated with the last side-effect arm.
+    pub sideeffect_last_repeat: bool,
 }
 
 pub fn reset_timer_callback_exec_diag() {
@@ -124,9 +252,29 @@ pub fn reset_timer_callback_exec_diag() {
     TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT.store(0, Ordering::Relaxed);
     TIMER_TASK_LEGACY_DRIVER_BRANCH_COUNT.store(0, Ordering::Relaxed);
     TIMER_TASK_DEFAULT_BRANCH_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_FROM_ENSURE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_FROM_WAKE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_FROM_ENQUEUE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_LAST_MODE.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_LAST_SOURCE.store(0, Ordering::Relaxed);
+    TIMER_TASK_CREATE_LAST_PTR.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_SKIP_INACTIVE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_SKIP_NOT_DUE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_LAST_SKIP_CALLBACK_PTR.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_LAST_SKIP_ARG_PTR.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_LAST_SKIP_NOW_US.store(0, Ordering::Relaxed);
+    TIMER_TASK_PROCESS_LAST_SKIP_DUE_US.store(0, Ordering::Relaxed);
     TIMER_TASK_MARK_READY_COUNT.store(0, Ordering::Relaxed);
     TIMER_TASK_POP_COUNT.store(0, Ordering::Relaxed);
     TIMER_TASK_SELECTED_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_TRUE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_FALSE_COUNT.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_LAST_TASK_PTR.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_LAST_WAKE_AT_US.store(0, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_LAST_RESULT.store(false, Ordering::Relaxed);
+    TIMER_TASK_SLEEP_TASK_MISMATCH_COUNT.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_CURRENT_PTR.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_CURRENT_ARG_PTR.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_LAST_PTR.store(0, Ordering::Relaxed);
@@ -136,6 +284,35 @@ pub fn reset_timer_callback_exec_diag() {
     TIMER_CALLBACK_LAST_TIMEOUT_US.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_LAST_LATENESS_US.store(0, Ordering::Relaxed);
     TIMER_CALLBACK_MAX_LATENESS_US.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_ARM_COUNT.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_DISARM_COUNT.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_KIND.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_PTR.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_ARG_PTR.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_TIMER_PTR.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_CALLBACK_PTR.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_ARG_PTR.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TIMEOUT_US.store(0, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_REPEAT.store(false, Ordering::Relaxed);
+    for idx in 0..TIMER_EXEC_RING_CAP {
+        TIMER_CALLBACK_RECENT_ORDINALS[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_ARG_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_EXEC_AT_US[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_DUE_AT_US[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_TIMEOUT_US[idx].store(0, Ordering::Relaxed);
+        TIMER_CALLBACK_RECENT_LATENESS_US[idx].store(0, Ordering::Relaxed);
+    }
+    TIMER_ARM_COUNT.store(0, Ordering::Relaxed);
+    for idx in 0..TIMER_ARM_RING_CAP {
+        TIMER_ARM_RECENT_ORDINALS[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_TIMER_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_CALLBACK_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_ARG_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_CALLER_PTRS[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_TIMEOUT_US[idx].store(0, Ordering::Relaxed);
+        TIMER_ARM_RECENT_PERIODIC[idx].store(false, Ordering::Relaxed);
+    }
 }
 
 pub fn timer_task_entry_count() -> u32 {
@@ -162,6 +339,58 @@ pub fn timer_task_default_branch_count() -> u32 {
     TIMER_TASK_DEFAULT_BRANCH_COUNT.load(Ordering::Relaxed)
 }
 
+pub fn timer_task_create_count() -> u32 {
+    TIMER_TASK_CREATE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_from_ensure_count() -> u32 {
+    TIMER_TASK_CREATE_FROM_ENSURE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_from_wake_count() -> u32 {
+    TIMER_TASK_CREATE_FROM_WAKE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_from_enqueue_count() -> u32 {
+    TIMER_TASK_CREATE_FROM_ENQUEUE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_last_mode() -> u32 {
+    TIMER_TASK_CREATE_LAST_MODE.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_last_source() -> u32 {
+    TIMER_TASK_CREATE_LAST_SOURCE.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_create_last_ptr() -> usize {
+    TIMER_TASK_CREATE_LAST_PTR.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_skip_inactive_count() -> u32 {
+    TIMER_TASK_PROCESS_SKIP_INACTIVE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_skip_not_due_count() -> u32 {
+    TIMER_TASK_PROCESS_SKIP_NOT_DUE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_last_skip_callback_ptr() -> usize {
+    TIMER_TASK_PROCESS_LAST_SKIP_CALLBACK_PTR.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_last_skip_arg_ptr() -> usize {
+    TIMER_TASK_PROCESS_LAST_SKIP_ARG_PTR.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_last_skip_now_us() -> u32 {
+    TIMER_TASK_PROCESS_LAST_SKIP_NOW_US.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_process_last_skip_due_us() -> u32 {
+    TIMER_TASK_PROCESS_LAST_SKIP_DUE_US.load(Ordering::Relaxed)
+}
+
 pub fn timer_task_mark_ready_count() -> u32 {
     TIMER_TASK_MARK_READY_COUNT.load(Ordering::Relaxed)
 }
@@ -172,6 +401,34 @@ pub fn timer_task_pop_count() -> u32 {
 
 pub fn timer_task_selected_count() -> u32 {
     TIMER_TASK_SELECTED_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_count() -> u32 {
+    TIMER_TASK_SLEEP_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_true_count() -> u32 {
+    TIMER_TASK_SLEEP_TRUE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_false_count() -> u32 {
+    TIMER_TASK_SLEEP_FALSE_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_last_task_ptr() -> usize {
+    TIMER_TASK_SLEEP_LAST_TASK_PTR.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_last_wake_at_us() -> u64 {
+    TIMER_TASK_SLEEP_LAST_WAKE_AT_US.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_last_result() -> bool {
+    TIMER_TASK_SLEEP_LAST_RESULT.load(Ordering::Relaxed)
+}
+
+pub fn timer_task_sleep_task_mismatch_count() -> u32 {
+    TIMER_TASK_SLEEP_TASK_MISMATCH_COUNT.load(Ordering::Relaxed)
 }
 
 pub fn timer_task_ptr() -> usize {
@@ -197,6 +454,24 @@ pub fn note_timer_task_selected(task: TaskPtr) {
 }
 
 pub fn timer_callback_exec_diag() -> TimerCallbackExecDiag {
+    let mut recent_ordinals = [0u32; TIMER_EXEC_RING_CAP];
+    let mut recent_callback_ptrs = [0usize; TIMER_EXEC_RING_CAP];
+    let mut recent_arg_ptrs = [0usize; TIMER_EXEC_RING_CAP];
+    let mut recent_exec_at_us = [0u32; TIMER_EXEC_RING_CAP];
+    let mut recent_due_at_us = [0u32; TIMER_EXEC_RING_CAP];
+    let mut recent_timeout_us = [0u32; TIMER_EXEC_RING_CAP];
+    let mut recent_lateness_us = [0u32; TIMER_EXEC_RING_CAP];
+    for idx in 0..TIMER_EXEC_RING_CAP {
+        recent_ordinals[idx] = TIMER_CALLBACK_RECENT_ORDINALS[idx].load(Ordering::Relaxed);
+        recent_callback_ptrs[idx] = TIMER_CALLBACK_RECENT_PTRS[idx].load(Ordering::Relaxed);
+        recent_arg_ptrs[idx] = TIMER_CALLBACK_RECENT_ARG_PTRS[idx].load(Ordering::Relaxed);
+        recent_exec_at_us[idx] = TIMER_CALLBACK_RECENT_EXEC_AT_US[idx].load(Ordering::Relaxed);
+        recent_due_at_us[idx] = TIMER_CALLBACK_RECENT_DUE_AT_US[idx].load(Ordering::Relaxed);
+        recent_timeout_us[idx] =
+            TIMER_CALLBACK_RECENT_TIMEOUT_US[idx].load(Ordering::Relaxed);
+        recent_lateness_us[idx] =
+            TIMER_CALLBACK_RECENT_LATENESS_US[idx].load(Ordering::Relaxed);
+    }
     TimerCallbackExecDiag {
         callback_count: TIMER_CALLBACK_EXEC_COUNT.load(Ordering::Relaxed),
         current_callback_ptr: TIMER_CALLBACK_CURRENT_PTR.load(Ordering::Relaxed),
@@ -208,13 +483,162 @@ pub fn timer_callback_exec_diag() -> TimerCallbackExecDiag {
         last_timeout_us: TIMER_CALLBACK_LAST_TIMEOUT_US.load(Ordering::Relaxed),
         last_lateness_us: TIMER_CALLBACK_LAST_LATENESS_US.load(Ordering::Relaxed),
         max_lateness_us: TIMER_CALLBACK_MAX_LATENESS_US.load(Ordering::Relaxed),
+        recent_ordinals,
+        recent_callback_ptrs,
+        recent_arg_ptrs,
+        recent_exec_at_us,
+        recent_due_at_us,
+        recent_timeout_us,
+        recent_lateness_us,
+        sideeffect_arm_count: TIMER_CALLBACK_SIDEEFFECT_ARM_COUNT.load(Ordering::Relaxed),
+        sideeffect_disarm_count: TIMER_CALLBACK_SIDEEFFECT_DISARM_COUNT.load(Ordering::Relaxed),
+        sideeffect_last_kind: TIMER_CALLBACK_SIDEEFFECT_LAST_KIND.load(Ordering::Relaxed),
+        sideeffect_last_current_ptr: TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_PTR
+            .load(Ordering::Relaxed),
+        sideeffect_last_current_arg_ptr: TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_ARG_PTR
+            .load(Ordering::Relaxed),
+        sideeffect_last_target_timer_ptr: TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_TIMER_PTR
+            .load(Ordering::Relaxed),
+        sideeffect_last_target_callback_ptr: TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_CALLBACK_PTR
+            .load(Ordering::Relaxed),
+        sideeffect_last_target_arg_ptr: TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_ARG_PTR
+            .load(Ordering::Relaxed),
+        sideeffect_last_timeout_us: TIMER_CALLBACK_SIDEEFFECT_LAST_TIMEOUT_US
+            .load(Ordering::Relaxed),
+        sideeffect_last_repeat: TIMER_CALLBACK_SIDEEFFECT_LAST_REPEAT.load(Ordering::Relaxed),
     }
+}
+
+pub fn timer_live_callback_ptr(timer_ptr: usize) -> usize {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return 0;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    timer.callback_ptr
+}
+
+pub fn timer_live_callback_arg_ptr(timer_ptr: usize) -> usize {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return 0;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    timer.callback_arg_ptr
+}
+
+pub fn timer_live_is_active(timer_ptr: usize) -> bool {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return false;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    TIMER_QUEUE.inner.with(|q| timer.is_active(q))
+}
+
+pub fn timer_live_started_us(timer_ptr: usize) -> u64 {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return 0;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    TIMER_QUEUE.inner.with(|q| timer.properties(q).started)
+}
+
+pub fn timer_live_next_due_us(timer_ptr: usize) -> u64 {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return 0;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    TIMER_QUEUE.inner.with(|q| timer.properties(q).next_due)
+}
+
+pub fn timer_live_period_us(timer_ptr: usize) -> u64 {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return 0;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    TIMER_QUEUE.inner.with(|q| timer.properties(q).period)
+}
+
+pub fn timer_live_periodic(timer_ptr: usize) -> bool {
+    let Some(timer_ptr) = NonNull::new(timer_ptr as *mut ()) else {
+        return false;
+    };
+    let timer_ptr = timer_ptr.cast();
+    let timer = unsafe { Timer::from_ptr(timer_ptr) };
+    TIMER_QUEUE.inner.with(|q| timer.properties(q).periodic)
+}
+
+pub fn timer_arm_count() -> u32 {
+    TIMER_ARM_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_ordinal(index: usize) -> u32 {
+    TIMER_ARM_RECENT_ORDINALS[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_timer_ptr(index: usize) -> usize {
+    TIMER_ARM_RECENT_TIMER_PTRS[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_callback_ptr(index: usize) -> usize {
+    TIMER_ARM_RECENT_CALLBACK_PTRS[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_arg_ptr(index: usize) -> usize {
+    TIMER_ARM_RECENT_ARG_PTRS[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_caller_ptr(index: usize) -> usize {
+    TIMER_ARM_RECENT_CALLER_PTRS[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_timeout_us(index: usize) -> u64 {
+    TIMER_ARM_RECENT_TIMEOUT_US[index].load(Ordering::Relaxed)
+}
+
+pub fn timer_arm_recent_periodic(index: usize) -> bool {
+    TIMER_ARM_RECENT_PERIODIC[index].load(Ordering::Relaxed)
+}
+
+fn note_timer_task_created(task: TimerTaskHandle, source: u32, mode: u32) {
+    TIMER_TASK_CREATE_COUNT.fetch_add(1, Ordering::Relaxed);
+    match source {
+        1 => {
+            TIMER_TASK_CREATE_FROM_ENSURE_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        2 => {
+            TIMER_TASK_CREATE_FROM_WAKE_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        3 => {
+            TIMER_TASK_CREATE_FROM_ENQUEUE_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+    TIMER_TASK_CREATE_LAST_SOURCE.store(source, Ordering::Relaxed);
+    TIMER_TASK_CREATE_LAST_MODE.store(mode, Ordering::Relaxed);
+    TIMER_TASK_CREATE_LAST_PTR.store(task.ptr(), Ordering::Relaxed);
 }
 
 pub fn ensure_timer_task() {
     TIMER_QUEUE.inner.with(|q| {
         if q.task.is_none() {
             let task = create_timer_task();
+            note_timer_task_created(task, 1, task.mode_code());
+            TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
+            q.task = Some(task);
+            q.next_wakeup = u64::MAX;
+        }
+    });
+}
+
+pub fn ensure_legacy_timer_task() {
+    TIMER_QUEUE.inner.with(|q| {
+        if q.task.is_none() {
+            let task = create_legacy_timer_task();
             TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
             q.task = Some(task);
             q.next_wakeup = u64::MAX;
@@ -229,6 +653,7 @@ pub fn wake_timer_task() {
             wake_timer_task_handle(task);
         } else {
             let task = create_timer_task();
+            note_timer_task_created(task, 2, task.mode_code());
             TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
             q.task = Some(task);
             q.next_wakeup = u64::MAX;
@@ -249,6 +674,58 @@ fn update_max_lateness_us(candidate: u32) {
             Err(observed) => current = observed,
         }
     }
+}
+
+fn record_recent_exec(
+    ordinal: u32,
+    callback_ptr: usize,
+    arg_ptr: usize,
+    exec_at_us: u32,
+    due_at_us: u32,
+    timeout_us: u32,
+    lateness_us: u32,
+) {
+    let idx = (ordinal as usize) % TIMER_EXEC_RING_CAP;
+    TIMER_CALLBACK_RECENT_ORDINALS[idx].store(ordinal, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_PTRS[idx].store(callback_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_ARG_PTRS[idx].store(arg_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_EXEC_AT_US[idx].store(exec_at_us, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_DUE_AT_US[idx].store(due_at_us, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_TIMEOUT_US[idx].store(timeout_us, Ordering::Relaxed);
+    TIMER_CALLBACK_RECENT_LATENESS_US[idx].store(lateness_us, Ordering::Relaxed);
+}
+
+fn record_timer_callback_sideeffect(
+    kind: u32,
+    target_timer_ptr: usize,
+    target_callback_ptr: usize,
+    target_arg_ptr: usize,
+    timeout_us: u64,
+    repeat: bool,
+) {
+    let current_callback_ptr = TIMER_CALLBACK_CURRENT_PTR.load(Ordering::Relaxed);
+    if current_callback_ptr == 0 {
+        return;
+    }
+    let current_arg_ptr = TIMER_CALLBACK_CURRENT_ARG_PTR.load(Ordering::Relaxed);
+    match kind {
+        1 => {
+            TIMER_CALLBACK_SIDEEFFECT_ARM_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        2 => {
+            TIMER_CALLBACK_SIDEEFFECT_DISARM_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+    TIMER_CALLBACK_SIDEEFFECT_LAST_KIND.store(kind, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_PTR.store(current_callback_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_CURRENT_ARG_PTR.store(current_arg_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_TIMER_PTR.store(target_timer_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_CALLBACK_PTR
+        .store(target_callback_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TARGET_ARG_PTR.store(target_arg_ptr, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_TIMEOUT_US.store(timeout_us, Ordering::Relaxed);
+    TIMER_CALLBACK_SIDEEFFECT_LAST_REPEAT.store(repeat, Ordering::Relaxed);
 }
 
 struct TimerQueueInner {
@@ -290,6 +767,7 @@ impl TimerQueueInner {
         } else {
             // create the timer task
             let task = create_timer_task();
+            note_timer_task_created(task, 3, task.mode_code());
             TIMER_TASK_PTR.store(task.ptr(), Ordering::Relaxed);
             self.task = Some(task);
             self.next_wakeup = due;
@@ -327,6 +805,16 @@ impl TimerQueueInner {
 }
 
 fn create_timer_task() -> TimerTaskHandle {
+    if backend_legacy_port_runtime_enabled() {
+        crate::esp_radio::legacy_preempt_builtin::enable();
+        let task_handle =
+            crate::esp_radio::legacy_preempt_builtin::task_create(
+                legacy_timer_task,
+                core::ptr::null_mut(),
+                8192,
+            );
+        return TimerTaskHandle::Legacy(task_handle);
+    }
     if legacy_builtin_scheduler_runtime_mode_enabled() {
         crate::esp_radio::legacy_builtin_scheduler::allocate_main_task();
         let task_handle = crate::esp_radio::legacy_builtin_scheduler::task_create(
@@ -335,13 +823,43 @@ fn create_timer_task() -> TimerTaskHandle {
             core::ptr::null_mut(),
             8192,
         );
-        if let Some(task_ptr) = TaskPtr::new(task_handle.cast()) {
-            legacy_scheduler::note_created_task("timer", task_ptr);
-        }
         TimerTaskHandle::Legacy(task_handle)
     } else {
         let task_ptr =
             SCHEDULER.create_task("timer", timer_task, core::ptr::null_mut(), 8192, 2, None);
+        legacy_scheduler::note_created_task("timer", task_ptr);
+        TimerTaskHandle::Modern(task_ptr)
+    }
+}
+
+fn create_legacy_timer_task() -> TimerTaskHandle {
+    if backend_legacy_port_runtime_enabled() {
+        crate::esp_radio::legacy_preempt_builtin::enable();
+        let task_handle = crate::esp_radio::legacy_preempt_builtin::task_create(
+            legacy_timer_task,
+            core::ptr::null_mut(),
+            8192,
+        );
+        return TimerTaskHandle::Legacy(task_handle);
+    }
+    if legacy_builtin_scheduler_runtime_mode_enabled() {
+        crate::esp_radio::legacy_builtin_scheduler::allocate_main_task();
+        let task_handle = crate::esp_radio::legacy_builtin_scheduler::task_create(
+            "timer",
+            legacy_timer_task,
+            core::ptr::null_mut(),
+            8192,
+        );
+        TimerTaskHandle::Legacy(task_handle)
+    } else {
+        let task_ptr = SCHEDULER.create_task(
+            "timer",
+            legacy_timer_task,
+            core::ptr::null_mut(),
+            8192,
+            2,
+            None,
+        );
         legacy_scheduler::note_created_task("timer", task_ptr);
         TimerTaskHandle::Modern(task_ptr)
     }
@@ -389,6 +907,14 @@ impl TimerQueue {
                 timers = props.next.take();
 
                 if !props.is_active || props.drop {
+                    TIMER_TASK_PROCESS_SKIP_INACTIVE_COUNT.fetch_add(1, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_CALLBACK_PTR
+                        .store(current_timer.callback_ptr, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_ARG_PTR
+                        .store(current_timer.callback_arg_ptr, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_NOW_US.store(crate::now() as u32, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_DUE_US
+                        .store(props.next_due as u32, Ordering::Relaxed);
                     debug!(
                         "Timer {:x} is inactive or dropped",
                         current_timer as *const _ as usize
@@ -396,7 +922,16 @@ impl TimerQueue {
                     return None;
                 }
 
-                if props.next_due > crate::now() {
+                let now = crate::now();
+                if props.next_due > now {
+                    TIMER_TASK_PROCESS_SKIP_NOT_DUE_COUNT.fetch_add(1, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_CALLBACK_PTR
+                        .store(current_timer.callback_ptr, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_ARG_PTR
+                        .store(current_timer.callback_arg_ptr, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_NOW_US.store(now as u32, Ordering::Relaxed);
+                    TIMER_TASK_PROCESS_LAST_SKIP_DUE_US
+                        .store(props.next_due as u32, Ordering::Relaxed);
                     // Not our time yet.
                     debug!(
                         "Timer {:x} is not due yet",
@@ -419,7 +954,7 @@ impl TimerQueue {
                 debug!("Triggering timer: {:x}", current_timer as *const _ as usize);
                 let exec_at_us = crate::now() as u32;
                 let lateness_us = exec_at_us.saturating_sub(due_at_us);
-                TIMER_CALLBACK_EXEC_COUNT.fetch_add(1, Ordering::Relaxed);
+                let ordinal = TIMER_CALLBACK_EXEC_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
                 TIMER_CALLBACK_CURRENT_PTR
                     .store(current_timer.callback_ptr, Ordering::Relaxed);
                 TIMER_CALLBACK_CURRENT_ARG_PTR
@@ -431,6 +966,15 @@ impl TimerQueue {
                 TIMER_CALLBACK_LAST_TIMEOUT_US.store(timeout_us, Ordering::Relaxed);
                 TIMER_CALLBACK_LAST_LATENESS_US.store(lateness_us, Ordering::Relaxed);
                 update_max_lateness_us(lateness_us);
+                record_recent_exec(
+                    ordinal,
+                    current_timer.callback_ptr,
+                    current_timer.callback_arg_ptr,
+                    exec_at_us,
+                    due_at_us,
+                    timeout_us,
+                    lateness_us,
+                );
                 (current_timer.callback.borrow_mut())();
                 TIMER_CALLBACK_CURRENT_PTR.store(0, Ordering::Relaxed);
                 TIMER_CALLBACK_CURRENT_ARG_PTR.store(0, Ordering::Relaxed);
@@ -466,7 +1010,23 @@ impl TimerQueue {
             if use_legacy_timer_loop_diag_enabled() {
                 crate::task::yield_task();
             } else {
-                SCHEDULER.sleep_until(Instant::EPOCH + Duration::from_micros(next_wakeup));
+                let current_task_ptr = crate::task::current_task().as_ptr() as usize;
+                let timer_task_ptr = TIMER_TASK_PTR.load(Ordering::Relaxed);
+                let wake_at = Instant::EPOCH + Duration::from_micros(next_wakeup);
+                TIMER_TASK_SLEEP_COUNT.fetch_add(1, Ordering::Relaxed);
+                TIMER_TASK_SLEEP_LAST_TASK_PTR.store(current_task_ptr, Ordering::Relaxed);
+                TIMER_TASK_SLEEP_LAST_WAKE_AT_US.store(next_wakeup, Ordering::Relaxed);
+                if current_task_ptr != 0 && timer_task_ptr != 0 && current_task_ptr != timer_task_ptr
+                {
+                    TIMER_TASK_SLEEP_TASK_MISMATCH_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+                let slept = SCHEDULER.sleep_until(wake_at);
+                TIMER_TASK_SLEEP_LAST_RESULT.store(slept, Ordering::Relaxed);
+                if slept {
+                    TIMER_TASK_SLEEP_TRUE_COUNT.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    TIMER_TASK_SLEEP_FALSE_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
             }
         });
     }
@@ -509,7 +1069,7 @@ impl TimerQueue {
         if let Some((timer_ptr, due_at_us, timeout_us, callback_ptr, callback_arg_ptr)) = maybe_due {
             let exec_at_us = crate::now() as u32;
             let lateness_us = exec_at_us.saturating_sub(due_at_us);
-            TIMER_CALLBACK_EXEC_COUNT.fetch_add(1, Ordering::Relaxed);
+            let ordinal = TIMER_CALLBACK_EXEC_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
             TIMER_CALLBACK_CURRENT_PTR.store(callback_ptr, Ordering::Relaxed);
             TIMER_CALLBACK_CURRENT_ARG_PTR.store(callback_arg_ptr, Ordering::Relaxed);
             TIMER_CALLBACK_LAST_PTR.store(callback_ptr, Ordering::Relaxed);
@@ -519,6 +1079,15 @@ impl TimerQueue {
             TIMER_CALLBACK_LAST_TIMEOUT_US.store(timeout_us, Ordering::Relaxed);
             TIMER_CALLBACK_LAST_LATENESS_US.store(lateness_us, Ordering::Relaxed);
             update_max_lateness_us(lateness_us);
+            record_recent_exec(
+                ordinal,
+                callback_ptr,
+                callback_arg_ptr,
+                exec_at_us,
+                due_at_us,
+                timeout_us,
+                lateness_us,
+            );
 
             let timer = unsafe { timer_ptr.as_ref() };
             (timer.callback.borrow_mut())();
@@ -680,6 +1249,22 @@ impl TimerImplementation for Timer {
             timer, timeout, periodic
         );
         let timer = unsafe { Timer::from_ptr(timer) };
+        record_timer_callback_sideeffect(
+            1,
+            timer as *const Timer as usize,
+            timer.callback_ptr,
+            timer.callback_arg_ptr,
+            timeout,
+            periodic,
+        );
+        record_timer_arm(
+            timer as *const Timer as usize,
+            timer.callback_ptr,
+            timer.callback_arg_ptr,
+            current_arm_caller_ptr(),
+            timeout,
+            periodic,
+        );
         TIMER_QUEUE.inner.with(|q| timer.arm(q, timeout, periodic))
     }
 
@@ -692,6 +1277,14 @@ impl TimerImplementation for Timer {
     unsafe fn disarm(timer: TimerPtr) {
         debug!("Disarming {:?}", timer);
         let timer = unsafe { Timer::from_ptr(timer) };
+        record_timer_callback_sideeffect(
+            2,
+            timer as *const Timer as usize,
+            timer.callback_ptr,
+            timer.callback_arg_ptr,
+            0,
+            false,
+        );
         TIMER_QUEUE.inner.with(|q| timer.disarm(q))
     }
 }
@@ -734,6 +1327,17 @@ pub(crate) extern "C" fn timer_task(_: *mut c_void) {
         }
     }
 }
+
+pub(crate) extern "C" fn legacy_timer_task(_: *mut c_void) {
+    TIMER_TASK_ENTRY_COUNT.fetch_add(1, Ordering::Relaxed);
+    loop {
+        TIMER_TASK_LOOP_COUNT.fetch_add(1, Ordering::Relaxed);
+        TIMER_TASK_LEGACY_COMPAT_BRANCH_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !unsafe { __esp_radio_diag_process_legacy_timer_compat_due() } {
+            crate::task::yield_task();
+        }
+    }
+}
 #[derive(Clone, Copy)]
 enum TimerTaskHandle {
     Modern(TaskPtr),
@@ -745,6 +1349,13 @@ impl TimerTaskHandle {
         match self {
             Self::Modern(task) => task.as_ptr() as usize,
             Self::Legacy(task) => task as usize,
+        }
+    }
+
+    fn mode_code(self) -> u32 {
+        match self {
+            Self::Modern(_) => 1,
+            Self::Legacy(_) => 2,
         }
     }
 }

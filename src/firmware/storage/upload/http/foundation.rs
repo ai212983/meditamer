@@ -1,5 +1,6 @@
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embassy_time::{Duration, Instant, Timer};
+#[cfg(not(feature = "psram-alloc"))]
 use static_cell::StaticCell;
 
 mod connection;
@@ -44,14 +45,19 @@ const HTTP_CHUNK_BUF_TARGET: usize = HTTP_CHUNK_BUF_FALLBACK;
 const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
 const DHCP_POLL_MS: u64 = 250;
 
+#[cfg(not(feature = "psram-alloc"))]
 static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
+#[cfg(not(feature = "psram-alloc"))]
 static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
+#[cfg(not(feature = "psram-alloc"))]
 static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
+#[cfg(not(feature = "psram-alloc"))]
 static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
 
 enum HttpBuffer<const N: usize> {
     #[cfg(feature = "psram-alloc")]
     Psram(psram::LargeByteBuffer),
+    #[cfg(not(feature = "psram-alloc"))]
     Internal(&'static mut [u8; N]),
 }
 
@@ -60,16 +66,20 @@ impl<const N: usize> HttpBuffer<N> {
         match self {
             #[cfg(feature = "psram-alloc")]
             Self::Psram(buffer) => buffer.as_mut_slice(),
+            #[cfg(not(feature = "psram-alloc"))]
             Self::Internal(buffer) => &mut buffer[..],
         }
     }
 }
 
 fn init_http_buffer<const N: usize>(
+    #[cfg(not(feature = "psram-alloc"))]
     cell: &'static StaticCell<[u8; N]>,
-    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] alloc_bytes: usize,
-    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] tag: &'static str,
-) -> HttpBuffer<N> {
+    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))]
+    alloc_bytes: usize,
+    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))]
+    tag: &'static str,
+) -> Option<HttpBuffer<N>> {
     #[cfg(feature = "psram-alloc")]
     {
         match psram::alloc_large_byte_buffer(alloc_bytes) {
@@ -83,21 +93,21 @@ fn init_http_buffer<const N: usize>(
                     );
                 }
                 psram::log_allocator_high_water(tag);
-                return HttpBuffer::Psram(buffer);
+                return Some(HttpBuffer::Psram(buffer));
             }
             Err(err) => {
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                    esp_println::println!(
-                        "upload_http: {} psram alloc failed ({:?}); using internal ram",
-                        tag,
-                        err
-                    );
-                }
+                esp_println::println!(
+                    "upload_http: buffer_alloc_failed tag={} placement=psram err={:?}",
+                    tag,
+                    err
+                );
+                return None;
             }
         }
     }
 
-    HttpBuffer::Internal(cell.init([0u8; N]))
+    #[cfg(not(feature = "psram-alloc"))]
+    return Some(HttpBuffer::Internal(cell.init([0u8; N])));
 }
 
 struct HttpServerLoopState {
@@ -171,22 +181,46 @@ impl HttpServerBuffers {
     }
 
     fn ensure_initialized(&mut self) {
-        if self.rx.is_some() {
+        if self.rx.is_some()
+            && self.tx.is_some()
+            && self.header.is_some()
+            && self.chunk.is_some()
+        {
             return;
         }
 
-        self.rx = Some(init_http_buffer(&RX_BUFFER, HTTP_RX_BUF_TARGET, "http_rx"));
-        self.tx = Some(init_http_buffer(&TX_BUFFER, HTTP_TX_BUF_TARGET, "http_tx"));
-        self.header = Some(init_http_buffer(
-            &HEADER_BUFFER,
-            HTTP_HEADER_MAX,
-            "http_header",
-        ));
-        self.chunk = Some(init_http_buffer(
-            &CHUNK_BUFFER,
-            HTTP_CHUNK_BUF_TARGET,
-            "http_chunk",
-        ));
+        if self.rx.is_none() {
+            self.rx = init_http_buffer(
+                #[cfg(not(feature = "psram-alloc"))]
+                &RX_BUFFER,
+                HTTP_RX_BUF_TARGET,
+                "http_rx",
+            );
+        }
+        if self.tx.is_none() {
+            self.tx = init_http_buffer(
+                #[cfg(not(feature = "psram-alloc"))]
+                &TX_BUFFER,
+                HTTP_TX_BUF_TARGET,
+                "http_tx",
+            );
+        }
+        if self.header.is_none() {
+            self.header = init_http_buffer(
+                #[cfg(not(feature = "psram-alloc"))]
+                &HEADER_BUFFER,
+                HTTP_HEADER_MAX,
+                "http_header",
+            );
+        }
+        if self.chunk.is_none() {
+            self.chunk = init_http_buffer(
+                #[cfg(not(feature = "psram-alloc"))]
+                &CHUNK_BUFFER,
+                HTTP_CHUNK_BUF_TARGET,
+                "http_chunk",
+            );
+        }
         log_http_mem_diag("buffers_init");
     }
 

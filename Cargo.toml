@@ -40,14 +40,13 @@ default = [
 ]
 esp-hal-runtime = []
 graphics = ["dep:embedded-graphics", "dep:heapless", "dep:u8g2-fonts"]
-psram-alloc = ["dep:esp-alloc", "esp-hal/psram"]
+psram-alloc = ["dep:esp-alloc"]
 ui-hybrid = []
 telemetry-defmt = ["dep:defmt", "esp-println/defmt-espflash"]
 wifi-debug-slim-app = []
 asset-upload-http = [
     "dep:embassy-net",
     "dep:embedded-io-async",
-    "dep:static_cell",
     "dep:esp-alloc",
     "esp-rtos/esp-radio",
     "esp-rtos/esp-alloc",
@@ -58,37 +57,35 @@ asset-upload-http-uploader = ["asset-upload-http"]
 wifi-backend-esp-radio = ["dep:esp-radio"]
 
 [dependencies]
-esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
-esp-rtos = { version = "0.2.0", features = ["esp32", "embassy"] }
-esp32 = "0.39.0"
-esp-alloc = { version = "0.9.0", optional = true, default-features = false, features = ["compat", "esp32"] }
-esp-println = { version = "0.16.1", default-features = false, features = ["esp32", "log-04", "uart"] }
-esp-backtrace = { version = "0.18.1", default-features = false, features = ["esp32", "panic-handler", "println"] }
-defmt = { version = "1.0.1", optional = true }
-esp-wifi-sys = { version = "0.8.1", default-features = false, features = ["esp32"] }
-embassy-executor = "0.9.0"
-embassy-time = "0.5.0"
-embassy-sync = "0.7.0"
+esp-hal = { version = "1.1.1", features = ["esp32", "unstable"] }
+esp-rtos = { version = "0.3.0", features = ["esp32", "embassy"] }
+esp32 = "0.40.2"
+esp-alloc = { version = "0.10.0", optional = true, default-features = false, features = ["compat", "esp32", "global-allocator"] }
+esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
+esp-backtrace = { version = "0.19.0", default-features = false, features = ["esp32", "panic-handler", "println"] }
+defmt = { version = "1.1.1", optional = true }
+esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.2.0", default-features = false }
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
+embassy-time = "0.5.1"
+embassy-sync = "0.8.0"
 embassy-futures = "0.1.2"
-embassy-net = { version = "0.8.0", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embassy-embedded-hal = "0.6.0"
+embassy-net = { version = "0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embedded-hal-async = "1.0.0"
 embedded-io-async = { version = "0.7.0", optional = true }
-enumset = { version = "1.1", default-features = false }
-esp-radio = { version = "0.17.0", optional = true, default-features = false, features = ["esp32", "wifi", "log-04", "unstable"] }
-static_cell = { version = "2.1.0", optional = true }
+enumset = { version = "1.1.13", default-features = false }
+esp-radio = { version = "1.0.0-beta.0", optional = true, default-features = false, features = ["esp32", "wifi", "log-04", "unstable"] }
+static_cell = "2.1.1"
 
-embedded-graphics = { version = "0.8.1", optional = true }
-heapless = { version = "0.8.0", optional = true }
-u8g2-fonts = { version = "0.7.2", optional = true }
+embedded-graphics = { version = "0.8.2", optional = true }
+heapless = { version = "0.9.3", optional = true }
+u8g2-fonts = { version = "0.8.0", optional = true }
 fixed = { version = "1.29.0", default-features = false }
-fixed-sqrt = { version = "0.2.5", default-features = false }
+fixed-sqrt = { version = "0.3.0", default-features = false }
 statig = "0.4.1"
-esp-storage = { version = "0.8.1", features = ["esp32"] }
+esp-storage = { version = "0.9.0", features = ["esp32"] }
 embedded-storage = "0.3.1"
 sdcard = { path = "packages/sdcard" }
 
 [build-dependencies]
 event_config_compiler = { path = "tools/event_config_compiler" }
-
-[patch.crates-io]
-esp-radio = { path = "vendor/esp-radio-0.17.0" }
-esp-rtos = { path = "vendor/esp-rtos-0.2.0" }

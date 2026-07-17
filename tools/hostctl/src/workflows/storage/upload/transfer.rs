@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::Path,
-};
+use std::{fs, path::Path};
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::{blocking::Client, Method};

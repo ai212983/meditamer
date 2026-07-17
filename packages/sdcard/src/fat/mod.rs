@@ -1,9 +1,10 @@
 include!("core.rs");
-include!("api_read_write.rs");
-include!("api_mutate.rs");
-include!("cluster_utils.rs");
-include!("dir_scan.rs");
-include!("fat_mount.rs");
+include!("size_math.rs");
+include!("volume_parse.rs");
+include!("directory_names.rs");
+include!("directory_parse.rs");
+include!("list_parse.rs");
 include!("names_lfn.rs");
-include!("dir_ops.rs");
+mod engine;
+pub use engine::*;
 include!("tests.rs");

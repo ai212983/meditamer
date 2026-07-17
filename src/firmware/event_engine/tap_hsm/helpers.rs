@@ -41,6 +41,14 @@ impl TapHsm {
         self.seq_axis = 0;
     }
 
+    pub(super) fn reset_sampling_history(&mut self) {
+        self.prev_accel = None;
+        self.prev_jerk_l1 = 0;
+        self.last_candidate_at_ms = None;
+        self.last_big_gyro_at_ms = None;
+        self.clear_sequence();
+    }
+
     pub(super) fn start_sequence(&mut self, now_ms: u64, axis: u8) {
         self.seq_last_tap_ms = Some(now_ms);
         self.seq_axis = axis;

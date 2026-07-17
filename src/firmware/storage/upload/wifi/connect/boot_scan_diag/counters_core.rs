@@ -48,7 +48,7 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
     );
     let os_diag = esp_radio::diagnostic_wifi_os_diag_snapshot();
     println!(
-        "upload_http: boot_scan_only_diag wifi_os_diag after={} sem_take={} sem_take_isr={} sem_give={} sem_give_isr={} queue_send={} queue_send_first_task_ptr=0x{:x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:x} queue_send_last_task_role={} queue_send_task_changes={} queue_send_last_item_size={} queue_send_last_item_word0=0x{:08x} queue_send_last_item_word1=0x{:08x} queue_send_last_item_pointee_word0=0x{:08x} queue_send_last_item_pointee_word1=0x{:08x} queue_send_last_timer_callback_ptr=0x{:x} queue_send_last_timer_arg_ptr=0x{:x} queue_send_isr={} queue_send_isr_legacy_branch={} queue_recv={} queue_recv_first_task_ptr=0x{:x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:x} queue_recv_last_task_role={} queue_recv_task_changes={} queue_recv_isr={} event_post={}",
+        "upload_http: boot_scan_only_diag wifi_os_diag after={} sem_take={} sem_take_isr={} sem_give={} sem_give_isr={} queue_send={} queue_send_first_task_ptr=0x{:x} queue_send_first_task_role={} queue_send_last_task_ptr=0x{:x} queue_send_last_task_role={} queue_send_task_changes={} queue_send_last_item_size={} queue_send_last_item_word0=0x{:08x} queue_send_last_item_word1=0x{:08x} queue_send_last_item_pointee_word0=0x{:08x} queue_send_last_item_pointee_word1=0x{:08x} queue_send_last_caller_ptr=0x{:x} queue_send_last_timer_callback_ptr=0x{:x} queue_send_last_timer_arg_ptr=0x{:x} queue_send_isr={} queue_send_isr_legacy_branch={} queue_send_scan_start_process_count={} queue_send_get_ap_list_process_count={} queue_send_clear_ap_list_process_count={} queue_send_set_promis_process_count={} queue_recv={} queue_recv_first_task_ptr=0x{:x} queue_recv_first_task_role={} queue_recv_last_task_ptr=0x{:x} queue_recv_last_task_role={} queue_recv_task_changes={} queue_recv_isr={} queue_recv_last_item_size={} queue_recv_last_item_word0=0x{:08x} queue_recv_last_item_word1=0x{:08x} queue_recv_last_item_pointee_word0=0x{:08x} queue_recv_last_item_pointee_word1=0x{:08x} queue_recv_last_caller_ptr=0x{:x} queue_recv_scan_start_process_count={} queue_recv_get_ap_list_process_count={} queue_recv_clear_ap_list_process_count={} queue_recv_set_promis_process_count={} event_post={} wifi_log_callback_count={}",
         stage,
         os_diag.sem_take,
         os_diag.sem_take_isr,
@@ -65,10 +65,15 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
         os_diag.queue_send_last_item_word1,
         os_diag.queue_send_last_item_pointee_word0,
         os_diag.queue_send_last_item_pointee_word1,
+        os_diag.queue_send_last_caller_ptr,
         os_diag.queue_send_last_timer_callback_ptr,
         os_diag.queue_send_last_timer_arg_ptr,
         os_diag.queue_send_isr,
         os_diag.queue_send_isr_legacy_branch,
+        os_diag.queue_send_scan_start_process_count,
+        os_diag.queue_send_get_ap_list_process_count,
+        os_diag.queue_send_clear_ap_list_process_count,
+        os_diag.queue_send_set_promis_process_count,
         os_diag.queue_recv,
         os_diag.queue_recv_first_task_ptr,
         format_task_role(os_diag.queue_recv_first_task_ptr),
@@ -76,7 +81,30 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
         format_task_role(os_diag.queue_recv_last_task_ptr),
         os_diag.queue_recv_task_changes,
         os_diag.queue_recv_isr,
+        os_diag.queue_recv_last_item_size,
+        os_diag.queue_recv_last_item_word0,
+        os_diag.queue_recv_last_item_word1,
+        os_diag.queue_recv_last_item_pointee_word0,
+        os_diag.queue_recv_last_item_pointee_word1,
+        os_diag.queue_recv_last_caller_ptr,
+        os_diag.queue_recv_scan_start_process_count,
+        os_diag.queue_recv_get_ap_list_process_count,
+        os_diag.queue_recv_clear_ap_list_process_count,
+        os_diag.queue_recv_set_promis_process_count,
         os_diag.event_post,
+        os_diag.wifi_log_callback_count,
+    );
+    println!(
+        "upload_http: boot_scan_only_diag wifi_os_diag_init_processes after={} queue_send_set_rxcb_process_count={} queue_send_register_mgmt_frame_process_count={} queue_send_set_country_process_count={} queue_send_set_ps_process_count={} queue_recv_set_rxcb_process_count={} queue_recv_register_mgmt_frame_process_count={} queue_recv_set_country_process_count={} queue_recv_set_ps_process_count={}",
+        stage,
+        os_diag.queue_send_set_rxcb_process_count,
+        os_diag.queue_send_register_mgmt_frame_process_count,
+        os_diag.queue_send_set_country_process_count,
+        os_diag.queue_send_set_ps_process_count,
+        os_diag.queue_recv_set_rxcb_process_count,
+        os_diag.queue_recv_register_mgmt_frame_process_count,
+        os_diag.queue_recv_set_country_process_count,
+        os_diag.queue_recv_set_ps_process_count,
     );
     for idx in 0..os_diag.queue_send_sample_queues.len() {
         let queue_ptr = os_diag.queue_send_sample_queues[idx];
@@ -108,7 +136,7 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
         let task_ptr = os_diag.queue_send_recent_tasks[idx];
         if ordinal != 0 || queue_ptr != 0 || task_ptr != 0 {
             println!(
-                "upload_http: boot_scan_only_diag wifi_os_diag_send_recent after={} idx={} ordinal={} queue_ptr=0x{:x} task_ptr=0x{:x} task_role={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x} timer_callback_ptr=0x{:x} timer_arg_ptr=0x{:x}",
+                "upload_http: boot_scan_only_diag wifi_os_diag_send_recent after={} idx={} ordinal={} queue_ptr=0x{:x} task_ptr=0x{:x} task_role={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x} caller_ptr=0x{:x} timer_callback_ptr=0x{:x} timer_arg_ptr=0x{:x}",
                 stage,
                 idx,
                 ordinal,
@@ -118,6 +146,7 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
                 os_diag.queue_send_recent_item_word0[idx],
                 os_diag.queue_send_recent_item_pointee_word0[idx],
                 os_diag.queue_send_recent_item_pointee_word1[idx],
+                os_diag.queue_send_recent_caller_ptr[idx],
                 os_diag.queue_send_recent_timer_callback_ptr[idx],
                 os_diag.queue_send_recent_timer_arg_ptr[idx],
             );
@@ -128,12 +157,45 @@ pub(super) fn log_boot_scan_only_core_counters(stage: &str) {
         let task_ptr = os_diag.queue_recv_sample_tasks[idx];
         if queue_ptr != 0 || task_ptr != 0 {
             println!(
-                "upload_http: boot_scan_only_diag wifi_os_diag_recv_sample after={} idx={} queue_ptr=0x{:x} task_ptr=0x{:x} task_role={}",
+                "upload_http: boot_scan_only_diag wifi_os_diag_recv_sample after={} idx={} queue_ptr=0x{:x} task_ptr=0x{:x} task_role={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x}",
                 stage,
                 idx,
                 queue_ptr,
                 task_ptr,
                 format_task_role(task_ptr),
+                os_diag.queue_recv_sample_item_word0[idx],
+                os_diag.queue_recv_sample_item_pointee_word0[idx],
+                os_diag.queue_recv_sample_item_pointee_word1[idx],
+            );
+        }
+    }
+    for idx in 0..os_diag.queue_recv_recent_ordinals.len() {
+        let ordinal = os_diag.queue_recv_recent_ordinals[idx];
+        let queue_ptr = os_diag.queue_recv_recent_queues[idx];
+        let task_ptr = os_diag.queue_recv_recent_tasks[idx];
+        if ordinal != 0 || queue_ptr != 0 || task_ptr != 0 {
+            println!(
+                "upload_http: boot_scan_only_diag wifi_os_diag_recv_recent after={} idx={} ordinal={} queue_ptr=0x{:x} task_ptr=0x{:x} task_role={} item_word0=0x{:08x} pointee_word0=0x{:08x} pointee_word1=0x{:08x} caller_ptr=0x{:x}",
+                stage,
+                idx,
+                ordinal,
+                queue_ptr,
+                task_ptr,
+                format_task_role(task_ptr),
+                os_diag.queue_recv_recent_item_word0[idx],
+                os_diag.queue_recv_recent_item_pointee_word0[idx],
+                os_diag.queue_recv_recent_item_pointee_word1[idx],
+                os_diag.queue_recv_recent_caller_ptr[idx],
+            );
+        }
+    }
+    for idx in 0..os_diag.wifi_log_recent_ordinals.len() {
+        let ordinal = os_diag.wifi_log_recent_ordinals[idx];
+        let caller_ptr = os_diag.wifi_log_recent_caller_ptr[idx];
+        if ordinal != 0 || caller_ptr != 0 {
+            println!(
+                "upload_http: boot_scan_only_diag wifi_log_recent after={} idx={} ordinal={} caller_ptr=0x{:x}",
+                stage, idx, ordinal, caller_ptr
             );
         }
     }

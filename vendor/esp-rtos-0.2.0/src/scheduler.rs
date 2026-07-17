@@ -382,6 +382,16 @@ impl SchedulerState {
 
     pub(crate) fn switch_task(&mut self, #[cfg(xtensa)] trap_frame: &mut CpuContext) {
         #[cfg(feature = "esp-radio")]
+        if crate::esp_radio::backend_legacy_port_runtime_enabled()
+            && crate::esp_radio::legacy_preempt_builtin_initialized()
+        {
+            crate::esp_radio::legacy_preempt_builtin_switch_task(
+                #[cfg(xtensa)]
+                trap_frame,
+            );
+            return;
+        }
+        #[cfg(feature = "esp-radio")]
         if crate::esp_radio::legacy_builtin_scheduler_runtime_mode_enabled() {
             crate::esp_radio::legacy_builtin_scheduler_switch_task(
                 #[cfg(xtensa)]

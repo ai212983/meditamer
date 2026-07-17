@@ -1,4 +1,4 @@
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 
 use super::super::super::{
     app_state::{
@@ -6,16 +6,14 @@ use super::super::super::{
         AppStateSnapshot, BaseMode, DayBackground, OverlayMode,
     },
     config::DIAG_CONTROL_EVENTS,
-    event_engine::{EngineTraceSample, EventEngine},
+    input::gpio36::Gpio36Mode,
     storage::transfer_buffers,
     touch::{
-        config::{TOUCH_CALIBRATION_WIZARD_ENABLED, TOUCH_INIT_RETRY_MS},
-        tasks::try_touch_init_with_logs,
+        config::{GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED, TOUCH_CALIBRATION_WIZARD_ENABLED},
         wizard::TouchCalibrationWizard,
     },
     types::{DisplayContext, TimeSyncState},
 };
-use super::super::FaceDownToggleState;
 #[cfg(feature = "graphics")]
 use crate::firmware::assets::runtime::clear_runtime_asset_caches;
 
@@ -29,31 +27,18 @@ pub(super) struct DisplayLoopState {
     pub(super) screen_initialized: bool,
     pub(super) pattern_nonce: u32,
     pub(super) first_visual_seed_pending: bool,
-    pub(super) face_down_toggle: FaceDownToggleState,
-    pub(super) imu_double_tap_ready: bool,
-    pub(super) imu_retry_at: Instant,
-    pub(super) event_engine: EventEngine,
-    pub(super) last_engine_trace: EngineTraceSample,
-    pub(super) last_detect_tap_src: u8,
-    pub(super) last_detect_int1: u8,
-    pub(super) trace_epoch: Instant,
-    pub(super) tap_trace_next_sample_at: Instant,
-    pub(super) tap_trace_aux_next_sample_at: Instant,
-    pub(super) tap_trace_power_good: i16,
     pub(super) backlight_cycle_start: Option<Instant>,
     pub(super) backlight_level: u8,
     pub(super) touch_ready: bool,
+    pub(super) touch_startup_settled: bool,
+    pub(super) runtime_ready_announced: bool,
     pub(super) touch_wizard: TouchCalibrationWizard,
-    pub(super) touch_retry_at: Instant,
-    pub(super) touch_next_sample_at: Instant,
     pub(super) touch_feedback_dirty: bool,
     pub(super) touch_feedback_next_flush_at: Instant,
     pub(super) touch_contact_active: bool,
     pub(super) touch_last_nonzero_at: Option<Instant>,
-    pub(super) touch_irq_pending: u8,
-    pub(super) touch_irq_burst_until: Instant,
-    pub(super) touch_idle_fallback_at: Instant,
-    pub(super) touch_wizard_trace_capture_until_ms: u64,
+    pub(super) gpio36_mode: Gpio36Mode,
+    pub(super) gpio36_ready_announced: bool,
 }
 
 impl DisplayLoopState {
@@ -65,7 +50,12 @@ impl DisplayLoopState {
         if let Some(control) = boot_result.diag_control() {
             DIAG_CONTROL_EVENTS.send(control).await;
         }
-        if TOUCH_CALIBRATION_WIZARD_ENABLED && !cfg!(feature = "wifi-debug-slim-app") {
+        if GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED {
+            let day_result = app_state.apply(AppStateCommand::SetBase(BaseMode::Day));
+            if let Some(control) = day_result.diag_control() {
+                DIAG_CONTROL_EVENTS.send(control).await;
+            }
+        } else if TOUCH_CALIBRATION_WIZARD_ENABLED && !cfg!(feature = "wifi-debug-slim-app") {
             let wizard_result = app_state.apply(AppStateCommand::SetBase(BaseMode::TouchWizard));
             if let Some(control) = wizard_result.diag_control() {
                 DIAG_CONTROL_EVENTS.send(control).await;
@@ -81,15 +71,8 @@ impl DisplayLoopState {
         }
         let snapshot = app_state.snapshot();
         publish_app_state_snapshot(snapshot);
-        let touch_ready = try_touch_init_with_logs(&mut context.inkplate, "boot");
-        let touch_wizard = TouchCalibrationWizard::new(
-            matches!(snapshot.base, BaseMode::TouchWizard) && touch_ready,
-        );
-        let touch_retry_at = if touch_ready {
-            now
-        } else {
-            now + Duration::from_millis(TOUCH_INIT_RETRY_MS)
-        };
+        let touch_ready = false;
+        let touch_wizard = TouchCalibrationWizard::new(false);
 
         Self {
             update_count: 0,
@@ -101,31 +84,22 @@ impl DisplayLoopState {
             screen_initialized: false,
             pattern_nonce: 0,
             first_visual_seed_pending: true,
-            face_down_toggle: FaceDownToggleState::new(),
-            imu_double_tap_ready: false,
-            imu_retry_at: now,
-            event_engine: EventEngine::default(),
-            last_engine_trace: EngineTraceSample::default(),
-            last_detect_tap_src: 0,
-            last_detect_int1: 0,
-            trace_epoch: now,
-            tap_trace_next_sample_at: now,
-            tap_trace_aux_next_sample_at: now,
-            tap_trace_power_good: -1,
             backlight_cycle_start: None,
             backlight_level: 0,
             touch_ready,
+            touch_startup_settled: false,
+            runtime_ready_announced: false,
             touch_wizard,
-            touch_retry_at,
-            touch_next_sample_at: now,
             touch_feedback_dirty: false,
             touch_feedback_next_flush_at: now,
             touch_contact_active: false,
             touch_last_nonzero_at: None,
-            touch_irq_pending: 0,
-            touch_irq_burst_until: now,
-            touch_idle_fallback_at: now,
-            touch_wizard_trace_capture_until_ms: 0,
+            gpio36_mode: if GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED {
+                Gpio36Mode::ButtonOnly
+            } else {
+                Gpio36Mode::SharedWithTouch
+            },
+            gpio36_ready_announced: false,
         }
     }
 
@@ -163,7 +137,7 @@ impl DisplayLoopState {
                 clear_runtime_asset_caches().await;
             }
             if !result.before.services.upload_enabled && result.after.services.upload_enabled {
-                let _ = context.inkplate.frontlight_off();
+                let _ = context.inkplate.frontlight_off().await;
             }
         }
 

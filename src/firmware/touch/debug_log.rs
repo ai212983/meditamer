@@ -1,6 +1,7 @@
 use core::fmt::Write;
 
 use super::super::types::SerialUart;
+use super::config::TOUCH_WIZARD_TRACE_ENABLED;
 
 use super::types::{
     TouchEvent, TouchEventKind, TouchSwipeDirection, TouchTraceSample, TouchWizardSessionEvent,
@@ -8,9 +9,9 @@ use super::types::{
 };
 
 // Keep wizard dump buffers small enough to preserve DRAM headroom for Wi-Fi init.
-const TOUCH_WIZARD_SESSION_CAPACITY: usize = 48;
-const TOUCH_WIZARD_EVENT_CAPACITY: usize = 64;
-const TOUCH_WIZARD_TOUCH_SAMPLE_CAPACITY: usize = 192;
+const TOUCH_WIZARD_SESSION_CAPACITY: usize = if TOUCH_WIZARD_TRACE_ENABLED { 48 } else { 1 };
+const TOUCH_WIZARD_EVENT_CAPACITY: usize = if TOUCH_WIZARD_TRACE_ENABLED { 64 } else { 1 };
+const TOUCH_WIZARD_TOUCH_SAMPLE_CAPACITY: usize = if TOUCH_WIZARD_TRACE_ENABLED { 192 } else { 1 };
 
 pub(crate) struct TouchWizardSessionLog {
     active: bool,
@@ -120,7 +121,7 @@ impl TouchWizardSessionLog {
         }
         let _ = uart_write_all(
             uart,
-            b"touch_event,ms,kind,x,y,start_x,start_y,duration_ms,count,move_count,max_travel_px,release_debounce_ms,dropout_count\r\n",
+            b"touch_event,ms,kind,x,y,contact_x,contact_y,start_x,start_y,duration_ms,count,move_count,max_travel_px,release_debounce_ms,dropout_count\r\n",
         )
         .await;
         for event in &self.events {
@@ -170,11 +171,13 @@ pub(crate) async fn write_touch_event_trace_sample(uart: &mut SerialUart, event:
     let mut line = heapless::String::<196>::new();
     let _ = write!(
         &mut line,
-        "touch_event,{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
+        "touch_event,{},{},{},{},{},{},{},{},{},{},{},{},{},{}\r\n",
         event.t_ms,
         touch_event_kind_label(event.kind),
         event.x,
         event.y,
+        event.contact_x,
+        event.contact_y,
         event.start_x,
         event.start_y,
         event.duration_ms,
@@ -211,10 +214,16 @@ pub(crate) async fn write_touch_trace_sample(uart: &mut SerialUart, sample: Touc
 }
 
 pub(crate) async fn uart_write_all(uart: &mut SerialUart, mut bytes: &[u8]) -> bool {
+    const TX_POLL_SLICE_BYTES: usize = 32;
+
     while !bytes.is_empty() {
-        match uart.write_async(bytes).await {
+        let slice_len = bytes.len().min(TX_POLL_SLICE_BYTES);
+        match uart.write_async(&bytes[..slice_len]).await {
             Ok(0) => return false,
-            Ok(written) => bytes = &bytes[written..],
+            Ok(written) => {
+                bytes = &bytes[written..];
+                embassy_futures::yield_now().await;
+            }
             Err(_) => return false,
         }
     }
