@@ -4,21 +4,24 @@ use sdcard::fat::{FatEngine, FatRequest, FatResult};
 
 use super::{
     build_temp_upload_path, copy_fat_path, ensure_upload_ready, map_fat_result_to_upload_code,
-    parse_upload_path, upload_result, SdProbeDriver, SdUploadResult, SdUploadResultCode,
-    SdUploadSession, SD_PATH_MAX, SD_UPLOAD_PATH_BUF_MAX,
+    parse_upload_path, upload_result, SdProbeDriver, SdUploadBegin, SdUploadResult,
+    SdUploadResultCode, SdUploadSession, SD_UPLOAD_PATH_BUF_MAX,
 };
 
 #[inline(never)]
 pub(super) async fn handle_begin(
-    path: [u8; SD_PATH_MAX],
-    path_len: u8,
-    expected_size: u32,
+    begin: SdUploadBegin,
     session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
     fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
+    let SdUploadBegin {
+        path,
+        path_len,
+        expected_size,
+    } = begin;
     telemetry::log_stack_headroom("sd_upload_begin_entry");
     if session.is_some() {
         return upload_result(false, SdUploadResultCode::Busy, 0);

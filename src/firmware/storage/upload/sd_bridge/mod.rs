@@ -210,7 +210,7 @@ async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<Sd
     }
 
     with_timeout(
-        Duration::from_millis(remaining_ms as u64),
+        Duration::from_millis(remaining_ms),
         SD_UPLOAD_RESULTS.receive(),
     )
     .await

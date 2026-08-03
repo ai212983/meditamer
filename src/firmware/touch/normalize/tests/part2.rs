@@ -41,6 +41,7 @@ fn single_contact_ignores_implausibly_large_slot_jump() {
 
     // Far candidate exceeds jump cap; keep stable candidate.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c1, p1) = n.normalize(
         8,

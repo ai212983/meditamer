@@ -1,4 +1,4 @@
-use crate::firmware::config::TIMESET_CMD_BUF_LEN;
+use crate::firmware::config::SERIAL_CMD_BUF_LEN;
 
 pub(super) enum LineReadEvent<'a> {
     None,
@@ -7,7 +7,7 @@ pub(super) enum LineReadEvent<'a> {
 }
 
 pub(super) struct SerialLineReader {
-    line_buf: [u8; TIMESET_CMD_BUF_LEN],
+    line_buf: [u8; SERIAL_CMD_BUF_LEN],
     line_len: usize,
     overflowed: bool,
 }
@@ -15,7 +15,7 @@ pub(super) struct SerialLineReader {
 impl SerialLineReader {
     pub(super) const fn new() -> Self {
         Self {
-            line_buf: [0; TIMESET_CMD_BUF_LEN],
+            line_buf: [0; SERIAL_CMD_BUF_LEN],
             line_len: 0,
             overflowed: false,
         }
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn emits_single_overflow_and_drops_until_newline() {
         let mut reader = SerialLineReader::new();
-        for _ in 0..crate::firmware::config::TIMESET_CMD_BUF_LEN {
+        for _ in 0..crate::firmware::config::SERIAL_CMD_BUF_LEN {
             assert!(matches!(reader.push_byte(b'x'), LineReadEvent::None));
         }
         assert!(matches!(reader.push_byte(b'y'), LineReadEvent::Overflow));

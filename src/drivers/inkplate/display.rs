@@ -1,11 +1,31 @@
 mod async_impl;
 
-use super::{LUTB, LUTW};
+use super::{
+    partial_transition::{
+        partial_transition_stats, prepare_partial_transition, reverse_scan_row_count_for_changes,
+        PartialTransitionStats,
+    },
+    FRAMEBUFFER_BYTES, LUTB, LUTW, PARTIAL_TRANSITION_BYTES,
+};
 
-fn partial_waveform_byte(previous: u8, current: u8, upper_nibble: bool) -> u8 {
-    let black_to_white = previous & !current;
-    let white_to_black = !previous & current;
-    let shift = if upper_nibble { 4 } else { 0 };
-    LUTW[((black_to_white >> shift) & 0x0F) as usize]
-        & LUTB[((white_to_black >> shift) & 0x0F) as usize]
+fn prepare_panel_partial_transition(
+    previous: &[u8; FRAMEBUFFER_BYTES],
+    current: &[u8; FRAMEBUFFER_BYTES],
+    transition: &mut [u8; PARTIAL_TRANSITION_BYTES],
+) {
+    prepare_partial_transition(previous, current, transition, &LUTW, &LUTB)
+}
+
+fn panel_partial_scan_rows(
+    previous: &[u8; FRAMEBUFFER_BYTES],
+    current: &[u8; FRAMEBUFFER_BYTES],
+) -> Option<usize> {
+    reverse_scan_row_count_for_changes(previous, current, super::E_INK_WIDTH / 8)
+}
+
+fn panel_partial_transition_stats(
+    previous: &[u8; FRAMEBUFFER_BYTES],
+    current: &[u8; FRAMEBUFFER_BYTES],
+) -> PartialTransitionStats {
+    partial_transition_stats(previous, current)
 }

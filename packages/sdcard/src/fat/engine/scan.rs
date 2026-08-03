@@ -226,6 +226,7 @@ impl FatEngine {
             } else {
                 None
             };
+            let mut found = None;
             match process_directory_slot(
                 &mut self.scan.directory,
                 &self.workspace.sector,
@@ -233,9 +234,10 @@ impl FatEngine {
                 slot as u8,
                 target,
                 self.scan.needed_free_slots,
+                &mut found,
             ) {
-                DirectorySlotOutcome::Found(found) => {
-                    self.scan.result = Some(found);
+                DirectorySlotOutcome::Found => {
+                    self.scan.result = found;
                     return self.after_scan();
                 }
                 DirectorySlotOutcome::EarlyReturnFree => return self.after_scan(),

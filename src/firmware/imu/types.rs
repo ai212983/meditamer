@@ -57,5 +57,4 @@ impl Default for ImuTraceContext {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ImuActionSnapshot {
     pub(crate) backlight_trigger: bool,
-    pub(crate) day_background_toggle_count: u32,
 }

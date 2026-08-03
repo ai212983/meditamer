@@ -1,5 +1,6 @@
 mod elan;
 mod power;
+mod protocol;
 
 use super::{I2cOps, InkplateHalError, Result};
 

@@ -1,26 +1,30 @@
 use core::fmt::Write;
 
+#[cfg(feature = "asset-upload-http")]
+use super::io::{run_netcfg_get_command, run_netcfg_set_command};
 use super::{
     commands::{
         app_state_command_for_serial, serial_command_event_and_responses, SchedulerOperation,
         SerialCommand,
     },
     io::{
-        drain_app_state_apply_acks, run_allocator_alloc_probe, run_netcfg_get_command,
-        run_netcfg_set_command, run_sdwait_command, wait_app_state_apply_ack,
-        write_allocator_status_line, write_diag_status_line, write_sd_request_queued,
-        write_state_status_line,
+        drain_app_state_apply_acks, run_allocator_alloc_probe, run_sdwait_command,
+        wait_app_state_apply_ack, write_allocator_status_line, write_diag_status_line,
+        write_sd_request_queued, write_state_status_line,
     },
     metrics,
     queue::{enqueue_app_event_with_retry, enqueue_sd_request_with_retry},
     task_state::SerialTaskState,
 };
 use crate::firmware::{
-    config::{APP_STATE_APPLY_ACK_TIMEOUT_MS, NET_CONTROL_COMMANDS},
-    runtime::service_mode,
-    storage::upload::wifi,
+    config::APP_STATE_APPLY_ACK_TIMEOUT_MS,
     touch::debug_log::uart_write_all,
-    types::{AppEvent, NetControlCommand, SdCommand, SdRequest, SerialUart},
+    types::{AppEvent, SdCommand, SdRequest, SerialUart},
+};
+#[cfg(feature = "asset-upload-http")]
+use crate::firmware::{
+    config::NET_CONTROL_COMMANDS, runtime::service_mode, storage::upload::wifi,
+    types::NetControlCommand,
 };
 
 pub(super) async fn handle_serial_command(
@@ -29,10 +33,49 @@ pub(super) async fn handle_serial_command(
     cmd: SerialCommand,
 ) {
     match cmd {
-        #[cfg(not(feature = "wifi-debug-slim-app"))]
-        SerialCommand::TouchWizardDump => {
-            state.write_touch_wizard_dump(uart).await;
+        SerialCommand::Ping
+        | SerialCommand::Metrics
+        | SerialCommand::TouchSchedReset
+        | SerialCommand::Scheduler { .. }
+        | SerialCommand::MetricsNet
+        | SerialCommand::TelemetryStatus
+        | SerialCommand::TelemetrySet { .. }
+        | SerialCommand::AllocatorStatus
+        | SerialCommand::AllocatorAllocProbe { .. }
+        | SerialCommand::SdWait { .. }
+        | SerialCommand::DiagGet
+        | SerialCommand::StateGet => {
+            handle_local_command(uart, state, cmd).await;
         }
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::StateSet { .. }
+        | SerialCommand::StateDiag { .. }
+        | SerialCommand::NetStart
+        | SerialCommand::NetStop => {
+            run_app_state_set_command(uart, state, cmd).await;
+        }
+        #[cfg(not(feature = "asset-upload-http"))]
+        SerialCommand::StateSet { .. } | SerialCommand::StateDiag { .. } => {
+            run_app_state_set_command(uart, state, cmd).await;
+        }
+        #[cfg(feature = "asset-upload-http")]
+        SerialCommand::NetCfgSet { .. }
+        | SerialCommand::NetCfgGet
+        | SerialCommand::NetStatus
+        | SerialCommand::NetListenerSet { .. }
+        | SerialCommand::NetRecover => {
+            handle_network_command(uart, cmd).await;
+        }
+        queued_command => dispatch_queued_command(uart, state, queued_command).await,
+    }
+}
+
+async fn handle_local_command(
+    uart: &mut SerialUart,
+    state: &mut SerialTaskState,
+    cmd: SerialCommand,
+) {
+    match cmd {
         SerialCommand::Ping => {
             let _ = uart_write_all(uart, b"PONG\r\n").await;
         }
@@ -93,17 +136,6 @@ pub(super) async fn handle_serial_command(
         SerialCommand::StateGet => {
             write_state_status_line(uart).await;
         }
-        #[cfg(feature = "asset-upload-http")]
-        SerialCommand::StateSet { .. }
-        | SerialCommand::StateDiag { .. }
-        | SerialCommand::NetStart
-        | SerialCommand::NetStop => {
-            run_app_state_set_command(uart, state, cmd).await;
-        }
-        #[cfg(not(feature = "asset-upload-http"))]
-        SerialCommand::StateSet { .. } | SerialCommand::StateDiag { .. } => {
-            run_app_state_set_command(uart, state, cmd).await;
-        }
         SerialCommand::AllocatorAllocProbe { bytes } => {
             run_allocator_alloc_probe(uart, bytes as usize).await;
         }
@@ -118,6 +150,13 @@ pub(super) async fn handle_serial_command(
             )
             .await;
         }
+        _ => unreachable!("local serial command must map to local dispatch"),
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+async fn handle_network_command(uart: &mut SerialUart, cmd: SerialCommand) {
+    match cmd {
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetCfgSet { config } => {
             run_netcfg_set_command(uart, config).await;
@@ -160,27 +199,7 @@ pub(super) async fn handle_serial_command(
         }
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetListenerSet { enabled } => {
-            let previous_enabled = service_mode::upload_http_listener_enabled();
-            let seq_before = service_mode::upload_http_listener_set_seq();
-            service_mode::set_upload_http_listener_enabled(enabled);
-            let seq_after = service_mode::upload_http_listener_set_seq();
-            if crate::firmware::telemetry::diag_enabled(crate::firmware::telemetry::DIAG_DOMAIN_NET)
-            {
-                esp_println::println!(
-                    "upload_http: listener_control cmd={} prev_enabled={} next_enabled={} seq_before={} seq_after={}",
-                    if enabled { "on" } else { "off" },
-                    previous_enabled,
-                    enabled,
-                    seq_before,
-                    seq_after,
-                );
-            }
-            let response = if enabled {
-                b"NET OK op=listener_on\r\n".as_slice()
-            } else {
-                b"NET OK op=listener_off\r\n".as_slice()
-            };
-            let _ = uart.write_async(response).await;
+            run_net_listener_set_command(uart, enabled).await;
         }
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetRecover => {
@@ -194,34 +213,64 @@ pub(super) async fn handle_serial_command(
                 let _ = uart_write_all(uart, b"NET ERR reason=busy\r\n").await;
             }
         }
-        _ => {
-            let (app_event, sd_command, ok_response, busy_response) =
-                serial_command_event_and_responses(cmd);
-            let mut sd_request_meta: Option<(u32, SdCommand)> = None;
-            let queued = if let Some(event) = app_event {
-                enqueue_app_event_with_retry(event).await
-            } else if let Some(command) = sd_command {
-                let request_id = state.next_sd_request_id();
-                let request = SdRequest {
-                    id: request_id,
-                    command,
-                };
-                sd_request_meta = Some((request_id, command));
-                enqueue_sd_request_with_retry(request).await
-            } else {
-                unreachable!("serial command must map to app or sd dispatch");
-            };
+        _ => unreachable!("network serial command must map to network dispatch"),
+    }
+}
 
-            if queued {
-                let _ = uart.write_async(ok_response).await;
-                if let Some((request_id, command)) = sd_request_meta {
-                    state.set_last_sd_request_id(request_id);
-                    write_sd_request_queued(uart, request_id, command).await;
-                }
-            } else {
-                let _ = uart.write_async(busy_response).await;
-            }
+#[cfg(feature = "asset-upload-http")]
+async fn run_net_listener_set_command(uart: &mut SerialUart, enabled: bool) {
+    let previous_enabled = service_mode::upload_http_listener_enabled();
+    let seq_before = service_mode::upload_http_listener_set_seq();
+    service_mode::set_upload_http_listener_enabled(enabled);
+    let seq_after = service_mode::upload_http_listener_set_seq();
+    if crate::firmware::telemetry::diag_enabled(crate::firmware::telemetry::DIAG_DOMAIN_NET) {
+        esp_println::println!(
+            "upload_http: listener_control cmd={} prev_enabled={} next_enabled={} seq_before={} seq_after={}",
+            if enabled { "on" } else { "off" },
+            previous_enabled,
+            enabled,
+            seq_before,
+            seq_after,
+        );
+    }
+    let response = if enabled {
+        b"NET OK op=listener_on\r\n".as_slice()
+    } else {
+        b"NET OK op=listener_off\r\n".as_slice()
+    };
+    let _ = uart.write_async(response).await;
+}
+
+async fn dispatch_queued_command(
+    uart: &mut SerialUart,
+    state: &mut SerialTaskState,
+    cmd: SerialCommand,
+) {
+    let (app_event, sd_command, ok_response, busy_response) =
+        serial_command_event_and_responses(cmd);
+    let mut sd_request_meta: Option<(u32, SdCommand)> = None;
+    let queued = if let Some(event) = app_event {
+        enqueue_app_event_with_retry(event).await
+    } else if let Some(command) = sd_command {
+        let request_id = state.next_sd_request_id();
+        let request = SdRequest {
+            id: request_id,
+            command,
+        };
+        sd_request_meta = Some((request_id, command));
+        enqueue_sd_request_with_retry(request).await
+    } else {
+        unreachable!("serial command must map to app or sd dispatch");
+    };
+
+    if queued {
+        let _ = uart.write_async(ok_response).await;
+        if let Some((request_id, command)) = sd_request_meta {
+            state.set_last_sd_request_id(request_id);
+            write_sd_request_queued(uart, request_id, command).await;
         }
+    } else {
+        let _ = uart.write_async(busy_response).await;
     }
 }
 
@@ -264,9 +313,9 @@ struct AppStateSetResponses {
     invalid_transition: &'static [u8],
 }
 
-fn app_state_set_responses(cmd: SerialCommand) -> AppStateSetResponses {
+fn app_state_set_responses(_cmd: SerialCommand) -> AppStateSetResponses {
     #[cfg(feature = "asset-upload-http")]
-    if matches!(cmd, SerialCommand::NetStart) {
+    if matches!(_cmd, SerialCommand::NetStart) {
         return AppStateSetResponses {
             ok: b"NET OK op=start\r\n",
             busy: b"NET ERR reason=busy\r\n",
@@ -276,7 +325,7 @@ fn app_state_set_responses(cmd: SerialCommand) -> AppStateSetResponses {
     }
 
     #[cfg(feature = "asset-upload-http")]
-    if matches!(cmd, SerialCommand::NetStop) {
+    if matches!(_cmd, SerialCommand::NetStop) {
         return AppStateSetResponses {
             ok: b"NET OK op=stop\r\n",
             busy: b"NET ERR reason=busy\r\n",

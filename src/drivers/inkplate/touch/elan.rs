@@ -1,3 +1,4 @@
+use super::protocol;
 use super::*;
 use crate::drivers::inkplate::{
     TouchInitStatus, TouchPoint, TouchSample, E_INK_HEIGHT, E_INK_WIDTH, TOUCHSCREEN_ADDR,
@@ -104,51 +105,31 @@ where
         Ok(raw)
     }
 
-    pub async fn read_sample(&mut self, rotation: u8) -> Result<TouchSample, I2C::Error> {
+    async fn ensure_resolution(&mut self) -> Result<(), I2C::Error> {
         if self.touch_x_res == 0 || self.touch_y_res == 0 {
             let (x_res, y_res) = self.read_resolution().await?;
             self.touch_x_res = x_res;
             self.touch_y_res = y_res;
         }
+        Ok(())
+    }
+
+    pub async fn read_sample(&mut self, rotation: u8) -> Result<TouchSample, I2C::Error> {
+        self.ensure_resolution().await?;
         let mut raw = self.read_raw_data().await?;
         for _ in 0..RAW_EMPTY_RETRY_COUNT {
-            if raw_frame_has_contact(&raw, self.touch_x_res, self.touch_y_res) {
+            if raw_frame_is_touch_report(&raw) {
                 break;
             }
             embassy_time::Timer::after_millis(RAW_EMPTY_RETRY_DELAY_MS).await;
             raw = self.read_raw_data().await?;
         }
-        let bit_count = (raw[7].count_ones() as u8).min(2);
-        let mut raw_points = [(0u16, 0u16); 2];
-        for (idx, slot) in raw_points.iter_mut().enumerate() {
-            let decoded = decode_xy(&raw, idx);
-            *slot = if raw_point_plausible(decoded.0, decoded.1, self.touch_x_res, self.touch_y_res)
-            {
-                decoded
-            } else {
-                (0, 0)
-            };
-        }
-        if raw_points[0] == (0, 0) && raw_points[1] != (0, 0) {
-            raw_points.swap(0, 1);
-        }
-        let coord_count = raw_points
-            .iter()
-            .filter(|(x, y)| *x != 0 || *y != 0)
-            .count() as u8;
-        let touch_count = bit_count.max(coord_count).min(2);
-        let points = raw_points.map(|(x, y)| {
-            if x == 0 && y == 0 {
-                TouchPoint::default()
-            } else {
-                transform_point(x, y, rotation, self.touch_x_res, self.touch_y_res)
-            }
-        });
-        Ok(TouchSample {
-            touch_count,
-            points,
+        Ok(decode_sample(
             raw,
-        })
+            rotation,
+            self.touch_x_res,
+            self.touch_y_res,
+        ))
     }
 }
 
@@ -162,15 +143,43 @@ pub(super) fn decode_xy(raw: &[u8; 8], index: usize) -> (u16, u16) {
 }
 
 pub(super) fn raw_point_plausible(x: u16, y: u16, x_res: u16, y_res: u16) -> bool {
-    x != 0 && y != 0 && x_res != 0 && y_res != 0 && x <= x_res && y <= y_res
+    x_res != 0 && y_res != 0 && x <= x_res && y <= y_res
 }
 
-pub(super) fn raw_frame_has_contact(raw: &[u8; 8], x_res: u16, y_res: u16) -> bool {
-    raw[7].count_ones() > 0
-        || (0..2).any(|idx| {
-            let (x, y) = decode_xy(raw, idx);
-            raw_point_plausible(x, y, x_res, y_res)
-        })
+pub(super) const fn raw_frame_is_touch_report(raw: &[u8; 8]) -> bool {
+    protocol::is_touch_report(raw)
+}
+
+pub(super) fn decode_sample(raw: [u8; 8], rotation: u8, x_res: u16, y_res: u16) -> TouchSample {
+    if !raw_frame_is_touch_report(&raw) {
+        return TouchSample {
+            touch_count: 0,
+            points: [TouchPoint::default(); 2],
+            raw,
+        };
+    }
+
+    // ELAN's two-finger 0x5A report uses the low two status bits as the
+    // authoritative active-slot mask. Coordinate bytes are retained after a
+    // slot is released, so they must never create or extend contact presence.
+    let active_mask = protocol::active_slots(&raw);
+    let touch_count = active_mask.count_ones() as u8;
+    let mut points = [TouchPoint::default(); 2];
+    for (idx, point) in points.iter_mut().enumerate() {
+        if active_mask & (1 << idx) == 0 {
+            continue;
+        }
+        let (x, y) = decode_xy(&raw, idx);
+        if raw_point_plausible(x, y, x_res, y_res) {
+            *point = transform_point(x, y, rotation, x_res, y_res);
+        }
+    }
+
+    TouchSample {
+        touch_count,
+        points,
+        raw,
+    }
 }
 
 fn scale_axis(raw: u16, panel_extent: usize, controller_extent: u16) -> u16 {

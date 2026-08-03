@@ -22,7 +22,7 @@ Default is `release` when no argument is provided.
 Recommended explicit wrapper invocation:
 
 ```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/device/flash.sh debug
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh debug
 ```
 
 `hostctl flash-capture` defaults:
@@ -34,12 +34,11 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 FLASH_SET_TIME_AFTER_FLASH=0 scripts/device/
 
 Optional flash env vars consumed by the workflow:
 
-- `ESPFLASH_BAUD` (default `460800` for full flash)
+- `ESPFLASH_BAUD` (default `115200` for full flash)
 - `ESPFLASH_FALLBACK_BAUD` (default `115200` for app-only fallback)
 - `FLASH_TIMEOUT_SEC` (default `360`)
 - `ESPFLASH_ENABLE_FALLBACK` (`1` default; app-only fallback via ESP-IDF `esptool.py`)
 - `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default)
-- `FLASH_SET_TIME_AFTER_FLASH` (`1` default; set `0` to skip automatic `TIMESET`)
 - `HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS` (default `8000`)
 - `HOSTCTL_FLASH_CAPTURE_LOG_PATH` (optional artifact directory override for `scripts/device/flash.sh`)
 

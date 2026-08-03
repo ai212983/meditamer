@@ -151,22 +151,18 @@ fn log_commit_metrics(
         active.write_metrics_start,
         sd_probe.write_metrics_snapshot(),
     );
-    let cmd25_success_burst_ms_avg = if write_metrics_delta.cmd25_success_bursts == 0 {
-        0
-    } else {
-        write_metrics_delta.cmd25_success_burst_ms_total / write_metrics_delta.cmd25_success_bursts
-    };
-    let cmd25_ready_wait_ms_avg = if write_metrics_delta.cmd25_ready_wait_count == 0 {
-        0
-    } else {
-        write_metrics_delta.cmd25_ready_wait_ms_total / write_metrics_delta.cmd25_ready_wait_count
-    };
-    let cmd25_ready_wait_polls_avg = if write_metrics_delta.cmd25_ready_wait_count == 0 {
-        0
-    } else {
-        write_metrics_delta.cmd25_ready_wait_polls_total
-            / write_metrics_delta.cmd25_ready_wait_count
-    };
+    let cmd25_success_burst_ms_avg = write_metrics_delta
+        .cmd25_success_burst_ms_total
+        .checked_div(write_metrics_delta.cmd25_success_bursts)
+        .unwrap_or(0);
+    let cmd25_ready_wait_ms_avg = write_metrics_delta
+        .cmd25_ready_wait_ms_total
+        .checked_div(write_metrics_delta.cmd25_ready_wait_count)
+        .unwrap_or(0);
+    let cmd25_ready_wait_polls_avg = write_metrics_delta
+        .cmd25_ready_wait_polls_total
+        .checked_div(write_metrics_delta.cmd25_ready_wait_count)
+        .unwrap_or(0);
     let chunk_total_ms_avg = div_or_zero(
         active.chunk_timing.chunk_total_ms_total,
         active.chunk_timing.chunk_count,

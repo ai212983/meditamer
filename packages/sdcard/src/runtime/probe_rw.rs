@@ -20,164 +20,179 @@ where
         return SdRuntimeResultCode::PowerOnFailed;
     }
 
-    let result = sd_probe.probe().await;
-    let code = if result.is_ok() {
-        SdRuntimeResultCode::Ok
-    } else {
-        SdRuntimeResultCode::OperationFailed
-    };
-
-    match result {
+    let code = match sd_probe.probe().await {
         Ok(status) => {
-            let version = match status.version {
-                probe::SdCardVersion::V1 => "v1.x",
-                probe::SdCardVersion::V2 => "v2+",
-            };
-            let capacity = if status.high_capacity {
-                "sdhc_or_sdxc"
-            } else {
-                "sdsc"
-            };
-            let filesystem = match status.filesystem {
-                probe::SdFilesystem::ExFat => "exfat",
-                probe::SdFilesystem::Fat32 => "fat32",
-                probe::SdFilesystem::Fat16 => "fat16",
-                probe::SdFilesystem::Fat12 => "fat12",
-                probe::SdFilesystem::Ntfs => "ntfs",
-                probe::SdFilesystem::Unknown => "unknown",
-            };
-            let gib_x100 = status
-                .capacity_bytes
-                .saturating_mul(100)
-                .saturating_div(1024 * 1024 * 1024);
-            let gib_int = gib_x100 / 100;
-            let gib_frac = gib_x100 % 100;
-            esp_println::println!(
-                "sdprobe[{}]: card_detected version={} capacity={} fs={} bytes={} size_gib={}.{:02}",
-                reason,
-                version,
-                capacity,
-                filesystem,
-                status.capacity_bytes,
-                gib_int,
-                gib_frac
-            );
+            log_probe_status(reason, status);
+            SdRuntimeResultCode::Ok
         }
         Err(err) => {
             sd_probe.recover_after_timeout();
-            match err {
-            probe::SdProbeError::Spi(spi_err) => {
-                esp_println::println!("sdprobe[{}]: not_detected spi_error={:?}", reason, spi_err);
-            }
-            probe::SdProbeError::SpiConfig(cfg_err) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected spi_config_error={:?}",
-                    reason,
-                    cfg_err
-                );
-            }
-            probe::SdProbeError::Cmd0Failed(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd0_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd8Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd8_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd8EchoMismatch(r7) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd8_echo={:02x}{:02x}{:02x}{:02x}",
-                    reason,
-                    r7[0],
-                    r7[1],
-                    r7[2],
-                    r7[3]
-                );
-            }
-            probe::SdProbeError::Acmd41Timeout(r1) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected acmd41_last_r1=0x{:02x}",
-                    reason,
-                    r1
-                );
-            }
-            probe::SdProbeError::Cmd58Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd58_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd9Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd9_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd16Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd16_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd17Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd17_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd24Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd24_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd25Unexpected(r1) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd25_r1=0x{:02x}", reason, r1);
-            }
-            probe::SdProbeError::Cmd13Unexpected(r1, status) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd13_r1=0x{:02x} status=0x{:02x}",
-                    reason,
-                    r1,
-                    status
-                );
-            }
-            probe::SdProbeError::NoResponse(cmd) => {
-                esp_println::println!("sdprobe[{}]: not_detected cmd{}_no_response", reason, cmd);
-            }
-            probe::SdProbeError::DataTokenTimeout(cmd) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd{}_data_token_timeout",
-                    reason,
-                    cmd
-                );
-            }
-            probe::SdProbeError::DataTokenUnexpected(cmd, token) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected cmd{}_data_token=0x{:02x}",
-                    reason,
-                    cmd,
-                    token
-                );
-            }
-            probe::SdProbeError::WriteDataRejected(response) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected write_response=0x{:02x}",
-                    reason,
-                    response
-                );
-            }
-            probe::SdProbeError::DmaTransferTimeout => {
-                esp_println::println!("sdprobe[{}]: not_detected dma_transfer_timeout", reason);
-            }
-            probe::SdProbeError::WriteBusyTimeout { elapsed_ms, polls } => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected write_busy_timeout elapsed_ms={} polls={}",
-                    reason,
-                    elapsed_ms,
-                    polls
-                );
-            }
-            probe::SdProbeError::WriteLengthInvalid(len) => {
-                esp_println::println!(
-                    "sdprobe[{}]: not_detected write_len_invalid={}",
-                    reason,
-                    len
-                );
-            }
-            probe::SdProbeError::NotInitialized => {
-                esp_println::println!("sdprobe[{}]: not_detected not_initialized", reason);
-            }
-            probe::SdProbeError::CapacityDecodeFailed => {
-                esp_println::println!("sdprobe[{}]: not_detected capacity_decode_failed", reason);
-            }
-            }
+            log_probe_error(reason, err);
+            SdRuntimeResultCode::OperationFailed
+        }
+    };
+
+    finish_probe_power_cycle(reason, power, power_mode, code)
+}
+
+fn log_probe_status(reason: &str, status: probe::SdProbeStatus) {
+    let version = match status.version {
+        probe::SdCardVersion::V1 => "v1.x",
+        probe::SdCardVersion::V2 => "v2+",
+    };
+    let capacity = if status.high_capacity {
+        "sdhc_or_sdxc"
+    } else {
+        "sdsc"
+    };
+    let filesystem = match status.filesystem {
+        probe::SdFilesystem::ExFat => "exfat",
+        probe::SdFilesystem::Fat32 => "fat32",
+        probe::SdFilesystem::Fat16 => "fat16",
+        probe::SdFilesystem::Fat12 => "fat12",
+        probe::SdFilesystem::Ntfs => "ntfs",
+        probe::SdFilesystem::Unknown => "unknown",
+    };
+    let gib_x100 = status
+        .capacity_bytes
+        .saturating_mul(100)
+        .saturating_div(1024 * 1024 * 1024);
+    let gib_int = gib_x100 / 100;
+    let gib_frac = gib_x100 % 100;
+    esp_println::println!(
+        "sdprobe[{}]: card_detected version={} capacity={} fs={} bytes={} size_gib={}.{:02}",
+        reason,
+        version,
+        capacity,
+        filesystem,
+        status.capacity_bytes,
+        gib_int,
+        gib_frac
+    );
+}
+
+fn log_probe_error(reason: &str, err: probe::SdProbeError) {
+    match err {
+        probe::SdProbeError::Spi(spi_err) => {
+            esp_println::println!("sdprobe[{}]: not_detected spi_error={:?}", reason, spi_err);
+        }
+        probe::SdProbeError::SpiConfig(cfg_err) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected spi_config_error={:?}",
+                reason,
+                cfg_err
+            );
+        }
+        probe::SdProbeError::Cmd0Failed(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd0_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd8Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd8_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd8EchoMismatch(r7) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected cmd8_echo={:02x}{:02x}{:02x}{:02x}",
+                reason,
+                r7[0],
+                r7[1],
+                r7[2],
+                r7[3]
+            );
+        }
+        probe::SdProbeError::Acmd41Timeout(r1) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected acmd41_last_r1=0x{:02x}",
+                reason,
+                r1
+            );
+        }
+        probe::SdProbeError::Cmd58Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd58_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd9Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd9_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd16Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd16_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd17Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd17_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd24Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd24_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd25Unexpected(r1) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd25_r1=0x{:02x}", reason, r1);
+        }
+        probe::SdProbeError::Cmd13Unexpected(r1, status) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected cmd13_r1=0x{:02x} status=0x{:02x}",
+                reason,
+                r1,
+                status
+            );
+        }
+        probe::SdProbeError::NoResponse(cmd) => {
+            esp_println::println!("sdprobe[{}]: not_detected cmd{}_no_response", reason, cmd);
+        }
+        probe::SdProbeError::DataTokenTimeout(cmd) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected cmd{}_data_token_timeout",
+                reason,
+                cmd
+            );
+        }
+        probe::SdProbeError::DataTokenUnexpected(cmd, token) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected cmd{}_data_token=0x{:02x}",
+                reason,
+                cmd,
+                token
+            );
+        }
+        probe::SdProbeError::WriteDataRejected(response) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected write_response=0x{:02x}",
+                reason,
+                response
+            );
+        }
+        probe::SdProbeError::DmaTransferTimeout => {
+            esp_println::println!("sdprobe[{}]: not_detected dma_transfer_timeout", reason);
+        }
+        probe::SdProbeError::WriteBusyTimeout { elapsed_ms, polls } => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected write_busy_timeout elapsed_ms={} polls={}",
+                reason,
+                elapsed_ms,
+                polls
+            );
+        }
+        probe::SdProbeError::WriteLengthInvalid(len) => {
+            esp_println::println!(
+                "sdprobe[{}]: not_detected write_len_invalid={}",
+                reason,
+                len
+            );
+        }
+        probe::SdProbeError::NotInitialized => {
+            esp_println::println!("sdprobe[{}]: not_detected not_initialized", reason);
+        }
+        probe::SdProbeError::CapacityDecodeFailed => {
+            esp_println::println!("sdprobe[{}]: not_detected capacity_decode_failed", reason);
         }
     }
+}
 
+fn finish_probe_power_cycle<E, P>(
+    reason: &str,
+    power: &mut P,
+    power_mode: SdPowerMode,
+    code: SdRuntimeResultCode,
+) -> SdRuntimeResultCode
+where
+    P: FnMut(SdPowerAction) -> Result<(), E>,
+{
     if power_off_io(power, power_mode).is_err() {
         esp_println::println!("sdprobe[{}]: power_off_error", reason);
         return SdRuntimeResultCode::PowerOffFailed;

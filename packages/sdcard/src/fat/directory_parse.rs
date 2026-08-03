@@ -1,7 +1,7 @@
 #[derive(Clone, Copy)]
 enum DirectorySlotOutcome {
     Continue,
-    Found(DirFound),
+    Found,
     EarlyReturnFree,
 }
 
@@ -32,6 +32,7 @@ fn process_directory_slot(
     slot: u8,
     target_name: Option<&PathSegment>,
     needed_free_slots: usize,
+    found: &mut Option<DirFound>,
 ) -> DirectorySlotOutcome {
     let base = slot as usize * DIR_ENTRY_SIZE;
     let first = sector[base];
@@ -71,7 +72,7 @@ fn process_directory_slot(
         return DirectorySlotOutcome::Continue;
     }
 
-    let found = target_name.and_then(|target| {
+    *found = target_name.and_then(|target| {
         let record = parse_record(sector, base, &state.lfn);
         if !segment_matches_record(target, &record) {
             return None;
@@ -91,7 +92,7 @@ fn process_directory_slot(
     state.lfn.clear();
     state.free_run_len = 0;
     match found {
-        Some(found) => DirectorySlotOutcome::Found(found),
+        Some(_) => DirectorySlotOutcome::Found,
         None => DirectorySlotOutcome::Continue,
     }
 }

@@ -200,7 +200,7 @@ Notes:
   `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
 - outcome:
   - chose a dedicated vendored subtree under:
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/true_old_stack/`
+    `vendor/esp-radio-0.17.0/src/wifi/true_old_stack/`
   - added isolated old-stack modules for:
     - `install.rs`
     - `init.rs`
@@ -243,9 +243,9 @@ Notes:
   `CARGO_FEATURES=wifi-debug-slim-app scripts/build/build.sh debug`
 - outcome:
   - established the minimal true-old-stack backend surface in
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/true_old_stack/mod.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/true_old_stack/mod.rs`
   - exposed compile-time backend entrypoints from
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/mod.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/mod.rs`
     for:
     - `wifi_new`
     - `start`
@@ -382,10 +382,10 @@ Notes:
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+  `logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
 - outcome:
   - switched the active `backend_legacy_port` entrypoints in
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/mod.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/mod.rs`
     to the isolated `true_old_stack/` subtree for:
     - `wifi_new`
     - `start`
@@ -414,7 +414,7 @@ Notes:
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+  `logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
 - outcome:
   - active backend remained `backend-legacy-port`
   - init completed:
@@ -451,7 +451,7 @@ Notes:
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
+  `logs/hostctl_flashcapture_true_old_stack_20260316_094819/capture.log`
 - outcome:
   - stop condition reached
   - even the isolated true old-stack backend does not restore discovery on the

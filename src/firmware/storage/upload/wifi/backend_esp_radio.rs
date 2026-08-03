@@ -1,10 +1,17 @@
 extern crate alloc;
 
-use esp_hal::time::Duration;
+use core::sync::atomic::{AtomicBool, Ordering};
 use esp_radio::wifi::{
-    scan::ScanTypeConfig,
     sta::{ScanMethod, StationConfig},
     AuthenticationMethod, Config, DisconnectReason, Interface, PowerSaveMode, Protocols,
+};
+
+#[path = "backend_esp_radio/scan_config.rs"]
+mod scan_config;
+
+pub(crate) use scan_config::{
+    wifi_active_scan_config, wifi_channel_active_scan_config, wifi_directed_active_scan_config,
+    wifi_passive_scan_config, wifi_raw_broad_scan_config,
 };
 
 pub(crate) use esp_radio::wifi::{
@@ -15,6 +22,12 @@ pub(crate) type WifiDriverConfig = ControllerConfig;
 pub(crate) type WifiDevice = Interface;
 pub(crate) type AuthMethod = AuthenticationMethod;
 pub(crate) type ModeConfig = Config;
+
+// `WifiController::new` starts the configured interface, but esp-radio 1.0 beta
+// does not expose its internal Started/Stopped state. Keep the state at this
+// adapter boundary so the recovery machine can make truthful start/stop
+// decisions after using the raw lifecycle calls below.
+static WIFI_STARTED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn backend_name() -> &'static str {
     "esp-radio-1.0"
@@ -39,8 +52,12 @@ pub(crate) fn initialize_runtime_sta(
 ) -> Result<(WifiController<'static>, WifiDevice), &'static str> {
     let sta = Interface::station();
     match WifiController::new(wifi, wifi_runtime_config(country_us_override)) {
-        Ok(controller) => Ok((controller, sta)),
+        Ok(controller) => {
+            WIFI_STARTED.store(true, Ordering::Release);
+            Ok((controller, sta))
+        }
         Err(err) => {
+            WIFI_STARTED.store(false, Ordering::Release);
             esp_println::println!("asset-upload-http: wifi init err={:?}", err);
             Err("asset-upload-http: wifi init failed")
         }
@@ -65,7 +82,7 @@ pub(crate) fn wifi_set_mode(
 }
 
 pub(crate) fn wifi_is_started(_controller: &WifiController<'_>) -> Result<bool, WifiError> {
-    Ok(true)
+    Ok(WIFI_STARTED.load(Ordering::Acquire))
 }
 
 pub(crate) fn wifi_is_connected(controller: &WifiController<'_>) -> bool {
@@ -140,47 +157,6 @@ pub(crate) fn wifi_client_mode_config(
     ModeConfig::Station(station)
 }
 
-pub(crate) fn wifi_active_scan_config(max_results: usize, min_ms: u64, max_ms: u64) -> ScanConfig {
-    ScanConfig::default()
-        .with_show_hidden(true)
-        .with_max(max_results)
-        .with_scan_type(ScanTypeConfig::Active {
-            min: Duration::from_millis(min_ms),
-            max: Duration::from_millis(max_ms),
-        })
-}
-
-pub(crate) fn wifi_directed_active_scan_config(
-    ssid: &str,
-    max_results: usize,
-    min_ms: u64,
-    max_ms: u64,
-) -> ScanConfig {
-    wifi_active_scan_config(max_results, min_ms, max_ms).with_ssid(ssid)
-}
-
-pub(crate) fn wifi_channel_active_scan_config(
-    channel: u8,
-    max_results: usize,
-    min_ms: u64,
-    max_ms: u64,
-) -> ScanConfig {
-    wifi_active_scan_config(max_results, min_ms, max_ms).with_channel(channel)
-}
-
-pub(crate) fn wifi_passive_scan_config(max_results: usize, passive_ms: u64) -> ScanConfig {
-    ScanConfig::default()
-        .with_show_hidden(true)
-        .with_max(max_results)
-        .with_scan_type(ScanTypeConfig::Passive(Duration::from_millis(passive_ms)))
-}
-
-pub(crate) fn wifi_raw_broad_scan_config(max_results: usize) -> ScanConfig {
-    ScanConfig::default()
-        .with_show_hidden(true)
-        .with_max(max_results)
-}
-
 pub(crate) async fn wifi_scan_with_config_async(
     controller: &mut WifiController<'_>,
     config: ScanConfig,
@@ -203,14 +179,39 @@ pub(crate) async fn wifi_scan_with_config_async(
 pub(crate) async fn wifi_start_async(
     _controller: &mut WifiController<'_>,
 ) -> Result<(), WifiError> {
-    Ok(())
+    if WIFI_STARTED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+
+    let result = unsafe { esp_wifi_sys::include::esp_wifi_start() };
+    match result as u32 {
+        esp_wifi_sys::include::ESP_OK => {
+            WIFI_STARTED.store(true, Ordering::Release);
+            Ok(())
+        }
+        esp_wifi_sys::include::ESP_ERR_NO_MEM => Err(WifiError::OutOfMemory),
+        esp_wifi_sys::include::ESP_ERR_INVALID_ARG => Err(WifiError::InvalidArguments),
+        _ => Err(WifiError::Failed),
+    }
 }
 
 pub(crate) async fn wifi_stop_async(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
     if controller.is_connected() {
         record_disconnect(controller.disconnect_async().await.map(|info| info.reason))?;
     }
-    Ok(())
+
+    if !WIFI_STARTED.load(Ordering::Acquire) {
+        return Ok(());
+    }
+
+    let result = unsafe { esp_wifi_sys::include::esp_wifi_stop() };
+    match result as u32 {
+        esp_wifi_sys::include::ESP_OK | esp_wifi_sys::include::ESP_ERR_WIFI_NOT_STARTED => {
+            WIFI_STARTED.store(false, Ordering::Release);
+            Ok(())
+        }
+        _ => Err(WifiError::Failed),
+    }
 }
 
 pub(crate) async fn wifi_connect_async(

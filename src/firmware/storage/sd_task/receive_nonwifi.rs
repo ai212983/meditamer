@@ -34,9 +34,8 @@ async fn receive_request_without_wifi_powered(
     upload_session: &mut Option<SdUploadSession>,
     fat_engine: &mut FatEngine,
 ) -> Option<SdRequest> {
-    match select3(
+    match select(
         SD_UPLOAD_REQUESTS.receive(),
-        SD_ASSET_READ_REQUESTS.receive(),
         with_timeout(
             Duration::from_millis(super::SD_IDLE_POWER_OFF_MS),
             SD_REQUESTS.receive(),
@@ -44,7 +43,7 @@ async fn receive_request_without_wifi_powered(
     )
     .await
     {
-        Either3::First(upload_request) => {
+        Either::First(upload_request) => {
             process_upload_request_and_publish(
                 upload_request,
                 upload_session,
@@ -56,19 +55,7 @@ async fn receive_request_without_wifi_powered(
             .await;
             None
         }
-        Either3::Second(asset_request) => {
-            process_asset_read_request_and_publish(
-                asset_request,
-                upload_session,
-                sd_probe,
-                powered,
-                upload_mounted,
-                fat_engine,
-            )
-            .await;
-            None
-        }
-        Either3::Third(result) => result.ok(),
+        Either::Second(result) => result.ok(),
     }
 }
 
@@ -80,14 +67,8 @@ async fn receive_request_without_wifi_unpowered(
     upload_session: &mut Option<SdUploadSession>,
     fat_engine: &mut FatEngine,
 ) -> Option<SdRequest> {
-    match select3(
-        SD_UPLOAD_REQUESTS.receive(),
-        SD_ASSET_READ_REQUESTS.receive(),
-        SD_REQUESTS.receive(),
-    )
-    .await
-    {
-        Either3::First(upload_request) => {
+    match select(SD_UPLOAD_REQUESTS.receive(), SD_REQUESTS.receive()).await {
+        Either::First(upload_request) => {
             process_upload_request_and_publish(
                 upload_request,
                 upload_session,
@@ -99,18 +80,6 @@ async fn receive_request_without_wifi_unpowered(
             .await;
             None
         }
-        Either3::Second(asset_request) => {
-            process_asset_read_request_and_publish(
-                asset_request,
-                upload_session,
-                sd_probe,
-                powered,
-                upload_mounted,
-                fat_engine,
-            )
-            .await;
-            None
-        }
-        Either3::Third(request) => Some(request),
+        Either::Second(request) => Some(request),
     }
 }

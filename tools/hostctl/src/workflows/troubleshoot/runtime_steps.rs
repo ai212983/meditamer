@@ -29,7 +29,6 @@ impl TroubleshootRuntime<'_> {
             .current_dir(&repo_dir)
             .env_remove("RUSTUP_TOOLCHAIN")
             .env("ESPFLASH_PORT", &self.port)
-            .env("FLASH_SET_TIME_AFTER_FLASH", "0")
             .output()
             .with_context(|| format!("failed to execute {}", script.display()));
 

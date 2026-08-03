@@ -33,17 +33,27 @@ pub(in super::super) struct SdUploadChunkTimingMetrics {
     pub(super) chunk_overhead_ms_max: u32,
 }
 
+pub(super) struct SdUploadChunkTimingSample {
+    pub(super) queue_wait_ms: u32,
+    pub(super) total_ms: u32,
+    pub(super) ensure_ready_ms: u32,
+    pub(super) payload_lock_ms: u32,
+    pub(super) append_total_ms: u32,
+    pub(super) append_capacity_ms: u32,
+    pub(super) append_write_data_ms: u32,
+}
+
 impl SdUploadChunkTimingMetrics {
-    pub(super) fn record_chunk(
-        &mut self,
-        chunk_queue_wait_ms: u32,
-        chunk_total_ms: u32,
-        ensure_ready_ms: u32,
-        payload_lock_ms: u32,
-        append_total_ms: u32,
-        append_capacity_ms: u32,
-        append_write_data_ms: u32,
-    ) {
+    pub(super) fn record_chunk(&mut self, sample: SdUploadChunkTimingSample) {
+        let SdUploadChunkTimingSample {
+            queue_wait_ms: chunk_queue_wait_ms,
+            total_ms: chunk_total_ms,
+            ensure_ready_ms,
+            payload_lock_ms,
+            append_total_ms,
+            append_capacity_ms,
+            append_write_data_ms,
+        } = sample;
         self.chunk_count = self.chunk_count.saturating_add(1);
         self.chunk_queue_wait_ms_total = self
             .chunk_queue_wait_ms_total

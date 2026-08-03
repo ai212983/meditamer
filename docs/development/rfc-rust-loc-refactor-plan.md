@@ -63,8 +63,6 @@ We should split by cohesive module groups, not by isolated file size.
 - `packages/sdcard/src/api.rs` (296)
 - `tools/hostctl/src/workflows_wifi_discovery/runtime.rs` (299)
 - `src/firmware/storage/sd_task/upload/stream.rs` (300)
-- `src/firmware/graphics/shanshui.rs` (300)
-- `src/firmware/graphics/suminagashi.rs` (296)
 - `src/firmware/event_engine/features.rs` (297)
 - `src/firmware/runtime/display_task/touch_loop.rs` (284)
 - `src/firmware/touch/normalize/tests/part2.rs` (299)

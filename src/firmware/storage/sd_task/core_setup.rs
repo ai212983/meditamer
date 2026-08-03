@@ -21,15 +21,14 @@ use super::super::types::{
     WifiConfigResultCode,
 };
 
-mod asset_read;
 mod dispatch;
 mod engine_driver;
 mod logging;
 mod manual_io;
 mod power;
-mod serial_log;
 #[cfg(not(feature = "asset-upload-http"))]
 mod receive;
+mod serial_log;
 #[cfg(all(test, not(target_os = "none")))]
 mod tests;
 mod upload;

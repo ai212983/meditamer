@@ -1,16 +1,16 @@
 use embassy_net::tcp::TcpSocket;
 use embassy_time::{Duration, Instant};
 
-use super::params::{
-    parse_path_or_400, parse_u32_or_400, prefetched_body_slice, required_content_length,
-    sd_upload_or_http_error, write_response, write_roundtrip_error_response,
-};
+use super::super::super::super::sd_bridge::{roundtrip_error_log, sd_upload_roundtrip};
+use super::super::super::HTTP_SOCKET_TIMEOUT_SECS;
 use super::super::body::{
     elapsed_ms_u32, forward_upload_body_or_http_error, log_upload_stats, usize_to_u32_saturating,
 };
 use super::super::{RequestContext, HTTP_UPLOAD_BODY_READ_TIMEOUT_MS};
-use super::super::super::HTTP_SOCKET_TIMEOUT_SECS;
-use super::super::super::super::sd_bridge::{roundtrip_error_log, sd_upload_roundtrip};
+use super::params::{
+    parse_path_or_400, parse_u32_or_400, prefetched_body_slice, required_content_length,
+    sd_upload_or_http_error, write_response, write_roundtrip_error_response,
+};
 use crate::firmware::telemetry;
 use crate::firmware::types::SdUploadCommand;
 
@@ -44,28 +44,30 @@ pub(super) async fn handle_upload_chunk(
     let content_length = required_content_length(socket, request.content_length).await?;
     let request_started_at = Instant::now();
     let prefetched = prefetched_body_slice(header_buf, request, content_length);
-    socket.set_timeout(Some(Duration::from_millis(HTTP_UPLOAD_BODY_READ_TIMEOUT_MS)));
+    socket.set_timeout(Some(Duration::from_millis(
+        HTTP_UPLOAD_BODY_READ_TIMEOUT_MS,
+    )));
     let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, false)
             .await;
     socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
     let stats = body_result?;
 
-    telemetry::record_upload_http_upload_phase(
-        usize_to_u32_saturating(stats.sent_bytes),
-        stats.body_read_ms,
-        stats.payload_copy_ms,
-        stats.sd_queue_ms,
-        stats.sd_task_wait_ms,
-        0,
-        stats.chunk_p50_ms,
-        stats.chunk_p95_ms,
-        stats.chunk_max_ms,
-        stats.chunk_samples,
-        stats.chunk_samples_dropped,
-        stats.sd_wait_ms,
-        elapsed_ms_u32(request_started_at),
-    );
+    telemetry::record_upload_http_upload_phase(telemetry::UploadHttpPhaseMetrics {
+        bytes: usize_to_u32_saturating(stats.sent_bytes),
+        body_read_ms: stats.body_read_ms,
+        payload_copy_ms: stats.payload_copy_ms,
+        sd_queue_ms: stats.sd_queue_ms,
+        sd_task_wait_ms: stats.sd_task_wait_ms,
+        commit_ms: 0,
+        chunk_p50_ms: stats.chunk_p50_ms,
+        chunk_p95_ms: stats.chunk_p95_ms,
+        chunk_max_ms: stats.chunk_max_ms,
+        chunk_samples: stats.chunk_samples,
+        chunk_samples_dropped: stats.chunk_samples_dropped,
+        sd_wait_ms: stats.sd_wait_ms,
+        request_ms: elapsed_ms_u32(request_started_at),
+    });
     log_upload_stats(
         "upload_chunk",
         &stats,
@@ -131,7 +133,9 @@ pub(super) async fn handle_upload(
     sd_wait_ms = sd_wait_ms.saturating_add(elapsed_ms_u32(begin_started_at));
 
     let prefetched = prefetched_body_slice(header_buf, request, content_length);
-    socket.set_timeout(Some(Duration::from_millis(HTTP_UPLOAD_BODY_READ_TIMEOUT_MS)));
+    socket.set_timeout(Some(Duration::from_millis(
+        HTTP_UPLOAD_BODY_READ_TIMEOUT_MS,
+    )));
     let body_result =
         forward_upload_body_or_http_error(socket, chunk_buf, prefetched, content_length, true)
             .await;
@@ -148,21 +152,21 @@ pub(super) async fn handle_upload(
     sd_wait_ms = sd_wait_ms.saturating_add(commit_ms);
 
     let total_sd_wait_ms = sd_wait_ms.saturating_add(stats.sd_wait_ms);
-    telemetry::record_upload_http_upload_phase(
-        usize_to_u32_saturating(stats.sent_bytes),
-        stats.body_read_ms,
-        stats.payload_copy_ms,
-        stats.sd_queue_ms,
-        stats.sd_task_wait_ms,
+    telemetry::record_upload_http_upload_phase(telemetry::UploadHttpPhaseMetrics {
+        bytes: usize_to_u32_saturating(stats.sent_bytes),
+        body_read_ms: stats.body_read_ms,
+        payload_copy_ms: stats.payload_copy_ms,
+        sd_queue_ms: stats.sd_queue_ms,
+        sd_task_wait_ms: stats.sd_task_wait_ms,
         commit_ms,
-        stats.chunk_p50_ms,
-        stats.chunk_p95_ms,
-        stats.chunk_max_ms,
-        stats.chunk_samples,
-        stats.chunk_samples_dropped,
-        total_sd_wait_ms,
-        elapsed_ms_u32(request_started_at),
-    );
+        chunk_p50_ms: stats.chunk_p50_ms,
+        chunk_p95_ms: stats.chunk_p95_ms,
+        chunk_max_ms: stats.chunk_max_ms,
+        chunk_samples: stats.chunk_samples,
+        chunk_samples_dropped: stats.chunk_samples_dropped,
+        sd_wait_ms: total_sd_wait_ms,
+        request_ms: elapsed_ms_u32(request_started_at),
+    });
     log_upload_stats(
         "upload",
         &stats,

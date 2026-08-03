@@ -6,7 +6,7 @@ mod error_low_mem;
 mod error_recovery;
 
 use error_low_mem::recover_connect_err_low_internal_mem;
-use error_recovery::handle_error_recovery_paths;
+use error_recovery::{handle_error_recovery_paths, ErrorRecoveryObservation};
 
 const CONNECT_ERR_LOW_INTERNAL_FREE_BYTES: usize = 2_048;
 
@@ -242,12 +242,14 @@ pub(super) async fn handle_connect_error(
     handle_error_recovery_paths(
         controller,
         state,
-        disconnect_reason,
-        discovery_reason,
-        auth_reason,
-        observed_candidates,
-        observed_ap,
-        observed_target_candidate,
+        ErrorRecoveryObservation {
+            disconnect_reason,
+            discovery_reason,
+            auth_reason,
+            candidates: observed_candidates,
+            ap: observed_ap,
+            target_candidate: observed_target_candidate,
+        },
     )
     .await;
 }

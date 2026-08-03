@@ -7,7 +7,7 @@ use super::helpers::{
 };
 use super::metrics::write_metrics_delta;
 use super::path_ops::{build_temp_upload_path, parse_upload_path};
-use super::types::SdUploadSession;
+use super::types::{SdUploadChunkTimingSample, SdUploadSession};
 use embassy_time::Instant;
 use sdcard::fat::FatEngine;
 
@@ -15,10 +15,14 @@ mod begin;
 mod chunk;
 mod finish;
 
+pub(super) struct SdUploadBegin {
+    pub(super) path: [u8; SD_PATH_MAX],
+    pub(super) path_len: u8,
+    pub(super) expected_size: u32,
+}
+
 pub(super) async fn handle_begin(
-    path: [u8; SD_PATH_MAX],
-    path_len: u8,
-    expected_size: u32,
+    begin: SdUploadBegin,
     session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
@@ -26,9 +30,7 @@ pub(super) async fn handle_begin(
     fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     begin::handle_begin(
-        path,
-        path_len,
-        expected_size,
+        begin,
         session,
         sd_probe,
         powered,
@@ -80,11 +82,7 @@ pub(super) async fn handle_abort(
 }
 
 fn div_or_zero(total: u32, count: u32) -> u32 {
-    if count == 0 {
-        0
-    } else {
-        total / count
-    }
+    total.checked_div(count).unwrap_or(0)
 }
 
 fn elapsed_ms_u32(started_at: Instant) -> u32 {

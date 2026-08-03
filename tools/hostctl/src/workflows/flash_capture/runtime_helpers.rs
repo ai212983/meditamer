@@ -3,15 +3,17 @@ fn action_write_summary(runtime: &mut FlashCaptureRuntime<'_>, context: &mut Val
         .flash_result
         .as_ref()
         .ok_or_else(|| anyhow!("cannot write summary without flash result"))?;
-    write_summary(
-        &runtime.outputs,
-        &runtime.port,
-        runtime.baud,
-        runtime.flash_baud,
+    write_summary(SummaryInputs {
+        outputs: &runtime.outputs,
+        port: &runtime.port,
+        baud: runtime.baud,
+        flash_baud: runtime.flash_baud,
         result,
-        runtime.opts.capture_mode,
-        runtime.capture_bytes,
-    )?;
+        capture_mode: runtime.opts.capture_mode,
+        capture_bytes: runtime.capture_bytes,
+        post_command: runtime.opts.post_command.as_deref(),
+        post_command_match: runtime.post_command_match.as_deref(),
+    })?;
     context_set_string(
         context,
         "artifact_root",

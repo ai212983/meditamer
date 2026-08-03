@@ -111,7 +111,7 @@ impl WifiTaskState {
 
     pub(super) fn clear_hard_recover_watchdog(&mut self, reason: &'static str) {
         if let Some(started_at) = self.hard_recover_watchdog_started_at.take() {
-            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            let elapsed_ms = started_at.elapsed().as_millis();
             let last_scan_age_ms =
                 Self::point_age_ms(self.hard_recover_watchdog_last_scan_completed_at);
             let last_connect_begin_age_ms =

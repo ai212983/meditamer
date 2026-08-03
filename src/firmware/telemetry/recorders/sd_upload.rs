@@ -1,3 +1,4 @@
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_roundtrip_timeout() {
     SD_UPLOAD_ERRORS.fetch_add(1, Ordering::Relaxed);
     SD_UPLOAD_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
@@ -5,6 +6,7 @@ pub(crate) fn record_sd_upload_roundtrip_timeout() {
     defmt::warn!("telemetry sd_upload_roundtrip_timeout");
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_roundtrip_code(code: SdUploadResultCode) {
     SD_UPLOAD_ERRORS.fetch_add(1, Ordering::Relaxed);
     match code {
@@ -26,6 +28,7 @@ pub(crate) fn record_sd_upload_roundtrip_code(code: SdUploadResultCode) {
     );
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_roundtrip_timing(phase: SdUploadRoundtripPhase, elapsed_ms: u32) {
     let (count, total, max) = match phase {
         SdUploadRoundtripPhase::Begin => (
@@ -68,32 +71,38 @@ pub(crate) fn set_boot_reset_reason_code(code: Option<u8>) {
     BOOT_RESET_REASON_CODE.store(code.unwrap_or(0) as u32, Ordering::Relaxed);
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_session_timeout_abort() {
     SD_UPLOAD_SESSION_TIMEOUT_ABORTS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
     defmt::warn!("telemetry sd_upload_session_timeout_abort");
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_session_mode_off_abort() {
     SD_UPLOAD_SESSION_MODE_OFF_ABORTS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
     defmt::warn!("telemetry sd_upload_session_mode_off_abort");
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn set_wifi_link_connected(connected: bool) {
     WIFI_LINK_CONNECTED.store(connected, Ordering::Relaxed);
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_wifi_watchdog_disconnect() {
     WIFI_CONNECTED_WATCHDOG_DISCONNECTS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]
     defmt::warn!("telemetry wifi_watchdog_disconnect");
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn wifi_link_connected() -> bool {
     WIFI_LINK_CONNECTED.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn set_upload_http_listener(listening: bool, ip: Option<[u8; 4]>) {
     let previous = UPLOAD_HTTP_LISTENING.swap(listening, Ordering::Relaxed);
     if listening && !previous {

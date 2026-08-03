@@ -22,102 +22,173 @@ enum Token {
 }
 
 fn tokenize(raw: &str) -> Result<Vec<Token>> {
-    let chars = raw.chars().collect::<Vec<_>>();
-    let mut tokens = Vec::new();
-    let mut i = 0usize;
-    while i < chars.len() {
-        match chars[i] {
-            c if c.is_whitespace() => i += 1,
-            '&' if chars.get(i + 1) == Some(&'&') => push_token(&mut tokens, Token::And, &mut i, 2),
-            '|' if chars.get(i + 1) == Some(&'|') => push_token(&mut tokens, Token::Or, &mut i, 2),
-            '=' if chars.get(i + 1) == Some(&'=') => push_token(&mut tokens, Token::Eq, &mut i, 2),
-            '!' if chars.get(i + 1) == Some(&'=') => push_token(&mut tokens, Token::Ne, &mut i, 2),
-            '>' if chars.get(i + 1) == Some(&'=') => push_token(&mut tokens, Token::Gte, &mut i, 2),
-            '<' if chars.get(i + 1) == Some(&'=') => push_token(&mut tokens, Token::Lte, &mut i, 2),
-            '>' => push_token(&mut tokens, Token::Gt, &mut i, 1),
-            '<' => push_token(&mut tokens, Token::Lt, &mut i, 1),
-            '+' => push_token(&mut tokens, Token::Plus, &mut i, 1),
-            '-' => push_token(&mut tokens, Token::Minus, &mut i, 1),
-            '!' => push_token(&mut tokens, Token::Not, &mut i, 1),
-            '(' => push_token(&mut tokens, Token::LParen, &mut i, 1),
-            ')' => push_token(&mut tokens, Token::RParen, &mut i, 1),
-            '"' => tokenize_string(&chars, raw, &mut tokens, &mut i)?,
-            '.' => tokenize_path(&chars, &mut tokens, &mut i),
-            c if c.is_ascii_digit() => tokenize_number(&chars, &mut tokens, &mut i)?,
-            c if c.is_ascii_alphabetic() || c == '_' => tokenize_ident(&chars, &mut tokens, &mut i),
-            other => return Err(anyhow!("unsupported token '{other}' in condition: {raw}")),
+    Lexer::new(raw).tokenize()
+}
+
+struct Lexer<'a> {
+    raw: &'a str,
+    chars: Vec<char>,
+    tokens: Vec<Token>,
+    index: usize,
+}
+
+impl<'a> Lexer<'a> {
+    fn new(raw: &'a str) -> Self {
+        Self {
+            raw,
+            chars: raw.chars().collect(),
+            tokens: Vec::new(),
+            index: 0,
         }
     }
-    Ok(tokens)
-}
 
-fn push_token(tokens: &mut Vec<Token>, token: Token, index: &mut usize, step: usize) {
-    tokens.push(token);
-    *index += step;
-}
+    fn tokenize(mut self) -> Result<Vec<Token>> {
+        while self.index < self.chars.len() {
+            self.tokenize_next()?;
+        }
+        Ok(self.tokens)
+    }
 
-fn tokenize_string(chars: &[char], raw: &str, tokens: &mut Vec<Token>, index: &mut usize) -> Result<()> {
-    let mut value = String::new();
-    *index += 1;
-    while *index < chars.len() {
-        match chars[*index] {
-            '"' => break,
-            '\\' if *index + 1 < chars.len() => {
-                value.push(chars[*index + 1]);
-                *index += 2;
+    fn tokenize_next(&mut self) -> Result<()> {
+        let current = self.chars[self.index];
+        if current.is_whitespace() {
+            self.index += 1;
+            return Ok(());
+        }
+        if let Some((token, width)) = operator_token(current, self.chars.get(self.index + 1)) {
+            self.push(token, width);
+            return Ok(());
+        }
+        match current {
+            '"' => self.tokenize_string(),
+            '.' => {
+                self.tokenize_path();
+                Ok(())
             }
-            other => {
-                value.push(other);
-                *index += 1;
+            c if c.is_ascii_digit() => self.tokenize_number(),
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                self.tokenize_ident();
+                Ok(())
             }
+            other => Err(anyhow!(
+                "unsupported token '{other}' in condition: {}",
+                self.raw
+            )),
         }
     }
-    if *index >= chars.len() || chars[*index] != '"' {
-        return Err(anyhow!("unterminated string literal in condition: {raw}"));
+
+    fn push(&mut self, token: Token, width: usize) {
+        self.tokens.push(token);
+        self.index += width;
     }
-    tokens.push(Token::String(value));
-    *index += 1;
-    Ok(())
+
+    fn tokenize_string(&mut self) -> Result<()> {
+        let mut value = String::new();
+        self.index += 1;
+        while self.index < self.chars.len() {
+            match self.chars[self.index] {
+                '"' => break,
+                '\\' if self.index + 1 < self.chars.len() => {
+                    value.push(self.chars[self.index + 1]);
+                    self.index += 2;
+                }
+                other => {
+                    value.push(other);
+                    self.index += 1;
+                }
+            }
+        }
+        if self.chars.get(self.index) != Some(&'"') {
+            return Err(anyhow!(
+                "unterminated string literal in condition: {}",
+                self.raw
+            ));
+        }
+        self.push(Token::String(value), 1);
+        Ok(())
+    }
+
+    fn tokenize_path(&mut self) {
+        let start = self.index;
+        self.index += 1;
+        while self
+            .chars
+            .get(self.index)
+            .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+        {
+            self.index += 1;
+        }
+        self.tokens
+            .push(Token::Path(self.chars[start..self.index].iter().collect()));
+    }
+
+    fn tokenize_number(&mut self) -> Result<()> {
+        let start = self.index;
+        self.index += 1;
+        while self
+            .chars
+            .get(self.index)
+            .is_some_and(|c| c.is_ascii_digit() || *c == '.')
+        {
+            self.index += 1;
+        }
+        let raw_number = self.chars[start..self.index].iter().collect::<String>();
+        let number = raw_number
+            .parse::<f64>()
+            .map_err(|_| anyhow!("invalid numeric literal in condition: {raw_number}"))?;
+        self.tokens.push(Token::Number(number));
+        Ok(())
+    }
+
+    fn tokenize_ident(&mut self) {
+        let start = self.index;
+        self.index += 1;
+        while self
+            .chars
+            .get(self.index)
+            .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_')
+        {
+            self.index += 1;
+        }
+        let ident = self.chars[start..self.index].iter().collect::<String>();
+        self.tokens.push(match ident.as_str() {
+            "true" => Token::Bool(true),
+            "false" => Token::Bool(false),
+            "null" => Token::Null,
+            _ => Token::Ident(ident),
+        });
+    }
 }
 
-fn tokenize_path(chars: &[char], tokens: &mut Vec<Token>, index: &mut usize) {
-    let start = *index;
-    *index += 1;
-    while *index < chars.len()
-        && (chars[*index].is_ascii_alphanumeric() || chars[*index] == '_' || chars[*index] == '.')
-    {
-        *index += 1;
-    }
-    tokens.push(Token::Path(chars[start..*index].iter().collect()));
+fn operator_token(current: char, next: Option<&char>) -> Option<(Token, usize)> {
+    two_char_operator(current, next)
+        .map(|token| (token, 2))
+        .or_else(|| one_char_operator(current).map(|token| (token, 1)))
 }
 
-fn tokenize_number(chars: &[char], tokens: &mut Vec<Token>, index: &mut usize) -> Result<()> {
-    let start = *index;
-    *index += 1;
-    while *index < chars.len() && (chars[*index].is_ascii_digit() || chars[*index] == '.') {
-        *index += 1;
+fn two_char_operator(current: char, next: Option<&char>) -> Option<Token> {
+    match (current, next.copied()) {
+        ('&', Some('&')) => Some(Token::And),
+        ('|', Some('|')) => Some(Token::Or),
+        ('=', Some('=')) => Some(Token::Eq),
+        ('!', Some('=')) => Some(Token::Ne),
+        ('>', Some('=')) => Some(Token::Gte),
+        ('<', Some('=')) => Some(Token::Lte),
+        _ => None,
     }
-    let raw_number = chars[start..*index].iter().collect::<String>();
-    let number = raw_number
-        .parse::<f64>()
-        .map_err(|_| anyhow!("invalid numeric literal in condition: {raw_number}"))?;
-    tokens.push(Token::Number(number));
-    Ok(())
 }
 
-fn tokenize_ident(chars: &[char], tokens: &mut Vec<Token>, index: &mut usize) {
-    let start = *index;
-    *index += 1;
-    while *index < chars.len() && (chars[*index].is_ascii_alphanumeric() || chars[*index] == '_') {
-        *index += 1;
+fn one_char_operator(current: char) -> Option<Token> {
+    match current {
+        '>' => Some(Token::Gt),
+        '<' => Some(Token::Lt),
+        '+' => Some(Token::Plus),
+        '-' => Some(Token::Minus),
+        '!' => Some(Token::Not),
+        '(' => Some(Token::LParen),
+        ')' => Some(Token::RParen),
+        _ => None,
     }
-    let ident = chars[start..*index].iter().collect::<String>();
-    tokens.push(match ident.as_str() {
-        "true" => Token::Bool(true),
-        "false" => Token::Bool(false),
-        "null" => Token::Null,
-        _ => Token::Ident(ident),
-    });
 }
 
 struct ExprParser<'a> {
@@ -227,7 +298,9 @@ impl ExprParser<'_> {
                 self.expect(Token::RParen)?;
                 Ok(value)
             }
-            other => Err(anyhow!("unexpected token in condition expression: {other:?}")),
+            other => Err(anyhow!(
+                "unexpected token in condition expression: {other:?}"
+            )),
         }
     }
 
@@ -235,7 +308,11 @@ impl ExprParser<'_> {
         self.expect(Token::LParen)?;
         let path = match self.tokens.get(self.index) {
             Some(Token::Path(path)) => path.clone(),
-            _ => return Err(anyhow!("function '{ident}' expects a context path argument")),
+            _ => {
+                return Err(anyhow!(
+                    "function '{ident}' expects a context path argument"
+                ))
+            }
         };
         self.index += 1;
         self.expect(Token::RParen)?;
@@ -243,7 +320,9 @@ impl ExprParser<'_> {
         match ident {
             "exists" => Ok(Value::Bool(value.is_some())),
             "present" => Ok(Value::Bool(value.is_some_and(|item| !item.is_null()))),
-            _ => Err(anyhow!("unsupported function in condition expression: {ident}")),
+            _ => Err(anyhow!(
+                "unsupported function in condition expression: {ident}"
+            )),
         }
     }
 

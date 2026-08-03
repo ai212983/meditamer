@@ -2,9 +2,7 @@ use core::fmt::Write;
 
 use super::labels::{sd_command_label, sd_result_code_label, sd_result_kind_label};
 use crate::firmware::{
-    app_state::{
-        read_app_state_snapshot, BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode,
-    },
+    app_state::{read_app_state_snapshot, DiagKind, DiagTargets},
     psram,
     runtime::diagnostics::read_diag_runtime_status,
     touch::debug_log::uart_write_all,
@@ -86,27 +84,6 @@ fn phase_label(phase: crate::firmware::app_state::Phase) -> &'static str {
     }
 }
 
-fn base_label(base: BaseMode) -> &'static str {
-    match base {
-        BaseMode::Day => "DAY",
-        BaseMode::TouchWizard => "TOUCH_WIZARD",
-    }
-}
-
-fn day_bg_label(day_background: DayBackground) -> &'static str {
-    match day_background {
-        DayBackground::Suminagashi => "SUMINAGASHI",
-        DayBackground::Shanshui => "SHANSHUI",
-    }
-}
-
-fn overlay_label(overlay: OverlayMode) -> &'static str {
-    match overlay {
-        OverlayMode::None => "NONE",
-        OverlayMode::Clock => "CLOCK",
-    }
-}
-
 fn diag_label(kind: DiagKind) -> &'static str {
     match kind {
         DiagKind::None => "NONE",
@@ -151,17 +128,9 @@ pub(super) async fn write_state_status_line(uart: &mut SerialUart) {
     let mut line = heapless::String::<256>::new();
     let _ = write!(
         &mut line,
-        "STATE phase={} base={} day_bg={} overlay={} upload={} assets={} diag_kind={} targets={} ready={}\r\n",
+        "STATE phase={} upload={} diag_kind={} targets={} ready={}\r\n",
         phase_label(snapshot.phase),
-        base_label(snapshot.base),
-        day_bg_label(snapshot.day_background),
-        overlay_label(snapshot.overlay),
         if snapshot.services.upload_enabled {
-            "on"
-        } else {
-            "off"
-        },
-        if snapshot.services.asset_reads_enabled {
             "on"
         } else {
             "off"
@@ -196,10 +165,6 @@ pub(super) async fn write_diag_status_line(uart: &mut SerialUart) {
 pub(super) async fn run_allocator_alloc_probe(uart: &mut SerialUart, bytes: usize) {
     match psram::alloc_large_byte_buffer(bytes) {
         Ok(mut buffer) => {
-            #[cfg(not(feature = "psram-alloc"))]
-            let _ = &mut buffer;
-
-            #[cfg(feature = "psram-alloc")]
             if let Some(first) = buffer.as_mut_slice().first_mut() {
                 *first = 0xA5;
             }

@@ -4,14 +4,16 @@ use embassy_time::{Duration, Instant, Ticker};
 use super::super::{
     config::{
         TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES, TOUCH_IMU_ACTIVITY,
-        TOUCH_PIPELINE_EVENTS, TOUCH_PIPELINE_INPUTS, TOUCH_SAMPLE_ACTIVE_MS, TOUCH_TRACE_ENABLED,
-        TOUCH_TRACE_SAMPLES, TOUCH_WIZARD_RAW_TRACE_SAMPLES, TOUCH_WIZARD_TRACE_ENABLED,
+        TOUCH_PIPELINE_EVENTS, TOUCH_PIPELINE_INPUTS, TOUCH_SAMPLE_ACTIVE_MS,
     },
-    types::{
-        TouchActivitySnapshot, TouchEvent, TouchEventKind, TouchPipelineInput, TouchSampleFrame,
-        TouchTraceSample,
-    },
+    imu_activity::snapshot_for_event,
+    types::{TouchActivitySnapshot, TouchEvent, TouchPipelineInput, TouchSampleFrame},
     TouchEngine,
+};
+#[cfg(not(feature = "wifi-debug-slim-app"))]
+use super::super::{
+    config::{TOUCH_TRACE_ENABLED, TOUCH_TRACE_SAMPLES},
+    types::TouchTraceSample,
 };
 
 #[embassy_executor::task]
@@ -37,12 +39,9 @@ async fn process_input(engine: &mut TouchEngine, input: TouchPipelineInput) {
             TOUCH_IMU_ACTIVITY.signal(TouchActivitySnapshot::default());
         }
         TouchPipelineInput::Sample(frame) => {
+            #[cfg(not(feature = "wifi-debug-slim-app"))]
             if TOUCH_TRACE_ENABLED && frame.sample.touch_count > 0 {
                 let _ = TOUCH_TRACE_SAMPLES
-                    .try_send(TouchTraceSample::from_sample(frame.t_ms, frame.sample));
-            }
-            if TOUCH_WIZARD_TRACE_ENABLED {
-                let _ = TOUCH_WIZARD_RAW_TRACE_SAMPLES
                     .try_send(TouchTraceSample::from_sample(frame.t_ms, frame.sample));
             }
             let output = engine.tick(frame.t_ms, frame.sample);
@@ -69,19 +68,7 @@ async fn push_events(events: [Option<TouchEvent>; 3]) {
 }
 
 fn publish_imu_activity(event: TouchEvent) {
-    let snapshot = match event.kind {
-        TouchEventKind::Down | TouchEventKind::Move | TouchEventKind::LongPress => {
-            TouchActivitySnapshot {
-                active: true,
-                last_nonzero_ms: Some(event.t_ms),
-            }
-        }
-        TouchEventKind::Up
-        | TouchEventKind::Tap
-        | TouchEventKind::Swipe(_)
-        | TouchEventKind::Cancel => TouchActivitySnapshot::default(),
-    };
-    TOUCH_IMU_ACTIVITY.signal(snapshot);
+    TOUCH_IMU_ACTIVITY.signal(snapshot_for_event(event));
 }
 
 pub(crate) async fn push_touch_input_sample(frame: TouchSampleFrame) {

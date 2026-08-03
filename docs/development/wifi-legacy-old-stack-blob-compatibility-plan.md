@@ -87,13 +87,13 @@ for discovery, using source comparison instead of new runtime experiments.
 - validation: source comparison only
 - outcome:
   - compared old working Rust-side install/init path in
-    `/Users/dimitri/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/esp-wifi-0.15.1/src/wifi/internal.rs`
+    `$CARGO_HOME/registry/src/<registry>/esp-wifi-0.15.1/src/wifi/internal.rs`
     and
-    `/Users/dimitri/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/esp-wifi-0.15.1/src/wifi/mod.rs`
+    `$CARGO_HOME/registry/src/<registry>/esp-wifi-0.15.1/src/wifi/mod.rs`
     against the current active vendored path in
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/internal.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/internal.rs`
     and
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/legacy_stack/init.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/legacy_stack/init.rs`
   - confirmed the public `esp_wifi.h` scan/start/init contract is effectively
     unchanged between `esp-wifi-sys 0.7.1` and `esp-wifi-sys 0.8.1`
   - confirmed the internal install/global-table contract is not unchanged:
@@ -139,7 +139,7 @@ Choose one cohesive unit, not multiple scattered shims. Preferred order:
       blob-facing compatibility expectations
   - first files/substrates to replace or bypass:
     - current active dependency on
-      `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/internal.rs`
+      `vendor/esp-radio-0.17.0/src/wifi/internal.rs`
       for blob-facing install/global assumptions
     - current `esp-wifi-sys 0.8.1` internal install/global expectations where
       they differ from the old `0.7.1` working stack
@@ -179,17 +179,17 @@ as the current crate graph allows.
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
+  `logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
 - outcome:
   - added a dedicated direct-compatibility module at
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/blob_compat_internal.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/blob_compat_internal.rs`
     as a closer import of the old `esp-wifi 0.15.1` internal install/global
     state contract
   - routed only `backend_legacy_port` init/coex selection through that module
     from:
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/legacy_stack/init.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/legacy_stack/init.rs`
     and
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/vendor/esp-radio-0.17.0/src/wifi/mod.rs`
+    `vendor/esp-radio-0.17.0/src/wifi/mod.rs`
   - the slice built successfully, but canonical validation regressed the
     boundary to:
     `legacy_port_wifi_init stage=esp_wifi_init_internal.before`
@@ -237,7 +237,7 @@ Use only:
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
+  `logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
 - outcome:
   - backend marker remained `backend-legacy-port`
   - boot still reached:
@@ -282,7 +282,7 @@ inside this repo.
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
+  `logs/hostctl_flashcapture_backend_legacy_port_20260316_092802_blob_compat_install/capture.log`
 - outcome:
   - stop condition reached
   - the full Rust-side parallel old-stack import did not move discovery

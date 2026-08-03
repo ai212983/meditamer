@@ -1,3 +1,5 @@
+extern crate alloc;
+
 mod command_dispatch;
 mod commands;
 mod io;
@@ -19,7 +21,7 @@ use task_state::SerialTaskState;
 use super::super::{touch::debug_log::uart_write_all, types::SerialUart};
 
 #[embassy_executor::task]
-pub(crate) async fn time_sync_task(mut uart: SerialUart) {
+pub(crate) async fn serial_task(mut uart: SerialUart) {
     let mut line_reader = SerialLineReader::new();
     let mut rx = [0u8; 128];
     let mut state = SerialTaskState::new();
@@ -53,7 +55,15 @@ async fn handle_uart_byte(
         }
         LineReadEvent::Complete(line) => {
             if let Some(cmd) = parse_serial_command(line) {
-                command_dispatch::handle_serial_command(uart, state, cmd).await;
+                // The dispatcher is a wide match whose arms do not share stack
+                // slots, so inlining its future here inflates this task's
+                // Embassy pool — which sits in `.bss` in `dram_seg` and so
+                // comes out of the CPU0 stack. Boxing puts it on the heap in
+                // `dram2_seg` for the duration of one command instead, which
+                // is cheap because commands arrive at human/host cadence.
+                // See docs/development/dram-budget.md.
+                alloc::boxed::Box::pin(command_dispatch::handle_serial_command(uart, state, cmd))
+                    .await;
             } else {
                 let _ = uart_write_all(uart, b"CMD ERR\r\n").await;
             }

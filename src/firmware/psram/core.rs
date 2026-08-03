@@ -43,7 +43,19 @@ static MIN_FREE_EXTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LARGE_ALLOC_EXTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
 static LARGE_ALLOC_INTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
 static LARGE_ALLOC_FAIL: AtomicUsize = AtomicUsize::new(0);
-const INTERNAL_HEAP_BYTES: usize = 64 * 1024;
+/// The whole internal-capability heap, in `dram2_seg` (`.dram2_uninit`).
+///
+/// It deliberately takes nothing from `dram_seg`: `.stack` is whatever is left
+/// of `dram_seg` after `.data`/`.bss`, so heap placed there comes straight out
+/// of the CPU0 stack. `dram2_seg` cannot back the stack at all, which makes it
+/// free capacity by comparison. It also holds the 45000 byte `FRAMEBUFFER_BW`,
+/// so growing this past the remainder of its 113840 bytes fails at link time.
+///
+/// Do not add a second internal region in the reclaimed PRO CPU ROM stack: that
+/// was measured at an 11/40 boot panic rate. See
+/// docs/development/dram-budget-rom-stack.md.
+const INTERNAL_HEAP_DRAM2_BYTES: usize = 58 * 1024;
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferPlacement {
@@ -53,32 +65,22 @@ pub(crate) enum BufferPlacement {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferAllocError {
-    AllocatorDisabled,
     AllocatorNotReady,
     OutOfMemory,
 }
 
 pub(crate) struct LargeByteBuffer {
     placement: BufferPlacement,
-    #[cfg(feature = "psram-alloc")]
     ptr: NonNull<u8>,
-    #[cfg(feature = "psram-alloc")]
     len: usize,
-    #[cfg(feature = "psram-alloc")]
     layout: Layout,
 }
 
-#[cfg(feature = "psram-alloc")]
 unsafe impl Send for LargeByteBuffer {}
-#[cfg(feature = "psram-alloc")]
 unsafe impl Sync for LargeByteBuffer {}
 
 const fn initial_allocator_state() -> u8 {
-    if cfg!(feature = "psram-alloc") {
-        AllocatorState::NotInitialized as u8
-    } else {
-        AllocatorState::Disabled as u8
-    }
+    AllocatorState::NotInitialized as u8
 }
 
 fn allocator_state_from_u8(raw: u8) -> AllocatorState {

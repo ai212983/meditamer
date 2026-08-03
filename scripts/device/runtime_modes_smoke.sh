@@ -15,7 +15,7 @@ reject_legacy_env_vars "runtime_modes_smoke.sh" \
     MODE_SMOKE_MONITOR_PERSIST_RAW \
     MODE_SMOKE_MONITOR_RAW_TIO_MUTE \
     MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS \
-    MODE_SMOKE_POST_UPLOAD_TIMESET_REPEATS
+    MODE_SMOKE_POST_UPLOAD_PING_REPEATS
 
 suite="${HOSTCTL_MODE_SMOKE_SUITE:-full}"
 args=(test runtime-modes-smoke --suite "$suite")

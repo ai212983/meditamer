@@ -15,7 +15,7 @@ use logging::Logger;
 use workflows::flash_capture::{run_flash_capture, CaptureMode, FlashCaptureOptions, FlashMode};
 use workflows::runtime_modes::RuntimeModesSmokeOptions;
 use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
-use workflows::serial::{RepaintOptions, TimeSetOptions, TouchWizardDumpOptions};
+use workflows::serial::RepaintOptions;
 use workflows::troubleshoot::TroubleshootOptions;
 use workflows::upload::UploadOptions;
 use workflows::wifi::acceptance::WifiAcceptanceOptions;
@@ -32,10 +32,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     FlashCapture(FlashCaptureArgs),
-    Timeset(TimeSetArgs),
     Repaint(RepaintArgs),
-    MarbleMetrics,
-    TouchWizardDump(TouchWizardDumpArgs),
     Upload(UploadArgs),
     Test(TestArgs),
 }
@@ -64,26 +61,18 @@ struct FlashCaptureArgs {
     idf_root: Option<PathBuf>,
     #[arg(long)]
     idf_tools_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct TimeSetArgs {
     #[arg(long)]
-    epoch: Option<u64>,
-    #[arg(long = "tz-offset-minutes")]
-    tz_offset_minutes: Option<i32>,
+    post_command: Option<String>,
+    #[arg(long)]
+    post_pattern: Option<String>,
+    #[arg(long)]
+    post_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Args)]
 struct RepaintArgs {
     #[arg(long)]
     command: Option<String>,
-}
-
-#[derive(Debug, Args)]
-struct TouchWizardDumpArgs {
-    #[arg(long)]
-    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -195,26 +184,15 @@ fn run(cli: Cli) -> Result<()> {
                 boot_window_ms: args.boot_window_ms,
                 idf_root: args.idf_root,
                 idf_tools_path: args.idf_tools_path,
-            },
-        ),
-        Commands::Timeset(args) => workflows::serial::run_timeset(
-            &mut logger,
-            TimeSetOptions {
-                epoch: args.epoch,
-                tz_offset_minutes: args.tz_offset_minutes,
+                post_command: args.post_command,
+                post_pattern: args.post_pattern,
+                post_timeout_ms: args.post_timeout_ms,
             },
         ),
         Commands::Repaint(args) => workflows::serial::run_repaint(
             &mut logger,
             RepaintOptions {
                 command: args.command,
-            },
-        ),
-        Commands::MarbleMetrics => workflows::serial::run_marble_metrics(&mut logger),
-        Commands::TouchWizardDump(args) => workflows::serial::run_touch_wizard_dump(
-            &mut logger,
-            TouchWizardDumpOptions {
-                output_path: args.output,
             },
         ),
         Commands::Upload(args) => workflows::upload::run_upload(

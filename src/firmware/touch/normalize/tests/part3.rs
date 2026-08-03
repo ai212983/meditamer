@@ -10,6 +10,7 @@ fn decoded_dropout_with_plausible_coords_updates_continuity_primary() {
     // Decoded drops to zero, but raw still indicates touch and coordinates
     // stay plausible near the previous position; continuity should track it.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c1, p1) = n.normalize(
         24,
@@ -37,6 +38,7 @@ fn decoded_dropout_with_implausible_coords_keeps_previous_primary() {
 
     // Very far coordinate during decoded dropout should be treated as noise.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c1, p1) = n.normalize(
         24,
@@ -66,6 +68,7 @@ fn single_contact_dual_slot_prefers_moved_candidate_when_other_is_sticky() {
     // Two coordinates appear, but raw says one contact. Slot A is stuck on
     // previous point while slot B moved significantly.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c1, p1) = n.normalize(
         8,
@@ -93,6 +96,7 @@ fn dual_contact_keeps_continuity_and_does_not_force_slot_switch() {
 
     // Two valid contacts reported: keep continuity with nearest point.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x03;
     let (c1, p1) = n.normalize(
         8,

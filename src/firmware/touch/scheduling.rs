@@ -1,8 +1,5 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
-static LOOP_COUNT: AtomicU32 = AtomicU32::new(0);
-static LOOP_GAP_MAX_MS: AtomicU32 = AtomicU32::new(0);
-static LOOP_GAP_OVER_8_MS: AtomicU32 = AtomicU32::new(0);
 static ACTIVE_SAMPLE_COUNT: AtomicU32 = AtomicU32::new(0);
 static ACTIVE_SAMPLE_GAP_MAX_MS: AtomicU32 = AtomicU32::new(0);
 static ACTIVE_SAMPLE_GAP_OVER_16_MS: AtomicU32 = AtomicU32::new(0);
@@ -10,20 +7,9 @@ static LAST_ACTIVE_SAMPLE_MS: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy)]
 pub(crate) struct TouchSchedulingSnapshot {
-    pub(crate) loop_count: u32,
-    pub(crate) loop_gap_max_ms: u32,
-    pub(crate) loop_gap_over_8_ms: u32,
     pub(crate) active_sample_count: u32,
     pub(crate) active_sample_gap_max_ms: u32,
     pub(crate) active_sample_gap_over_16_ms: u32,
-}
-
-pub(crate) fn record_loop_gap(gap_ms: u64) {
-    LOOP_COUNT.fetch_add(1, Ordering::Relaxed);
-    update_max(&LOOP_GAP_MAX_MS, clamp_u32(gap_ms));
-    if gap_ms > 8 {
-        LOOP_GAP_OVER_8_MS.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 pub(crate) fn record_sample(t_ms: u64, touch_count: u8) {
@@ -47,9 +33,6 @@ pub(crate) fn record_sample(t_ms: u64, touch_count: u8) {
 
 pub(crate) fn snapshot() -> TouchSchedulingSnapshot {
     TouchSchedulingSnapshot {
-        loop_count: LOOP_COUNT.load(Ordering::Relaxed),
-        loop_gap_max_ms: LOOP_GAP_MAX_MS.load(Ordering::Relaxed),
-        loop_gap_over_8_ms: LOOP_GAP_OVER_8_MS.load(Ordering::Relaxed),
         active_sample_count: ACTIVE_SAMPLE_COUNT.load(Ordering::Relaxed),
         active_sample_gap_max_ms: ACTIVE_SAMPLE_GAP_MAX_MS.load(Ordering::Relaxed),
         active_sample_gap_over_16_ms: ACTIVE_SAMPLE_GAP_OVER_16_MS.load(Ordering::Relaxed),
@@ -57,9 +40,6 @@ pub(crate) fn snapshot() -> TouchSchedulingSnapshot {
 }
 
 pub(crate) fn reset() {
-    LOOP_COUNT.store(0, Ordering::Relaxed);
-    LOOP_GAP_MAX_MS.store(0, Ordering::Relaxed);
-    LOOP_GAP_OVER_8_MS.store(0, Ordering::Relaxed);
     ACTIVE_SAMPLE_COUNT.store(0, Ordering::Relaxed);
     ACTIVE_SAMPLE_GAP_MAX_MS.store(0, Ordering::Relaxed);
     ACTIVE_SAMPLE_GAP_OVER_16_MS.store(0, Ordering::Relaxed);

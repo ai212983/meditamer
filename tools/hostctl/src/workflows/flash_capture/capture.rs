@@ -25,40 +25,30 @@ fn capture_stream_window(
     Ok(bytes)
 }
 
-fn run_timeset_after_flash(logger: &mut Logger, port: &str, baud: u32) -> Result<()> {
-    let original_port = env::var("HOSTCTL_PORT").ok();
-    let original_baud = env::var("HOSTCTL_BAUD").ok();
-    env::set_var("HOSTCTL_PORT", port);
-    env::set_var("HOSTCTL_BAUD", baud.to_string());
-    let result = run_timeset(
-        logger,
-        TimeSetOptions {
-            epoch: None,
-            tz_offset_minutes: None,
-        },
-    );
-    restore_env_var("HOSTCTL_PORT", original_port);
-    restore_env_var("HOSTCTL_BAUD", original_baud);
-    result
-}
-
-fn restore_env_var(name: &str, value: Option<String>) {
-    if let Some(value) = value {
-        env::set_var(name, value);
-    } else {
-        env::remove_var(name);
-    }
-}
-
-fn write_summary(
-    outputs: &OutputPaths,
-    port: &str,
+struct SummaryInputs<'a> {
+    outputs: &'a OutputPaths,
+    port: &'a str,
     baud: u32,
     flash_baud: u32,
-    result: &FlashResult,
+    result: &'a FlashResult,
     capture_mode: CaptureMode,
     capture_bytes: usize,
-) -> Result<()> {
+    post_command: Option<&'a str>,
+    post_command_match: Option<&'a str>,
+}
+
+fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
+    let SummaryInputs {
+        outputs,
+        port,
+        baud,
+        flash_baud,
+        result,
+        capture_mode,
+        capture_bytes,
+        post_command,
+        post_command_match,
+    } = summary;
     let mut file = File::create(&outputs.summary)?;
     writeln!(file, "port={port}")?;
     writeln!(file, "baud={baud}")?;
@@ -72,6 +62,16 @@ fn write_summary(
     writeln!(file, "idf_root={}", display_opt_path(result.idf_root.as_ref()))?;
     writeln!(file, "idf_py_bin={}", display_opt_path(result.idf_py_bin.as_ref()))?;
     writeln!(file, "reset_mode=en-only")?;
+    writeln!(file, "firmware_elf={}", outputs.firmware_elf.display())?;
+    writeln!(file, "app_bin={}", outputs.app_bin.display())?;
+    writeln!(file, "sha256={}", outputs.hashes.display())?;
+    writeln!(file, "build_metadata={}", outputs.build_metadata.display())?;
+    writeln!(file, "post_command={}", post_command.unwrap_or("n/a"))?;
+    writeln!(
+        file,
+        "post_command_match={}",
+        post_command_match.unwrap_or("n/a")
+    )?;
     Ok(())
 }
 

@@ -55,5 +55,14 @@ fi
 if [[ -n "${IDF_TOOLS_PATH:-}" ]]; then
     args+=(--idf-tools-path "$IDF_TOOLS_PATH")
 fi
+if [[ -n "${HOSTCTL_FLASH_CAPTURE_POST_COMMAND:-}" ]]; then
+    args+=(--post-command "$HOSTCTL_FLASH_CAPTURE_POST_COMMAND")
+fi
+if [[ -n "${HOSTCTL_FLASH_CAPTURE_POST_PATTERN:-}" ]]; then
+    args+=(--post-pattern "$HOSTCTL_FLASH_CAPTURE_POST_PATTERN")
+fi
+if [[ -n "${HOSTCTL_FLASH_CAPTURE_POST_TIMEOUT_MS:-}" ]]; then
+    args+=(--post-timeout-ms "$HOSTCTL_FLASH_CAPTURE_POST_TIMEOUT_MS")
+fi
 
 run_hostctl "${args[@]}"

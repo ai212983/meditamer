@@ -1,21 +1,13 @@
-use crate::firmware::app_state::{
-    AppStateCommand, BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode,
-};
+use crate::firmware::app_state::{AppStateCommand, DiagKind, DiagTargets};
+use crate::firmware::runtime::scheduling::SchedulerProfile;
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::types::NetConfigSet;
-use crate::firmware::types::{AppEvent, SdCommand, TimeSyncCommand, SD_PATH_MAX, SD_WRITE_MAX};
-use crate::firmware::runtime::scheduling::SchedulerProfile;
+use crate::firmware::types::{AppEvent, SdCommand, SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
 pub(super) enum SerialCommand {
     Ping,
-    TimeSync(TimeSyncCommand),
-    #[cfg(not(feature = "wifi-debug-slim-app"))]
-    TouchWizard,
-    #[cfg(not(feature = "wifi-debug-slim-app"))]
-    TouchWizardDump,
     Repaint,
-    RepaintMarble,
     Metrics,
     TouchSchedReset,
     Scheduler {
@@ -119,11 +111,7 @@ pub(super) enum SchedulerOperation {
 
 #[derive(Clone, Copy)]
 pub(super) enum StateSetOperation {
-    Base(BaseMode),
-    DayBackground(DayBackground),
-    Overlay(OverlayMode),
     Upload(bool),
-    AssetReads(bool),
 }
 
 #[derive(Clone, Copy)]
@@ -150,11 +138,7 @@ pub(super) enum TelemetrySetOperation {
 impl StateSetOperation {
     pub(super) fn as_state_command(self) -> AppStateCommand {
         match self {
-            Self::Base(mode) => AppStateCommand::SetBase(mode),
-            Self::DayBackground(day_bg) => AppStateCommand::SetDayBackground(day_bg),
-            Self::Overlay(overlay) => AppStateCommand::SetOverlay(overlay),
             Self::Upload(enabled) => AppStateCommand::SetUpload(enabled),
-            Self::AssetReads(enabled) => AppStateCommand::SetAssets(enabled),
         }
     }
 }

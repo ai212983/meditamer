@@ -33,12 +33,33 @@ where
         Ok(())
     }
 
+    /// Leaves a powered panel in a quiescent scan state between updates.
+    ///
+    /// The reference waveform finishes with `vscan_start()`, which deliberately
+    /// leaves CKV asserted. That is safe while the reference application remains
+    /// inside its display transaction, but this firmware resumes touch I2C work
+    /// between updates. Park the fast scan pins before releasing that boundary
+    /// while keeping the PMIC on for the next interactive refresh.
+    #[inline(always)]
+    pub(super) fn park_panel_scan(&self) {
+        self.set_ckv(false);
+        self.clear_data_and_cl_le();
+        self.set_sph(true);
+    }
+
+    #[inline(always)]
     pub(super) fn vscan_end(&self) {
         self.set_ckv(false);
         self.set_le(true);
         self.set_le(false);
+        // Soldered's reference driver calls the ESP ROM delay primitive here
+        // with a nominal zero duration. That call-latency-only boundary proved
+        // code-layout-sensitive in the Rust release build, so retain an
+        // explicit 1 us setup margin before the next SPH/CKV sequence.
+        esp_hal::rom::ets_delay_us(1);
     }
 
+    #[inline(always)]
     pub(super) fn hscan_start(&self, d: u32) {
         self.set_sph(false);
         self.write_data_and_clock(d);

@@ -1,4 +1,4 @@
-name: Docs Guard
+name: Docs Advisory
 
 on:
   pull_request:
@@ -17,11 +17,11 @@ concurrency:
 
 jobs:
   markdown-loc:
-    name: Markdown LOC Guard
+    name: Markdown LOC Advisory
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-      - name: Markdown LOC guard
+      - name: Markdown LOC advisory
         run: scripts/ci/check_markdown_loc.sh

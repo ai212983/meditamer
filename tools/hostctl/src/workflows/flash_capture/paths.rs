@@ -11,7 +11,12 @@ fn prepare_output_paths(explicit: Option<&Path>) -> Result<OutputPaths> {
     Ok(OutputPaths {
         flash_log: root.join("flash.log"),
         capture_log: root.join("capture.log"),
+        post_command_log: root.join("post-command.log"),
         summary: root.join("summary.txt"),
+        firmware_elf: root.join("firmware.elf"),
+        app_bin: root.join("app.bin"),
+        hashes: root.join("sha256.txt"),
+        build_metadata: root.join("build-metadata.txt"),
         root,
     })
 }

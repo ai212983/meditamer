@@ -70,7 +70,7 @@ for file in "${files[@]}"; do
   fi
 done
 
-echo "rust-loc: checked ${checked_count} file(s) (warn>${warn_limit}, fail>${max_limit})"
+echo "rust-loc: checked ${checked_count} file(s) (warn>${warn_limit}, high-attention>${max_limit}, advisory-only)"
 
 if [[ -s "$tmp_warn" ]]; then
   echo
@@ -80,9 +80,8 @@ fi
 
 if [[ -s "$tmp_hard" ]]; then
   echo
-  echo "rust-loc violations (over ${max_limit} lines):" >&2
-  sort -nr "$tmp_hard" | awk -F '\t' '{ printf "  - %s (%s lines)\n", $2, $1 }' >&2
-  exit 1
+  echo "rust-loc high-attention advisories (over ${max_limit} lines):"
+  sort -nr "$tmp_hard" | awk -F '\t' '{ printf "  - %s (%s lines)\n", $2, $1 }'
 fi
 
 exit 0

@@ -110,11 +110,12 @@ fn sdcard_fixture_cutover_runs_preflight_full_suite_and_summary() -> Result<()> 
     assert!(traces
         .iter()
         .any(|entry| entry == "raw_expect_pattern:cutover_telemetry"));
-    assert!(traces
-        .iter()
-        .any(|entry| entry == "poll_command_pattern"));
+    assert!(traces.iter().any(|entry| entry == "poll_command_pattern"));
     assert_eq!(
-        traces.iter().filter(|entry| *entry == "repeat_step").count(),
+        traces
+            .iter()
+            .filter(|entry| *entry == "repeat_step")
+            .count(),
         5
     );
     assert!(traces.iter().any(|entry| entry == "run_step:mkdir"));
@@ -139,7 +140,10 @@ fn sdcard_fixture_no_card_runs_only_absence_and_runtime_gates() -> Result<()> {
         .iter()
         .any(|entry| entry == "raw_expect_pattern:upload_mode_off"));
     assert_eq!(
-        traces.iter().filter(|entry| *entry == "repeat_step").count(),
+        traces
+            .iter()
+            .filter(|entry| *entry == "repeat_step")
+            .count(),
         1
     );
     assert!(traces.iter().any(|entry| entry == "cutover_summary"));

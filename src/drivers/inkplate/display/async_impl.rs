@@ -1,166 +1,72 @@
+mod full;
+mod full_scan;
+mod partial;
+mod partial_scan;
+
 use super::super::{
-    DelayOps, I2cOps, InkplateHal, Result, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BYTES, LUT2, LUTB,
+    panel_lifecycle::{
+        display_transaction_finalization, merge_transaction_results, DisplayTransactionFinalization,
+    },
+    DelayOps, I2cOps, InkplateHal, PanelRefreshError, PanelRefreshErrorStage, Result,
 };
-use super::partial_waveform_byte;
 
 impl<I2C, D> InkplateHal<I2C, D>
 where
     I2C: I2cOps,
     D: DelayOps,
 {
-    pub async fn display_bw_async(&mut self, leave_on: bool) -> Result<(), I2C::Error> {
-        self.eink_on_async().await?;
-        self.clean_async(0, 5).await?;
-        self.clean_async(1, 15).await?;
-        self.clean_async(0, 15).await?;
-        self.clean_async(1, 15).await?;
-        self.clean_async(0, 15).await?;
-
-        for _ in 0..10 {
-            let mut ptr = FRAMEBUFFER_BYTES as isize - 1;
-            self.vscan_start().await?;
-
-            for row in 0..E_INK_HEIGHT {
-                let dram = self.framebuffer_bw[ptr as usize];
-                ptr -= 1;
-
-                let mut data = LUTB[(dram >> 4) as usize];
-                let mut send = self.pin_lut[data as usize];
-                self.hscan_start(send);
-
-                data = LUTB[(dram & 0x0F) as usize];
-                send = self.pin_lut[data as usize];
-                self.write_data_and_clock(send);
-
-                for _ in 0..(E_INK_WIDTH / 8 - 1) {
-                    let d = self.framebuffer_bw[ptr as usize];
-                    ptr -= 1;
-
-                    data = LUTB[(d >> 4) as usize];
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-
-                    data = LUTB[(d & 0x0F) as usize];
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-                }
-
-                self.write_data_and_clock(send);
-                self.vscan_end();
-
-                if (row & 0x1F) == 0 {
-                    embassy_time::Timer::after_micros(0).await;
-                }
+    async fn finalize_display_transaction(
+        &mut self,
+        operation: Result<(), I2C::Error>,
+        leave_on: bool,
+    ) -> Result<(), I2C::Error> {
+        match display_transaction_finalization(operation.is_ok(), leave_on) {
+            DisplayTransactionFinalization::ParkPoweredPanel => {
+                self.park_panel_scan();
+                operation
             }
-            embassy_time::Timer::after_micros(230).await;
-        }
-
-        let mut pos = FRAMEBUFFER_BYTES as isize - 1;
-        self.vscan_start().await?;
-        for row in 0..E_INK_HEIGHT {
-            let dram = self.framebuffer_bw[pos as usize];
-            pos -= 1;
-
-            let mut data = LUT2[(dram >> 4) as usize];
-            let mut send = self.pin_lut[data as usize];
-            self.hscan_start(send);
-
-            data = LUT2[(dram & 0x0F) as usize];
-            send = self.pin_lut[data as usize];
-            self.write_data_and_clock(send);
-
-            for _ in 0..(E_INK_WIDTH / 8 - 1) {
-                let d = self.framebuffer_bw[pos as usize];
-                pos -= 1;
-
-                data = LUT2[(d >> 4) as usize];
-                send = self.pin_lut[data as usize];
-                self.write_data_and_clock(send);
-
-                data = LUT2[(d & 0x0F) as usize];
-                send = self.pin_lut[data as usize];
-                self.write_data_and_clock(send);
-            }
-
-            self.write_data_and_clock(send);
-            self.vscan_end();
-
-            if (row & 0x1F) == 0 {
-                embassy_time::Timer::after_micros(0).await;
+            DisplayTransactionFinalization::ShutDownPanel => {
+                let shutdown = self.eink_off_async().await;
+                merge_transaction_results(operation, shutdown)
             }
         }
-        embassy_time::Timer::after_micros(230).await;
-
-        self.clean_async(2, 1).await?;
-        self.clean_async(3, 1).await?;
-        let _ = self.vscan_start().await;
-
-        self.framebuffer_bw_previous
-            .copy_from_slice(self.framebuffer_bw);
-        self.partial_ready = true;
-
-        if !leave_on {
-            self.eink_off_async().await?;
-        }
-
-        Ok(())
     }
 
-    pub async fn display_bw_partial_async(&mut self, leave_on: bool) -> Result<(), I2C::Error> {
-        if !self.partial_ready {
-            return self.display_bw_async(leave_on).await;
-        }
-
-        self.eink_on_async().await?;
-        for _ in 0..9 {
-            let mut pos = FRAMEBUFFER_BYTES as isize - 1;
-            self.vscan_start().await?;
-            for row in 0..E_INK_HEIGHT {
-                let idx = pos as usize;
-                let previous = self.framebuffer_bw_previous[idx];
-                let current = self.framebuffer_bw[idx];
-                let mut data = partial_waveform_byte(previous, current, true);
-                let mut send = self.pin_lut[data as usize];
-                self.hscan_start(send);
-
-                data = partial_waveform_byte(previous, current, false);
-                send = self.pin_lut[data as usize];
-                self.write_data_and_clock(send);
-                pos -= 1;
-
-                for _ in 0..(E_INK_WIDTH / 8 - 1) {
-                    let idx = pos as usize;
-                    let previous = self.framebuffer_bw_previous[idx];
-                    let current = self.framebuffer_bw[idx];
-
-                    data = partial_waveform_byte(previous, current, true);
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-
-                    data = partial_waveform_byte(previous, current, false);
-                    send = self.pin_lut[data as usize];
-                    self.write_data_and_clock(send);
-                    pos -= 1;
-                }
-
-                self.write_data_and_clock(send);
-                self.vscan_end();
-                if (row & 0x1F) == 0 {
-                    embassy_time::Timer::after_micros(0).await;
+    async fn finalize_display_transaction_reported(
+        &mut self,
+        operation: Result<(), I2C::Error>,
+        leave_on: bool,
+    ) -> core::result::Result<(), PanelRefreshError<I2C::Error>> {
+        match display_transaction_finalization(operation.is_ok(), leave_on) {
+            DisplayTransactionFinalization::ParkPoweredPanel => {
+                self.park_panel_scan();
+                operation.map_err(|source| {
+                    PanelRefreshError::new(PanelRefreshErrorStage::Waveform, source)
+                })
+            }
+            DisplayTransactionFinalization::ShutDownPanel => {
+                let shutdown = self.eink_off_async().await;
+                match operation {
+                    Err(source) => Err(PanelRefreshError::new(
+                        PanelRefreshErrorStage::Waveform,
+                        source,
+                    )),
+                    Ok(()) => shutdown.map_err(|source| {
+                        PanelRefreshError::new(PanelRefreshErrorStage::PowerOff, source)
+                    }),
                 }
             }
-            embassy_time::Timer::after_micros(230).await;
         }
+    }
 
-        self.clean_async(2, 2).await?;
-        self.clean_async(3, 1).await?;
-        let _ = self.vscan_start().await;
-
-        self.framebuffer_bw_previous
-            .copy_from_slice(self.framebuffer_bw);
-        if !leave_on {
-            self.eink_off_async().await?;
+    fn finish_binary_refresh(&mut self, succeeded: bool) {
+        if succeeded {
+            if let Some(previous) = self.framebuffer_bw_previous.as_deref_mut() {
+                previous.copy_from_slice(self.framebuffer_bw);
+                self.partial_ready = true;
+                return;
+            }
         }
-        Ok(())
+        self.partial_ready = false;
     }
 }

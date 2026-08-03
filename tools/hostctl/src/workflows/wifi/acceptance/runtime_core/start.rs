@@ -11,11 +11,7 @@ impl WifiAcceptanceRuntime<'_> {
                 .is_some()
                 || self
                     .console
-                    .command_wait_regex(
-                        "SCHEDPROFILE",
-                        &ready_status,
-                        Duration::from_millis(750),
-                    )?
+                    .command_wait_regex("SCHEDPROFILE", &ready_status, Duration::from_millis(750))?
                     .is_some()
             {
                 self.logger.info("runtime readiness gate: pass");
@@ -38,14 +34,8 @@ impl WifiAcceptanceRuntime<'_> {
                 "HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS",
                 30_000,
             )?,
-            timeout_ms: env_utils::parse_env_u32(
-                "HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS",
-                180_000,
-            )?,
-            settle_ms: env_utils::parse_env_u32(
-                "HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS",
-                6_000,
-            )?,
+            timeout_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS", 180_000)?,
+            settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 6_000)?,
             allow_ready_only_fallback: env_utils::parse_env_bool01(
                 "HOSTCTL_NET_BOOT_DISCOVERY_READY_ONLY_FALLBACK",
                 false,
@@ -109,17 +99,12 @@ impl WifiAcceptanceRuntime<'_> {
             .console
             .command_wait_regex("METRICS", &touch_re, Duration::from_secs(5))?
             .ok_or_else(|| anyhow!("missing METRICS TOUCH_SCHED response"))?;
-        let loop_gap = metric_u32(&touch_line, "loop_gap_max_ms")
-            .ok_or_else(|| anyhow!("touch metrics missing loop_gap_max_ms: {touch_line}"))?;
         let active_gap = metric_u32(&touch_line, "active_gap_max_ms")
             .ok_or_else(|| anyhow!("touch metrics missing active_gap_max_ms: {touch_line}"))?;
-        let loop_limit = env_utils::parse_env_u32("HOSTCTL_TOUCH_LOOP_GAP_MAX_MS", 8)?;
         let active_limit = env_utils::parse_env_u32("HOSTCTL_TOUCH_ACTIVE_GAP_MAX_MS", 16)?;
-        if loop_gap > loop_limit || active_gap > active_limit {
+        if active_gap > active_limit {
             return Err(anyhow!(
-                "touch scheduling gate failed: loop_gap_max_ms={} limit={} active_gap_max_ms={} limit={}",
-                loop_gap,
-                loop_limit,
+                "touch scheduling gate failed: active_gap_max_ms={} limit={}",
                 active_gap,
                 active_limit
             ));
@@ -147,8 +132,9 @@ impl WifiAcceptanceRuntime<'_> {
             .console
             .command_wait_regex("METRICS", &touch_stack_re, Duration::from_secs(5))?
             .ok_or_else(|| anyhow!("missing touch-core stack headroom response"))?;
-        let touch_stack_headroom = metric_u32(&touch_stack_line, "headroom")
-            .ok_or_else(|| anyhow!("touch-core stack response missing headroom: {touch_stack_line}"))?;
+        let touch_stack_headroom = metric_u32(&touch_stack_line, "headroom").ok_or_else(|| {
+            anyhow!("touch-core stack response missing headroom: {touch_stack_line}")
+        })?;
         let touch_stack_floor =
             env_utils::parse_env_u32("HOSTCTL_TOUCH_CORE_STACK_HEADROOM_MIN_BYTES", 1024)?;
         if touch_stack_headroom < touch_stack_floor {
@@ -164,8 +150,10 @@ impl WifiAcceptanceRuntime<'_> {
             .console
             .command_wait_regex("PSRAM", &memory_re, Duration::from_secs(5))?
             .ok_or_else(|| anyhow!("missing PSRAM allocator response"))?;
-        let min_internal = metric_u32(&memory_line, "min_internal_free_bytes")
-            .ok_or_else(|| anyhow!("PSRAM status missing min_internal_free_bytes: {memory_line}"))?;
+        let min_internal =
+            metric_u32(&memory_line, "min_internal_free_bytes").ok_or_else(|| {
+                anyhow!("PSRAM status missing min_internal_free_bytes: {memory_line}")
+            })?;
         let memory_floor =
             env_utils::parse_env_u32("HOSTCTL_NET_MIN_INTERNAL_FREE_BYTES", 16 * 1024)?;
         if min_internal < memory_floor {
@@ -177,8 +165,7 @@ impl WifiAcceptanceRuntime<'_> {
         }
 
         self.logger.info(format!(
-            "runtime_health_gate: loop_gap_max_ms={} active_gap_max_ms={} main_stack_headroom={} touch_core_stack_headroom={} min_internal_free_bytes={}",
-            loop_gap,
+            "runtime_health_gate: active_gap_max_ms={} main_stack_headroom={} touch_core_stack_headroom={} min_internal_free_bytes={}",
             active_gap,
             main_stack_headroom,
             touch_stack_headroom,

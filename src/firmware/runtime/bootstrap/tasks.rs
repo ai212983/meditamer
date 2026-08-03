@@ -7,13 +7,17 @@ use crate::firmware::{
     imu, storage, telemetry, touch,
     types::{DisplayContext, InkplateImuDriver, InkplateTouchDriver, SdProbeDriver, SerialUart},
 };
+use crate::{
+    drivers::inkplate::TouchInitStatus,
+    firmware::touch::config::GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED,
+};
 
 use crate::firmware::runtime::{
     diagnostics::diagnostics_task,
     display_task::display_task,
-    periodic::{battery_task, clock_task},
+    periodic::battery_task,
     scheduling::{spawn as spawn_task, TaskClass},
-    serial_task::time_sync_task,
+    serial_task::serial_task,
 };
 
 use super::halt_forever;
@@ -39,7 +43,7 @@ pub(super) async fn board_runtime_task(
 ) {
     let BoardRuntimeResources {
         mut display_context,
-        touch_driver,
+        mut touch_driver,
         imu_driver,
         gpio36_input,
         sd_probe,
@@ -54,7 +58,30 @@ pub(super) async fn board_runtime_task(
     let _ = display_context.inkplate.set_wakeup(true).await;
     let _ = display_context.inkplate.frontlight_off().await;
 
-    start_touch_core(cpu_control, software_interrupt1, touch_driver, gpio36_input);
+    // Bring ELAN up before the IMU and display tasks start using the shared I2C
+    // bus. Per-transaction locking cannot make this multi-step reset/hello
+    // sequence atomic, and concurrent startup produced repeatable arbitration
+    // failures on hardware.
+    let initial_touch_resolution = if GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED {
+        None
+    } else {
+        match touch_driver.init_with_status().await {
+            Ok(TouchInitStatus::Ready { x_res, y_res }) => Some((x_res, y_res)),
+            status => {
+                esp_println::println!("touch: init_failed phase=bootstrap status={:?}", status);
+                let _ = touch_driver.shutdown().await;
+                None
+            }
+        }
+    };
+
+    start_touch_core(
+        cpu_control,
+        software_interrupt1,
+        touch_driver,
+        gpio36_input,
+        initial_touch_resolution,
+    );
 
     spawn_task(
         spawner,
@@ -77,10 +104,9 @@ pub(super) async fn board_runtime_task(
         display_task(display_context).unwrap(),
     );
     spawn_task(spawner, TaskClass::Diagnostics, diagnostics_task().unwrap());
-    spawn_task(spawner, TaskClass::Clock, clock_task().unwrap());
     spawn_task(spawner, TaskClass::Battery, battery_task().unwrap());
     spawn_task(spawner, TaskClass::Sd, storage::sd_task(sd_probe).unwrap());
-    spawn_task(spawner, TaskClass::Serial, time_sync_task(uart).unwrap());
+    spawn_task(spawner, TaskClass::Serial, serial_task(uart).unwrap());
 }
 
 fn start_touch_core(
@@ -88,6 +114,7 @@ fn start_touch_core(
     software_interrupt1: SoftwareInterrupt<'static, 1>,
     touch_driver: InkplateTouchDriver,
     gpio36_input: Input<'static>,
+    initial_touch_resolution: Option<(u16, u16)>,
 ) {
     static TOUCH_CORE_STACK: StaticCell<Stack<TOUCH_CORE_STACK_BYTES>> = StaticCell::new();
     let stack = TOUCH_CORE_STACK.init(Stack::new());
@@ -101,18 +128,27 @@ fn start_touch_core(
         software_interrupt1,
         stack,
         Some(TOUCH_CORE_STACK_GUARD_OFFSET),
-        move || run_touch_core(touch_driver, gpio36_input),
+        move || run_touch_core(touch_driver, gpio36_input, initial_touch_resolution),
     );
 }
 
-fn run_touch_core(touch_driver: InkplateTouchDriver, gpio36_input: Input<'static>) -> ! {
+fn run_touch_core(
+    touch_driver: InkplateTouchDriver,
+    gpio36_input: Input<'static>,
+    initial_touch_resolution: Option<(u16, u16)>,
+) -> ! {
     static TOUCH_CORE_EXECUTOR: StaticCell<esp_rtos::embassy::Executor> = StaticCell::new();
     let executor = TOUCH_CORE_EXECUTOR.init(esp_rtos::embassy::Executor::new());
     executor.run(move |spawner| {
         spawn_task(
             spawner,
             TaskClass::TouchAcquisition,
-            touch::tasks::touch_acquisition_task(touch_driver, gpio36_input).unwrap(),
+            touch::tasks::touch_acquisition_task(
+                touch_driver,
+                gpio36_input,
+                initial_touch_resolution,
+            )
+            .unwrap(),
         );
     })
 }

@@ -55,9 +55,27 @@ pub(super) async fn disconnect_and_stop_with_timeout(
     context: &str,
 ) {
     disconnect_with_timeout(controller, context).await;
+    match with_timeout(
+        Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
+        wifi_stop_async(controller),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            diag_reassoc!("upload_http: {} stop err={:?}", context, err);
+        }
+        Err(_) => {
+            diag_reassoc!(
+                "upload_http: {} stop timeout={}ms",
+                context,
+                WIFI_DRIVER_CONTROL_TIMEOUT_MS
+            );
+        }
+    }
     if WIFI_RESET_MAC_AFTER_STOP || WIFI_MODE_NULL_STA_RESET_AFTER_STOP {
         diag_reassoc!(
-            "upload_http: {} raw stop/reset unavailable on esp-radio 1.0; disconnect/reconfigure selected",
+            "upload_http: {} lifecycle stop applied; optional MAC/mode reset unavailable on esp-radio 1.0",
             context,
         );
     }

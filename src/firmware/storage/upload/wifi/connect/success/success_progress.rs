@@ -9,10 +9,10 @@ pub(super) async fn handle_connected_progress(
     listener_wait_started_at: &mut Option<Instant>,
 ) -> bool {
     if !*dhcp_lease_observed {
-        *dhcp_lease_observed = has_ipv4_lease(&stack);
+        *dhcp_lease_observed = has_ipv4_lease(stack);
         if *dhcp_lease_observed {
             reset_listener_timeout_guard(state);
-            let lease_ipv4 = stack_ipv4_lease(&stack).unwrap_or([0, 0, 0, 0]);
+            let lease_ipv4 = stack_ipv4_lease(stack).unwrap_or([0, 0, 0, 0]);
             let telemetry_ipv4 = telemetry::snapshot()
                 .upload_http_ipv4
                 .unwrap_or([0, 0, 0, 0]);
@@ -73,7 +73,7 @@ pub(super) async fn handle_connected_progress(
     if *dhcp_lease_observed {
         let listener_enabled = service_mode::upload_http_listener_enabled();
         let snapshot = telemetry::snapshot();
-        let lease_ipv4 = stack_ipv4_lease(&stack);
+        let lease_ipv4 = stack_ipv4_lease(stack);
         if !listener_enabled {
             reset_listener_timeout_guard(state);
             telemetry::set_upload_http_listener(false, lease_ipv4);

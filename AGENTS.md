@@ -14,7 +14,9 @@
 |development/sensors.md: Sensor details and behavior
 |development/sound.md: Sound functionality and behavior
 |development/hardware-test-matrix.md: Hardware testing matrices
-|Documentation policy: Markdown warn at 220 LOC, fail above 300 LOC (`scripts/ci/check_markdown_loc.sh` / `scripts/ci/check_markdown_loc.sh --staged`)
+|development/dram-budget.md: Internal DRAM accounting and recovery levers; `dram_seg` is always full and `.stack` is only its remainder, so check this before adding large statics, task-local buffers, or channel depth
+|development/dram-budget-rom-stack.md: Why `ld/meditamer-memory.x` extends `dram2_seg` over the APP CPU ROM stack, and why deep sleep is compatible; read before touching `ld/` or adding deep sleep
+|Documentation policy: Markdown LOC is advisory: warn above 220 and flag high attention above 300 (`scripts/ci/check_markdown_loc.sh` / `scripts/ci/check_markdown_loc.sh --staged`)
 |todos/: Deferred tasks (e.g., cold-boot-validation.md)
 |MANDATORY: Never use absolute local filesystem paths/links in tracked files, and never commit them (including generated artifacts, logs, or docs); always use repo-relative paths/links.
 |MANDATORY: Do not ignore, bypass, or paper over problems; fix root cause. If unsure, ask the user.

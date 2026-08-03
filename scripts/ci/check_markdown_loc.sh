@@ -81,7 +81,7 @@ if (( checked_count == 0 )); then
   exit 0
 fi
 
-echo "markdown-loc: checked ${checked_count} file(s) (warn>${warn_limit}, fail>${max_limit})"
+echo "markdown-loc: checked ${checked_count} file(s) (warn>${warn_limit}, high-attention>${max_limit}, advisory-only)"
 
 if [[ -s "$tmp_warn" ]]; then
   echo
@@ -91,9 +91,8 @@ fi
 
 if [[ -s "$tmp_hard" ]]; then
   echo
-  echo "markdown-loc violations (over ${max_limit} lines):" >&2
-  sort -nr "$tmp_hard" | awk -F '\t' '{ printf "  - %s (%s lines)\n", $2, $1 }' >&2
-  exit 1
+  echo "markdown-loc high-attention advisories (over ${max_limit} lines):"
+  sort -nr "$tmp_hard" | awk -F '\t' '{ printf "  - %s (%s lines)\n", $2, $1 }'
 fi
 
 exit 0

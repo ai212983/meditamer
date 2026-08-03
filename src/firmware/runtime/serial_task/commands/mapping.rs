@@ -7,30 +7,11 @@ pub(super) fn serial_command_event_and_responses(
     &'static [u8],
 ) {
     match cmd {
-        SerialCommand::TimeSync(cmd) => (
-            Some(AppEvent::TimeSync(cmd)),
-            None,
-            b"TIMESET OK\r\n",
-            b"TIMESET BUSY\r\n",
-        ),
-        #[cfg(not(feature = "wifi-debug-slim-app"))]
-        SerialCommand::TouchWizard => (
-            Some(AppEvent::StartTouchCalibrationWizard),
-            None,
-            b"TOUCH_WIZARD OK\r\n",
-            b"TOUCH_WIZARD BUSY\r\n",
-        ),
         SerialCommand::Repaint => (
             Some(AppEvent::ForceRepaint),
             None,
             b"REPAINT OK\r\n",
             b"REPAINT BUSY\r\n",
-        ),
-        SerialCommand::RepaintMarble => (
-            Some(AppEvent::ForceMarbleRepaint),
-            None,
-            b"REPAINT_MARBLE OK\r\n",
-            b"REPAINT_MARBLE BUSY\r\n",
         ),
         SerialCommand::Probe => (
             None,
@@ -136,10 +117,6 @@ pub(super) fn serial_command_event_and_responses(
             b"SDFATTRUNC OK\r\n",
             b"SDFATTRUNC BUSY\r\n",
         ),
-        #[cfg(not(feature = "wifi-debug-slim-app"))]
-        SerialCommand::TouchWizardDump => {
-            unreachable!("touch wizard dump command is handled inline")
-        }
         SerialCommand::Ping => unreachable!("ping command is handled inline"),
         SerialCommand::Metrics
         | SerialCommand::TouchSchedReset

@@ -9,7 +9,6 @@ METRICS
 Response lines:
 
 ```text
-METRICS MARBLE_REDRAW_MS=<n> MAX_MS=<n>
 METRICS WIFI attempt=<n> success=<n> failure=<n> no_ap=<n> scan_runs=<n> scan_empty=<n> scan_hits=<n>
 METRICS WIFI_LINK rssi_last_dbm=<n> rssi_min_dbm=<n> rssi_max_dbm=<n> rssi_samples=<n> rssi_low_samples=<n>
 METRICS UPLOAD accept_ok=<n> accept_err=<n> request_err=<n> req_hdr_to=<n> req_read_body=<n> req_read_body_reset=<n> req_sd_busy=<n> sd_errors=<n> sd_busy=<n> sd_timeouts=<n> sd_power_on_fail=<n> sd_init_fail=<n> sess_timeout_abort=<n> sess_mode_off_abort=<n>
@@ -28,8 +27,8 @@ METRICS NET_ACCEPT arm_gap_n=<n> arm_gap_us=<n> arm_gap_us_max=<n> arm_gap_after
 ### Runtime Scheduling Profiles
 
 Embassy task priorities are selected from a centralized behavior profile. In automatic mode the
-runtime chooses `interactive`, `touch`, `upload`, or `diagnostics` from the current app state.
-Diagnostics has precedence over the touch wizard, and the touch wizard has precedence over upload.
+runtime chooses `interactive`, `upload`, or `diagnostics` from the current app state. Diagnostics
+has precedence over upload.
 
 Use the serial control to inspect or temporarily override the automatic choice:
 
@@ -37,7 +36,6 @@ Use the serial control to inspect or temporarily override the automatic choice:
 SCHEDPROFILE
 SCHEDPROFILE AUTO
 SCHEDPROFILE INTERACTIVE
-SCHEDPROFILE TOUCH
 SCHEDPROFILE UPLOAD
 SCHEDPROFILE DIAGNOSTICS
 ```

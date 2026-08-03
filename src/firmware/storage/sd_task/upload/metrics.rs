@@ -39,12 +39,8 @@ pub(super) fn write_metrics_delta(start: SdWriteMetrics, end: SdWriteMetrics) ->
         cmd25_ready_wait_over_8ms: end
             .cmd25_ready_wait_over_8ms
             .saturating_sub(start.cmd25_ready_wait_over_8ms),
-        acmd23_attempts: end
-            .acmd23_attempts
-            .saturating_sub(start.acmd23_attempts),
-        acmd23_successes: end
-            .acmd23_successes
-            .saturating_sub(start.acmd23_successes),
+        acmd23_attempts: end.acmd23_attempts.saturating_sub(start.acmd23_attempts),
+        acmd23_successes: end.acmd23_successes.saturating_sub(start.acmd23_successes),
         acmd23_unsupported: end
             .acmd23_unsupported
             .saturating_sub(start.acmd23_unsupported),

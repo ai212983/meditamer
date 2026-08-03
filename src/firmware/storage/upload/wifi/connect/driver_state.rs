@@ -210,10 +210,6 @@ pub(super) fn maybe_log_scan_entry_driver_state() {
     }
 }
 
-pub(super) fn log_boot_scan_only_driver_state() {
-    log_driver_state("boot_scan_only_driver_state", true);
-}
-
 pub(super) fn maybe_log_first_start_driver_state(
     expected_auth_idx: usize,
     expected_channel_hint: Option<u8>,

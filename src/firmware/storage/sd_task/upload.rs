@@ -1,9 +1,10 @@
+#[cfg(feature = "asset-upload-http")]
 use embassy_time::Instant;
 use sdcard::fat::FatEngine;
 
-use super::super::super::types::{
-    SdProbeDriver, SdUploadRequest, SdUploadResult, SdUploadResultCode,
-};
+#[cfg(any(feature = "asset-upload-http", all(test, not(target_os = "none"))))]
+use super::super::super::types::SdUploadResultCode;
+use super::super::super::types::{SdProbeDriver, SdUploadRequest, SdUploadResult};
 
 mod dispatch;
 mod helpers;
@@ -45,10 +46,12 @@ pub(super) fn parse_upload_path(path: &[u8], path_len: u8) -> Result<&str, SdUpl
     path_ops::parse_upload_path(path, path_len)
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(super) fn active_session_last_activity(session: &Option<SdUploadSession>) -> Option<Instant> {
     session.as_ref().map(|active| active.last_activity_at)
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(super) async fn ensure_upload_ready(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,

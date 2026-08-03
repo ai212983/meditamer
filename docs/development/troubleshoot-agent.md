@@ -29,7 +29,7 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 1. Flash firmware using `scripts/device/flash.sh` (unless explicitly disabled).
    This wrapper runs `hostctl flash-capture`, which is orchestrated by
    `tools/hostctl/scenarios/flash-capture.sw.yaml`.
-2. Run UART protocol probes (`PING`, `STATE GET`, `TIMESET`, `PSRAM`).
+2. Run UART protocol and readiness probes (`PING`, `STATE GET`, `PSRAM`).
 3. Run boot soak (`scripts/device/soak_boot.sh`) for repeated cold boot markers.
 4. Emit summary with pass/fail stage and failure class.
 
@@ -89,7 +89,7 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 - `build`: Build/link/toolchain failure before valid flash.
 - `flash`: `flash.sh` failure or flash transport instability.
 - `uart_transport`: serial port open/ownership/connectivity issue.
-- `uart_protocol`: command/ack contract issue (`PING/STATE/TIMESET/PSRAM`).
+- `uart_protocol`: command/response or readiness issue (`PING/STATE/PSRAM`).
 - `dhcp_no_ipv4_stall`: Wi-Fi association succeeds but DHCP lease does not converge (no IPv4).
 - `runtime`: panic/reset/Guru-style runtime failure signatures.
 - `boot`: soak marker gaps across reset cycles.

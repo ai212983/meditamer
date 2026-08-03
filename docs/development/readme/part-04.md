@@ -173,8 +173,8 @@ scripts/tests/hw/test_wifi_acceptance.sh
 - additional Wi-Fi diagnostics, blackout probes, and regression-gate notes now
   live in `docs/development/readme/part-06.md`.
 - to force baseline (pipeline off) for comparison, use:
-  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/build/build.sh debug`
-  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES='esp-hal-runtime,graphics,asset-upload-http,psram-alloc' scripts/device/flash.sh debug`
+  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES=asset-upload-http scripts/build/build.sh debug`
+  - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES=asset-upload-http scripts/device/flash.sh debug`
 
 Wi-Fi zero-discovery diagnostic workflow:
 

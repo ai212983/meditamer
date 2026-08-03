@@ -61,7 +61,7 @@ Current pre-commit hook:
 - Validates links in staged Markdown files via `scripts/ci/check_markdown_links.sh`.
 - Scans staged files for leaked Wi-Fi credentials via `scripts/ci/check_secrets.sh --staged`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
-- Runs host-tooling clippy via `scripts/ci/lint_host_tools.sh` (`-D warnings`) when staged files touch `tools/**` or workspace toolchain manifests.
+- Runs the canonical host-lint lane (`-D warnings`) when staged files touch host tools, the SD-card package, or workspace toolchain manifests.
 
 Current commit-msg hook:
 
@@ -72,7 +72,7 @@ Current commit-msg hook:
 
 Current pre-push hook:
 
-- Runs strict firmware clippy via `cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --all-features --workspace --bins --lib -- -D warnings` when pushed files touch firmware/workspace Rust paths.
+- Runs strict firmware clippy through `scripts/build/build.sh clippy`, which shares the production LVGL native-toolchain setup, when pushed files touch firmware/workspace Rust paths.
 - Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
 
 CI includes a dedicated secret-scan workflow (`.github/workflows/secret_scan.yml`) that runs `scripts/ci/check_secrets.sh` on pull requests and pushes to `master`.
@@ -141,7 +141,7 @@ Optional SonarQube env vars:
 
 Notes for this workspace:
 
-- The firmware is `no_std` with heavy feature/cfg gating; analyzer results can include inactive-code and unresolved-import noise outside active build paths.
+- The firmware is `no_std`; the optional Wi-Fi, telemetry, and slim diagnostic profiles can still produce analyzer noise outside the active build profile.
 - The baseline script intentionally runs with `--disable-build-scripts --disable-proc-macros` for stable, fast CI signal.
 - Authoritative correctness gates remain `cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` and strict `cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` on `--bins --lib`.
 
@@ -155,10 +155,12 @@ Optional full (online) validation:
 git ls-files -z '*.md' | xargs -0 env MARKDOWN_LINKS_ONLINE=1 scripts/ci/check_markdown_links.sh
 ```
 
-## Markdown LOC Policy
+## Markdown LOC Advisory
 
 - warning threshold: `220` lines
-- hard limit: `300` lines
+- high-attention threshold: `300` lines
+- LOC findings are advisory and do not block CI; architecture and code-analysis
+  ratchets remain the blocking maintainability gates.
 - local staged check: `scripts/ci/check_markdown_loc.sh --staged`
 - full repo check: `scripts/ci/check_markdown_loc.sh`
 - CI workflow: `.github/workflows/docs_ci.yml`
@@ -166,8 +168,8 @@ git ls-files -z '*.md' | xargs -0 env MARKDOWN_LINKS_ONLINE=1 scripts/ci/check_m
   - `docs/archive/**`
   - `tools/**/deep-research-report*.md`
 
-When a document approaches the warning threshold, split it into shard parts and
-keep the original path as a short index page linking to those parts.
+When useful for navigation and ownership, split a large document into shard
+parts and keep the original path as a short index page linking to those parts.
 
 ## Sharded Docs Workflow
 
@@ -175,39 +177,40 @@ keep the original path as a short index page linking to those parts.
 - RFC updates go to the latest shard in `docs/development/rfc-upload-throughput-next-phase/part-*.md`.
 - Development-guide operational updates go to the relevant `docs/development/readme/part-*.md` file.
 - Keep these as index pages only: `docs/development/upload-throughput-history.md`, `docs/development/rfc-upload-throughput-next-phase.md`, `docs/development/README.md`.
-- When a latest shard nears `220` LOC:
-  - create the next `part-XX.md`
-  - add it to the index page links in order.
+- Start a new shard for a distinct investigation phase, responsibility, or
+  navigation boundary, then add it to the index page links in order.
 
-## File Size Guidelines (Rewrite Phase)
+## Source Architecture Review
 
-These limits are active during the current rewrite on this branch. Enforcement is manual in review for now (no hooks yet).
+Line-count reports are advisory signals for review, not acceptance thresholds.
+Split code when doing so creates a coherent responsibility, ownership boundary,
+test seam, or hardware-lifetime boundary. Do not split a cohesive module merely
+to reduce its line count.
 
-- Hard cap: non-generated source files must stay at or below `500` lines.
-- Split-plan trigger: once a file crosses `420` lines, the same PR must include a short split plan.
-- Warning threshold: treat `450` lines as "split now unless there is a blocking reason".
-- New modules target: keep new modules at or below `300` lines.
+- Blocking code-analysis checks focus on function complexity and argument-heavy
+  APIs rather than file length.
+- Large-file reports help reviewers find areas worth inspecting, but they do not
+  fail CI.
 - Prefer folder-based splits over flat suffix files. Example: prefer `src/firmware/event_engine/tap/hsm.rs` and `src/firmware/event_engine/tap/trace.rs` over `src/firmware/event_engine/tap_hsm.rs` and `src/firmware/event_engine/tap_trace.rs`.
-- Generated/build outputs are excluded from these limits (for example `target/**` and `**/out/**`).
-
-Suggested PR checklist line:
-
-- `[]` If any touched file is `>= 420` lines, I included a split plan in this PR description.
+- Generated/build outputs are excluded from these reports (for example `target/**` and `**/out/**`).
 
 ## Display Runtime Behavior
 
-- Clock refresh task: every 5 minutes (`300s`)
-- Battery task: independent Embassy task every 5 minutes (`300s`)
-- Battery label: top-right (`BAT xx%`)
-- Battery percentage source: BQ27441 fuel gauge `SoC` register (reference behavior)
+- LVGL service period: 8 ms, with panel refreshes driven by accumulated dirty areas.
+- Battery task: independent Embassy task every 5 minutes (`300s`).
+- Battery percentage source: BQ27441 fuel-gauge `SoC` register.
 
 ## Build
 
 ```bash
-scripts/build/build.sh [debug|release]
+scripts/build/build.sh [debug|release|clippy] [default|minimal|slim|telemetry|all-features]
+scripts/ci/check_software_baseline.sh [lane]
 ```
 
 Default is `release` when no argument is provided.
+
+See [Compile-Time Features](../compile-time-features.md) for the supported
+feature profiles and the functionality that is now unconditional.
 
 The default Xtensa runner (`scripts/build/xtensa_runner.sh`) flashes firmware without opening
 an interactive monitor (safe in non-interactive shells). To enable monitor explicitly:

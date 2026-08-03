@@ -198,20 +198,6 @@ where
         }
     }
 
-    pub(super) async fn i2c_read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), I2C::Error> {
-        match self.i2c.read(addr, buffer).await {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                let _ = self.i2c.reset().await;
-                embassy_time::Timer::after_millis(1).await;
-                self.i2c
-                    .read(addr, buffer)
-                    .await
-                    .map_err(InkplateHalError::I2c)
-            }
-        }
-    }
-
     pub(super) async fn read_i2c_reg(&mut self, addr: u8, reg: u8) -> Result<u8, I2C::Error> {
         let mut buf = [0u8; 1];
         self.i2c_write_read(addr, &[reg], &mut buf).await?;

@@ -39,18 +39,6 @@ cargo +stable run \
   inspect --bundle /path/to/scene.scenebundle
 ```
 
-## Complex suite (same scene, multiple conditions)
-Run:
-```bash
-tools/scene_viewer/scripts/render_complex_suite.sh
-```
-
-Outputs are written to:
-- `tools/scene_viewer/out/complex_suite/maps`
-- `tools/scene_viewer/out/complex_suite/bundle`
-- `tools/scene_viewer/out/complex_suite/renders`
-- `tools/scene_viewer/out/complex_suite/debug`
-
 ## Buddha 3D model suite
 Run:
 ```bash

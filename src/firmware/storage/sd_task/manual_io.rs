@@ -1,8 +1,6 @@
 use core::fmt::Write;
 
-use sdcard::probe::{
-    SdCardVersion, SdFilesystem, SdProbeError, SdProbeStatus, SD_SECTOR_SIZE,
-};
+use sdcard::probe::{SdCardVersion, SdFilesystem, SdProbeError, SdProbeStatus, SD_SECTOR_SIZE};
 
 use super::serial_log::{self, SdSerialLine};
 use crate::firmware::types::{SdProbeDriver, SdResultCode};
@@ -78,7 +76,11 @@ async fn publish_probe_error(reason: &str, err: SdProbeError) {
             queue_line!("sdprobe[{}]: not_detected spi_error={:?}", reason, err)
         }
         SdProbeError::SpiConfig(err) => {
-            queue_line!("sdprobe[{}]: not_detected spi_config_error={:?}", reason, err)
+            queue_line!(
+                "sdprobe[{}]: not_detected spi_config_error={:?}",
+                reason,
+                err
+            )
         }
         SdProbeError::Cmd0Failed(r1) => {
             queue_line!("sdprobe[{}]: not_detected cmd0_r1=0x{:02x}", reason, r1)
@@ -237,7 +239,13 @@ async fn read_sector(
             Err(SdResultCode::OperationFailed)
         }
         Err(err) => {
-            queue_line!("sdrw[{}]: {}_error lba={} err={:?}", reason, phase, lba, err);
+            queue_line!(
+                "sdrw[{}]: {}_error lba={} err={:?}",
+                reason,
+                phase,
+                lba,
+                err
+            );
             Err(SdResultCode::OperationFailed)
         }
     }

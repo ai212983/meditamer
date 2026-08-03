@@ -146,33 +146,6 @@ pub(crate) struct SdUploadResult {
 }
 
 #[derive(Clone, Copy)]
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-pub(crate) struct SdAssetReadRequest {
-    pub(crate) path: [u8; SD_PATH_MAX],
-    pub(crate) path_len: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-pub(crate) enum SdAssetReadResultCode {
-    Ok,
-    Busy,
-    InvalidPath,
-    NotFound,
-    SizeMismatch,
-    PowerOnFailed,
-    InitFailed,
-    OperationFailed,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct SdAssetReadResponse {
-    pub(crate) ok: bool,
-    pub(crate) code: SdAssetReadResultCode,
-    pub(crate) data_len: u16,
-}
-
-#[derive(Clone, Copy)]
 pub(crate) enum SdPowerRequest {
     On,
     Off,

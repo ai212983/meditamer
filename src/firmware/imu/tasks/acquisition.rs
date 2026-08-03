@@ -1,4 +1,4 @@
-use embassy_futures::select::{select4, Either4};
+use embassy_futures::select::{select5, Either5};
 use embassy_time::{Duration, Instant, Timer};
 
 use crate::firmware::{
@@ -19,6 +19,7 @@ use super::super::{
     scheduler::{AdaptiveImuScheduler, SamplingMode},
     types::{ImuFaultStage, ImuPipelineInput, ImuSuppressionReason},
 };
+use super::acquisition_control::{handle_control_command, receive_command};
 
 #[embassy_executor::task]
 pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
@@ -37,7 +38,7 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
     let mut power_good = -1i16;
     let mut next_aux_at = Instant::now();
 
-    log_status(SerialStatusEvent::ImuScheduler {
+    log_status(SerialStatusEvent::Scheduler {
         sensor_odr_hz: config.sensor_odr_hz,
         idle_hz: config.idle_hz,
         active_hz: config.active_hz,
@@ -45,16 +46,17 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
     });
 
     loop {
-        match select4(
+        match select5(
             Timer::at(next_sample_at),
             IMU_SAMPLING_DEMAND.wait(),
             TOUCH_IMU_ACTIVITY.wait(),
             TOUCH_IMU_STATUS.wait(),
+            receive_command(),
         )
         .await
         {
-            Either4::First(_) => {}
-            Either4::Second(demand) => {
+            Either5::First(_) => {}
+            Either5::Second(demand) => {
                 promote_scheduler(&mut scheduler, &mut last_mode, demand.active_until_ms);
                 let active_deadline =
                     Instant::now() + Duration::from_micros(scheduler.active_period_us());
@@ -63,13 +65,19 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
                 }
                 continue;
             }
-            Either4::Third(snapshot) => {
+            Either5::Third(snapshot) => {
                 touch = snapshot;
                 next_sample_at = Instant::now();
                 continue;
             }
-            Either4::Fourth(status) => {
+            Either5::Fourth(status) => {
                 touch_initializing = matches!(status, TouchStatus::Initializing);
+                next_sample_at = Instant::now();
+                continue;
+            }
+            Either5::Fifth(command) => {
+                handle_control_command(command).await;
+                pending_discontinuity = true;
                 next_sample_at = Instant::now();
                 continue;
             }
@@ -139,7 +147,7 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
                         .send(ImuPipelineInput::Recovered { now_ms })
                         .await;
                     metrics::record_recovery();
-                    log_status(SerialStatusEvent::ImuReady);
+                    log_status(SerialStatusEvent::Ready);
                 }
                 Ok(false) | Err(_) => {
                     metrics::record_init_failure();
@@ -153,7 +161,7 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
                         fault_notified = true;
                     }
                     retry_at = Instant::now() + Duration::from_millis(IMU_INIT_RETRY_MS);
-                    log_status(SerialStatusEvent::ImuInitFailed);
+                    log_status(SerialStatusEvent::InitFailed);
                 }
             }
         }
@@ -213,7 +221,7 @@ pub(crate) async fn imu_acquisition_task(mut imu: InkplateImuDriver) {
                             stage: ImuFaultStage::Sampling,
                         })
                         .await;
-                    log_status(SerialStatusEvent::ImuReadError);
+                    log_status(SerialStatusEvent::ReadError);
                 }
             }
         }

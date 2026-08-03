@@ -24,12 +24,6 @@ pub(super) const WIFI_POST_START_PROMISC_ZERO_HARD_REINIT: bool = parse_nonzero_
         None => option_env!("WIFI_POST_START_PROMISC_ZERO_HARD_REINIT"),
     },
 );
-pub(super) const WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG: bool = parse_nonzero_flag(
-    match option_env!("MEDITAMER_WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG") {
-        Some(value) => Some(value),
-        None => option_env!("WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG"),
-    },
-);
 const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_DEFAULT: u64 = 120;
 const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MIN: u64 = 50;
 const WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS_MAX: u64 = 3_000;

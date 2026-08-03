@@ -69,7 +69,7 @@ impl FatEngine {
             write_fat_value(&mut self.workspace.sector, index, 0);
             count = count.saturating_add(1);
 
-            if next >= super::super::FAT32_EOC || next < 2 {
+            if !(2..super::super::FAT32_EOC).contains(&next) {
                 current = 0;
                 break;
             }

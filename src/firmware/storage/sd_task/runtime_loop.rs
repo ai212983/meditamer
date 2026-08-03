@@ -1,17 +1,304 @@
+extern crate alloc;
+
 #[path = "runtime_startup.rs"]
 mod runtime_startup;
 
+struct SdTaskRuntime {
+    sd_probe: SdProbeDriver,
+    boot_started_at: Instant,
+    powered: bool,
+    upload_mounted: bool,
+    upload_session: Option<SdUploadSession>,
+    // Held for the whole task, so as a plain field it would sit in this task's
+    // Embassy pool — which lives in `.bss` in `dram_seg` and therefore comes
+    // straight out of the CPU0 stack. On the heap it lands in `dram2_seg`
+    // instead. See docs/development/dram-budget.md.
+    fat_engine: alloc::boxed::Box<FatEngine>,
+    consecutive_failures: u8,
+    backoff_until: Option<Instant>,
+}
+
+impl SdTaskRuntime {
+    async fn initialize(sd_probe: SdProbeDriver) -> Self {
+        let mut runtime = Self {
+            sd_probe,
+            boot_started_at: Instant::now(),
+            powered: false,
+            upload_mounted: false,
+            upload_session: None,
+            fat_engine: alloc::boxed::Box::new(FatEngine::new()),
+            consecutive_failures: 0,
+            backoff_until: None,
+        };
+        let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
+        (runtime.consecutive_failures, runtime.backoff_until) = runtime_startup::initialize(
+            &mut runtime.sd_probe,
+            &mut runtime.powered,
+            &mut no_power,
+            &mut runtime.fat_engine,
+        )
+        .await;
+        runtime
+    }
+
+    async fn wait_for_backoff(&mut self) {
+        let Some(until) = self.backoff_until.take() else {
+            return;
+        };
+        let now = Instant::now();
+        if now < until {
+            Timer::after(until.saturating_duration_since(now)).await;
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn abort_stale_upload_session(&mut self) -> bool {
+        let Some(reason) = self.pending_upload_abort() else {
+            return false;
+        };
+        match reason {
+            UploadAbortReason::ModeOff => telemetry::record_sd_upload_session_mode_off_abort(),
+            UploadAbortReason::Idle { idle_ms } => {
+                telemetry::record_sd_upload_session_timeout_abort();
+                esp_println::println!(
+                    "sdtask: upload_session_idle_abort idle_ms={} threshold_ms={}",
+                    idle_ms,
+                    SD_UPLOAD_SESSION_IDLE_ABORT_MS
+                );
+            }
+        }
+        let result = abort_active_upload_session(
+            &mut self.upload_session,
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.fat_engine,
+        )
+        .await;
+        publish_upload_result(result);
+        true
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    fn pending_upload_abort(&self) -> Option<UploadAbortReason> {
+        self.upload_session.as_ref()?;
+        if !service_mode::upload_transfers_enabled() {
+            return Some(UploadAbortReason::ModeOff);
+        }
+        let last_activity_at = upload::active_session_last_activity(&self.upload_session)?;
+        let idle_ms = duration_ms_since(last_activity_at);
+        (idle_ms >= SD_UPLOAD_SESSION_IDLE_ABORT_MS).then_some(UploadAbortReason::Idle { idle_ms })
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn run_cycle(&mut self) {
+        if self.powered {
+            self.run_powered_cycle().await;
+        } else {
+            self.run_unpowered_cycle().await;
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn run_powered_cycle(&mut self) {
+        match select3(
+            WIFI_CONFIG_REQUESTS.receive(),
+            SD_UPLOAD_REQUESTS.receive(),
+            with_timeout(
+                Duration::from_millis(SD_IDLE_POWER_OFF_MS),
+                SD_REQUESTS.receive(),
+            ),
+        )
+        .await
+        {
+            Either3::First(request) => {
+                self.process_wifi_config_request(request).await;
+            }
+            Either3::Second(request) => {
+                self.process_upload_request(request).await;
+            }
+            Either3::Third(Ok(request)) => self.process_core_request(request).await,
+            Either3::Third(Err(_)) => self.handle_idle().await,
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn run_unpowered_cycle(&mut self) {
+        match select3(
+            WIFI_CONFIG_REQUESTS.receive(),
+            SD_UPLOAD_REQUESTS.receive(),
+            SD_REQUESTS.receive(),
+        )
+        .await
+        {
+            Either3::First(request) => {
+                self.process_wifi_config_request(request).await;
+            }
+            Either3::Second(request) => {
+                self.process_upload_request(request).await;
+            }
+            Either3::Third(request) => self.process_core_request(request).await,
+        }
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn process_wifi_config_request(
+        &mut self,
+        request: crate::firmware::types::WifiConfigRequest,
+    ) {
+        if !service_mode::upload_transfers_enabled() {
+            publish_wifi_config_response(disabled_wifi_config_response());
+            return;
+        }
+        if let Err(code) = ensure_upload_storage_ready(
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.fat_engine,
+        )
+        .await
+        {
+            publish_wifi_config_response(wifi_config_error_response(code));
+            return;
+        }
+        let response = process_wifi_config_request(
+            request,
+            &self.upload_session,
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.fat_engine,
+        )
+        .await;
+        publish_wifi_config_response(response);
+    }
+
+    #[cfg(feature = "asset-upload-http")]
+    async fn process_upload_request(&mut self, request: SdUploadRequest) {
+        if !service_mode::upload_transfers_enabled() {
+            publish_upload_result(disabled_upload_result());
+            return;
+        }
+        if let Err(code) = ensure_upload_storage_ready(
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.fat_engine,
+        )
+        .await
+        {
+            publish_upload_result(upload_storage_error_result(code));
+            return;
+        }
+        let result = process_upload_request(
+            request,
+            &mut self.upload_session,
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.fat_engine,
+        )
+        .await;
+        publish_upload_result(result);
+    }
+
+    #[cfg(not(feature = "asset-upload-http"))]
+    async fn run_cycle(&mut self) {
+        match receive_core_request(
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut self.upload_mounted,
+            &mut self.upload_session,
+            &mut self.fat_engine,
+        )
+        .await
+        {
+            Some(request) => self.process_core_request(request).await,
+            None => self.handle_idle().await,
+        }
+    }
+
+    async fn handle_idle(&mut self) {
+        #[cfg(feature = "asset-upload-http")]
+        if self.upload_session.is_some() {
+            // Keep SD online during an active upload session; stale sessions are cleaned up
+            // by the idle-abort/mode-off check at the top of the loop.
+            return;
+        }
+        // The boot probe can finish while the display task is still in its
+        // initial e-paper refresh and unable to service the shared I2C
+        // expander. Keep the card powered until the display has announced
+        // runtime readiness; a fixed grace period alone raced slow full
+        // refreshes and produced a spurious power-off timeout.
+        if self.powered
+            && (!crate::firmware::runtime::scheduling::runtime_ready()
+                || duration_ms_since(self.boot_started_at) < SD_BOOT_POWER_OFF_GRACE_MS as u32)
+        {
+            return;
+        }
+        if self.powered && !request_sd_power(SdPowerRequest::Off).await {
+            esp_println::println!("sdtask: idle_power_off_failed");
+        }
+        self.reset_storage_state();
+    }
+
+    async fn process_core_request(&mut self, request: SdRequest) {
+        let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
+        let result = process_request(
+            request,
+            &mut self.sd_probe,
+            &mut self.powered,
+            &mut no_power,
+            &mut self.fat_engine,
+        )
+        .await;
+        publish_result(result);
+        if result.ok || !result.recover_bus {
+            self.consecutive_failures = 0;
+            self.backoff_until = None;
+            return;
+        }
+
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1).min(8);
+        let backoff_ms = failure_backoff_ms(self.consecutive_failures);
+        self.backoff_until = Some(Instant::now() + Duration::from_millis(backoff_ms));
+        if self.powered && !request_sd_power(SdPowerRequest::Off).await {
+            esp_println::println!("sdtask: fail_power_off_failed");
+        }
+        self.reset_storage_state();
+    }
+
+    fn reset_storage_state(&mut self) {
+        self.powered = false;
+        self.sd_probe.invalidate();
+        self.fat_engine.invalidate();
+        self.upload_mounted = false;
+    }
+}
+
+#[cfg(feature = "asset-upload-http")]
+enum UploadAbortReason {
+    ModeOff,
+    Idle { idle_ms: u32 },
+}
+
+#[cfg(feature = "asset-upload-http")]
+fn upload_storage_error_result(code: SdUploadResultCode) -> SdUploadResult {
+    SdUploadResult {
+        ok: false,
+        code,
+        bytes_written: 0,
+        chunk_queue_wait_ms: 0,
+        chunk_handler_ms: 0,
+        chunk_post_handler_ms: 0,
+        chunk_published_at_ms: 0,
+        chunk_handler_done_at_ms: 0,
+    }
+}
+
 #[embassy_executor::task]
-pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
-    let boot_started_at = Instant::now();
-    let mut powered = false;
-    let mut upload_mounted = false;
-    let mut upload_session: Option<SdUploadSession> = None;
-    let mut fat_engine = FatEngine::new();
-    let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
-    let (mut consecutive_failures, mut backoff_until) =
-        runtime_startup::initialize(&mut sd_probe, &mut powered, &mut no_power, &mut fat_engine)
-            .await;
+pub(crate) async fn sd_task(sd_probe: SdProbeDriver) {
+    let mut runtime = SdTaskRuntime::initialize(sd_probe).await;
 
     #[cfg(feature = "asset-upload-http")]
     if crate::firmware::storage::transfer_buffers::lock_upload_chunk_buffer()
@@ -22,271 +309,13 @@ pub(crate) async fn sd_task(mut sd_probe: SdProbeDriver) {
     }
 
     loop {
-        if let Some(until) = backoff_until {
-            let now = Instant::now();
-            if now < until {
-                Timer::after(until.saturating_duration_since(now)).await;
-            }
-            backoff_until = None;
-        }
+        runtime.wait_for_backoff().await;
 
         #[cfg(feature = "asset-upload-http")]
-        if upload_session.is_some() {
-            if !service_mode::upload_transfers_enabled() {
-                telemetry::record_sd_upload_session_mode_off_abort();
-                let result = abort_active_upload_session(
-                    &mut upload_session,
-                    &mut sd_probe,
-                    &mut powered,
-                    &mut upload_mounted,
-                    &mut fat_engine,
-                )
-                .await;
-                publish_upload_result(result);
-                continue;
-            }
-
-            if let Some(last_activity_at) = upload::active_session_last_activity(&upload_session) {
-                let idle_ms = duration_ms_since(last_activity_at);
-                if idle_ms >= SD_UPLOAD_SESSION_IDLE_ABORT_MS {
-                    telemetry::record_sd_upload_session_timeout_abort();
-                    esp_println::println!(
-                        "sdtask: upload_session_idle_abort idle_ms={} threshold_ms={}",
-                        idle_ms,
-                        SD_UPLOAD_SESSION_IDLE_ABORT_MS
-                    );
-                    let result = abort_active_upload_session(
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await;
-                    publish_upload_result(result);
-                    continue;
-                }
-            }
-        }
-
-        #[cfg(feature = "asset-upload-http")]
-        let request = if powered {
-            match select3(
-                WIFI_CONFIG_REQUESTS.receive(),
-                SD_UPLOAD_REQUESTS.receive(),
-                with_timeout(
-                    Duration::from_millis(SD_IDLE_POWER_OFF_MS),
-                    SD_REQUESTS.receive(),
-                ),
-            )
-            .await
-            {
-                Either3::First(config_request) => {
-                    if !service_mode::upload_transfers_enabled() {
-                        publish_wifi_config_response(disabled_wifi_config_response());
-                        continue;
-                    }
-                    if let Err(code) = ensure_upload_storage_ready(
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await
-                    {
-                        publish_wifi_config_response(wifi_config_error_response(code));
-                        continue;
-                    }
-                    let response = process_wifi_config_request(
-                        config_request,
-                        &upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await;
-                    publish_wifi_config_response(response);
-                    continue;
-                }
-                Either3::Second(upload_request) => {
-                    if !service_mode::upload_transfers_enabled() {
-                        publish_upload_result(disabled_upload_result());
-                        continue;
-                    }
-                    if let Err(code) = ensure_upload_storage_ready(
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await
-                    {
-                        publish_upload_result(SdUploadResult {
-                            ok: false,
-                            code,
-                            bytes_written: 0,
-                            chunk_queue_wait_ms: 0,
-                            chunk_handler_ms: 0,
-                            chunk_post_handler_ms: 0,
-                            chunk_published_at_ms: 0,
-                            chunk_handler_done_at_ms: 0,
-                        });
-                        continue;
-                    }
-                    let result = process_upload_request(
-                        upload_request,
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await;
-                    publish_upload_result(result);
-                    continue;
-                }
-                Either3::Third(result) => result.ok(),
-            }
-        } else {
-            match select3(
-                WIFI_CONFIG_REQUESTS.receive(),
-                SD_UPLOAD_REQUESTS.receive(),
-                SD_REQUESTS.receive(),
-            )
-            .await
-            {
-                Either3::First(config_request) => {
-                    if !service_mode::upload_transfers_enabled() {
-                        publish_wifi_config_response(disabled_wifi_config_response());
-                        continue;
-                    }
-                    if let Err(code) = ensure_upload_storage_ready(
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await
-                    {
-                        publish_wifi_config_response(wifi_config_error_response(code));
-                        continue;
-                    }
-                    let response = process_wifi_config_request(
-                        config_request,
-                        &upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await;
-                    publish_wifi_config_response(response);
-                    continue;
-                }
-                Either3::Second(upload_request) => {
-                    if !service_mode::upload_transfers_enabled() {
-                        publish_upload_result(disabled_upload_result());
-                        continue;
-                    }
-                    if let Err(code) = ensure_upload_storage_ready(
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await
-                    {
-                        publish_upload_result(SdUploadResult {
-                            ok: false,
-                            code,
-                            bytes_written: 0,
-                            chunk_queue_wait_ms: 0,
-                            chunk_handler_ms: 0,
-                            chunk_post_handler_ms: 0,
-                            chunk_published_at_ms: 0,
-                            chunk_handler_done_at_ms: 0,
-                        });
-                        continue;
-                    }
-                    let result = process_upload_request(
-                        upload_request,
-                        &mut upload_session,
-                        &mut sd_probe,
-                        &mut powered,
-                        &mut upload_mounted,
-                        &mut fat_engine,
-                    )
-                    .await;
-                    publish_upload_result(result);
-                    continue;
-                }
-                Either3::Third(request) => Some(request),
-            }
-        };
-
-        #[cfg(not(feature = "asset-upload-http"))]
-        let request = receive_core_request(
-            &mut sd_probe,
-            &mut powered,
-            &mut upload_mounted,
-            &mut upload_session,
-            &mut fat_engine,
-        )
-        .await;
-
-        let Some(request) = request else {
-            #[cfg(feature = "asset-upload-http")]
-            if upload_session.is_some() {
-                // Keep SD online during an active upload session; stale sessions are cleaned up
-                // by the idle-abort/mode-off checks at the top of this loop.
-                continue;
-            }
-            // The boot probe can finish while the display task is still in its
-            // initial e-paper refresh and unable to service the shared I2C
-            // expander. Keep the card powered until the display has announced
-            // runtime readiness; a fixed grace period alone raced slow full
-            // refreshes and produced a spurious power-off timeout.
-            if powered
-                && (!crate::firmware::runtime::scheduling::runtime_ready()
-                    || duration_ms_since(boot_started_at) < SD_BOOT_POWER_OFF_GRACE_MS as u32)
-            {
-                continue;
-            }
-            if powered && !request_sd_power(SdPowerRequest::Off).await {
-                esp_println::println!("sdtask: idle_power_off_failed");
-            }
-            powered = false;
-            sd_probe.invalidate();
-            fat_engine.invalidate();
-            upload_mounted = false;
+        if runtime.abort_stale_upload_session().await {
             continue;
-        };
-
-        let result = process_request(
-            request,
-            &mut sd_probe,
-            &mut powered,
-            &mut no_power,
-            &mut fat_engine,
-        )
-        .await;
-        publish_result(result);
-
-        if result.ok || !result.recover_bus {
-            consecutive_failures = 0;
-            backoff_until = None;
-        } else {
-            consecutive_failures = consecutive_failures.saturating_add(1).min(8);
-            let backoff_ms = failure_backoff_ms(consecutive_failures);
-            backoff_until = Some(Instant::now() + Duration::from_millis(backoff_ms));
-            if powered && !request_sd_power(SdPowerRequest::Off).await {
-                esp_println::println!("sdtask: fail_power_off_failed");
-            }
-            powered = false;
-            sd_probe.invalidate();
-            fat_engine.invalidate();
-            upload_mounted = false;
         }
+
+        runtime.run_cycle().await;
     }
 }

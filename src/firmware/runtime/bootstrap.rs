@@ -1,6 +1,10 @@
-use crate::drivers::inkplate::{imu::InkplateImu, touch::InkplateTouch, InkplateHal};
+use crate::drivers::inkplate::{
+    imu::InkplateImu, touch::InkplateTouch, InkplateHal, FRAMEBUFFER_BYTES,
+    PARTIAL_TRANSITION_BYTES,
+};
 use embassy_embedded_hal::{adapter::BlockingAsync, shared_bus::asynch::i2c::I2cDevice};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use esp_hal::clock::CpuClock;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::{
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
@@ -17,10 +21,12 @@ use esp_hal::{
 };
 
 use super::super::config::UART_BAUD;
+#[cfg(feature = "asset-upload-http")]
+use super::super::storage;
 use super::super::types::{DisplayContext, PanelPinHold};
 use super::super::{
     app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
-    psram, storage, telemetry,
+    psram, telemetry,
 };
 use sdcard::probe;
 use static_cell::StaticCell;
@@ -28,10 +34,14 @@ use static_cell::StaticCell;
 mod tasks;
 use tasks::{board_runtime_task, BoardRuntimeResources};
 
+#[cfg(feature = "asset-upload-http")]
 use super::scheduling::{spawn as spawn_task, TaskClass};
 
 pub fn run() -> ! {
-    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let hal_config = esp_hal::Config::default();
+    let hal_config = hal_config.with_cpu_clock(CpuClock::_240MHz);
+    let peripherals = esp_hal::init(hal_config);
+    esp_println::println!("CPU_CLOCK hz={}", esp_hal::clock::cpu_clock().as_hz());
     let reset_reason = esp_hal::system::reset_reason();
     telemetry::set_boot_reset_reason_code(reset_reason.map(|value| value as u8));
     esp_println::println!(
@@ -39,15 +49,8 @@ pub fn run() -> ! {
         reset_reason,
         reset_reason.map(|value| value as u8).unwrap_or(0),
     );
-    #[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
-    esp_alloc::heap_allocator!(size: 48 * 1024);
-
-    #[cfg(feature = "psram-alloc")]
     let allocator_status = psram::init_allocator(peripherals.PSRAM);
-    #[cfg(not(feature = "psram-alloc"))]
-    psram::init_allocator();
     psram::log_allocator_status();
-    #[cfg(feature = "psram-alloc")]
     if !matches!(allocator_status.state, psram::AllocatorState::Initialized) {
         esp_println::println!(
             "psram: allocator initialization failed: {:?}",
@@ -156,10 +159,71 @@ pub fn run() -> ! {
     let display_i2c = I2cDevice::new(i2c_bus);
     let touch_i2c = I2cDevice::new(i2c_bus);
     let imu_i2c = I2cDevice::new(i2c_bus);
-    let inkplate = match InkplateHal::new(display_i2c, crate::drivers::platform::BusyDelay::new()) {
-        Ok(driver) => driver,
-        Err(_) => halt_forever(),
+    let mut inkplate =
+        match InkplateHal::new(display_i2c, crate::drivers::platform::BusyDelay::new()) {
+            Ok(driver) => driver,
+            Err(_) => halt_forever(),
+        };
+    // The previous-frame buffer is only diffed against outside the
+    // interrupt-masked scan passes, so it lives in PSRAM and leaves its
+    // 45000 bytes of dram2_seg for the internal heap. Without it partial
+    // refreshes fall back to full ones, so treat failure as fatal.
+    let previous_buffer = match psram::alloc_large_byte_buffer(FRAMEBUFFER_BYTES) {
+        Ok(buffer) => buffer,
+        Err(error) => {
+            esp_println::println!("panel: previous framebuffer allocation failed: {:?}", error);
+            halt_forever()
+        }
     };
+    let previous_placement = previous_buffer.placement();
+    if !matches!(previous_placement, psram::BufferPlacement::Psram) {
+        esp_println::println!(
+            "panel: previous framebuffer requires psram actual={:?}",
+            previous_placement
+        );
+        halt_forever();
+    }
+    if !inkplate.install_previous_framebuffer(previous_buffer.into_static_mut_slice()) {
+        esp_println::println!(
+            "panel: previous framebuffer size mismatch expected={}",
+            FRAMEBUFFER_BYTES
+        );
+        halt_forever();
+    }
+    esp_println::println!(
+        "panel: previous framebuffer ready bytes={} placement={:?}",
+        FRAMEBUFFER_BYTES,
+        previous_placement
+    );
+
+    let transition_buffer = match psram::alloc_large_byte_buffer(PARTIAL_TRANSITION_BYTES) {
+        Ok(buffer) => buffer,
+        Err(error) => {
+            esp_println::println!("panel: partial transition allocation failed: {:?}", error);
+            halt_forever()
+        }
+    };
+    let transition_placement = transition_buffer.placement();
+    if !matches!(transition_placement, psram::BufferPlacement::Psram) {
+        esp_println::println!(
+            "panel: partial transition requires psram actual={:?}",
+            transition_placement
+        );
+        halt_forever();
+    }
+    let transition = transition_buffer.into_static_mut_slice();
+    if !inkplate.install_partial_transition_buffer(transition) {
+        esp_println::println!(
+            "panel: partial transition size mismatch expected={}",
+            PARTIAL_TRANSITION_BYTES
+        );
+        halt_forever();
+    }
+    esp_println::println!(
+        "panel: partial transition ready bytes={} placement={:?}",
+        PARTIAL_TRANSITION_BYTES,
+        transition_placement
+    );
     let touch_driver = InkplateTouch::new(touch_i2c);
     let imu_driver = InkplateImu::new(imu_i2c);
 

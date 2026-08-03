@@ -10,12 +10,9 @@ mod telemetry;
 
 pub(super) use common::{
     parse_allocator_alloc_probe_command, parse_allocator_status_command, parse_metrics_command,
-    parse_metrics_net_command, parse_ping_command, parse_repaint_command,
-    parse_repaint_marble_command, parse_scheduler_command, parse_sdprobe_command,
-    parse_timeset_command, parse_touch_sched_reset_command,
+    parse_metrics_net_command, parse_ping_command, parse_repaint_command, parse_scheduler_command,
+    parse_sdprobe_command, parse_touch_sched_reset_command,
 };
-#[cfg(not(feature = "wifi-debug-slim-app"))]
-pub(super) use common::{parse_touch_wizard_command, parse_touch_wizard_dump_command};
 #[cfg(feature = "asset-upload-http")]
 pub(super) use network::{
     parse_net_listener_command, parse_net_recover_command, parse_net_start_command,

@@ -56,9 +56,23 @@ impl GpioFast {
     }
 
     #[inline(always)]
+    pub fn out_enable_clear(mask: u32) {
+        unsafe {
+            (*esp32::GPIO::PTR).enable_w1tc().write(|w| w.bits(mask));
+        }
+    }
+
+    #[inline(always)]
     pub fn out_enable1_set(mask: u32) {
         unsafe {
             (*esp32::GPIO::PTR).enable1_w1ts().write(|w| w.bits(mask));
+        }
+    }
+
+    #[inline(always)]
+    pub fn out_enable1_clear(mask: u32) {
+        unsafe {
+            (*esp32::GPIO::PTR).enable1_w1tc().write(|w| w.bits(mask));
         }
     }
 }

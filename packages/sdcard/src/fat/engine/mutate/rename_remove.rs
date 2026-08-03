@@ -44,7 +44,7 @@ impl FatEngine {
 
         let lfn_len = utf16_len(target.as_bytes())?;
         self.mutation.lfn_len = lfn_len as u16;
-        self.mutation.needed_slots = ((lfn_len + 12) / 13 + 1) as u8;
+        self.mutation.needed_slots = (lfn_len.div_ceil(13) + 1) as u8;
         self.mutation.alias_attempt = 1;
         self.begin_alias_scan()
     }

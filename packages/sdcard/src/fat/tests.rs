@@ -37,9 +37,7 @@ mod tests {
 
     #[test]
     fn build_display_name_from_lfn_sequence() {
-        let short = [
-            b'L', b'O', b'N', b'G', b'N', b'A', b'~', b'1', b'T', b'X', b'T',
-        ];
+        let short = *b"LONGNA~1TXT";
         let checksum = short_name_checksum(&short);
         let long = "LongFileNameData.txt";
         let mut utf16 = [0u16; 40];
@@ -48,7 +46,7 @@ mod tests {
             utf16[utf16_len] = unit;
             utf16_len += 1;
         }
-        let slots = (utf16_len + 12) / 13;
+        let slots = utf16_len.div_ceil(13);
 
         let mut lfn = LfnState::new();
         for seq in (1..=slots).rev() {
@@ -74,9 +72,7 @@ mod tests {
     #[test]
     fn segment_matches_lfn_case_insensitive_ascii() {
         let mut record = DirRecord {
-            short_name: [
-                b'L', b'O', b'N', b'G', b'N', b'A', b'~', b'1', b'T', b'X', b'T',
-            ],
+            short_name: *b"LONGNA~1TXT",
             display_name: [0; FAT_NAME_MAX],
             display_name_len: 0,
             attr: 0x20,

@@ -1,8 +1,9 @@
 use super::{
-    DelayOps, I2cOps, InkplateHal, InkplateHalError, Ordering, PinMode, ProbeStatus, Result,
-    TestPattern, BUZZ_EN, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BW, FRAMEBUFFER_BW_PREVIOUS,
+    panel_lifecycle::PanelPowerState, DelayOps, I2cOps, InkplateHal, InkplateHalError, Ordering,
+    PinMode, ProbeStatus, Result, TestPattern, BUZZ_EN, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BW,
     FRAMEBUFFER_BYTES, FRAMEBUFFER_TAKEN, FRONTLIGHT_EN, GPIO0_ENABLE, INT1_LSM, INT2_LSM,
-    INT_APDS, IO_INT_ADDR, PWRUP, SD_PMOS_PIN, TPS65186_ADDR, VCOM, WAKEUP,
+    INT_APDS, IO_INT_ADDR, PARTIAL_TRANSITION_BYTES, PWRUP, SD_PMOS_PIN, TPS65186_ADDR, VCOM,
+    WAKEUP,
 };
 
 impl<I2C, D> InkplateHal<I2C, D>
@@ -29,12 +30,6 @@ where
             core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
             slot.assume_init_mut()
         };
-        let framebuffer_bw_previous = unsafe {
-            let slot = &mut *core::ptr::addr_of_mut!(FRAMEBUFFER_BW_PREVIOUS);
-            core::ptr::write_bytes(slot.as_mut_ptr().cast::<u8>(), 0, FRAMEBUFFER_BYTES);
-            slot.assume_init_mut()
-        };
-
         Ok(Self {
             i2c,
             delay,
@@ -42,11 +37,35 @@ where
             battery_gate_active_high: None,
             pin_lut,
             panel_fast_ready: false,
-            panel_on: false,
+            panel_power_state: PanelPowerState::Off,
             framebuffer_bw,
-            framebuffer_bw_previous,
+            framebuffer_bw_previous: None,
+            partial_transition: None,
             partial_ready: false,
         })
+    }
+
+    /// Installs the vendor-sized scratch frame used by partial refreshes.
+    /// Without it, partial requests deliberately fall back to a full refresh.
+    pub fn install_partial_transition_buffer(&mut self, buffer: &'static mut [u8]) -> bool {
+        let Ok(buffer) = <&'static mut [u8; PARTIAL_TRANSITION_BYTES]>::try_from(buffer) else {
+            return false;
+        };
+        self.partial_transition = Some(buffer);
+        true
+    }
+
+    /// Installs the previous-frame buffer that partial refreshes diff against.
+    /// Like the transition buffer, partial requests fall back to a full refresh
+    /// while it is absent. Starts cleared so the first partial pass treats the
+    /// panel as white.
+    pub fn install_previous_framebuffer(&mut self, buffer: &'static mut [u8]) -> bool {
+        let Ok(buffer) = <&'static mut [u8; FRAMEBUFFER_BYTES]>::try_from(buffer) else {
+            return false;
+        };
+        buffer.fill(0);
+        self.framebuffer_bw_previous = Some(buffer);
+        true
     }
 
     pub fn width(&self) -> usize {
@@ -133,6 +152,10 @@ where
         } else {
             self.framebuffer_bw[byte_idx] &= !bit;
         }
+    }
+
+    pub(crate) fn framebuffer_bw_mut(&mut self) -> &mut [u8] {
+        self.framebuffer_bw
     }
 
     pub fn draw_test_pattern(&mut self, pattern: TestPattern) {

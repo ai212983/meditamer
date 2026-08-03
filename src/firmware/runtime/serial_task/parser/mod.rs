@@ -11,23 +11,11 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
     parse_basic_command(line)
         .or_else(|| parse_network_command(line))
         .or_else(|| parse_storage_command(line))
-        .or_else(|| basic::parse_timeset_command(line).map(SerialCommand::TimeSync))
 }
 
 fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
-    if basic::parse_repaint_marble_command(line) {
-        return Some(SerialCommand::RepaintMarble);
-    }
     if basic::parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
-    }
-    #[cfg(not(feature = "wifi-debug-slim-app"))]
-    if basic::parse_touch_wizard_dump_command(line) {
-        return Some(SerialCommand::TouchWizardDump);
-    }
-    #[cfg(not(feature = "wifi-debug-slim-app"))]
-    if basic::parse_touch_wizard_command(line) {
-        return Some(SerialCommand::TouchWizard);
     }
     if basic::parse_metrics_net_command(line) {
         return Some(SerialCommand::MetricsNet);

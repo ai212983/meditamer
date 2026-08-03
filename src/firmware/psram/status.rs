@@ -1,42 +1,26 @@
 pub(crate) fn allocator_status() -> AllocatorStatus {
-    #[cfg(feature = "psram-alloc")]
     let (total_bytes, free_bytes) = {
         let stats = esp_alloc::HEAP.stats();
         (stats.size, esp_alloc::HEAP.free())
     };
-    #[cfg(not(feature = "psram-alloc"))]
-    let (total_bytes, free_bytes) = (0, 0);
     let peak_used_bytes = update_peak_used_bytes(used_bytes(total_bytes, free_bytes));
 
-    if cfg!(feature = "psram-alloc") {
-        AllocatorStatus {
-            feature_enabled: true,
-            state: current_allocator_state(),
-            total_bytes,
-            free_bytes,
-            peak_used_bytes,
-        }
-    } else {
-        AllocatorStatus {
-            feature_enabled: false,
-            state: AllocatorState::Disabled,
-            total_bytes,
-            free_bytes,
-            peak_used_bytes,
-        }
+    AllocatorStatus {
+        feature_enabled: true,
+        state: current_allocator_state(),
+        total_bytes,
+        free_bytes,
+        peak_used_bytes,
     }
 }
 
 pub(crate) fn allocator_memory_snapshot() -> AllocatorMemorySnapshot {
     let status = allocator_status();
     let used_bytes = used_bytes(status.total_bytes, status.free_bytes);
-    #[cfg(feature = "psram-alloc")]
     let (free_internal_bytes, free_external_bytes) = (
         esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into()),
         esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::External.into()),
     );
-    #[cfg(not(feature = "psram-alloc"))]
-    let (free_internal_bytes, free_external_bytes) = (0, 0);
 
     let initialized = status.feature_enabled && matches!(status.state, AllocatorState::Initialized);
     let (min_free_bytes, min_free_internal_bytes, min_free_external_bytes) = if initialized {

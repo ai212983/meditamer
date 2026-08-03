@@ -3,12 +3,13 @@ name: Firmware Heavy CI
 on:
   pull_request:
     paths:
-      - "src/main.rs"
-      - "src/event_engine/**"
-      - "src/inkplate_hal/**"
-      - "src/firmware/storage/sd_task/**"
+      - "src/**"
+      - "csrc/**"
+      - "ld/**"
       - "packages/sdcard/**"
-      - "scripts/ci/check_fat_engine_stackless.sh"
+      - "tools/event_config_compiler/**"
+      - "scripts/build/build.sh"
+      - "scripts/ci/check_*.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
@@ -37,7 +38,7 @@ jobs:
   firmware-xtensa:
     name: Firmware Xtensa Build and Clippy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -51,9 +52,7 @@ jobs:
           ldproxy: true
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
-      - name: Firmware clippy
-        run: cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --all-features --workspace --bins --lib -- -D warnings
-      - name: FAT engine stackless guard
-        run: scripts/ci/check_fat_engine_stackless.sh
-      - name: Firmware build release
-        run: cargo +esp build -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --locked --release
+      - name: Firmware profile builds and clippy
+        run: scripts/ci/check_software_baseline.sh firmware
+      - name: Firmware static guards
+        run: scripts/ci/check_software_baseline.sh static

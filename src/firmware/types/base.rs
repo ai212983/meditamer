@@ -17,17 +17,17 @@ pub(crate) type InkplateTouchDriver = InkplateTouch<SharedI2cDevice>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const SD_UPLOAD_CHUNK_MAX_DEFAULT: usize = 65_536;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const SD_UPLOAD_CHUNK_MAX_MIN: usize = 4_096;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const SD_UPLOAD_CHUNK_MAX_MAX: usize = 65_536;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const HTTP_RX_BUF_TARGET_DEFAULT: usize = 65_536;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const HTTP_RX_BUF_TARGET_MIN: usize = 8_192;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const HTTP_RX_BUF_TARGET_MAX: usize = 262_144;
 #[cfg(feature = "asset-upload-http")]
 const HTTP_INGRESS_COOP_YIELD_BYTES_DEFAULT: usize = 16 * 1024;
@@ -75,7 +75,7 @@ const fn parse_ascii_usize(value: &str) -> Option<usize> {
     }
     Some(out)
 }
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const fn configured_sd_upload_chunk_max() -> usize {
     let configured = match option_env!("MEDITAMER_SD_UPLOAD_CHUNK_MAX") {
         Some(v) => Some(v),
@@ -92,7 +92,7 @@ const fn configured_sd_upload_chunk_max() -> usize {
         _ => SD_UPLOAD_CHUNK_MAX_DEFAULT,
     }
 }
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 const fn configured_http_rx_buf_target() -> usize {
     let configured = match option_env!("MEDITAMER_HTTP_RX_BUF_TARGET") {
         Some(v) => Some(v),
@@ -183,21 +183,17 @@ const fn configured_http_ingress_adaptive_fairness() -> bool {
         _ => HTTP_INGRESS_ADAPTIVE_FAIRNESS_DEFAULT != 0,
     }
 }
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 // Larger upload chunks reduce per-chunk SD roundtrip overhead and improve
 // sustained HTTP upload throughput when PSRAM is available.
 // Override at build time via MEDITAMER_SD_UPLOAD_CHUNK_MAX (fallback SD_UPLOAD_CHUNK_MAX).
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = configured_sd_upload_chunk_max();
-#[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
-pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 4096;
 #[cfg(not(feature = "asset-upload-http"))]
 pub(crate) const SD_UPLOAD_CHUNK_MAX: usize = 1024;
-#[cfg(all(feature = "asset-upload-http", feature = "psram-alloc"))]
+#[cfg(feature = "asset-upload-http")]
 // Override at build time via MEDITAMER_HTTP_RX_BUF_TARGET
 // (fallback HTTP_RX_BUF_TARGET).
 pub(crate) const HTTP_RX_BUF_TARGET_BYTES: usize = configured_http_rx_buf_target();
-#[cfg(all(feature = "asset-upload-http", not(feature = "psram-alloc")))]
-pub(crate) const HTTP_RX_BUF_TARGET_BYTES: usize = 2048;
 #[cfg(feature = "asset-upload-http")]
 // Override at build time via MEDITAMER_HTTP_INGRESS_COOP_YIELD_BYTES
 // (fallback HTTP_INGRESS_COOP_YIELD_BYTES).
@@ -215,10 +211,6 @@ pub(crate) const HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS: u32 =
 // Override at build time via MEDITAMER_HTTP_INGRESS_ADAPTIVE_FAIRNESS
 // (fallback HTTP_INGRESS_ADAPTIVE_FAIRNESS): 0=off, 1=on.
 pub(crate) const HTTP_INGRESS_ADAPTIVE_FAIRNESS: bool = configured_http_ingress_adaptive_fairness();
-#[cfg(feature = "asset-upload-http")]
-pub(crate) const SD_ASSET_READ_MAX: usize = 1024;
-#[cfg(not(feature = "asset-upload-http"))]
-pub(crate) const SD_ASSET_READ_MAX: usize = 3072;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_SSID_MAX: usize = 32;
 #[cfg(feature = "asset-upload-http")]

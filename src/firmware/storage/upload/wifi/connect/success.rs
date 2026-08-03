@@ -84,7 +84,7 @@ pub(super) async fn handle_connect_success(
     stack: &Stack<'static>,
     state: &mut WifiTaskState,
 ) {
-    let mut dhcp_lease_observed = has_ipv4_lease(&stack);
+    let mut dhcp_lease_observed = has_ipv4_lease(stack);
     let dhcp_wait_started_at = Instant::now();
     let mut listener_wait_started_at = None;
     loop {

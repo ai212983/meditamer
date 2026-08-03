@@ -17,24 +17,3 @@ async fn process_upload_request_and_publish(
     .await;
     publish_upload_result(result);
 }
-
-#[cfg(not(feature = "asset-upload-http"))]
-async fn process_asset_read_request_and_publish(
-    asset_request: crate::firmware::types::SdAssetReadRequest,
-    upload_session: &mut Option<SdUploadSession>,
-    sd_probe: &mut SdProbeDriver,
-    powered: &mut bool,
-    upload_mounted: &mut bool,
-    fat_engine: &mut FatEngine,
-) {
-    let response = process_asset_read_request(
-        asset_request,
-        upload_session,
-        sd_probe,
-        powered,
-        upload_mounted,
-        fat_engine,
-    )
-    .await;
-    publish_asset_read_response(response);
-}

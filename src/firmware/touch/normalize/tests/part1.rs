@@ -92,6 +92,7 @@ fn bit_only_frame_without_recent_coordinate_presence_does_not_latch() {
 
     // Status bit only, no decoded coordinate.
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c0, p0) = n.normalize(
         0,
@@ -118,6 +119,7 @@ fn bit_only_frame_after_real_touch_keeps_short_continuity_then_releases() {
     assert_eq!(p0, Some(NormalizedTouchPoint { x: 210, y: 310 }));
 
     let mut raw = [0u8; 8];
+    raw[0] = 0x5A;
     raw[7] = 0x01;
     let (c1, p1) = n.normalize(
         40,

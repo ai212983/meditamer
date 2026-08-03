@@ -107,30 +107,6 @@ mod tests {
     }
 
     #[test]
-    fn touch_wizard_forces_overlay_none() {
-        let mut snapshot = AppStateSnapshot::default();
-        snapshot.phase = Phase::Operating;
-        snapshot.overlay = OverlayMode::Clock;
-        let mut engine = AppStateEngine::new(snapshot);
-        let result = engine.apply(AppStateCommand::SetBase(BaseMode::TouchWizard));
-        assert!(result.changed());
-        assert!(matches!(result.after.overlay, OverlayMode::None));
-    }
-
-    #[test]
-    fn clock_overlay_invalid_for_touch_wizard() {
-        let mut snapshot = AppStateSnapshot::default();
-        snapshot.phase = Phase::Operating;
-        snapshot.base = BaseMode::TouchWizard;
-        let mut engine = AppStateEngine::new(snapshot);
-        let result = engine.apply(AppStateCommand::SetOverlay(OverlayMode::Clock));
-        assert!(matches!(
-            result.status,
-            AppStateApplyStatus::InvalidTransition
-        ));
-    }
-
-    #[test]
     fn boot_with_persisted_diag_emits_start_action() {
         let mut persisted = PersistedAppState::default();
         persisted.diag_kind = DiagKind::Test;

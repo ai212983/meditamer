@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::Local;
 use clap::ValueEnum;
 use fs2::FileExt;
@@ -23,10 +23,7 @@ use crate::{
     port_detect,
     scenarios::{execute_workflow, load_workflow, WorkflowRuntime},
     serial_console::SerialConsole,
-    workflows::{
-        common::repo_root,
-        serial::{run_timeset, TimeSetOptions},
-    },
+    workflows::common::repo_root,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -56,6 +53,9 @@ pub struct FlashCaptureOptions {
     pub boot_window_ms: Option<u64>,
     pub idf_root: Option<PathBuf>,
     pub idf_tools_path: Option<PathBuf>,
+    pub post_command: Option<String>,
+    pub post_pattern: Option<String>,
+    pub post_timeout_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,7 +115,12 @@ struct OutputPaths {
     root: PathBuf,
     flash_log: PathBuf,
     capture_log: PathBuf,
+    post_command_log: PathBuf,
     summary: PathBuf,
+    firmware_elf: PathBuf,
+    app_bin: PathBuf,
+    hashes: PathBuf,
+    build_metadata: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -154,6 +159,7 @@ struct FlashCaptureRuntime<'a> {
     idf_env: Option<IdfEnv>,
     flash_result: Option<FlashResult>,
     capture_bytes: usize,
+    post_command_match: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -163,6 +169,7 @@ enum CommandProgressMode {
 
 const DEFAULT_LOG_DRAIN_TIMEOUT: Duration = Duration::from_millis(1_000);
 const DEFAULT_ENABLE_FALLBACK: bool = false;
+const DEFAULT_FLASH_BAUD: u32 = 115_200;
 
 #[derive(Debug)]
 struct LogRelayThread {

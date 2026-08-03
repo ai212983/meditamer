@@ -11,7 +11,10 @@ use serde_json::Value;
 use crate::{logging::Logger, scenarios::WorkflowRuntime, serial_console::SerialConsole};
 
 use super::{
-    io::{run_raw_expect_pattern, run_step, wait_for_pattern, wait_for_sd_result},
+    io::{
+        run_raw_expect_pattern, run_step, wait_for_pattern, wait_for_sd_result,
+        SdResultExpectation, SdStep,
+    },
     templates::{optional_arg_u32, required_arg_str, resolve_templates},
 };
 
@@ -68,13 +71,17 @@ impl<'a> SdcardScenarioRuntime<'a> {
         run_step(
             self.logger,
             self.console,
-            &name,
-            &command,
-            ack_tag,
-            expected_status,
-            expected_code,
-            expected_pattern.as_ref(),
-            timeout_ms,
+            SdStep {
+                name: &name,
+                command: &command,
+                ack_tag,
+                result: SdResultExpectation {
+                    status: expected_status,
+                    code: expected_code,
+                    timeout_ms,
+                },
+                completion_pattern: expected_pattern.as_ref(),
+            },
         )
     }
 
@@ -235,9 +242,11 @@ impl<'a> SdcardScenarioRuntime<'a> {
         wait_for_sd_result(
             self.console,
             req_id,
-            sdwait_timeout_ms,
-            expected_status,
-            expected_code,
+            SdResultExpectation {
+                status: expected_status,
+                code: expected_code,
+                timeout_ms: sdwait_timeout_ms,
+            },
         )?;
 
         if self.console.has_regex_since(start, &busy_re) {

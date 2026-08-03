@@ -40,9 +40,7 @@ pub(super) fn classify_failure(stage: &str, detail: &str) -> String {
 
     if lower.contains("missing pong")
         || lower.contains("missing state")
-        || lower.contains("missing timeset")
         || lower.contains("missing psram")
-        || lower.contains("timeset err")
         || lower.contains("state err")
         || stage == "probe"
     {

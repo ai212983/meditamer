@@ -6,13 +6,10 @@ use crate::firmware::config::{
 };
 
 use super::snapshot::AppStateSnapshot;
-use super::types::{BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode, ServiceFlags};
+use super::types::{DiagKind, DiagTargets, ServiceFlags};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct PersistedAppState {
-    pub(crate) base: BaseMode,
-    pub(crate) day_background: DayBackground,
-    pub(crate) overlay: OverlayMode,
     pub(crate) services: ServiceFlags,
     pub(crate) diag_kind: DiagKind,
     pub(crate) diag_targets: DiagTargets,
@@ -21,9 +18,6 @@ pub(crate) struct PersistedAppState {
 impl Default for PersistedAppState {
     fn default() -> Self {
         Self {
-            base: BaseMode::Day,
-            day_background: DayBackground::Shanshui,
-            overlay: OverlayMode::None,
             services: ServiceFlags::normal(),
             diag_kind: DiagKind::None,
             diag_targets: DiagTargets::none(),
@@ -34,25 +28,25 @@ impl Default for PersistedAppState {
 impl PersistedAppState {
     pub(crate) fn from_snapshot(snapshot: AppStateSnapshot) -> Self {
         Self {
-            base: snapshot.base,
-            day_background: snapshot.day_background,
-            overlay: snapshot.overlay,
             services: snapshot.services,
             diag_kind: snapshot.diag_kind,
             diag_targets: snapshot.diag_targets,
         }
     }
 
+    pub(crate) fn update_from_snapshot(&mut self, snapshot: AppStateSnapshot) {
+        self.services = snapshot.services;
+        self.diag_kind = snapshot.diag_kind;
+        self.diag_targets = snapshot.diag_targets;
+    }
+
     pub(crate) fn record_bytes(self) -> [u8; APP_STATE_STORE_RECORD_LEN] {
         let mut record = [0xFFu8; APP_STATE_STORE_RECORD_LEN];
         record[0..4].copy_from_slice(&APP_STATE_STORE_MAGIC.to_le_bytes());
         record[4] = APP_STATE_STORE_VERSION;
-        record[5] = self.base.as_u8();
-        record[6] = self.day_background.as_u8();
-        record[7] = self.overlay.as_u8();
-        record[8] = self.services.as_bits();
-        record[9] = self.diag_kind.as_u8();
-        record[10] = self.diag_targets.as_persisted();
+        record[5] = self.services.as_bits();
+        record[6] = self.diag_kind.as_u8();
+        record[7] = self.diag_targets.as_persisted();
         record[APP_STATE_STORE_RECORD_LEN - 1] =
             checksum8(&record[..APP_STATE_STORE_RECORD_LEN - 1]);
         record
@@ -74,12 +68,9 @@ impl PersistedAppState {
             return None;
         }
         Some(Self {
-            base: BaseMode::from_u8(record[5])?,
-            day_background: DayBackground::from_u8(record[6])?,
-            overlay: OverlayMode::from_u8(record[7])?,
-            services: ServiceFlags::from_bits(record[8]),
-            diag_kind: DiagKind::from_u8(record[9])?,
-            diag_targets: DiagTargets::from_persisted(record[10]),
+            services: ServiceFlags::from_bits(record[5]),
+            diag_kind: DiagKind::from_u8(record[6])?,
+            diag_targets: DiagTargets::from_persisted(record[7]),
         })
     }
 }
@@ -136,7 +127,7 @@ mod tests {
     #[test]
     fn rejects_legacy_version() {
         let mut record = PersistedAppState::default().record_bytes();
-        record[4] = 3;
+        record[4] = 2;
         record[APP_STATE_STORE_RECORD_LEN - 1] =
             checksum8(&record[..APP_STATE_STORE_RECORD_LEN - 1]);
         assert!(PersistedAppState::from_record(&record).is_none());

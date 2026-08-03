@@ -1,14 +1,35 @@
+pub(super) struct ErrorRecoveryObservation {
+    pub(super) disconnect_reason: u8,
+    pub(super) discovery_reason: bool,
+    pub(super) auth_reason: bool,
+    pub(super) candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
+    pub(super) ap: Option<TargetApCandidate>,
+    pub(super) target_candidate: bool,
+}
+
 pub(super) async fn handle_error_recovery_paths(
     controller: &mut WifiController<'static>,
     state: &mut WifiTaskState,
-    disconnect_reason: u8,
-    discovery_reason: bool,
-    auth_reason: bool,
-    observed_candidates: heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
-    observed_ap: Option<TargetApCandidate>,
-    observed_target_candidate: bool,
+    observation: ErrorRecoveryObservation,
 ) {
-    if handle_observed_ap_paths(state, disconnect_reason, observed_candidates, observed_ap).await {
+    let ErrorRecoveryObservation {
+        disconnect_reason,
+        discovery_reason,
+        auth_reason,
+        candidates,
+        ap,
+        target_candidate,
+    } = observation;
+    if handle_observed_ap_paths(
+        state,
+        ObservedApRecoveryInput {
+            disconnect_reason,
+            candidates,
+            ap,
+        },
+    )
+    .await
+    {
         return;
     }
 
@@ -17,7 +38,7 @@ pub(super) async fn handle_error_recovery_paths(
         state,
         disconnect_reason,
         discovery_reason,
-        observed_target_candidate,
+        target_candidate,
     )
     .await
     {

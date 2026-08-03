@@ -3,7 +3,6 @@ mod base;
 mod modes;
 mod sd;
 mod serial;
-mod time_sync;
 mod trace;
 #[cfg(feature = "asset-upload-http")]
 mod wifi;
@@ -11,7 +10,7 @@ mod wifi;
 pub(crate) use app_event::AppEvent;
 pub(crate) use base::{
     DisplayContext, InkplateDriver, InkplateImuDriver, InkplateTouchDriver, PanelPinHold,
-    SdProbeDriver, SerialUart, SD_ASSET_READ_MAX, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX,
+    SdProbeDriver, SerialUart, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX,
 };
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use base::{
@@ -21,12 +20,10 @@ pub(crate) use base::{
 };
 pub(crate) use modes::AppStateApplyAck;
 pub(crate) use sd::{
-    SdAssetReadRequest, SdAssetReadResponse, SdAssetReadResultCode, SdCommand, SdCommandKind,
-    SdPowerRequest, SdRequest, SdResult, SdResultCode, SdUploadCommand, SdUploadRequest,
-    SdUploadResult, SdUploadResultCode,
+    SdCommand, SdCommandKind, SdPowerRequest, SdRequest, SdResult, SdResultCode, SdUploadCommand,
+    SdUploadRequest, SdUploadResult, SdUploadResultCode,
 };
 pub(crate) use serial::SerialStatusEvent;
-pub(crate) use time_sync::{TimeSyncCommand, TimeSyncState};
 pub(crate) use trace::TapTraceSample;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use wifi::{
@@ -37,5 +34,5 @@ pub(crate) use wifi::{
 #[allow(unused_imports)]
 pub(crate) use super::touch::types::{
     Gpio36InputPin, TouchEvent, TouchEventKind, TouchPipelineInput, TouchSampleFrame, TouchStatus,
-    TouchSwipeDirection, TouchTraceSample, TouchWizardSessionEvent, TouchWizardSwipeTraceSample,
+    TouchSwipeDirection,
 };

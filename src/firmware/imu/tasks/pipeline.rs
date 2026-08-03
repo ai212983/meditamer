@@ -15,15 +15,13 @@ use super::super::{
         IMU_PIPELINE_INPUTS, IMU_SAMPLING_DEMAND, IMU_TRACE_CONTEXT, TAP_TRACE_ENABLED,
         TAP_TRACE_SAMPLE_MS,
     },
-    face_down::{update_face_down_toggle, FaceDownToggleState},
-    mailbox::{publish_backlight_trigger, publish_day_background_toggle},
+    mailbox::publish_backlight_trigger,
     types::{ImuPipelineInput, ImuSamplingDemand, ImuTraceContext},
 };
 
 #[embassy_executor::task]
 pub(crate) async fn imu_pipeline_task() {
     let mut event_engine = EventEngine::default();
-    let mut face_down = FaceDownToggleState::default();
     let mut trace_context = ImuTraceContext::default();
     let mut next_trace_at = Instant::now();
 
@@ -66,16 +64,6 @@ pub(crate) async fn imu_pipeline_task() {
                     if matches!(action, EngineAction::BacklightTrigger) {
                         publish_backlight_trigger();
                     }
-                }
-
-                if update_face_down_toggle(
-                    &mut face_down,
-                    frame.now_ms,
-                    frame.ax,
-                    frame.ay,
-                    frame.az,
-                ) {
-                    publish_day_background_toggle();
                 }
 
                 if should_use_active_cadence(frame.tap_src, frame.int1, trace) {

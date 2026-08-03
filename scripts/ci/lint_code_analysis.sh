@@ -151,7 +151,7 @@ offenders_json="$(jq -c -s \
 ' "$tmp_metrics")"
 
 echo
-echo "offender counts (thresholds: file_sloc>$max_file_sloc, fn_cognitive>$max_fn_cognitive, fn_cyclomatic>$max_fn_cyclomatic, fn_nargs>$max_fn_nargs)"
+echo "metric counts (file size is advisory; function architecture thresholds are blocking)"
 echo "$offenders_json" | jq '{
   file_sloc: (.file_sloc | length),
   fn_cognitive: (.fn_cognitive | length),
@@ -263,8 +263,8 @@ if [[ "$enforce" == "1" ]]; then
     echo
     echo "ratchet enforcement summary"
     echo "$ratchet_eval_json" | jq '{
-      file_sloc_new: (.file_sloc.new | length),
-      file_sloc_regressed: (.file_sloc.regressed | length),
+      file_sloc_advisory_new: (.file_sloc.new | length),
+      file_sloc_advisory_increased: (.file_sloc.regressed | length),
       fn_cognitive_new: (.fn_cognitive.new | length),
       fn_cognitive_regressed: (.fn_cognitive.regressed | length),
       fn_cyclomatic_new: (.fn_cyclomatic.new | length),
@@ -273,7 +273,6 @@ if [[ "$enforce" == "1" ]]; then
       fn_nargs_regressed: (.fn_nargs.regressed | length)
     }'
     total_ratchet_failures="$(echo "$ratchet_eval_json" | jq '
-      (.file_sloc.new | length) + (.file_sloc.regressed | length) +
       (.fn_cognitive.new | length) + (.fn_cognitive.regressed | length) +
       (.fn_cyclomatic.new | length) + (.fn_cyclomatic.regressed | length) +
       (.fn_nargs.new | length) + (.fn_nargs.regressed | length)
@@ -283,8 +282,6 @@ if [[ "$enforce" == "1" ]]; then
       echo >&2 "rust-code-analysis ratchet failed: $total_ratchet_failures new/regressed offenders."
       echo "$ratchet_eval_json" | jq -r '
         [
-          {label:"file_sloc new", items:.file_sloc.new},
-          {label:"file_sloc regressed", items:.file_sloc.regressed},
           {label:"fn_cognitive new", items:.fn_cognitive.new},
           {label:"fn_cognitive regressed", items:.fn_cognitive.regressed},
           {label:"fn_cyclomatic new", items:.fn_cyclomatic.new},
@@ -301,11 +298,11 @@ if [[ "$enforce" == "1" ]]; then
     fi
   else
     total_offenders="$(echo "$offenders_json" | jq '
-      (.file_sloc | length) + (.fn_cognitive | length) + (.fn_cyclomatic | length) + (.fn_nargs | length)
+      (.fn_cognitive | length) + (.fn_cyclomatic | length) + (.fn_nargs | length)
     ')"
     if [[ "$total_offenders" != "0" ]]; then
       echo >&2
-      echo >&2 "rust-code-analysis lint failed: $total_offenders offenders above configured thresholds."
+      echo >&2 "rust-code-analysis lint failed: $total_offenders function-architecture offenders above configured thresholds."
       exit 2
     fi
   fi

@@ -87,9 +87,7 @@ fn write_dot_entries(
     root_cluster: u32,
 ) {
     let dot = DirRecord {
-        short_name: [
-            b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ',
-        ],
+        short_name: *b".          ",
         display_name: [0; super::super::FAT_NAME_MAX],
         display_name_len: 1,
         attr: super::super::ATTR_DIRECTORY,
@@ -98,9 +96,7 @@ fn write_dot_entries(
     };
     write_record_to_sector(sector, DirLocation { lba: 0, slot: 0 }, dot);
     let dotdot = DirRecord {
-        short_name: [
-            b'.', b'.', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ', b' ',
-        ],
+        short_name: *b"..         ",
         display_name: [0; super::super::FAT_NAME_MAX],
         display_name_len: 2,
         attr: super::super::ATTR_DIRECTORY,

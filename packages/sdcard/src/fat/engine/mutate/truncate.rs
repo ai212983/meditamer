@@ -99,8 +99,7 @@ impl FatEngine {
             self.stage = CommandStage::WriteFat;
             return Ok(FatStep::Continue);
         }
-        if value >= super::super::FAT32_EOC
-            || value < 2
+        if !(2..super::super::FAT32_EOC).contains(&value)
             || value > volume.total_clusters.saturating_add(1)
         {
             return Err(SdFatError::ClusterChainTooLong);

@@ -49,45 +49,46 @@ pub(crate) fn record_upload_http_health_request() {
     defmt::trace!("telemetry upload_http_health_request");
 }
 
-pub(crate) fn record_upload_http_upload_phase(
-    bytes: u32,
-    body_read_ms: u32,
-    payload_copy_ms: u32,
-    sd_queue_ms: u32,
-    sd_task_wait_ms: u32,
-    commit_ms: u32,
-    chunk_p50_ms: u32,
-    chunk_p95_ms: u32,
-    chunk_max_ms: u32,
-    chunk_samples: u32,
-    chunk_samples_dropped: u32,
-    sd_wait_ms: u32,
-    request_ms: u32,
-) {
+pub(crate) fn record_upload_http_upload_phase(metrics: UploadHttpPhaseMetrics) {
     UPLOAD_HTTP_UPLOAD_REQUESTS.fetch_add(1, Ordering::Relaxed);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BYTES, bytes);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL, body_read_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_MAX, body_read_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_TOTAL, payload_copy_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_MAX, payload_copy_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_TOTAL, sd_queue_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_MAX, sd_queue_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_TOTAL, sd_task_wait_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_MAX, sd_task_wait_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL, commit_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX, commit_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX, chunk_p50_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX, chunk_p95_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_MAX_MS_MAX, chunk_max_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_TOTAL, chunk_samples);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BYTES, metrics.bytes);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_TOTAL, metrics.body_read_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_BODY_READ_MS_MAX, metrics.body_read_ms);
+    saturating_add_u32(
+        &UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_TOTAL,
+        metrics.payload_copy_ms,
+    );
+    update_max_u32(
+        &UPLOAD_HTTP_UPLOAD_PAYLOAD_COPY_MS_MAX,
+        metrics.payload_copy_ms,
+    );
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_TOTAL, metrics.sd_queue_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_QUEUE_MS_MAX, metrics.sd_queue_ms);
+    saturating_add_u32(
+        &UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_TOTAL,
+        metrics.sd_task_wait_ms,
+    );
+    update_max_u32(
+        &UPLOAD_HTTP_UPLOAD_SD_TASK_WAIT_MS_MAX,
+        metrics.sd_task_wait_ms,
+    );
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL, metrics.commit_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX, metrics.commit_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX, metrics.chunk_p50_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX, metrics.chunk_p95_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_CHUNK_MAX_MS_MAX, metrics.chunk_max_ms);
+    saturating_add_u32(
+        &UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_TOTAL,
+        metrics.chunk_samples,
+    );
     saturating_add_u32(
         &UPLOAD_HTTP_UPLOAD_CHUNK_SAMPLES_DROPPED,
-        chunk_samples_dropped,
+        metrics.chunk_samples_dropped,
     );
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_TOTAL, sd_wait_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_MAX, sd_wait_ms);
-    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_REQUEST_MS_TOTAL, request_ms);
-    update_max_u32(&UPLOAD_HTTP_UPLOAD_REQUEST_MS_MAX, request_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_TOTAL, metrics.sd_wait_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_SD_WAIT_MS_MAX, metrics.sd_wait_ms);
+    saturating_add_u32(&UPLOAD_HTTP_UPLOAD_REQUEST_MS_TOTAL, metrics.request_ms);
+    update_max_u32(&UPLOAD_HTTP_UPLOAD_REQUEST_MS_MAX, metrics.request_ms);
 }
 
 pub(crate) fn record_net_pipeline_dhcp_wait(elapsed_ms: u32) {
@@ -130,9 +131,6 @@ pub(crate) fn record_net_pipeline_accept_arm_gap(elapsed_us: u32, after_mkdir: b
             &NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_TOTAL,
             elapsed_us,
         );
-        update_max_u32(
-            &NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_MAX,
-            elapsed_us,
-        );
+        update_max_u32(&NET_PIPELINE_ACCEPT_ARM_GAP_AFTER_MKDIR_US_MAX, elapsed_us);
     }
 }

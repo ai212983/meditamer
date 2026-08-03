@@ -14,8 +14,8 @@ pre-commit:
     secrets:
       run: scripts/ci/check_secrets.sh --staged
     host-tools-clippy:
-      glob: "{tools/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
-      run: scripts/ci/lint_host_tools.sh
+      glob: "{tools/**,packages/sdcard/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
+      run: scripts/ci/check_software_baseline.sh host-lint
 
 commit-msg:
   commands:
@@ -25,8 +25,8 @@ commit-msg:
 pre-push:
   commands:
     firmware-clippy:
-      glob: "{src/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
-      run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
+      glob: "{src/**,csrc/**,ld/**,packages/sdcard/**,scripts/build/build.sh,scripts/ci/check_software_baseline.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      run: scripts/ci/check_software_baseline.sh firmware-clippy
     code-analysis:
-      glob: "{src/**,tools/**,packages/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      glob: "{src/**,tools/**,packages/**,scripts/ci/check_software_baseline.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
       run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh

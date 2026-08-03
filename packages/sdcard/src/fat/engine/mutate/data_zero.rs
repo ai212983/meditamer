@@ -17,7 +17,7 @@ impl FatEngine {
                 let cluster_size =
                     SD_SECTOR_SIZE as u32 * u32::from(volume.sectors_per_cluster);
                 if self.mutation.data_len != 0
-                    && self.mutation.data_len % cluster_size == 0
+                    && self.mutation.data_len.is_multiple_of(cluster_size)
                     && self.mutation.target_clusters < self.upload.allocated_clusters
                 {
                     self.fat_read.start(self.data_write.cluster);
@@ -188,8 +188,7 @@ impl FatEngine {
 
     pub(super) fn after_zero_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-        if value >= super::super::FAT32_EOC
-            || value < 2
+        if !(2..super::super::FAT32_EOC).contains(&value)
             || value > volume.total_clusters.saturating_add(1)
         {
             return Err(SdFatError::ClusterChainTooLong);
@@ -233,8 +232,7 @@ impl FatEngine {
 
     pub(super) fn after_append_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-        if value >= super::super::FAT32_EOC
-            || value < 2
+        if !(2..super::super::FAT32_EOC).contains(&value)
             || value > volume.total_clusters.saturating_add(1)
         {
             return Err(SdFatError::ClusterChainTooLong);

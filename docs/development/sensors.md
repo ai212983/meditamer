@@ -37,7 +37,7 @@ Hardware module note:
   - Internal/External IO expander setup (`0x20`/`0x21`)
   - EPD PMIC control (`0x48`), frontlight, buzzer
   - Sensor interrupt pins are configured (`INT_APDS`, `INT1_LSM`, `INT2_LSM`, `FG_GPOUT`)
-  - LSM6DS3 driver, adaptive 20/125 Hz acquisition, tap event pipeline, and face-down classification
+  - LSM6DS3 driver, adaptive 20/125 Hz acquisition, and tap event pipeline
   - BQ27441 state-of-charge reads
   - Elan touchscreen acquisition and gesture pipeline
 - Not implemented yet:

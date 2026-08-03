@@ -1,14 +1,10 @@
-use core::sync::atomic::AtomicU32;
-
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 
-#[cfg(not(feature = "asset-upload-http"))]
-use super::super::types::SdAssetReadRequest;
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::WifiCredentials;
 use super::super::types::{
-    AppEvent, AppStateApplyAck, SdAssetReadResponse, SdPowerRequest, SdRequest, SdResult,
-    SdUploadRequest, SdUploadResult, SerialStatusEvent, TapTraceSample,
+    AppEvent, AppStateApplyAck, SdPowerRequest, SdRequest, SdResult, SdUploadRequest,
+    SdUploadResult, SerialStatusEvent, TapTraceSample,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{
@@ -34,14 +30,6 @@ pub(crate) static SD_UPLOAD_REQUESTS: Channel<CriticalSectionRawMutex, SdUploadR
     Channel::new();
 pub(crate) static SD_UPLOAD_RESULTS: Channel<CriticalSectionRawMutex, SdUploadResult, 2> =
     Channel::new();
-#[cfg(not(feature = "asset-upload-http"))]
-pub(crate) static SD_ASSET_READ_REQUESTS: Channel<CriticalSectionRawMutex, SdAssetReadRequest, 2> =
-    Channel::new();
-pub(crate) static SD_ASSET_READ_RESPONSES: Channel<
-    CriticalSectionRawMutex,
-    SdAssetReadResponse,
-    1,
-> = Channel::new();
 #[cfg(feature = "asset-upload-http")]
 pub(crate) static WIFI_CREDENTIALS_UPDATES: Channel<CriticalSectionRawMutex, WifiCredentials, 2> =
     Channel::new();
@@ -70,5 +58,3 @@ pub(crate) static APP_STATE_APPLY_ACKS: Channel<CriticalSectionRawMutex, AppStat
     Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();
-pub(crate) static LAST_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);
-pub(crate) static MAX_MARBLE_REDRAW_MS: AtomicU32 = AtomicU32::new(0);

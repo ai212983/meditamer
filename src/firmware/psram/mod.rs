@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-#[cfg(feature = "psram-alloc")]
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::NonNull,

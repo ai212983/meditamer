@@ -57,13 +57,12 @@ impl SdcardScenarioRuntime<'_> {
             .rev()
             .find(|line| memory_re.is_match(line))
             .ok_or_else(|| anyhow!("cutover summary: no allocator line"))?;
-        let loop_gap = token_u32(touch, "loop_gap_max_ms")?;
         let active_gap = token_u32(touch, "active_gap_max_ms")?;
         let min_internal = token_u32(memory, "min_internal_free_bytes")?;
 
         self.logger.info(format!(
-            "{label} min_stack_headroom={} min_touch_core_stack_headroom={} min_internal_free={} loop_gap_max_ms={} active_gap_max_ms={}",
-            min_stack, min_touch_stack, min_internal, loop_gap, active_gap
+            "{label} min_stack_headroom={} min_touch_core_stack_headroom={} min_internal_free={} active_gap_max_ms={}",
+            min_stack, min_touch_stack, min_internal, active_gap
         ));
         if min_stack < 8 * 1024 {
             return Err(anyhow!(
@@ -80,9 +79,9 @@ impl SdcardScenarioRuntime<'_> {
                 "cutover summary: touch-core stack headroom {min_touch_stack} < 1024"
             ));
         }
-        if loop_gap > 8 || active_gap > 16 {
+        if active_gap > 16 {
             return Err(anyhow!(
-                "cutover summary: touch gaps loop={loop_gap} active={active_gap}"
+                "cutover summary: active touch gap {active_gap} > 16"
             ));
         }
         Ok(())

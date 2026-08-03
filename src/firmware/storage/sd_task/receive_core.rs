@@ -1,19 +1,16 @@
+#[cfg(not(feature = "asset-upload-http"))]
+use embassy_futures::select::{select, Either};
+#[cfg(feature = "asset-upload-http")]
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{with_timeout, Duration};
 use sdcard::fat::FatEngine;
 
-#[cfg(not(feature = "asset-upload-http"))]
-use super::super::super::config::SD_ASSET_READ_REQUESTS;
 #[cfg(feature = "asset-upload-http")]
 use super::super::super::config::WIFI_CONFIG_REQUESTS;
 use super::super::super::{
     config::{SD_REQUESTS, SD_UPLOAD_REQUESTS},
     types::{SdProbeDriver, SdRequest},
 };
-#[cfg(not(feature = "asset-upload-http"))]
-use super::asset_read::process_asset_read_request;
-#[cfg(not(feature = "asset-upload-http"))]
-use super::logging::publish_asset_read_response;
 use super::logging::publish_upload_result;
 #[cfg(feature = "asset-upload-http")]
 use super::logging::publish_wifi_config_response;

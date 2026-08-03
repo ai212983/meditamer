@@ -1,7 +1,7 @@
 # Part 06: Advanced Wi-Fi Diagnostics
 
-Additional Wi-Fi blackout diagnostics and regression-gate notes are kept here to
-keep Part 04 under the Markdown LOC cap.
+Additional Wi-Fi blackout diagnostics and regression-gate notes are kept here as
+a distinct advanced-diagnostics topic.
 
 ## Diagnostic Knobs
 

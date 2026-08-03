@@ -1,14 +1,21 @@
-#[cfg(feature = "psram-alloc")]
 pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> AllocatorStatus {
     if matches!(current_allocator_state(), AllocatorState::Initialized) {
         return allocator_status();
     }
 
-    // Keep an internal-capability heap region for subsystems (Wi-Fi) that
-    // cannot allocate from external PSRAM.
-    esp_alloc::heap_allocator!(size: INTERNAL_HEAP_BYTES);
+    // Internal-capability heap for subsystems (Wi-Fi) that cannot allocate from
+    // external PSRAM. It sits outside `dram_seg`, so none of it comes out of the
+    // CPU0 stack.
+    esp_alloc::heap_allocator!(
+        #[unsafe(link_section = ".dram2_uninit")]
+        size: INTERNAL_HEAP_DRAM2_BYTES
+    );
 
-    let psram = esp_hal::psram::Psram::new(psram, Default::default());
+    let config = esp_hal::psram::PsramConfig {
+        cache_speed: esp_hal::psram::PsramCacheSpeed::PsramCacheF80mS80m,
+        ..Default::default()
+    };
+    let psram = esp_hal::psram::Psram::new(psram, config);
     let (_start, size) = psram.raw_parts();
     if size == 0 {
         update_allocator_state(AllocatorState::InitFailed);
@@ -25,10 +32,5 @@ pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> All
     LARGE_ALLOC_INTERNAL_OK.store(0, Ordering::Relaxed);
     LARGE_ALLOC_FAIL.store(0, Ordering::Relaxed);
     update_allocator_state(AllocatorState::Initialized);
-    allocator_status()
-}
-
-#[cfg(not(feature = "psram-alloc"))]
-pub(crate) fn init_allocator() -> AllocatorStatus {
     allocator_status()
 }

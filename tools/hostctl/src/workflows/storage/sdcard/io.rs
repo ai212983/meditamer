@@ -33,7 +33,6 @@ pub(super) fn maybe_flash_first(logger: &mut Logger, build_mode: &str) -> Result
         .current_dir(&repo_dir)
         .env_remove("RUSTUP_TOOLCHAIN")
         .env("ESPFLASH_PORT", port)
-        .env("FLASH_SET_TIME_AFTER_FLASH", "0")
         .status()
         .context("failed to execute scripts/device/flash.sh")?;
 
@@ -43,59 +42,87 @@ pub(super) fn maybe_flash_first(logger: &mut Logger, build_mode: &str) -> Result
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct SdResultExpectation<'a> {
+    pub(super) status: &'a str,
+    pub(super) code: Option<&'a str>,
+    pub(super) timeout_ms: u32,
+}
+
+struct SdResultFields {
+    status: Option<String>,
+    code: Option<String>,
+}
+
+impl SdResultFields {
+    fn parse(line: &str, status_re: &Regex, code_re: &Regex) -> Self {
+        Self {
+            status: capture_value(status_re, line),
+            code: capture_value(code_re, line),
+        }
+    }
+
+    fn fill_missing_from(&mut self, line: &str, status_re: &Regex, code_re: &Regex) {
+        if self.status.is_none() {
+            self.status = capture_value(status_re, line);
+        }
+        if self.code.is_none() {
+            self.code = capture_value(code_re, line);
+        }
+    }
+
+    fn status(&self) -> &str {
+        self.status.as_deref().unwrap_or("-")
+    }
+
+    fn code(&self) -> &str {
+        self.code.as_deref().unwrap_or("-")
+    }
+
+    fn is_incomplete(&self) -> bool {
+        self.status.is_none() || self.code.is_none()
+    }
+}
+
+fn capture_value(regex: &Regex, line: &str) -> Option<String> {
+    regex
+        .captures(line)
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str().to_string())
+}
+
 pub(super) fn wait_for_sd_result(
     console: &mut SerialConsole,
     request_id: u32,
-    timeout_ms: u32,
-    expected_status: &str,
-    expected_code: Option<&str>,
+    expectation: SdResultExpectation<'_>,
 ) -> Result<()> {
     let line = console
-        .sdwait_for_id(request_id, timeout_ms)?
+        .sdwait_for_id(request_id, expectation.timeout_ms)?
         .ok_or_else(|| anyhow!("missing SDWAIT response"))?;
 
-    if !line.contains("SDWAIT DONE") && expected_status != "timeout" {
+    if !line.contains("SDWAIT DONE") && expectation.status != "timeout" {
         return Err(anyhow!("unexpected SDWAIT response: {line}"));
     }
 
     let status_re = Regex::new(r"status=([a-z]+)")?;
     let code_re = Regex::new(r"code=([a-z0-9_]+)")?;
-    let mut status = status_re
-        .captures(&line)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| "-".to_string());
-    let mut code = code_re
-        .captures(&line)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| "-".to_string());
+    let mut result = SdResultFields::parse(&line, &status_re, &code_re);
 
-    if status == "-" || code == "-" {
+    if result.is_incomplete() {
         let done_prefix = Regex::new(&format!(r"^SDDONE id={} ", request_id))?;
         if let Some(done_line) = console.last_regex_since(0, &done_prefix) {
-            if status == "-" {
-                status = status_re
-                    .captures(&done_line)
-                    .and_then(|c| c.get(1))
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or(status);
-            }
-            if code == "-" {
-                code = code_re
-                    .captures(&done_line)
-                    .and_then(|c| c.get(1))
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or(code);
-            }
+            result.fill_missing_from(&done_line, &status_re, &code_re);
         }
     }
 
-    if status != expected_status {
-        return Err(anyhow!("expected status={expected_status}, got {line}"));
+    if result.status() != expectation.status {
+        return Err(anyhow!(
+            "expected status={}, got {line}",
+            expectation.status
+        ));
     }
-    if let Some(expected_code) = expected_code {
-        if code != expected_code {
+    if let Some(expected_code) = expectation.code {
+        if result.code() != expected_code {
             return Err(anyhow!("expected code={expected_code}, got {line}"));
         }
     }
@@ -118,22 +145,23 @@ pub(super) fn wait_for_pattern(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct SdStep<'a> {
+    pub(super) name: &'a str,
+    pub(super) command: &'a str,
+    pub(super) ack_tag: &'a str,
+    pub(super) result: SdResultExpectation<'a>,
+    pub(super) completion_pattern: Option<&'a Regex>,
+}
+
 pub(super) fn run_step(
     logger: &mut Logger,
     console: &mut SerialConsole,
-    name: &str,
-    command: &str,
-    ack_tag: &str,
-    expected_status: &str,
-    expected_code: Option<&str>,
-    expected_pattern: Option<&Regex>,
-    timeout_ms: u32,
+    step: SdStep<'_>,
 ) -> Result<()> {
     for _ in 0..12 {
         let mark = console.mark();
-        console.send_line(command)?;
-        let (status, line) = console.wait_ack_since(mark, ack_tag, Duration::from_secs(8))?;
+        console.send_line(step.command)?;
+        let (status, line) = console.wait_ack_since(mark, step.ack_tag, Duration::from_secs(8))?;
 
         match status {
             AckStatus::Busy | AckStatus::None => {
@@ -141,30 +169,34 @@ pub(super) fn run_step(
                 continue;
             }
             AckStatus::Err => {
-                return Err(anyhow!("{name} failed: {}", line.unwrap_or_default()));
+                return Err(anyhow!(
+                    "{} failed: {}",
+                    step.name,
+                    line.unwrap_or_default()
+                ));
             }
             AckStatus::Ok => {
                 let req_id = console
                     .wait_for_sdreq_id_since(mark, None, Duration::from_secs(8))?
-                    .ok_or_else(|| anyhow!("{name}: missing SDREQ id"))?;
-                wait_for_sd_result(console, req_id, timeout_ms, expected_status, expected_code)?;
+                    .ok_or_else(|| anyhow!("{}: missing SDREQ id", step.name))?;
+                wait_for_sd_result(console, req_id, step.result)?;
 
-                if let Some(pattern) = expected_pattern {
+                if let Some(pattern) = step.completion_pattern {
                     let matched = console
                         .wait_for_regex_since(mark, pattern, Duration::from_secs(90))?
                         .is_some();
                     if !matched {
-                        return Err(anyhow!("{name}: missing expected completion marker"));
+                        return Err(anyhow!("{}: missing expected completion marker", step.name));
                     }
                 }
 
-                logger.info(format!("[PASS] {name}"));
+                logger.info(format!("[PASS] {}", step.name));
                 return Ok(());
             }
         }
     }
 
-    Err(anyhow!("[FAIL] {name}"))
+    Err(anyhow!("[FAIL] {}", step.name))
 }
 
 pub(super) fn run_raw_expect_pattern(

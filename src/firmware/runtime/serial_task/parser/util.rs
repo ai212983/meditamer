@@ -35,6 +35,7 @@ pub(super) fn trim_ascii_whitespace(line: &[u8]) -> &[u8] {
     &line[start..end]
 }
 
+#[cfg(feature = "asset-upload-http")]
 pub(super) fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
@@ -56,25 +57,4 @@ pub(super) fn parse_u64_ascii(bytes: &[u8], mut i: usize) -> Option<(u64, usize)
     } else {
         Some((value, i))
     }
-}
-
-pub(super) fn parse_i32_ascii(bytes: &[u8], i: usize) -> Option<(i32, usize)> {
-    if i >= bytes.len() {
-        return None;
-    }
-    let mut idx = i;
-    let mut sign = 1i64;
-    if bytes[idx] == b'-' {
-        sign = -1;
-        idx += 1;
-    } else if bytes[idx] == b'+' {
-        idx += 1;
-    }
-
-    let (unsigned, next_idx) = parse_u64_ascii(bytes, idx)?;
-    let signed = sign.checked_mul(unsigned as i64)?;
-    if signed < i32::MIN as i64 || signed > i32::MAX as i64 {
-        return None;
-    }
-    Some((signed as i32, next_idx))
 }

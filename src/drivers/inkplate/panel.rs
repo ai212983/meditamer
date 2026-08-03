@@ -93,10 +93,37 @@ where
     }
 
     pub async fn eink_on_async(&mut self) -> Result<(), I2C::Error> {
-        if self.panel_on {
+        if self.panel_power_state.is_on() {
             return Ok(());
         }
 
+        // `Starting` means a previous startup or shutdown did not reach a
+        // confirmed clean state. Retry shutdown before energizing any rail.
+        if self.panel_power_state.requires_shutdown() {
+            self.eink_off_async().await?;
+        }
+
+        // Set this before the first hardware side effect. From this point on,
+        // every error path must attempt shutdown, even if the PMIC never
+        // reached its fully-on state.
+        self.panel_power_state.begin_startup();
+        let startup = self.eink_on_sequence_async().await;
+        match startup {
+            Ok(()) => {
+                self.panel_power_state.startup_succeeded();
+                Ok(())
+            }
+            Err(error) => {
+                // Preserve the startup error. eink_off_async retains
+                // `Starting` if recovery itself fails, causing the next call
+                // to retry shutdown before another startup.
+                let _shutdown = self.eink_off_async().await;
+                Err(error)
+            }
+        }
+    }
+
+    async fn eink_on_sequence_async(&mut self) -> Result<(), I2C::Error> {
         self.digital_write_internal(IO_INT_ADDR, WAKEUP, true)
             .await?;
         embassy_time::Timer::after_millis(5).await;
@@ -113,6 +140,7 @@ where
         self.digital_write_internal(IO_INT_ADDR, SPV, true).await?;
         self.set_ckv(false);
         self.digital_write_internal(IO_INT_ADDR, OE, false).await?;
+
         self.digital_write_internal(IO_INT_ADDR, PWRUP, true)
             .await?;
 
@@ -127,45 +155,118 @@ where
             }
         }
         if !ok {
-            let _ = self.eink_off_async().await;
             return Err(InkplateHalError::PanelPowerTimeout(last_pg));
         }
 
         self.digital_write_internal(IO_INT_ADDR, VCOM, true).await?;
         self.digital_write_internal(IO_INT_ADDR, OE, true).await?;
-        self.panel_on = true;
         Ok(())
     }
 
     pub async fn eink_off_async(&mut self) -> Result<(), I2C::Error> {
-        if !self.panel_on {
+        if !self.panel_power_state.requires_shutdown() {
             return Ok(());
         }
 
-        self.digital_write_internal(IO_INT_ADDR, VCOM, false)
-            .await?;
-        self.digital_write_internal(IO_INT_ADDR, OE, false).await?;
-        self.digital_write_internal(IO_INT_ADDR, GMOD, false)
-            .await?;
+        // Power-down is best-effort but exhaustive: one I2C failure must not
+        // skip the remaining rail shutdown or leave fast GPIOs driving the
+        // unpowered panel.
+        let mut first_error = None;
+        if let Err(error) = self.digital_write_internal(IO_INT_ADDR, VCOM, false).await {
+            first_error = Some(error);
+        }
+        if let Err(error) = self.digital_write_internal(IO_INT_ADDR, OE, false).await {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+        if let Err(error) = self.digital_write_internal(IO_INT_ADDR, GMOD, false).await {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
 
         self.clear_data_and_cl_le();
         self.set_ckv(false);
         self.set_sph(false);
-        self.digital_write_internal(IO_INT_ADDR, SPV, false).await?;
-        self.digital_write_internal(IO_INT_ADDR, PWRUP, false)
-            .await?;
-
-        for _ in 0..250 {
-            embassy_time::Timer::after_millis(1).await;
-            if self.read_power_good().await? == 0 {
-                break;
+        if let Err(error) = self.digital_write_internal(IO_INT_ADDR, SPV, false).await {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+        if let Err(error) = self.digital_write_internal(IO_INT_ADDR, PWRUP, false).await {
+            if first_error.is_none() {
+                first_error = Some(error);
             }
         }
 
-        self.digital_write_internal(IO_INT_ADDR, WAKEUP, false)
-            .await?;
-        self.i2c_write(TPS65186_ADDR, &[0x01, 0x00]).await?;
-        self.panel_on = false;
-        Ok(())
+        let mut powered_down = false;
+        let mut last_pg = PWR_GOOD_OK;
+        for _ in 0..250 {
+            embassy_time::Timer::after_millis(1).await;
+            match self.read_power_good().await {
+                Ok(0) => {
+                    powered_down = true;
+                    last_pg = 0;
+                    break;
+                }
+                Ok(value) => last_pg = value,
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    break;
+                }
+            }
+        }
+        if !powered_down && first_error.is_none() {
+            first_error = Some(InkplateHalError::PanelPowerDownTimeout(last_pg));
+        }
+
+        if let Err(error) = self
+            .digital_write_internal(IO_INT_ADDR, WAKEUP, false)
+            .await
+        {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+        if let Err(error) = self.i2c_write(TPS65186_ADDR, &[0x01, 0x00]).await {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+
+        // Match the reference driver's pinsZstate(): once the PMIC rails are
+        // down, no scan or control pin may continue driving the unpowered
+        // panel. prepare_panel_fast_io() restores all output directions on the
+        // next transaction.
+        GpioFast::out_enable_clear(PANEL_OUT_ENABLE_MASK);
+        GpioFast::out_enable1_clear(PANEL_OUT1_ENABLE_MASK);
+        self.panel_fast_ready = false;
+        for pin in [OE, GMOD, SPV] {
+            if let Err(error) = self
+                .pin_mode_internal(IO_INT_ADDR, pin, PinMode::Input)
+                .await
+            {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+
+        match first_error {
+            Some(error) => {
+                // Hardware state is uncertain. Keep shutdown-required state so
+                // a later transaction cannot mistake this for a powered-off
+                // panel and will retry recovery first.
+                self.panel_power_state.shutdown_finished(false);
+                Err(error)
+            }
+            None => {
+                self.panel_power_state.shutdown_finished(true);
+                Ok(())
+            }
+        }
     }
 }

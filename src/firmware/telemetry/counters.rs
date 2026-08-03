@@ -1,5 +1,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+#[cfg(feature = "asset-upload-http")]
 use super::types::SdUploadResultCode;
 
 static WIFI_CONNECT_ATTEMPTS: AtomicU32 = AtomicU32::new(0);

@@ -3,9 +3,10 @@ mod tests {
     use std::{fs, path::PathBuf, time::Duration};
 
     use super::{
-        acquire_port_lock, build_app_flash_command, build_firmware_command, normalize_output_root,
-        prepare_output_paths, run_command_logged, CommandProgressMode, CommandRunOptions,
-        CommandSpec, IdfEnv,
+        acquire_port_lock, archive_firmware_artifacts, build_app_flash_command,
+        build_firmware_command, normalize_output_root, prepare_output_paths, run_command_logged,
+        validate_post_command_options, CaptureMode, CommandProgressMode, CommandRunOptions,
+        CommandSpec, FlashCaptureOptions, FlashMode, IdfEnv, DEFAULT_FLASH_BAUD,
     };
     use crate::scenarios::load_workflow;
     use tempfile::tempdir;
@@ -24,7 +25,12 @@ mod tests {
         assert!(paths.root.starts_with(PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().expect("tools dir").parent().expect("repo root").join("logs")));
         assert!(paths.flash_log.ends_with("flash.log"));
         assert!(paths.capture_log.ends_with("capture.log"));
+        assert!(paths.post_command_log.ends_with("post-command.log"));
         assert!(paths.summary.ends_with("summary.txt"));
+        assert!(paths.firmware_elf.ends_with("firmware.elf"));
+        assert!(paths.app_bin.ends_with("app.bin"));
+        assert!(paths.hashes.ends_with("sha256.txt"));
+        assert!(paths.build_metadata.ends_with("build-metadata.txt"));
     }
 
     #[test]
@@ -43,6 +49,66 @@ mod tests {
         assert!(warning
             .expect("warning")
             .contains("treating file-like --log path"));
+    }
+
+    fn flash_options() -> FlashCaptureOptions {
+        FlashCaptureOptions {
+            profile: "release".into(),
+            output_path: None,
+            port: None,
+            flash_mode: FlashMode::Auto,
+            capture_mode: CaptureMode::Boot,
+            image: None,
+            flash_baud: None,
+            baud: None,
+            boot_window_ms: None,
+            idf_root: None,
+            idf_tools_path: None,
+            post_command: None,
+            post_pattern: None,
+            post_timeout_ms: None,
+        }
+    }
+
+    #[test]
+    fn full_flash_default_baud_matches_board_safe_rate() {
+        assert_eq!(DEFAULT_FLASH_BAUD, 115_200);
+    }
+
+    #[test]
+    fn post_command_requires_pattern_before_flash() {
+        let mut options = flash_options();
+        options.post_command = Some("LVGLSOAK 24".into());
+        assert!(validate_post_command_options(&options)
+            .expect_err("missing pattern")
+            .to_string()
+            .contains("--post-pattern"));
+
+        options.post_pattern = Some("LVGL_SOAK_END".into());
+        options.post_timeout_ms = Some(0);
+        assert!(validate_post_command_options(&options)
+            .expect_err("zero timeout")
+            .to_string()
+            .contains("greater than zero"));
+    }
+
+    #[test]
+    fn explicit_app_image_is_archived_with_hash_and_metadata() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("source.bin");
+        fs::write(&source, b"deterministic firmware").expect("write source");
+        let outputs = prepare_output_paths(Some(&temp.path().join("artifacts")))
+            .expect("output paths");
+
+        archive_firmware_artifacts(&source, &outputs, temp.path(), "release", true)
+            .expect("archive");
+
+        assert_eq!(fs::read(&outputs.app_bin).expect("app bin"), b"deterministic firmware");
+        let hashes = fs::read_to_string(&outputs.hashes).expect("hashes");
+        assert!(hashes.ends_with("  app.bin\n"));
+        let metadata = fs::read_to_string(&outputs.build_metadata).expect("metadata");
+        assert!(metadata.contains("profile=release"));
+        assert!(metadata.contains("git_status_begin"));
     }
 
     #[test]
@@ -104,164 +170,7 @@ mod tests {
         assert!(spec.env_remove.contains(&"RUSTFLAGS".into()));
     }
 
-    #[test]
-    fn run_command_logged_kills_idle_child_even_with_heartbeat() {
-        let temp = tempdir().expect("tempdir");
-        let log_path = temp.path().join("flash.log");
-        let spec = CommandSpec::new("python3").args([
-            "-c",
-            "import time\nprint('start', flush=True)\ntime.sleep(5)\nprint('done', flush=True)\n",
-        ]);
-
-        let status = run_command_logged(
-            &spec,
-            &log_path,
-            CommandRunOptions {
-                timeout: Some(Duration::from_secs(10)),
-                progress_interval: Some(Duration::from_millis(200)),
-                progress_label: Some("app-only flash"),
-                idle_timeout: Some(Duration::from_secs(1)),
-                progress_stall_timeout: None,
-                progress_mode: None,
-                log_drain_timeout: Duration::from_millis(200),
-            },
-        )
-        .expect("run command");
-
-        assert!(!status.success());
-        let log = fs::read_to_string(&log_path).expect("read log");
-        assert!(log.contains("start"));
-        assert!(log.contains("app-only flash in progress"));
-        assert!(log.contains("command output stalled after 1s without new child output"));
-        assert!(!log.lines().any(|line| line == "done"));
-    }
-
-    #[test]
-    fn run_command_logged_allows_child_that_keeps_emitting_output() {
-        let temp = tempdir().expect("tempdir");
-        let log_path = temp.path().join("flash.log");
-        let spec = CommandSpec::new("python3").args([
-            "-c",
-            "import time\nfor i in range(5):\n    print(i, flush=True)\n    time.sleep(0.2)\n",
-        ]);
-
-        let status = run_command_logged(
-            &spec,
-            &log_path,
-            CommandRunOptions {
-                timeout: Some(Duration::from_secs(10)),
-                progress_interval: Some(Duration::from_millis(200)),
-                progress_label: Some("app-only flash"),
-                idle_timeout: Some(Duration::from_secs(1)),
-                progress_stall_timeout: None,
-                progress_mode: None,
-                log_drain_timeout: Duration::from_millis(200),
-            },
-        )
-        .expect("run command");
-
-        assert!(status.success());
-        let log = fs::read_to_string(&log_path).expect("read log");
-        assert!(log.contains("0"));
-        assert!(log.contains("4"));
-        assert!(!log.contains("command output stalled"));
-    }
-
-    #[test]
-    fn run_command_logged_kills_child_when_esptool_write_progress_stalls() {
-        let temp = tempdir().expect("tempdir");
-        let log_path = temp.path().join("flash.log");
-        let spec = CommandSpec::new("python3").args([
-            "-c",
-            "import time\nprint('Writing at 0x00010000... (0 %)', flush=True)\nfor _ in range(20):\n    print('still alive', flush=True)\n    time.sleep(0.2)\nprint('done', flush=True)\n",
-        ]);
-
-        let status = run_command_logged(
-            &spec,
-            &log_path,
-            CommandRunOptions {
-                timeout: Some(Duration::from_secs(10)),
-                progress_interval: Some(Duration::from_millis(200)),
-                progress_label: Some("app-only flash"),
-                idle_timeout: Some(Duration::from_secs(5)),
-                progress_stall_timeout: Some(Duration::from_secs(1)),
-                progress_mode: Some(CommandProgressMode::EsptoolWriteFlash),
-                log_drain_timeout: Duration::from_millis(200),
-            },
-        )
-        .expect("run command");
-
-        assert!(!status.success());
-        let log = fs::read_to_string(&log_path).expect("read log");
-        assert!(log.contains("Writing at 0x00010000... (0 %)"));
-        assert!(log.contains("still alive"));
-        assert!(
-            log.contains("command progress stalled after 1s without esptool write advancement")
-        );
-        assert!(!log.lines().any(|line| line == "done"));
-    }
-
-    #[test]
-    fn run_command_logged_allows_advancing_esptool_write_progress() {
-        let temp = tempdir().expect("tempdir");
-        let log_path = temp.path().join("flash.log");
-        let spec = CommandSpec::new("python3").args([
-            "-c",
-            "import time\nfor marker in [\"Writing at 0x00010000... (0 %)\", \"Writing at 0x00011000... (1 %)\", \"Writing at 0x00012000... (2 %)\"]:\n    print(marker, flush=True)\n    time.sleep(0.2)\n",
-        ]);
-
-        let status = run_command_logged(
-            &spec,
-            &log_path,
-            CommandRunOptions {
-                timeout: Some(Duration::from_secs(10)),
-                progress_interval: Some(Duration::from_millis(200)),
-                progress_label: Some("app-only flash"),
-                idle_timeout: Some(Duration::from_secs(5)),
-                progress_stall_timeout: Some(Duration::from_secs(1)),
-                progress_mode: Some(CommandProgressMode::EsptoolWriteFlash),
-                log_drain_timeout: Duration::from_millis(200),
-            },
-        )
-        .expect("run command");
-
-        assert!(status.success());
-        let log = fs::read_to_string(&log_path).expect("read log");
-        assert!(log.contains("Writing at 0x00012000... (2 %)"));
-        assert!(!log.contains("command progress stalled"));
-    }
-
-    #[test]
-    fn run_command_logged_detaches_relay_threads_when_pipe_drain_lingers() {
-        let temp = tempdir().expect("tempdir");
-        let log_path = temp.path().join("flash.log");
-        let spec = CommandSpec::new("python3").args([
-            "-c",
-            "import subprocess, sys\nsubprocess.Popen(['python3', '-c', 'import time; time.sleep(2)'], stdout=sys.stdout, stderr=sys.stderr)\nprint('child exiting', flush=True)\n",
-        ]);
-
-        let started = std::time::Instant::now();
-        let status = run_command_logged(
-            &spec,
-            &log_path,
-            CommandRunOptions {
-                timeout: Some(Duration::from_secs(10)),
-                progress_interval: None,
-                progress_label: None,
-                idle_timeout: None,
-                progress_stall_timeout: None,
-                progress_mode: None,
-                log_drain_timeout: Duration::from_millis(200),
-            },
-        )
-        .expect("run command");
-
-        assert!(status.success());
-        assert!(started.elapsed() < Duration::from_secs(2));
-        let log = fs::read_to_string(&log_path).expect("read log");
-        assert!(log.contains("child exiting"));
-        assert!(log.contains("command log drain exceeded 200ms"));
-    }
+    include!("tests/command_run.rs");
 
     #[test]
     fn flash_capture_workflow_yaml_parses() {

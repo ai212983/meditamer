@@ -20,19 +20,11 @@ do:
         command: "STATE SET upload=off"
         expect_upload: "off"
         expect_ready: false
-      then: "no_storage_assets_on"
-  - no_storage_assets_on:
-      call: "apply_mode"
-      with:
-        command: "STATE SET assets=on"
-        expect_assets: "on"
-        expect_ready: false
       then: "no_storage_ready"
   - no_storage_ready:
       call: "state_get"
       with:
         expect_upload: "off"
-        expect_assets: "on"
         expect_ready: true
       then: "baseline_psram"
   - full_ready:
@@ -49,7 +41,7 @@ do:
       switch:
         - no_storage:
             when: ".suite == \"no-storage\""
-            then: "assets_off"
+            then: "print_summary"
         - default:
             then: "upload_on"
   - upload_on:
@@ -74,16 +66,16 @@ do:
           repeat:
             in: ".post_upload_status_repeats"
             at: "post_upload_status_index"
-      then: "post_upload_timeset_loop"
-  - post_upload_timeset_loop:
+      then: "post_upload_ping_loop"
+  - post_upload_ping_loop:
       do:
-        - run_post_upload_timeset_probe:
-            call: "run_post_upload_timeset_probe"
+        - run_post_upload_ping_probe:
+            call: "run_post_upload_ping_probe"
       metadata:
         hostctl:
           repeat:
-            in: ".post_upload_timeset_repeats"
-            at: "post_upload_timeset_index"
+            in: ".post_upload_ping_repeats"
+            at: "post_upload_ping_index"
       then: "upload_on_psram"
   - upload_on_psram:
       call: "psram_snapshot"
@@ -100,28 +92,6 @@ do:
       call: "psram_snapshot"
       with:
         label: "upload_off"
-      then: "assets_off"
-  - assets_off:
-      call: "apply_mode"
-      with:
-        command: "STATE SET assets=off"
-        expect_assets: "off"
-      then: "assets_off_psram"
-  - assets_off_psram:
-      call: "psram_snapshot"
-      with:
-        label: "assets_off"
-      then: "assets_on"
-  - assets_on:
-      call: "apply_mode"
-      with:
-        command: "STATE SET assets=on"
-        expect_assets: "on"
-      then: "assets_on_psram"
-  - assets_on_psram:
-      call: "psram_snapshot"
-      with:
-        label: "assets_on"
       then: "print_summary"
   - print_summary:
       call: "print_summary"

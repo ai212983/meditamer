@@ -28,11 +28,14 @@ do:
       call: "resolve_image"
       with:
         source: "explicit"
-      then: "flash_mode_gate"
+      then: "archive_image"
   - build_image:
       call: "resolve_image"
       with:
         source: "build"
+      then: "archive_image"
+  - archive_image:
+      call: "archive_image"
       then: "flash_mode_gate"
   - flash_mode_gate:
       switch:
@@ -159,26 +162,26 @@ do:
       call: "capture"
       with:
         mode: "none"
-      then: "timeset_gate"
+      then: "post_command_gate"
   - capture_stream:
       call: "capture"
       with:
         mode: "stream"
-      then: "timeset_gate"
+      then: "post_command_gate"
   - capture_boot:
       call: "capture"
       with:
         mode: "boot"
-      then: "timeset_gate"
-  - timeset_gate:
+      then: "post_command_gate"
+  - post_command_gate:
       switch:
-        - run_timeset:
-            when: "${ .set_time_after_flash == true }"
-            then: "post_flash_timeset"
+        - run_post_command:
+            when: "${ .post_command_supplied == true }"
+            then: "post_command"
         - default:
             then: "write_summary"
-  - post_flash_timeset:
-      call: "post_flash_timeset"
+  - post_command:
+      call: "post_command"
       then: "write_summary"
   - write_summary:
       call: "write_summary"

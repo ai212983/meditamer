@@ -1,6 +1,7 @@
 #[cfg(feature = "asset-upload-http")]
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+#[cfg(feature = "asset-upload-http")]
 use crate::firmware::app_state::{self, Phase};
 
 #[cfg(feature = "asset-upload-http")]
@@ -8,6 +9,7 @@ static UPLOAD_HTTP_LISTENER_ENABLED: AtomicBool = AtomicBool::new(true);
 #[cfg(feature = "asset-upload-http")]
 static UPLOAD_HTTP_LISTENER_SET_SEQ: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(feature = "asset-upload-http")]
 pub(crate) fn upload_enabled() -> bool {
     app_state::snapshot::upload_enabled()
 }

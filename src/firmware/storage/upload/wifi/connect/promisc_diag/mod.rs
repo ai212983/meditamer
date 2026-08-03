@@ -5,10 +5,9 @@ mod config;
 mod counters;
 
 use config::{
-    WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG, WIFI_POST_START_PROMISC_DIAG,
-    WIFI_POST_START_PROMISC_ZERO_HARD_REINIT, WIFI_SCAN_ENTRY_PROMISC_DIAG,
-    WIFI_SCAN_ENTRY_PROMISC_DIAG_CHANNELS, WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS,
-    WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO,
+    WIFI_POST_START_PROMISC_DIAG, WIFI_POST_START_PROMISC_ZERO_HARD_REINIT,
+    WIFI_SCAN_ENTRY_PROMISC_DIAG, WIFI_SCAN_ENTRY_PROMISC_DIAG_CHANNELS,
+    WIFI_SCAN_ENTRY_PROMISC_DIAG_DWELL_MS, WIFI_SOFTWARE_RESET_ON_POST_START_PROMISC_ZERO,
 };
 use counters::{promisc_rx_cb, promisc_totals, reset_promisc_counters};
 
@@ -107,7 +106,7 @@ async fn run_promisc_diag(label: &'static str, software_reset_on_zero: bool) -> 
     let restore_channel_rc = if get_channel_rc == esp_wifi_sys::include::ESP_OK as i32 {
         unsafe { esp_wifi_sys::include::esp_wifi_set_channel(orig_primary, orig_second) }
     } else {
-        esp_wifi_sys::include::ESP_FAIL as i32
+        esp_wifi_sys::include::ESP_FAIL
     };
 
     let disable_rc = unsafe { esp_wifi_sys::include::esp_wifi_set_promiscuous(false) };
@@ -214,11 +213,5 @@ pub(super) async fn maybe_handle_post_start_promisc_diag(
 pub(super) async fn maybe_run_scan_entry_promisc_diag() {
     if WIFI_SCAN_ENTRY_PROMISC_DIAG {
         let _ = run_promisc_diag("scan_entry_promisc_diag", false).await;
-    }
-}
-
-pub(super) async fn maybe_run_boot_scan_only_promisc_diag() {
-    if WIFI_BOOT_SCAN_ONLY_PROMISC_DIAG {
-        let _ = run_promisc_diag("boot_scan_only_promisc_diag", false).await;
     }
 }

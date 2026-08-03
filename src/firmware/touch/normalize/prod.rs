@@ -80,7 +80,7 @@ impl TouchPresenceNormalizer {
         // fallback instead of creating self-latching decoded presence.
         let decoded_present =
             sample.touch_count > 0 && sample_has_decoded_coordinate(sample.points);
-        let raw_present = sample.raw[7].count_ones() > 0;
+        let raw_present = sample.raw[0] == 0x5A && sample.raw[7] & 0x03 != 0;
         self.last_report_decoded = decoded_present;
         self.last_report_raw_present = raw_present;
         let recent_decoded_short = self

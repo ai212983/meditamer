@@ -31,7 +31,6 @@ mod tests {
             let mut rx = Vec::<u8>::new();
             let mut chunk = [0u8; 512];
             let mut upload = "off".to_string();
-            let mut assets = "on".to_string();
             let mut last_activity = Instant::now();
 
             loop {
@@ -73,7 +72,7 @@ mod tests {
 
                     let response = if command == "STATE GET" {
                         format!(
-                            "STATE phase=idle base=day upload={upload} assets={assets} ready=true"
+                            "STATE phase=idle upload={upload} diag_kind=none targets=NONE ready=true"
                         )
                     } else if command == "STATE SET upload=on" {
                         upload = "on".to_string();
@@ -81,12 +80,8 @@ mod tests {
                     } else if command == "STATE SET upload=off" {
                         upload = "off".to_string();
                         "STATE OK".to_string()
-                    } else if command == "STATE SET assets=off" {
-                        assets = "off".to_string();
-                        "STATE OK".to_string()
-                    } else if command == "STATE SET assets=on" {
-                        assets = "on".to_string();
-                        "STATE OK".to_string()
+                    } else if command == "PING" {
+                        "PONG".to_string()
                     } else if command == "PSRAM" {
                         "PSRAM feature_enabled=true state=ready total_bytes=1 used_bytes=1 free_bytes=0 peak_used_bytes=1"
                             .to_string()
@@ -111,7 +106,7 @@ mod tests {
         let mut logger = Logger::new(None)?;
         let workflow = load_workflow(&scenario_path)?;
         let console = SerialConsole::from_port_for_tests(Box::new(slave), Some(&log_path))?;
-        let mut runtime = RuntimeModesScenarioRuntime::new(&mut logger, console, 0, 0, 0);
+        let mut runtime = RuntimeModesScenarioRuntime::new(&mut logger, console, 0, 1, 1);
         let _ = execute_workflow(&workflow, &mut runtime, &json!({ "suite": "full" }))?;
         responder
             .join()
@@ -123,6 +118,9 @@ mod tests {
         }
         if !raw.contains("PSRAM feature_enabled=true") {
             return Err(anyhow!("runtime smoke capture missing PSRAM responses"));
+        }
+        if !raw.contains("PONG") {
+            return Err(anyhow!("runtime smoke capture missing PONG response"));
         }
         Ok(())
     }

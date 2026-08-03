@@ -5,7 +5,7 @@ use core::{
 
 use embassy_executor::{Metadata, SpawnToken, Spawner};
 
-use crate::firmware::app_state::{AppStateSnapshot, BaseMode, Phase};
+use crate::firmware::app_state::{AppStateSnapshot, Phase};
 
 const PROFILE_AUTO: u8 = u8::MAX;
 
@@ -13,7 +13,6 @@ const PROFILE_AUTO: u8 = u8::MAX;
 #[repr(u8)]
 pub(crate) enum SchedulerProfile {
     Interactive,
-    TouchWizard,
     Upload,
     Diagnostics,
 }
@@ -22,7 +21,6 @@ impl SchedulerProfile {
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Interactive => "interactive",
-            Self::TouchWizard => "touch",
             Self::Upload => "upload",
             Self::Diagnostics => "diagnostics",
         }
@@ -30,9 +28,8 @@ impl SchedulerProfile {
 
     const fn from_raw(raw: u8) -> Self {
         match raw {
-            1 => Self::TouchWizard,
-            2 => Self::Upload,
-            3 => Self::Diagnostics,
+            1 => Self::Upload,
+            2 => Self::Diagnostics,
             _ => Self::Interactive,
         }
     }
@@ -40,8 +37,6 @@ impl SchedulerProfile {
     const fn for_snapshot(snapshot: AppStateSnapshot) -> Self {
         if matches!(snapshot.phase, Phase::DiagnosticsExclusive) {
             Self::Diagnostics
-        } else if matches!(snapshot.base, BaseMode::TouchWizard) {
-            Self::TouchWizard
         } else if snapshot.services.upload_enabled {
             Self::Upload
         } else {
@@ -51,11 +46,9 @@ impl SchedulerProfile {
 
     const fn priority(self, class: TaskClass) -> u8 {
         match (self, class) {
-            (Self::Interactive | Self::TouchWizard | Self::Upload, TaskClass::TouchAcquisition) => {
-                3
-            }
-            (Self::Interactive | Self::TouchWizard | Self::Upload, TaskClass::TouchPipeline) => 2,
-            (Self::Interactive | Self::TouchWizard, TaskClass::Sd) => 1,
+            (Self::Interactive | Self::Upload, TaskClass::TouchAcquisition) => 3,
+            (Self::Interactive | Self::Upload, TaskClass::TouchPipeline) => 2,
+            (Self::Interactive, TaskClass::Sd) => 1,
             (
                 Self::Upload,
                 TaskClass::Network | TaskClass::Http | TaskClass::Sd | TaskClass::Wifi,
@@ -93,12 +86,11 @@ pub(crate) enum TaskClass {
     Wifi,
     Network,
     Http,
-    Clock,
     Battery,
 }
 
 impl TaskClass {
-    const COUNT: usize = 13;
+    const COUNT: usize = 12;
 }
 
 #[derive(Clone, Copy)]
@@ -183,7 +175,7 @@ fn apply_selected_profile() {
 #[cfg(test)]
 mod tests {
     use super::{SchedulerProfile, TaskClass};
-    use crate::firmware::app_state::{AppStateSnapshot, BaseMode, Phase};
+    use crate::firmware::app_state::{AppStateSnapshot, Phase};
 
     #[test]
     fn automatic_profile_follows_behavior_with_explicit_precedence() {
@@ -197,12 +189,6 @@ mod tests {
         assert_eq!(
             SchedulerProfile::for_snapshot(snapshot),
             SchedulerProfile::Upload
-        );
-
-        snapshot.base = BaseMode::TouchWizard;
-        assert_eq!(
-            SchedulerProfile::for_snapshot(snapshot),
-            SchedulerProfile::TouchWizard
         );
 
         snapshot.phase = Phase::DiagnosticsExclusive;
@@ -234,20 +220,6 @@ mod tests {
         );
         assert!(profile.priority(TaskClass::Sd) > profile.priority(TaskClass::Serial));
     }
-
-    #[test]
-    fn touch_profile_keeps_input_ahead_of_storage() {
-        let profile = SchedulerProfile::TouchWizard;
-        assert!(
-            profile.priority(TaskClass::TouchAcquisition)
-                > profile.priority(TaskClass::TouchPipeline)
-        );
-        assert!(profile.priority(TaskClass::TouchPipeline) > profile.priority(TaskClass::Sd));
-        assert_eq!(
-            profile.priority(TaskClass::Display),
-            profile.priority(TaskClass::Serial)
-        );
-    }
 }
 
 impl TaskClass {
@@ -264,7 +236,6 @@ impl TaskClass {
             8 => Self::Wifi,
             9 => Self::Network,
             10 => Self::Http,
-            11 => Self::Clock,
             _ => Self::Battery,
         }
     }

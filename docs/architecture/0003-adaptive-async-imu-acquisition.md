@@ -5,7 +5,7 @@
 
 ## Context
 
-LSM6DS3 reads, tap classification, face-down handling, and resulting display effects previously ran inside `display_task`. The sensor itself operated at 416 Hz, but firmware sampled at the display loop's nominal 20 Hz cadence and could be delayed further by rendering. Increasing direct polling to 416 Hz would consume nearly all of the shared 100 kHz I2C bus.
+LSM6DS3 reads, tap classification, and resulting display effects previously ran inside `display_task`. The sensor itself operated at 416 Hz, but firmware sampled at the display loop's nominal 20 Hz cadence and could be delayed further by rendering. Increasing direct polling to 416 Hz would consume nearly all of the shared 100 kHz I2C bus.
 
 The internal GPIO expander carries IMU INT1 and INT2 while also controlling panel and board outputs. Its output/configuration cache belongs to `InkplateHal`, so independent IMU ownership must not duplicate writes to that cache.
 
@@ -23,7 +23,7 @@ Configure three separate rates:
 
 Tap, interrupt, jerk, gyro, sequence, or recovery evidence extends a high-rate window. Direct polling is limited to 125 Hz on the current bus. Sampling discontinuities clear stale motion history before classification resumes.
 
-The pipeline consumes ordered timestamped frames through a bounded channel, owns `EventEngine` and face-down state, and never awaits display work. It publishes idempotent backlight requests and parity-preserving background toggles through a nonblocking mailbox. `display_task` remains the sole owner of frontlight, app-state, and rendering effects.
+The pipeline consumes ordered timestamped frames through a bounded channel, owns `EventEngine`, and never awaits display work. It publishes idempotent backlight requests through a nonblocking mailbox. `display_task` remains the sole owner of frontlight and rendering effects.
 
 Touch activity reaches acquisition through a latest-value signal before display consumption, preserving touch priority without borrowing display state.
 

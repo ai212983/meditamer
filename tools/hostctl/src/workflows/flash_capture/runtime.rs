@@ -12,7 +12,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
     let baud = opts.baud.unwrap_or(env_utils::baud_from_env(115200)?);
     let flash_baud = opts
         .flash_baud
-        .unwrap_or(env_utils::parse_env_u32("ESPFLASH_BAUD", 460_800)?);
+        .unwrap_or(env_utils::parse_env_u32("ESPFLASH_BAUD", DEFAULT_FLASH_BAUD)?);
     let fallback_baud = env_utils::parse_env_u32("ESPFLASH_FALLBACK_BAUD", 115_200)?;
     let flash_timeout = Duration::from_secs(env_utils::parse_env_u64("FLASH_TIMEOUT_SEC", 360)?);
     let flash_status_interval = Duration::from_secs(env_utils::parse_env_u64(
@@ -34,7 +34,6 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
     let boot_window = Duration::from_millis(opts.boot_window_ms.unwrap_or(
         env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS", 8_000)?,
     ));
-    let set_time_after_flash = env_utils::parse_env_bool01("FLASH_SET_TIME_AFTER_FLASH", true)?;
     let skip_update_check = env_utils::parse_env_bool01("ESPFLASH_SKIP_UPDATE_CHECK", true)?;
     let enable_fallback = env_utils::parse_env_bool01(
         "ESPFLASH_ENABLE_FALLBACK",
@@ -65,6 +64,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         idf_env: None,
         flash_result: None,
         capture_bytes: 0,
+        post_command_match: None,
     };
 
     let flash_mode = match runtime.opts.flash_mode {
@@ -81,8 +81,8 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         "flash_mode": flash_mode,
         "capture_mode": capture_mode,
         "image_supplied": runtime.opts.image.is_some(),
-        "set_time_after_flash": set_time_after_flash,
         "fallback_allowed": enable_fallback,
+        "post_command_supplied": runtime.opts.post_command.is_some(),
     });
     execute_workflow(&workflow, &mut runtime, &workflow_input)?;
 
@@ -101,6 +101,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
 
 impl FlashCaptureRuntime<'_> {
     fn action_preflight(&mut self, context: &mut Value) -> Result<()> {
+        validate_post_command_options(&self.opts)?;
         let fallback_allowed = context
             .get("fallback_allowed")
             .and_then(Value::as_bool)
@@ -142,6 +143,58 @@ impl FlashCaptureRuntime<'_> {
             self.opts.idf_tools_path.as_deref(),
         )?;
         self.idf_env = Some(idf_env);
+        Ok(())
+    }
+
+    fn action_archive_image(&mut self) -> Result<()> {
+        let image_path = self
+            .image_path
+            .as_deref()
+            .ok_or_else(|| anyhow!("image_path not resolved before archive"))?;
+        archive_firmware_artifacts(
+            image_path,
+            &self.outputs,
+            &self.repo_dir,
+            &self.opts.profile,
+            self.skip_update_check,
+        )
+    }
+
+    fn action_post_command(&mut self, context: &mut Value) -> Result<()> {
+        let command = self
+            .opts
+            .post_command
+            .as_deref()
+            .ok_or_else(|| anyhow!("post_command action requires --post-command"))?;
+        let pattern = self
+            .opts
+            .post_pattern
+            .as_deref()
+            .ok_or_else(|| anyhow!("--post-pattern is required with --post-command"))?;
+        let timeout_ms = self.opts.post_timeout_ms.unwrap_or(120_000);
+        let settle_ms = env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_POST_SETTLE_MS", 200)?;
+        let regex = regex::Regex::new(pattern)
+            .with_context(|| format!("invalid --post-pattern `{pattern}`"))?;
+        let mut console = SerialConsole::open(
+            &self.port,
+            self.baud,
+            Some(&self.outputs.post_command_log),
+        )?;
+        console.settle(settle_ms)?;
+        let mark = console.mark();
+        console.send_line(command)?;
+        let matched = console
+            .wait_for_regex_since(mark, &regex, Duration::from_millis(timeout_ms))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "post command `{command}` did not match `{pattern}` within {timeout_ms} ms; see {}",
+                    self.outputs.post_command_log.display()
+                )
+            })?;
+        self.logger
+            .info(format!("post command completed: {matched}"));
+        context_set_string(context, "post_command_match", &matched);
+        self.post_command_match = Some(matched);
         Ok(())
     }
 
@@ -189,81 +242,4 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
-    fn action_capture(&mut self, args: &Value, context: &mut Value) -> Result<()> {
-        let mode = args
-            .get("mode")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("capture requires mode"))?;
-        match mode {
-            "boot" => {
-                self.logger.info(format!(
-                    "capturing boot log for {} ms on {} -> {}",
-                    self.boot_window.as_millis(),
-                    self.port,
-                    self.outputs.capture_log.display()
-                ));
-                let bytes = capture_boot_window(
-                    &self.port,
-                    self.baud,
-                    self.boot_window,
-                    &self.outputs.capture_log,
-                )?;
-                self.capture_bytes = bytes.len();
-                self.logger.info(format!(
-                    "boot capture complete: {} bytes -> {}",
-                    self.capture_bytes,
-                    self.outputs.capture_log.display()
-                ));
-            }
-            "stream" => {
-                self.logger.info(format!(
-                    "capturing serial stream for {} ms on {} -> {}",
-                    self.boot_window.as_millis(),
-                    self.port,
-                    self.outputs.capture_log.display()
-                ));
-                let bytes = capture_stream_window(
-                    &self.port,
-                    self.baud,
-                    self.boot_window,
-                    &self.outputs.capture_log,
-                )?;
-                self.capture_bytes = bytes.len();
-                self.logger.info(format!(
-                    "stream capture complete: {} bytes -> {}",
-                    self.capture_bytes,
-                    self.outputs.capture_log.display()
-                ));
-            }
-            "none" => {
-                File::create(&self.outputs.capture_log)?;
-                self.capture_bytes = 0;
-                self.logger.info(format!(
-                    "capture skipped; created empty {}",
-                    self.outputs.capture_log.display()
-                ));
-            }
-            other => bail!("unsupported capture mode `{other}`"),
-        }
-        context_set_u64(context, "capture_bytes", self.capture_bytes as u64);
-        Ok(())
-    }
-}
-
-impl WorkflowRuntime for FlashCaptureRuntime<'_> {
-    fn invoke(&mut self, action: &str, args: &Value, context: &mut Value) -> Result<()> {
-        match action {
-            "preflight" => self.action_preflight(context),
-            "resolve_image" => self.action_resolve_image(args),
-            "prepare_idf_env" => self.action_prepare_idf_env(),
-            "flash" => self.action_flash(args),
-            "capture" => self.action_capture(args, context),
-            "post_flash_timeset" => run_timeset_after_flash(self.logger, &self.port, self.baud),
-            "write_summary" => action_write_summary(self, context),
-            "abort_flash" => action_abort_flash(context),
-            other => Err(anyhow!(
-                "unsupported flash-capture workflow action: {other}"
-            )),
-        }
-    }
 }

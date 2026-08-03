@@ -1,4 +1,4 @@
-use crate::firmware::app_state::{BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode};
+use crate::firmware::app_state::{DiagKind, DiagTargets};
 
 use super::super::super::commands::StateSetOperation;
 use super::super::util::trim_ascii_whitespace;
@@ -37,48 +37,12 @@ pub(in super::super) fn parse_state_set_command(line: &[u8]) -> Option<StateSetO
     let mut split = kv.splitn(2, |byte| *byte == b'=');
     let key = split.next()?;
     let value = split.next()?;
-    if key.eq_ignore_ascii_case(b"base") {
-        if value.eq_ignore_ascii_case(b"DAY") {
-            return Some(StateSetOperation::Base(BaseMode::Day));
-        }
-        if value.eq_ignore_ascii_case(b"TOUCH_WIZARD") {
-            return Some(StateSetOperation::Base(BaseMode::TouchWizard));
-        }
-        return None;
-    }
-    if key.eq_ignore_ascii_case(b"day_bg") {
-        if value.eq_ignore_ascii_case(b"SUMINAGASHI") {
-            return Some(StateSetOperation::DayBackground(DayBackground::Suminagashi));
-        }
-        if value.eq_ignore_ascii_case(b"SHANSHUI") {
-            return Some(StateSetOperation::DayBackground(DayBackground::Shanshui));
-        }
-        return None;
-    }
-    if key.eq_ignore_ascii_case(b"overlay") {
-        if value.eq_ignore_ascii_case(b"NONE") {
-            return Some(StateSetOperation::Overlay(OverlayMode::None));
-        }
-        if value.eq_ignore_ascii_case(b"CLOCK") {
-            return Some(StateSetOperation::Overlay(OverlayMode::Clock));
-        }
-        return None;
-    }
     if key.eq_ignore_ascii_case(b"upload") {
         if value.eq_ignore_ascii_case(b"ON") {
             return Some(StateSetOperation::Upload(true));
         }
         if value.eq_ignore_ascii_case(b"OFF") {
             return Some(StateSetOperation::Upload(false));
-        }
-        return None;
-    }
-    if key.eq_ignore_ascii_case(b"assets") {
-        if value.eq_ignore_ascii_case(b"ON") {
-            return Some(StateSetOperation::AssetReads(true));
-        }
-        if value.eq_ignore_ascii_case(b"OFF") {
-            return Some(StateSetOperation::AssetReads(false));
         }
         return None;
     }

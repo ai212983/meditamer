@@ -1,26 +1,19 @@
 mod app_events;
 mod gpio36_feedback;
+mod lvgl;
 mod sd_power;
 mod state;
-mod touch_events;
-mod wait;
-
-use app_events::{handle_app_event, handle_pending_imu_actions};
-use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_time::{with_timeout, Duration};
-use gpio36_feedback::render_gpio36_ready_feedback;
-use sd_power::process_sd_power_requests;
-use state::DisplayLoopState;
-use touch_events::process_touch_cycle;
-use wait::next_loop_wait_ms;
 
 use super::super::{
-    config::{APP_EVENTS, UI_TICK_MS},
-    input::gpio36::Gpio36Mode,
-    touch::{tasks::request_touch_pipeline_reset, wizard::render_touch_wizard_waiting_screen},
+    config::APP_EVENTS, input::gpio36::Gpio36Mode, touch::tasks::request_touch_pipeline_reset,
     types::DisplayContext,
 };
 use super::run_backlight_timeline;
+use app_events::{handle_app_event, handle_pending_imu_actions};
+use core::sync::atomic::{AtomicBool, Ordering};
+use embassy_time::{with_timeout, Duration};
+use sd_power::process_sd_power_requests;
+use state::DisplayLoopState;
 
 const SD_POWER_POLL_SLICE_MS: u64 = 5;
 static DISPLAY_WORK_BUSY: AtomicBool = AtomicBool::new(false);
@@ -40,7 +33,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
     request_touch_pipeline_reset();
 
     loop {
-        let maybe_event = receive_next_app_event_or_timeout(&mut context, &state).await;
+        let maybe_event = receive_next_app_event_or_timeout(&mut context).await;
         DISPLAY_WORK_BUSY.store(true, Ordering::Release);
         if let Some(event) = maybe_event {
             handle_app_event(event, &mut context, &mut state).await;
@@ -57,7 +50,7 @@ pub(crate) async fn display_task(mut context: DisplayContext) {
 }
 
 fn announce_runtime_ready(state: &mut DisplayLoopState) {
-    if state.touch_startup_settled && !state.runtime_ready_announced {
+    if state.touch_startup_settled && state.lvgl.is_ready() && !state.runtime_ready_announced {
         state.runtime_ready_announced = true;
         super::scheduling::mark_runtime_ready();
         esp_println::println!("RUNTIME_READY app_state=ready display=ready");
@@ -65,20 +58,15 @@ fn announce_runtime_ready(state: &mut DisplayLoopState) {
 }
 
 async fn render_initial_display_state(context: &mut DisplayContext, state: &mut DisplayLoopState) {
-    if state.in_touch_wizard_mode() && state.touch_wizard.is_active() {
-        state.touch_wizard.render_full(&mut context.inkplate).await;
-        state.screen_initialized = true;
-    } else if state.in_touch_wizard_mode() {
-        render_touch_wizard_waiting_screen(&mut context.inkplate).await;
-        state.screen_initialized = true;
+    if !lvgl::initialize(context, &mut state.lvgl).await {
+        esp_println::println!("RUNTIME_READY blocked=display_init_failed");
     }
 }
 
 async fn receive_next_app_event_or_timeout(
     context: &mut DisplayContext,
-    state: &DisplayLoopState,
 ) -> Option<crate::firmware::types::AppEvent> {
-    let mut remaining_wait_ms = display_wait_ms(state);
+    let mut remaining_wait_ms = lvgl::SERVICE_PERIOD_MS;
     let mut event = None;
     while remaining_wait_ms > 0 {
         process_sd_power_requests(context).await;
@@ -96,36 +84,21 @@ async fn receive_next_app_event_or_timeout(
 
 async fn process_runtime_tasks(context: &mut DisplayContext, state: &mut DisplayLoopState) {
     let upload_enabled = state.upload_enabled();
-    // GPIO36 is a shared WAKE/touch line. Keep its classifier alive in upload
-    // mode even though the rest of the interactive product UI is suspended.
-    // Button-only diagnostics resolve directly from edge events and must not
-    // run the touchscreen pipeline.
+    // GPIO36 is a shared WAKE/touch line. Keep touch and LVGL serviced during
+    // uploads so the bounded event queue cannot back up. Upload mode suspends
+    // only ancillary interactive work such as the backlight timeline.
+    // Button-only diagnostics resolve directly from edge events and therefore
+    // do not run the touchscreen pipeline.
     if !matches!(state.gpio36_mode, Gpio36Mode::ButtonOnly) {
-        process_touch_cycle(context, state).await;
-    }
-    if matches!(state.gpio36_mode, Gpio36Mode::ButtonOnly) && !state.gpio36_ready_announced {
-        render_gpio36_ready_feedback(&mut context.inkplate).await;
-        state.gpio36_ready_announced = true;
+        lvgl::process_cycle(context, &mut state.lvgl).await;
     }
     if upload_enabled {
         return;
     }
-    if !state.in_touch_wizard_mode() {
-        run_backlight_timeline(
-            &mut context.inkplate,
-            &mut state.backlight_cycle_start,
-            &mut state.backlight_level,
-        )
-        .await;
-    }
-}
-
-fn display_wait_ms(state: &DisplayLoopState) -> u64 {
-    if state.upload_enabled() {
-        // In upload mode IMU and product rendering are skipped. Clamp to a
-        // fixed UI tick while the shared GPIO/touch classifier remains active.
-        UI_TICK_MS
-    } else {
-        next_loop_wait_ms(state)
-    }
+    run_backlight_timeline(
+        &mut context.inkplate,
+        &mut state.backlight_cycle_start,
+        &mut state.backlight_level,
+    )
+    .await;
 }

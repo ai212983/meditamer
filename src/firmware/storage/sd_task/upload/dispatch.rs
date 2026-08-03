@@ -1,6 +1,6 @@
 use super::super::super::super::types::{SdProbeDriver, SdUploadRequest, SdUploadResult};
 use super::path_ops::{handle_mkdir, handle_remove, handle_stat};
-use super::stream::{handle_abort, handle_begin, handle_chunk, handle_commit};
+use super::stream::{handle_abort, handle_begin, handle_chunk, handle_commit, SdUploadBegin};
 use super::types::{
     split_upload_command, SdUploadSession, UploadCommandGroup, UploadPathCommand,
     UploadStreamCommand,
@@ -61,9 +61,11 @@ async fn process_upload_stream_request(
             expected_size,
         } => {
             handle_begin(
-                path,
-                path_len,
-                expected_size,
+                SdUploadBegin {
+                    path,
+                    path_len,
+                    expected_size,
+                },
                 session,
                 sd_probe,
                 powered,

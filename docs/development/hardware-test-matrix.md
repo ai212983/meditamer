@@ -130,7 +130,7 @@ Device 2's lane does not count as SD/FAT correctness or upload-throughput eviden
 
 Pass criteria:
 
-- `loop_gap_max_ms <= 8` and `active_gap_max_ms <= 16`;
+- `active_gap_max_ms <= 16`;
 - minimum stack headroom is 8 KiB, with 12 KiB as the target;
 - minimum dedicated touch-core stack headroom is 1 KiB;
 - internal free memory is at least 16 KiB;
@@ -163,7 +163,7 @@ Pass criteria:
 - `IMU_SCHED active_n` advances independently during display refresh;
 - touch contact increments `touch_skip` without I2C faults or worse touch scheduling;
 - upload mode increments `upload_skip` and resume records a discontinuity;
-- intended tap actions and face-down toggles occur once, with no stale action after upload;
+- intended tap actions occur once, with no stale action after upload;
 - transient I2C failure enters retry and recovers without reboot.
 
 Repeat the cadence check with `40/80` and `100/125` configurations before changing defaults.

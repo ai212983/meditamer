@@ -1,4 +1,5 @@
 #[derive(Clone, Copy)]
+#[cfg(feature = "asset-upload-http")]
 pub(crate) enum SdUploadRoundtripPhase {
     Begin,
     Chunk,
@@ -9,16 +10,36 @@ pub(crate) enum SdUploadRoundtripPhase {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(feature = "asset-upload-http")]
 pub(crate) enum WifiScanPhase {
     Active,
     Passive,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "asset-upload-http")]
 pub(crate) enum NetPipelineGate {
     WifiDown,
     LinkDown,
     NoIpv4,
+}
+
+#[derive(Clone, Copy)]
+#[cfg(feature = "asset-upload-http")]
+pub(crate) struct UploadHttpPhaseMetrics {
+    pub(crate) bytes: u32,
+    pub(crate) body_read_ms: u32,
+    pub(crate) payload_copy_ms: u32,
+    pub(crate) sd_queue_ms: u32,
+    pub(crate) sd_task_wait_ms: u32,
+    pub(crate) commit_ms: u32,
+    pub(crate) chunk_p50_ms: u32,
+    pub(crate) chunk_p95_ms: u32,
+    pub(crate) chunk_max_ms: u32,
+    pub(crate) chunk_samples: u32,
+    pub(crate) chunk_samples_dropped: u32,
+    pub(crate) sd_wait_ms: u32,
+    pub(crate) request_ms: u32,
 }
 
 #[derive(Clone, Copy)]

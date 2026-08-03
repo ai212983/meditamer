@@ -108,7 +108,7 @@ fn sort_candidates_by_signal(
 }
 
 pub(super) fn rotate_to_next_candidate(
-    candidates: &heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
+    candidates: &[TargetApCandidate],
     current_bssid: Option<[u8; 6]>,
     candidate_idx: &mut usize,
 ) -> Option<TargetApCandidate> {

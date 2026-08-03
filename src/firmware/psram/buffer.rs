@@ -4,32 +4,30 @@ impl LargeByteBuffer {
     }
 
     pub(crate) fn len(&self) -> usize {
-        #[cfg(feature = "psram-alloc")]
-        {
-            self.len
-        }
-        #[cfg(not(feature = "psram-alloc"))]
-        {
-            0
-        }
+        self.len
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    #[cfg(feature = "psram-alloc")]
     pub(crate) fn as_slice(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 
-    #[cfg(feature = "psram-alloc")]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
+
+    /// Converts a one-time firmware allocation into storage with device
+    /// lifetime. The panel driver is created once and lives until reset, so
+    /// retaining this allocation permanently is intentional.
+    pub(crate) fn into_static_mut_slice(self) -> &'static mut [u8] {
+        let buffer = core::mem::ManuallyDrop::new(self);
+        unsafe { slice::from_raw_parts_mut(buffer.ptr.as_ptr(), buffer.len) }
+    }
 }
 
-#[cfg(feature = "psram-alloc")]
 impl Drop for LargeByteBuffer {
     fn drop(&mut self) {
         unsafe {
@@ -37,7 +35,6 @@ impl Drop for LargeByteBuffer {
         }
     }
 }
-#[cfg(feature = "psram-alloc")]
 pub(crate) fn alloc_large_byte_buffer(
     byte_len: usize,
 ) -> Result<LargeByteBuffer, BufferAllocError> {
@@ -78,11 +75,4 @@ pub(crate) fn alloc_large_byte_buffer(
         len: byte_len,
         layout,
     })
-}
-
-#[cfg(not(feature = "psram-alloc"))]
-pub(crate) fn alloc_large_byte_buffer(
-    _byte_len: usize,
-) -> Result<LargeByteBuffer, BufferAllocError> {
-    Err(BufferAllocError::AllocatorDisabled)
 }

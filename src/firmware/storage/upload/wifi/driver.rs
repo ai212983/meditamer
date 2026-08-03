@@ -1,10 +1,4 @@
-use crate::firmware::{
-    storage::upload::wifi::{
-        wifi_active_scan_config, wifi_channel_active_scan_config, wifi_directed_active_scan_config,
-        wifi_passive_scan_config, wifi_raw_broad_scan_config, ScanConfig,
-    },
-    types::WifiRuntimePolicy,
-};
+use crate::firmware::storage::upload::wifi::{wifi_raw_broad_scan_config, ScanConfig};
 
 const WIFI_SCAN_RESULT_MAX_DEFAULT: usize = 64;
 const WIFI_SCAN_RESULT_MAX_MIN: usize = 4;
@@ -44,39 +38,6 @@ const fn parse_ascii_usize(value: &str) -> Option<usize> {
         idx += 1;
     }
     Some(parsed)
-}
-
-pub(super) fn active_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
-    wifi_active_scan_config(
-        WIFI_SCAN_RESULT_MAX,
-        policy.scan_active_min_ms as u64,
-        policy.scan_active_max_ms as u64,
-    )
-}
-
-pub(super) fn directed_active_scan_config(
-    target_ssid: &str,
-    policy: WifiRuntimePolicy,
-) -> ScanConfig {
-    wifi_directed_active_scan_config(
-        target_ssid,
-        WIFI_SCAN_RESULT_MAX,
-        policy.scan_active_min_ms as u64,
-        policy.scan_active_max_ms as u64,
-    )
-}
-
-pub(super) fn channel_active_scan_config(channel: u8, policy: WifiRuntimePolicy) -> ScanConfig {
-    wifi_channel_active_scan_config(
-        channel,
-        WIFI_SCAN_RESULT_MAX,
-        policy.scan_active_min_ms as u64,
-        policy.scan_active_max_ms as u64,
-    )
-}
-
-pub(super) fn passive_scan_config(policy: WifiRuntimePolicy) -> ScanConfig {
-    wifi_passive_scan_config(WIFI_SCAN_RESULT_MAX, policy.scan_passive_ms as u64)
 }
 
 pub(super) fn raw_broad_scan_config() -> ScanConfig {

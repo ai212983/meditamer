@@ -1,5 +1,10 @@
 # Wi-Fi PSRAM Discovery Validation Plan
 
+> Historical record. The `psram-alloc`, `esp-hal-runtime`, and `graphics`
+> features named below have been retired; PSRAM, the ESP-HAL runtime, and LVGL
+> are now unconditional. See [Compile-Time Features](./compile-time-features.md)
+> for the current build contract.
+
 ## Goal
 
 Determine whether PSRAM is the primary cause of the current Wi-Fi discovery
@@ -88,11 +93,11 @@ PSRAM participation.
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_no_psram_20260316_101638/capture.log`
+  `logs/hostctl_flashcapture_no_psram_20260316_101638/capture.log`
 - outcome:
   - identified `psram-alloc` as the narrow repo seam that enables PSRAM
   - added the missing `#[cfg(feature = "psram-alloc")]` guard to
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/src/firmware/psram/buffer.rs`
+    `src/firmware/psram/buffer.rs`
     so the no-PSRAM build path compiles correctly
   - validated with:
     - `CARGO_NO_DEFAULT_FEATURES=1`
@@ -148,9 +153,9 @@ Separate a board/PSRAM/system issue from an esp-rs integration issue.
 - commit:
 - validation:
   - PSRAM-off:
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_idf_wifi_control_psram_off_20260316_102928/serial_capture.log`
+    `logs/esp_idf_wifi_control_psram_off_20260316_102928/serial_capture.log`
   - PSRAM-on:
-    `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/esp_idf_wifi_control_psram_on_20260316_103325/serial_capture.log`
+    `logs/esp_idf_wifi_control_psram_on_20260316_103325/serial_capture.log`
 - outcome:
   - the official C/ESP-IDF control app still scans successfully with PSRAM off
     and with PSRAM on
@@ -169,7 +174,7 @@ Separate a board/PSRAM/system issue from an esp-rs integration issue.
     - `pre_scan_driver_state ... ps=1 ... cc=01.`
     - `scan_complete total_ap_count=10 returned_ap_count=10`
   - repo-side test seam added:
-    - `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/tools/esp_idf_wifi_control/sdkconfig.psram_on.defaults`
+    - `tools/esp_idf_wifi_control/sdkconfig.psram_on.defaults`
   - conclusion:
     - PSRAM does not break official ESP-IDF station scanning on this board
     - the remaining failure is integration-level and specific to the current
@@ -193,7 +198,7 @@ Separate a board/PSRAM/system issue from an esp-rs integration issue.
 
 - commit:
 - validation:
-  `/Users/dimitri/Documents/Code/personal/Inkplate/meditamer/logs/hostctl_flashcapture_no_psram_20260316_101638/capture.log`
+  `logs/hostctl_flashcapture_no_psram_20260316_101638/capture.log`
 - outcome:
   - stop condition reached for the PSRAM hypothesis
   - disabling PSRAM did not restore any discovery metric

@@ -174,21 +174,13 @@ async fn reinitialize_after_retry(
         Ok(Err(err)) => {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
-            esp_println::println!(
-                "sdtask: retry_init_error id={} err={:?}",
-                request_id,
-                err
-            );
+            esp_println::println!("sdtask: retry_init_error id={} err={:?}", request_id, err);
             Err(SdResultCode::InitFailed)
         }
         Err(err) => {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
-            esp_println::println!(
-                "sdtask: retry_init_timeout id={} err={:?}",
-                request_id,
-                err
-            );
+            esp_println::println!("sdtask: retry_init_timeout id={} err={:?}", request_id, err);
             Err(SdResultCode::InitFailed)
         }
     }

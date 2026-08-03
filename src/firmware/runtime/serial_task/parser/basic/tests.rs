@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::firmware::app_state::{BaseMode, DayBackground, DiagKind, OverlayMode};
+use crate::firmware::app_state::DiagKind;
 use crate::firmware::runtime::serial_task::commands::StateSetOperation;
 use crate::firmware::runtime::{
     scheduling::SchedulerProfile, serial_task::commands::SchedulerOperation,
@@ -21,10 +21,6 @@ fn parses_scheduler_profile_control() {
         Some(SchedulerOperation::Profile(SchedulerProfile::Upload))
     ));
     assert!(matches!(
-        parse_scheduler_command(b"SCHEDPROFILE TOUCH_WIZARD"),
-        Some(SchedulerOperation::Profile(SchedulerProfile::TouchWizard))
-    ));
-    assert!(matches!(
         parse_scheduler_command(b"SCHEDPROFILE DIAGNOSTICS"),
         Some(SchedulerOperation::Profile(SchedulerProfile::Diagnostics))
     ));
@@ -34,36 +30,8 @@ fn parses_scheduler_profile_control() {
 #[test]
 fn parses_state_set_forms() {
     assert!(matches!(
-        parse_state_set_command(b"STATE SET base=DAY"),
-        Some(StateSetOperation::Base(BaseMode::Day))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET base=TOUCH_WIZARD"),
-        Some(StateSetOperation::Base(BaseMode::TouchWizard))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET day_bg=SUMINAGASHI"),
-        Some(StateSetOperation::DayBackground(DayBackground::Suminagashi))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET day_bg=SHANSHUI"),
-        Some(StateSetOperation::DayBackground(DayBackground::Shanshui))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET overlay=NONE"),
-        Some(StateSetOperation::Overlay(OverlayMode::None))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET overlay=CLOCK"),
-        Some(StateSetOperation::Overlay(OverlayMode::Clock))
-    ));
-    assert!(matches!(
         parse_state_set_command(b"STATE SET upload=ON"),
         Some(StateSetOperation::Upload(true))
-    ));
-    assert!(matches!(
-        parse_state_set_command(b"STATE SET assets=OFF"),
-        Some(StateSetOperation::AssetReads(false))
     ));
 }
 
@@ -78,9 +46,9 @@ fn parses_diag_get_forms() {
 #[test]
 fn rejects_invalid_state_set_pairs() {
     assert!(parse_state_set_command(b"STATE SET foo=bar").is_none());
-    assert!(parse_state_set_command(b"STATE SET overlay=bad").is_none());
+    assert!(parse_state_set_command(b"STATE SET overlay=CLOCK").is_none());
     assert!(parse_state_set_command(b"STATE SET upload=maybe").is_none());
-    assert!(parse_state_set_command(b"STATE SET day_bg=night").is_none());
+    assert!(parse_state_set_command(b"STATE SET assets=off").is_none());
 }
 
 #[test]

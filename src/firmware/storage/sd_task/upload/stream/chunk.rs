@@ -4,7 +4,8 @@ use crate::firmware::storage::transfer_buffers;
 
 use super::{
     elapsed_ms_u32, ensure_upload_ready, map_fat_result_to_upload_code, upload_result,
-    SdProbeDriver, SdUploadResult, SdUploadResultCode, SdUploadSession, SD_UPLOAD_CHUNK_MAX,
+    SdProbeDriver, SdUploadChunkTimingSample, SdUploadResult, SdUploadResultCode, SdUploadSession,
+    SD_UPLOAD_CHUNK_MAX,
 };
 use embassy_time::Instant;
 
@@ -99,14 +100,14 @@ pub(super) async fn handle_chunk(
     active.bytes_written = next_bytes_written;
     active.last_activity_at = Instant::now();
     let chunk_total_ms = elapsed_ms_u32(chunk_started_at);
-    active.chunk_timing.record_chunk(
+    active.chunk_timing.record_chunk(SdUploadChunkTimingSample {
         queue_wait_ms,
-        chunk_total_ms,
+        total_ms: chunk_total_ms,
         ensure_ready_ms,
         payload_lock_ms,
         append_total_ms,
-        0,
-        append_total_ms,
-    );
+        append_capacity_ms: 0,
+        append_write_data_ms: append_total_ms,
+    });
     upload_result(true, SdUploadResultCode::Ok, active.bytes_written)
 }

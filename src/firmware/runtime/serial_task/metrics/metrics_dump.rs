@@ -1,26 +1,12 @@
-use core::{fmt::Write, sync::atomic::Ordering};
+use core::fmt::Write;
 
-use crate::firmware::{
-    config::{LAST_MARBLE_REDRAW_MS, MAX_MARBLE_REDRAW_MS},
-    telemetry,
-    types::SerialUart,
-};
+use crate::firmware::{telemetry, types::SerialUart};
 
 use super::{write_line, write_metrics_imu_line, write_metrics_net_lines};
 
 pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
-    let last_ms = LAST_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
-    let max_ms = MAX_MARBLE_REDRAW_MS.load(Ordering::Relaxed);
     let snapshot = telemetry::snapshot();
     let touch_scheduling = crate::firmware::touch::scheduling::snapshot();
-
-    let mut line = heapless::String::<160>::new();
-    let _ = write!(
-        &mut line,
-        "METRICS MARBLE_REDRAW_MS={} MAX_MS={}\r\n",
-        last_ms, max_ms
-    );
-    write_line(uart, line).await;
 
     let mut stack_line = heapless::String::<96>::new();
     let _ = write!(
@@ -41,10 +27,7 @@ pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
     let mut touch_line = heapless::String::<256>::new();
     let _ = write!(
         &mut touch_line,
-        "METRICS TOUCH_SCHED loop_n={} loop_gap_max_ms={} loop_gap_over_8={} active_n={} active_gap_max_ms={} active_gap_over_16={}\r\n",
-        touch_scheduling.loop_count,
-        touch_scheduling.loop_gap_max_ms,
-        touch_scheduling.loop_gap_over_8_ms,
+        "METRICS TOUCH_SCHED active_n={} active_gap_max_ms={} active_gap_over_16={}\r\n",
         touch_scheduling.active_sample_count,
         touch_scheduling.active_sample_gap_max_ms,
         touch_scheduling.active_sample_gap_over_16_ms,

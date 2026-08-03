@@ -109,6 +109,12 @@ fn parses_state_get() {
 }
 
 #[test]
+fn rejects_removed_timeset_command() {
+    assert!(parse_serial_command(b"TIMESET 1762531200 -300").is_none());
+    assert!(parse_serial_command(b"TIMESET").is_none());
+}
+
+#[test]
 fn parses_state_status_alias() {
     let cmd = parse_serial_command(b"STATE STATUS");
     assert!(matches!(cmd, Some(SerialCommand::StateGet)));
@@ -169,59 +175,6 @@ fn parses_state_set_upload_on() {
 }
 
 #[test]
-fn parses_state_set_assets_off() {
-    let cmd = parse_serial_command(b"STATE SET assets=off");
-    match cmd {
-        Some(SerialCommand::StateSet { operation }) => {
-            assert!(matches!(operation, StateSetOperation::AssetReads(false)));
-        }
-        _ => panic!("unexpected command"),
-    }
-}
-
-#[test]
-fn parses_state_set_base_touch_wizard() {
-    let cmd = parse_serial_command(b"STATE SET base=TOUCH_WIZARD");
-    match cmd {
-        Some(SerialCommand::StateSet { operation }) => {
-            assert!(matches!(
-                operation,
-                StateSetOperation::Base(BaseMode::TouchWizard)
-            ));
-        }
-        _ => panic!("unexpected command"),
-    }
-}
-
-#[test]
-fn parses_state_set_day_background() {
-    let cmd = parse_serial_command(b"STATE SET day_bg=SUMINAGASHI");
-    match cmd {
-        Some(SerialCommand::StateSet { operation }) => {
-            assert!(matches!(
-                operation,
-                StateSetOperation::DayBackground(DayBackground::Suminagashi)
-            ));
-        }
-        _ => panic!("unexpected command"),
-    }
-}
-
-#[test]
-fn parses_state_set_overlay_clock() {
-    let cmd = parse_serial_command(b"STATE SET overlay=CLOCK");
-    match cmd {
-        Some(SerialCommand::StateSet { operation }) => {
-            assert!(matches!(
-                operation,
-                StateSetOperation::Overlay(OverlayMode::Clock)
-            ));
-        }
-        _ => panic!("unexpected command"),
-    }
-}
-
-#[test]
 fn parses_state_diag() {
     let cmd = parse_serial_command(b"STATE DIAG kind=TEST targets=SD|WIFI|TOUCH");
     match cmd {
@@ -235,6 +188,9 @@ fn parses_state_diag() {
 
 #[test]
 fn rejects_invalid_state_commands() {
-    assert!(parse_serial_command(b"STATE SET base=INVALID").is_none());
+    assert!(parse_serial_command(b"STATE SET base=DAY").is_none());
+    assert!(parse_serial_command(b"STATE SET day_bg=PORTRAIT").is_none());
+    assert!(parse_serial_command(b"STATE SET overlay=CLOCK").is_none());
+    assert!(parse_serial_command(b"STATE SET assets=off").is_none());
     assert!(parse_serial_command(b"STATE DIAG kind=TEST targets=GPS").is_none());
 }

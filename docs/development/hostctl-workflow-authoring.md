@@ -49,7 +49,7 @@ Unsupported DSL task kinds currently fail fast.
 - Store counters in context (`health_attempt`, `upload_attempt`) or return them through `metadata.hostctl.result`.
 - Prefer this split even for flash flows: Rust should provide primitives like
   `flash_full`, `flash_app_only`, `capture_boot`, `capture_stream`, and
-  `post_flash_timeset`, while the YAML decides when they run.
+  `capture` and `post_command`, while the YAML decides when they run.
 
 3. Use TOML for workflow-specific strategy profiles when thresholds become large.
 - Keep orchestration graph in `*.sw.yaml`.

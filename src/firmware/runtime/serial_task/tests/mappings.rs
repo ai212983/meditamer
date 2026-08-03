@@ -1,18 +1,3 @@
-fn maps_timeset_to_event_and_responses() {
-    let cmd = parse_serial_command(b"TIMESET 1762531200 -300").expect("command");
-    let (app_event, sd_command, ok, busy) = serial_command_event_and_responses(cmd);
-    assert!(sd_command.is_none());
-    match app_event {
-        Some(AppEvent::TimeSync(sync)) => {
-            assert_eq!(sync.unix_epoch_utc_seconds, 1_762_531_200);
-            assert_eq!(sync.tz_offset_minutes, -300);
-        }
-        _ => panic!("expected timesync event"),
-    };
-    assert_eq!(ok, b"TIMESET OK\r\n");
-    assert_eq!(busy, b"TIMESET BUSY\r\n");
-}
-
 #[test]
 fn maps_sdfatstat_to_event_and_responses() {
     let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt").expect("command");

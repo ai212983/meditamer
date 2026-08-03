@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Dimitri Fedorov <dimitri.fedorov@suprematic.net>"]
 edition = "2021"
 resolver = "2"
-rust-version = "1.88"
+rust-version = "1.95"
 
 [[bin]]
 name = "meditamer"
@@ -18,7 +18,7 @@ bench = false
 doctest = false
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 
 [profile.dev]
 debug = true
@@ -32,35 +32,28 @@ opt-level = 3
 
 [features]
 default = [
-    "esp-hal-runtime",
-    "graphics",
     "asset-upload-http",
     "asset-upload-http-pipeline",
-    "psram-alloc",
 ]
-esp-hal-runtime = []
-graphics = ["dep:embedded-graphics", "dep:heapless", "dep:u8g2-fonts"]
-psram-alloc = ["dep:esp-alloc"]
-ui-hybrid = []
 telemetry-defmt = ["dep:defmt", "esp-println/defmt-espflash"]
-wifi-debug-slim-app = []
+wifi-debug-slim-app = ["asset-upload-http"]
 asset-upload-http = [
     "dep:embassy-net",
     "dep:embedded-io-async",
-    "dep:esp-alloc",
     "esp-rtos/esp-radio",
     "esp-rtos/esp-alloc",
     "wifi-backend-esp-radio",
 ]
-asset-upload-http-pipeline = []
-asset-upload-http-uploader = ["asset-upload-http"]
+asset-upload-http-pipeline = ["asset-upload-http"]
 wifi-backend-esp-radio = ["dep:esp-radio"]
 
 [dependencies]
+critical-section = "1.2.0"
 esp-hal = { version = "1.1.1", features = ["esp32", "unstable"] }
+esp-sync = "0.2.1"
 esp-rtos = { version = "0.3.0", features = ["esp32", "embassy"] }
 esp32 = "0.40.2"
-esp-alloc = { version = "0.10.0", optional = true, default-features = false, features = ["compat", "esp32", "global-allocator"] }
+esp-alloc = { version = "0.10.0", default-features = false, features = ["compat", "esp32", "global-allocator"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
 esp-backtrace = { version = "0.19.0", default-features = false, features = ["esp32", "panic-handler", "println"] }
 defmt = { version = "1.1.1", optional = true }
@@ -73,15 +66,12 @@ embassy-embedded-hal = "0.6.0"
 embassy-net = { version = "0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
 embedded-hal-async = "1.0.0"
 embedded-io-async = { version = "0.7.0", optional = true }
-enumset = { version = "1.1.13", default-features = false }
+enumset = { version = "1.1.14", default-features = false }
 esp-radio = { version = "1.0.0-beta.0", optional = true, default-features = false, features = ["esp32", "wifi", "log-04", "unstable"] }
 static_cell = "2.1.1"
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
 
-embedded-graphics = { version = "0.8.2", optional = true }
-heapless = { version = "0.9.3", optional = true }
-u8g2-fonts = { version = "0.8.0", optional = true }
-fixed = { version = "1.29.0", default-features = false }
-fixed-sqrt = { version = "0.3.0", default-features = false }
+heapless = "0.9.3"
 statig = "0.4.1"
 esp-storage = { version = "0.9.0", features = ["esp32"] }
 embedded-storage = "0.3.1"
