@@ -1,8 +1,11 @@
 # 2026-03-20 Asset Upload Transport Plan
 
-- Status: Needs-triage
+- Status: Proposed
 - Last-reviewed: 2026-08-10
-- Note: Premise was that Wi-Fi upload is too fragile to keep. Wi-Fi is now fixed, so the trade-off this plan argued from has changed. Re-decide before acting on it.
+- Open question: Which transport is primary. Wi-Fi is **still a candidate**
+  alongside BLE — the sections below argue against it, but that argument has
+  not been ratified. Wi-Fi is now working, which strengthens its case on
+  reliability while leaving the iPhone and firmware-size objections intact.
 
 ## Problem
 
@@ -30,13 +33,26 @@ With these constraints:
 - the transport should be simpler and smaller than the current Wi-Fi stack
 - uploads should write assets to SD card with integrity checks and clear failure handling
 
-## Decision
+## Proposed direction (not decided)
 
-Do not make Wi-Fi the primary long-term asset upload transport.
+This is the recommendation this document argues for, not a ratified decision.
+Nothing below has been adopted, and no work should treat it as settled.
 
-Do not make Bluetooth Classic the primary transport either.
+- Do not make Wi-Fi the primary long-term asset upload transport.
+- Do not make Bluetooth Classic the primary transport either.
+- Adopt a transport-agnostic upload protocol with BLE as the primary external
+  transport.
 
-Adopt a transport-agnostic upload protocol with BLE as the primary external transport.
+### Candidates still on the table
+
+| Transport | Status | Standing objection |
+| --- | --- | --- |
+| Wi-Fi STA + HTTP | Implemented and working today; see [guides/wifi-asset-upload.md](../guides/wifi-asset-upload.md) | Firmware size and complexity; weak fit for iPhone |
+| BLE | Proposed below; not built | Throughput for large assets is unproven on this board |
+| Bluetooth Classic | Argued against below | SPP/RFCOMM is not a viable iPhone path |
+
+The transport-agnostic upload protocol is worth building regardless of which
+transport wins, since it is what keeps the choice reversible.
 
 ## Why Not Wi-Fi
 
