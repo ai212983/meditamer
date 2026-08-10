@@ -62,6 +62,30 @@ From the serial `PSRAM`/`psram:` telemetry across captured runs:
 A `min_internal_free_bytes=6` line appears in one capture. It is a truncated log
 line, not a real near-exhaustion.
 
+### UI shell reservation and latest lifecycle measurement
+
+Capacities remain providers 8, surfaces 16, navigation 8, overlays 4, modals 4, intents 8, callback
+routes 2, and UI-step acknowledgements 2. Retained payload is zero; four future references are unallocated.
+
+| Exact debug layout | Xtensa bytes |
+| --- | ---: |
+| `ShellModel` (`960` host) / `CompositionReferences<4, 4>` | 924 / 168 |
+| `Backend` / `LvglState` | 1104 / 1336 |
+| `ActiveSurface` / `TimerServiceMetrics` | 52 / 24 |
+| `PreparedNavigation` / `NavigationPlan` / `TransitionResult` | 172 / 152 / 136 |
+| Callback intent queue / route table, including mutex wrappers | 272 / 212 |
+| `lv_mem_monitor_t` / allocator snapshot stack temporaries | 28 / 52 |
+
+The Phase 3 release ELF has pool 4128 bytes, callback storage 272/212/1, `.data` 14036, `.bss` 67876,
+`.stack` 114156, and `.dram2_uninit` 104392. Against E-0003, named UI storage grew 376 bytes, linked
+`.data` plus `.bss` grew 360, and stack remainder fell 352; alignment absorbed the difference.
+
+The E-0006 lane added a 40-byte result channel; its release artifact has `.data` 14156, `.bss` 67916,
+and `.stack` 113988. Release/debug cycles recorded CPU0 minima 101064/101304 and stable LVGL blocks.
+
+The Phase 4 pure model adds 48 bytes to the shell/backend/state/display pool (now 4176). Release is
+`.data` 14092, `.bss` 67948, `.stack` 114020; callback/ACK statics and capacities are unchanged.
+
 ## What Was Recovered
 
 | Section | Before | After | Delta |

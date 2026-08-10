@@ -3,20 +3,22 @@
 |Uses: Rust, esp-hal, Embassy
 |../Inkplate-Arduino-library: Reference C++ library for baseline functionality
 |development/README.md: Sharded development guide index (build/flash/monitor/time-sync/soak instructions live in `development/readme/part-*.md`)
-|development/upload-throughput-history.md: Sharded index; append new throughput entries to the latest `development/upload-throughput-history/part-*.md`
-|development/rfc-upload-throughput-next-phase.md: Sharded index; append new RFC updates to the latest `development/rfc-upload-throughput-next-phase/part-*.md`
-|development/wifi-upload-decision-ledger.md: Fast decision ledger for promoted/rejected/non-default Wi-Fi/upload knobs; check this first before proposing/rerunning A/B experiments
-|MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `development/rfc-upload-throughput-next-phase/` and `development/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
+|archive/upload/upload-throughput-history.md: Frozen throughput history (read-only; superseded by the asset upload transport plan)
+|archive/upload/rfc-upload-throughput-next-phase.md: Frozen upload RFC (read-only)
+|archive/wifi/wifi-upload-decision-ledger.md: Frozen decision ledger for promoted/rejected/non-default Wi-Fi/upload knobs; check this first before proposing/rerunning A/B experiments
+|MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `archive/upload/rfc-upload-throughput-next-phase/` and `archive/upload/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
 |Flash policy: Prefer `scripts/device/flash.sh` over raw `espflash`; it wraps `hostctl flash-capture` and the canonical orchestration in `tools/hostctl/scenarios/flash-capture.sw.yaml`. Use `hostctl flash-capture` directly only when you need explicit `--flash-mode` / `--capture-mode` / artifact-path control. Use `scripts/device/monitor.sh` only for passive attach/debug, not boot capture.
 |Hostctl workflow policy: Keep orchestration (branching, fallback order, retries, gate flow) in Serverless Workflow YAML under `tools/hostctl/scenarios/*.sw.yaml`; keep Rust hostctl code focused on primitive actions and context I/O.
-|development/event-engine-guide.md: Practical guide for tuning/modifying the event engine
-|development/statig-event-engine-plan.md: Plan for statig-based sensor-event engine
+|development/touch-and-events/event-engine-guide.md: Practical guide for tuning/modifying the event engine
+|development/touch-and-events/statig-event-engine-plan.md: Plan for statig-based sensor-event engine
 |development/sensors.md: Sensor details and behavior
 |development/sound.md: Sound functionality and behavior
 |development/hardware-test-matrix.md: Hardware testing matrices
 |development/dram-budget.md: Internal DRAM accounting and recovery levers; `dram_seg` is always full and `.stack` is only its remainder, so check this before adding large statics, task-local buffers, or channel depth
 |development/dram-budget-rom-stack.md: Why `ld/meditamer-memory.x` extends `dram2_seg` over the APP CPU ROM stack, and why deep sleep is compatible; read before touching `ld/` or adding deep sleep
 |Documentation policy: Markdown LOC is advisory: warn above 220 and flag high attention above 300 (`scripts/ci/check_markdown_loc.sh` / `scripts/ci/check_markdown_loc.sh --staged`)
+|Documentation policy: The LOC advisory applies to prose you edit. Do NOT shard append-only material (logs, ledgers, run journals, throughput history) into `part-NN.md` files: the split adds a hand-maintained index that rots, and the sharded file is still one document. Let such files grow, or archive them when the investigation closes.
+|Documentation policy: Link validation is `scripts/ci/check_markdown_links.sh` (staged files) or `--all` (whole repo). `docs/archive/` and `vendor/` are excluded; archived docs are frozen and their stale cross-references are expected.
 |todos/: Deferred tasks (e.g., cold-boot-validation.md)
 |MANDATORY: Never use absolute local filesystem paths/links in tracked files, and never commit them (including generated artifacts, logs, or docs); always use repo-relative paths/links.
 |MANDATORY: Do not ignore, bypass, or paper over problems; fix root cause. If unsure, ask the user.

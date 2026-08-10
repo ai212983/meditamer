@@ -110,12 +110,18 @@ This shape gives a softer rise-and-fall and avoids very high pitches.
 - Risset-style additive bell example (classic bell partial approach): [https://msp.ucsd.edu/techniques/latest/book-html/node71.html](https://msp.ucsd.edu/techniques/latest/book-html/node71.html)
 - Bell acoustics paper index (harmonic and inharmonic bell design context): [https://pubmed.ncbi.nlm.nih.gov/12880061/](https://pubmed.ncbi.nlm.nih.gov/12880061/)
 
-## Local reference files in this workspace
+## Reference files
+
+In this repository:
 
 - [src/lib.rs](../../src/lib.rs)
 - [src/main.rs](../../src/main.rs)
-- [Inkplate-Arduino-library/src/include/Buzzer.cpp](../../../Inkplate-Arduino-library/src/include/Buzzer.cpp)
-- [Inkplate-Arduino-library/src/include/Buzzer.h](../../../Inkplate-Arduino-library/src/include/Buzzer.h)
-- [Inkplate-Arduino-library/src/libs/MCP4018/src/MCP4018-SOLDERED.cpp](../../../Inkplate-Arduino-library/src/libs/MCP4018/src/MCP4018-SOLDERED.cpp)
-- [Inkplate-Arduino-library/src/boards/Inkplate4TEMPERA.h](../../../Inkplate-Arduino-library/src/boards/Inkplate4TEMPERA.h)
-- [Inkplate-Arduino-library/examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino](../../../Inkplate-Arduino-library/examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino)
+
+In the `Inkplate-Arduino-library` reference checkout (a sibling of this repo, so
+these are listed as paths rather than links — see `AGENTS.md`):
+
+- `src/features/Buzzer/Buzzer.cpp`
+- `src/features/Buzzer/Buzzer.h`
+- `src/features/MCP4018/MCP4018-SOLDERED.cpp`
+- `src/boards/Inkplate4TEMPERA/Inkplate4TEMPERADriver.h`
+- `examples/Inkplate4TEMPERA/Advanced/Sensors/Inkplate4TEMPERA_Buzzer/Inkplate4TEMPERA_Buzzer.ino`

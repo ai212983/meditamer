@@ -109,9 +109,7 @@ It is ordered by operational impact.
   - Low/variable throughput stretches operation windows and increases timeout/recovery exposure.
 - Evidence:
   - Historical data still shows low single-digit KiB/s and variance by payload:
-    - [docs/development/upload-throughput-history.md](upload-throughput-history.md)
-    - [docs/development/upload-throughput-history.md](upload-throughput-history.md)
-    - [docs/development/upload-throughput-history.md](upload-throughput-history.md)
+    - [docs/archive/upload/upload-throughput-history.md](../archive/upload/upload-throughput-history.md)
 - Mitigation path:
   - Keep per-phase telemetry comparisons and optimize highest-time bucket first.
 - Acceptance criteria:
@@ -145,7 +143,7 @@ It is ordered by operational impact.
   - False negatives can be introduced by host workflow timing/command pressure.
 - Evidence:
   - Dedicated root-cause and guardrails note:
-    - [docs/development/wifi-discovery-regression-guardrails.md](wifi-discovery-regression-guardrails.md)
+    - [docs/archive/wifi/wifi-discovery-regression-guardrails.md](../archive/wifi/wifi-discovery-regression-guardrails.md)
   - Discovery-debug and acceptance flow now explicitly separate discovery proof from throughput profiling:
     - [docs/development/README.md](README.md)
 - Mitigation path:

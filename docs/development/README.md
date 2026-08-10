@@ -23,6 +23,11 @@ The development guide is sharded to keep frequently edited Markdown files manage
   `docs/development/compile-time-features.md`.
 - LVGL native eight-level partial-refresh feasibility and reference-library
   findings live in `docs/development/lvgl-eight-level-partial-findings.md`.
+- The UI shell, app catalogue, and optional native-loader work is sequenced in
+  `docs/development/ui-app-structure-rework-plan.md`; run-specific status and evidence live in
+  `docs/development/ui-app-structure-rework-ledger.md`.
+- The compiled reference-versus-Rust panel waveform investigation plan lives in
+  `docs/development/2026-08-03-panel-waveform-reference-assembly-investigation-plan.md`.
 - Internal DRAM accounting, recovery levers, and re-measurement commands live in
   `docs/development/dram-budget.md`. Check it before adding large statics or
   task-local buffers. The ROM-stack reclaim behind the extended `dram2_seg`, and

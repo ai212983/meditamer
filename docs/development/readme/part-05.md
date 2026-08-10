@@ -51,6 +51,39 @@ Long refresh soak validation:
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/soak_refresh.sh 7200
 ```
 
+## UI Lifecycle Evidence
+
+After flashing the exact debug or release artifact under test, run at least two
+complete Home → Launcher → diagnostics → Home cycles:
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 \
+cargo run --locked --manifest-path tools/hostctl/Cargo.toml -- \
+  test ui-lifecycle --cycles 2 --output logs/ui-lifecycle.log
+```
+
+The default settled-baseline tolerance is exactly zero. After an identified
+artifact has a recorded characterization run, an acceptance run may opt into
+the predeclared bound from that evidence. E-0006 characterizes the current
+128 KiB LVGL arena at a 256-byte allocator-settling band:
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 \
+cargo run --locked --manifest-path tools/hostctl/Cargo.toml -- \
+  test ui-lifecycle --cycles 50 --max-baseline-drift-bytes 256 \
+  --output logs/ui-lifecycle-acceptance.log
+```
+
+The `UISTEP` primitive performs one shell-owned transition and acknowledges it
+only after panel refresh. The workflow never retries a timeout because its
+outcome is ambiguous. It writes the raw UART log and a sibling JSON report,
+then fails closed on lifecycle count/route gaps, out-of-bound settled LVGL
+usage/usable-total drift, changed live-block counts, a non-plateaued high-water,
+heap drift, shell or allocator-integrity faults, refresh errors, panics, or
+watchdogs.
+Passing logs remain resource evidence only: observe the physical panel and
+touch path before closing the UI phase gate.
+
 Optional soak env vars:
 
 - `SOAK_WINDOW_SEC` (capture window per cycle, default `8`)

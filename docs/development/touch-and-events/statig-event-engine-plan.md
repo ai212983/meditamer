@@ -4,7 +4,7 @@ Last updated: 2026-02-13 (Europe/Berlin context)
 
 ## Goal
 
-Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task/mod.rs` into a reusable `statig`-based engine that:
+Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task/mod.rs` into a reusable [statig](https://github.com/mdeloof/statig) -based engine that:
 
 - supports current triple-tap backlight behavior reliably,
 - is extensible to non-tap events (pickup, placement, stillness, near/far intent),
