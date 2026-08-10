@@ -9,7 +9,7 @@
 # rodata window, so we count those and refuse to let the count grow.
 #
 # The baseline is not zero: esp-hal and the Wi-Fi blob already ship #[ram]
-# functions that reference flash. See docs/development/dram-budget.md.
+# functions that reference flash. See docs/reference/dram-budget.md.
 
 set -euo pipefail
 

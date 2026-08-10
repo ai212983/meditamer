@@ -12,7 +12,7 @@ struct SdTaskRuntime {
     // Held for the whole task, so as a plain field it would sit in this task's
     // Embassy pool — which lives in `.bss` in `dram_seg` and therefore comes
     // straight out of the CPU0 stack. On the heap it lands in `dram2_seg`
-    // instead. See docs/development/dram-budget.md.
+    // instead. See docs/reference/dram-budget.md.
     fat_engine: alloc::boxed::Box<FatEngine>,
     consecutive_failures: u8,
     backoff_until: Option<Instant>,

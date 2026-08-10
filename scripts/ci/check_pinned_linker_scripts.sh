@@ -2,7 +2,7 @@
 #
 # `ld/meditamer-memory.x` is a pinned copy of esp-hal's esp32 `memory.x` with
 # exactly one line changed: `dram2_seg` is extended down over the APP CPU ROM
-# stack. See docs/development/dram-budget.md.
+# stack. See docs/reference/dram-budget.md.
 #
 # A pinned copy goes stale silently on an esp-hal upgrade, which would revert
 # unrelated upstream fixes without anyone noticing. This fails if upstream

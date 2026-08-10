@@ -7,7 +7,7 @@
   [ADR-0008](0008-app-catalogue-and-launcher.md),
   [UI/app rework plan](../development/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md),
-  [DRAM budget](../development/dram-budget.md)
+  [DRAM budget](../reference/dram-budget.md)
 
 ## Context
 

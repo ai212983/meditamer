@@ -17,6 +17,6 @@ DEP_LV_CONFIG_PATH = { value = "csrc/lvgl", relative = true }
 # Keep jump tables in flash instead of DRAM. `dram_seg` is fully consumed and
 # `.stack` is only its remainder, so the 9912 bytes this frees go directly to
 # stack headroom. `ld/rwdata_hook.x` keeps back the two groups that IRAM code
-# actually dereferences; see docs/development/dram-budget.md.
+# actually dereferences; see docs/reference/dram-budget.md.
 ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
 ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"

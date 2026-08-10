@@ -61,7 +61,7 @@ async fn handle_uart_byte(
                 // comes out of the CPU0 stack. Boxing puts it on the heap in
                 // `dram2_seg` for the duration of one command instead, which
                 // is cheap because commands arrive at human/host cadence.
-                // See docs/development/dram-budget.md.
+                // See docs/reference/dram-budget.md.
                 alloc::boxed::Box::pin(command_dispatch::handle_serial_command(uart, state, cmd))
                     .await;
             } else {

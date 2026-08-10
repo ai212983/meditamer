@@ -1,12 +1,14 @@
 # ADR-0006: Evaluate native flash-overlay app modules
 
-- Status: Proposed — feasibility required
+- Status: Proposed
 - Date: 2026-08-07
+- Blocked-on: Feasibility evidence; see "Consequences" for what must be measured
+  before this can move to Accepted.
 - Amended: 2026-08-09
 - References: [ADR-0007](0007-ui-and-application-structure.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
   [UI/app rework plan](../development/ui-app-structure-rework-plan.md),
-  [DRAM budget](../development/dram-budget.md)
+  [DRAM budget](../reference/dram-budget.md)
 
 ## Context
 

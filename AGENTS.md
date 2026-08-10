@@ -2,23 +2,19 @@
 |IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning
 |Uses: Rust, esp-hal, Embassy
 |../Inkplate-Arduino-library: Reference C++ library for baseline functionality
-|development/README.md: Sharded development guide index (build/flash/monitor/time-sync/soak instructions live in `development/readme/part-*.md`)
-|archive/upload/upload-throughput-history.md: Frozen throughput history (read-only; superseded by the asset upload transport plan)
-|archive/upload/rfc-upload-throughput-next-phase.md: Frozen upload RFC (read-only)
-|archive/wifi/wifi-upload-decision-ledger.md: Frozen decision ledger for promoted/rejected/non-default Wi-Fi/upload knobs; check this first before proposing/rerunning A/B experiments
-|MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `archive/upload/rfc-upload-throughput-next-phase/` and `archive/upload/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
+|README.md: Documentation map. Start here. It defines the reference/guides/plans/notes split and says where new documents go.
+|guides/: How to work on the repo (setup, build/flash, metrics, troubleshooting, service modes, Wi-Fi)
+|reference/: How the system is (DRAM budgets, sensors, sound, features, test matrix, reliability register)
+|plans/: Unfinished work; each file carries a Status header
+|archive/: Frozen closed investigations; read-only, links not maintained
+|MANDATORY (read before writing code): `reference/dram-budget.md` before adding large statics, task-local buffers, or channel depth — `dram_seg` is always full and `.stack` is only its remainder. `reference/dram-budget-rom-stack.md` before touching `ld/` or adding deep sleep.
+|MANDATORY (experiment novelty gate): Before any Wi-Fi/upload A/B or tuning rerun, search `archive/wifi/wifi-upload-decision-ledger.md`, `archive/wifi/blackout-diagnostic-knobs.md`, `archive/upload/rfc-upload-throughput-next-phase/`, and `archive/upload/upload-throughput-history/` for the exact knob/value. If it is already completed/rejected, do not rerun unless the user explicitly asks for reconfirmation.
+|Wi-Fi status: The zero-discovery blackout is fixed. Blackout-era instrumentation is archived; the surviving live guard is `guides/wifi-regression-gate.md`. Run it before landing Wi-Fi, network, or upload changes.
 |Flash policy: Prefer `scripts/device/flash.sh` over raw `espflash`; it wraps `hostctl flash-capture` and the canonical orchestration in `tools/hostctl/scenarios/flash-capture.sw.yaml`. Use `hostctl flash-capture` directly only when you need explicit `--flash-mode` / `--capture-mode` / artifact-path control. Use `scripts/device/monitor.sh` only for passive attach/debug, not boot capture.
 |Hostctl workflow policy: Keep orchestration (branching, fallback order, retries, gate flow) in Serverless Workflow YAML under `tools/hostctl/scenarios/*.sw.yaml`; keep Rust hostctl code focused on primitive actions and context I/O.
-|development/touch-and-events/event-engine-guide.md: Practical guide for tuning/modifying the event engine
-|development/touch-and-events/statig-event-engine-plan.md: Plan for statig-based sensor-event engine
-|development/sensors.md: Sensor details and behavior
-|development/sound.md: Sound functionality and behavior
-|development/hardware-test-matrix.md: Hardware testing matrices
-|development/dram-budget.md: Internal DRAM accounting and recovery levers; `dram_seg` is always full and `.stack` is only its remainder, so check this before adding large statics, task-local buffers, or channel depth
-|development/dram-budget-rom-stack.md: Why `ld/meditamer-memory.x` extends `dram2_seg` over the APP CPU ROM stack, and why deep sleep is compatible; read before touching `ld/` or adding deep sleep
-|Documentation policy: Markdown LOC is advisory: warn above 220 and flag high attention above 300 (`scripts/ci/check_markdown_loc.sh` / `scripts/ci/check_markdown_loc.sh --staged`)
-|Documentation policy: The LOC advisory applies to prose you edit. Do NOT shard append-only material (logs, ledgers, run journals, throughput history) into `part-NN.md` files: the split adds a hand-maintained index that rots, and the sharded file is still one document. Let such files grow, or archive them when the investigation closes.
+|Documentation policy: Markdown LOC is advisory: warn above 220 and flag high attention above 300 (`scripts/ci/check_markdown_loc.sh` / `scripts/ci/check_markdown_loc.sh --staged`). Findings never block CI.
+|Documentation policy: Do NOT shard a long document into `part-NN.md` files. The split adds a hand-maintained index that rots while the document stays one document. Split only on a real topic boundary and name the pieces after their topics. Append-only material (logs, ledgers, run journals) is exempt from the LOC advisory: let it grow, then archive it when the investigation closes.
 |Documentation policy: Link validation is `scripts/ci/check_markdown_links.sh` (staged files) or `--all` (whole repo). `docs/archive/` and `vendor/` are excluded; archived docs are frozen and their stale cross-references are expected.
-|todos/: Deferred tasks (e.g., cold-boot-validation.md)
-|MANDATORY: Never use absolute local filesystem paths/links in tracked files, and never commit them (including generated artifacts, logs, or docs); always use repo-relative paths/links.
+|Documentation policy: Place a new document by lifetime, not topic — see `README.md`. Anything in `plans/` needs a `Status:` header; anything in `architecture/` needs an `Author:` line.
+|MANDATORY: Never use absolute local filesystem paths/links in tracked files, and never commit them (including generated artifacts, logs, or docs); always use repo-relative paths/links. Do not link outside the repo root; reference sibling checkouts as plain paths.
 |MANDATORY: Do not ignore, bypass, or paper over problems; fix root cause. If unsure, ask the user.

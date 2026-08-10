@@ -11,11 +11,11 @@ _experiment_guard_repo_root() {
 _experiment_guard_ledger_path() {
     local repo_root
     repo_root="$(_experiment_guard_repo_root)"
-    printf '%s/docs/development/wifi-upload-decision-ledger.md\n' "$repo_root"
+    printf '%s/docs/archive/wifi/wifi-upload-decision-ledger.md\n' "$repo_root"
 }
 
 _experiment_guard_docs_hint() {
-    printf '%s\n' "docs/development/wifi-upload-decision-ledger.md"
+    printf '%s\n' "docs/archive/wifi/wifi-upload-decision-ledger.md"
 }
 
 _experiment_guard_norm() {

@@ -53,7 +53,7 @@ static LARGE_ALLOC_FAIL: AtomicUsize = AtomicUsize::new(0);
 ///
 /// Do not add a second internal region in the reclaimed PRO CPU ROM stack: that
 /// was measured at an 11/40 boot panic rate. See
-/// docs/development/dram-budget-rom-stack.md.
+/// docs/reference/dram-budget-rom-stack.md.
 const INTERNAL_HEAP_DRAM2_BYTES: usize = 58 * 1024;
 
 
