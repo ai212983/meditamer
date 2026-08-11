@@ -7,6 +7,24 @@ use crate::firmware::types::{SD_PATH_MAX, SD_WRITE_MAX};
 #[derive(Clone, Copy)]
 pub(in crate::firmware::runtime) enum SerialCommand {
     Ping,
+    FirmwareStatus,
+    FirmwarePrepare,
+    FirmwareBegin {
+        image_len: u32,
+        digest: [u8; 32],
+        signature: [u8; 64],
+    },
+    FirmwareChunk {
+        offset: u32,
+        bytes: [u8; crate::firmware::firmware_update::LEGACY_CHUNK_MAX],
+        len: u16,
+    },
+    FirmwareStream {
+        baud: u32,
+    },
+    FirmwareFinish,
+    FirmwareActivate,
+    FirmwareAbort,
     UiCycleStep,
     #[cfg(feature = "ui-provider-fixture")]
     UiProviderFixtureStep,
@@ -25,6 +43,10 @@ pub(in crate::firmware::runtime) enum SerialCommand {
     AllocatorAllocProbe {
         bytes: u32,
     },
+    #[cfg(feature = "ble-foundation")]
+    BleProbeStart,
+    #[cfg(feature = "ble-foundation")]
+    BleProbeStatus,
     Probe,
     RwVerify {
         lba: u32,

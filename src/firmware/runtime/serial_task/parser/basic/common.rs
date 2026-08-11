@@ -48,6 +48,17 @@ pub(in super::super) fn parse_ui_cycle_step_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"UISTEP"
 }
 
+#[cfg(feature = "ble-foundation")]
+pub(in super::super) fn parse_ble_probe_start_command(line: &[u8]) -> bool {
+    trim_ascii_whitespace(line).eq_ignore_ascii_case(b"BLEPROBE START")
+}
+
+#[cfg(feature = "ble-foundation")]
+pub(in super::super) fn parse_ble_probe_status_command(line: &[u8]) -> bool {
+    let command = trim_ascii_whitespace(line);
+    command.eq_ignore_ascii_case(b"BLEPROBE") || command.eq_ignore_ascii_case(b"BLEPROBE STATUS")
+}
+
 #[cfg(feature = "ui-provider-fixture")]
 pub(in super::super) fn parse_ui_provider_fixture_step_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"UIFIXTURE"

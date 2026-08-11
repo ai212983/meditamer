@@ -7,8 +7,11 @@ pub(crate) const UART_BAUD: u32 = 115_200;
 // NETCFG SET JSON payloads can exceed 320 bytes in hard-cut network mode.
 pub(crate) const SERIAL_CMD_BUF_LEN: usize = 768;
 pub(crate) const APP_STATE_STORE_MAGIC: u32 = 0x4150_5053;
-pub(crate) const APP_STATE_STORE_VERSION: u8 = 3;
-pub(crate) const APP_STATE_STORE_RECORD_LEN: usize = 32;
+pub(crate) const APP_STATE_STORE_VERSION: u8 = 5;
+pub(crate) const APP_STATE_STORE_RECORD_LEN: usize = 128;
+pub(crate) const APP_STATE_STORE_OFFSET: u32 = 0x12000;
+pub(crate) const APP_STATE_STORE_SECTOR_SIZE: u32 = 0x1000;
+pub(crate) const APP_STATE_LEGACY_OFFSET: u32 = 0x3ff000;
 pub(crate) const BACKLIGHT_MAX_BRIGHTNESS: u8 = 63;
 pub(crate) const BACKLIGHT_HOLD_MS: u64 = 3_000;
 pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;

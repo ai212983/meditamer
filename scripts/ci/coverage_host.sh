@@ -33,8 +33,10 @@ mkdir -p "$output_dir"
 rm -f "$output_dir"/host_coverage_summary.tsv "$output_dir"/*.lcov "$merged_lcov_path"
 
 declare -a manifests=(
+  "tools/app_state_store_host_harness/Cargo.toml"
   "tools/event_config_compiler/Cargo.toml"
   "tools/event_engine_host_harness/Cargo.toml"
+  "tools/ui_shell_host_harness/Cargo.toml"
   "tools/touch_replay/Cargo.toml"
   "tools/hostctl/Cargo.toml"
 )

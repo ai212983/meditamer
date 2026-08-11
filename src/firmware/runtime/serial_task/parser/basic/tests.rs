@@ -34,6 +34,16 @@ fn parses_only_the_exact_ui_cycle_step_command() {
     assert!(!parse_ui_cycle_step_command(b"UI CYCLE"));
 }
 
+#[cfg(feature = "ble-foundation")]
+#[test]
+fn parses_bounded_ble_probe_commands() {
+    assert!(parse_ble_probe_start_command(b" BLEPROBE START\r\n"));
+    assert!(parse_ble_probe_status_command(b"BLEPROBE"));
+    assert!(parse_ble_probe_status_command(b"bleprobe status"));
+    assert!(!parse_ble_probe_start_command(b"BLEPROBE START 20"));
+    assert!(!parse_ble_probe_status_command(b"BLEPROBE STOP"));
+}
+
 #[test]
 fn parses_state_set_forms() {
     assert!(matches!(

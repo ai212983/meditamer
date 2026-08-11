@@ -7,5 +7,7 @@
 mod runtime;
 pub(crate) mod wifi;
 
+#[cfg(feature = "ble-foundation")]
+pub(crate) use runtime::residency_snapshot;
 pub(crate) use runtime::{net_task, setup, wifi_connection_task};
 pub(crate) use wifi::boot_scan_only_diag_enabled;

@@ -30,6 +30,15 @@ pub(crate) async fn resume_clients(reset_touch_pipeline: bool) {
     imu::resume_imu_acquisition().await;
 }
 
+/// Release a long-running non-panel transaction without making its command
+/// response wait for the first post-resume touch-controller sample.
+pub(crate) fn try_request_clients_resume(reset_touch_pipeline: bool) -> bool {
+    let pipeline = tasks::try_request_touch_pipeline_resume();
+    let acquisition = tasks::try_request_touch_acquisition_resume(reset_touch_pipeline);
+    let imu = imu::try_request_imu_acquisition_resume();
+    pipeline && acquisition && imu
+}
+
 /// Reopen touch processing only while the panel runs its GPIO waveform. The
 /// shared-I2C mutex serializes inter-frame touch reads with vscan setup.
 pub(crate) async fn open_touch_waveform_window() {

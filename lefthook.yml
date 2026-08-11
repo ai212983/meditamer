@@ -2,13 +2,19 @@ pre-commit:
   parallel: true
   commands:
     rustfmt:
-      glob: "{src/**/*.rs,tools/**/*.rs,build.rs}"
+      glob: "{src/**/*.rs,packages/**/*.rs,tools/**/*.rs,build.rs}"
       run: cargo fmt --all
       stage_fixed: true
     markdown-loc:
       run: scripts/ci/check_markdown_loc.sh --staged
     rust-loc:
       run: scripts/ci/check_rust_loc.sh --staged
+    include-usage:
+      env:
+        INCLUDE_USAGE_ENFORCE: "1"
+      run: scripts/ci/check_include_usage.sh --staged
+    orphan-modules:
+      run: scripts/ci/check_orphan_modules.sh
     markdown-links:
       run: scripts/ci/check_markdown_links.sh
     secrets:
@@ -28,5 +34,8 @@ pre-push:
       glob: "{src/**,csrc/**,ld/**,packages/sdcard/**,scripts/build/build.sh,scripts/ci/check_software_baseline.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
       run: scripts/ci/check_software_baseline.sh firmware-clippy
     code-analysis:
-      glob: "{src/**,tools/**,packages/**,scripts/ci/check_software_baseline.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      glob: "{src/**,tools/**,packages/**,scripts/ci/check_software_baseline.sh,scripts/ci/lint_code_analysis.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml,config/rca-baseline.json}"
       run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh
+    orphan-modules:
+      glob: "{src/**/*.rs,packages/**/*.rs,tools/**/*.rs,**/Cargo.toml,scripts/ci/check_orphan_modules.py,scripts/ci/check_orphan_modules.sh}"
+      run: scripts/ci/check_orphan_modules.sh

@@ -11,6 +11,7 @@ impl WorkflowRuntime for FlashCaptureRuntime<'_> {
         match action {
             "preflight" => self.action_preflight(context),
             "resolve_image" => self.action_resolve_image(args),
+            "prepare_bootloader" => self.action_prepare_bootloader(),
             "archive_image" => self.action_archive_image(),
             "prepare_idf_env" => self.action_prepare_idf_env(),
             "flash" => self.action_flash(args),

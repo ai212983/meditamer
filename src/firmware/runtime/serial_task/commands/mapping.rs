@@ -120,7 +120,15 @@ pub(in crate::firmware::runtime) fn serial_command_event_and_responses(
             b"SDFATTRUNC OK\r\n",
             b"SDFATTRUNC BUSY\r\n",
         ),
-        SerialCommand::Ping => unreachable!("ping command is handled inline"),
+        SerialCommand::Ping
+        | SerialCommand::FirmwareStatus
+        | SerialCommand::FirmwarePrepare
+        | SerialCommand::FirmwareBegin { .. }
+        | SerialCommand::FirmwareChunk { .. }
+        | SerialCommand::FirmwareStream { .. }
+        | SerialCommand::FirmwareFinish
+        | SerialCommand::FirmwareActivate
+        | SerialCommand::FirmwareAbort => unreachable!("local command is handled inline"),
         SerialCommand::UiCycleStep => unreachable!("UI step command is handled inline"),
         #[cfg(feature = "ui-provider-fixture")]
         SerialCommand::UiProviderFixtureStep => {
@@ -137,6 +145,10 @@ pub(in crate::firmware::runtime) fn serial_command_event_and_responses(
         SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
         SerialCommand::AllocatorAllocProbe { .. } => {
             unreachable!("allocator allocation probe command is handled inline")
+        }
+        #[cfg(feature = "ble-foundation")]
+        SerialCommand::BleProbeStart | SerialCommand::BleProbeStatus => {
+            unreachable!("BLE probe command is handled inline")
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
         SerialCommand::DiagGet => unreachable!("diag get command is handled inline"),

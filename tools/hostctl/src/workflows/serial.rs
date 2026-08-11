@@ -32,6 +32,10 @@ pub fn run_repaint(logger: &mut Logger, opts: RepaintOptions) -> Result<()> {
         .command
         .or_else(|| std::env::var("HOSTCTL_REPAINT_CMD").ok())
         .unwrap_or_else(|| "REPAINT".to_string());
+    let ack_tag = command
+        .split_ascii_whitespace()
+        .next()
+        .ok_or_else(|| anyhow!("serial command must not be empty"))?;
     let output_path = std::env::var_os("HOSTCTL_REPAINT_LOG_PATH").map(PathBuf::from);
 
     if retries == 0 {
@@ -39,15 +43,15 @@ pub fn run_repaint(logger: &mut Logger, opts: RepaintOptions) -> Result<()> {
     }
 
     let (mut console, port, baud) = open_console(settle_ms, output_path)?;
-    let ack_ok = format!("{} OK", command);
-    let ack_busy = format!("{} BUSY", command);
+    let ack_ok = format!("{} OK", ack_tag);
+    let ack_busy = format!("{} BUSY", ack_tag);
 
     for attempt in 1..=retries {
         let mark = console.mark();
         console.send_line(&command)?;
         if wait_ack {
             let (status, line) =
-                console.wait_ack_since(mark, &command, Duration::from_millis(ack_timeout_ms))?;
+                console.wait_ack_since(mark, ack_tag, Duration::from_millis(ack_timeout_ms))?;
             if let Some(line) = line {
                 if status == AckStatus::Ok && line.contains(&ack_ok) {
                     logger.info(format!(

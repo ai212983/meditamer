@@ -1,11 +1,14 @@
 # UI and App Structure Rework Plan
 
-- Status: Active
-- Last-reviewed: 2026-08-10
+- Status: Done
+- Last-reviewed: 2026-08-11
 - Started: 2026-08-09
+- Completed: 2026-08-11
 - Decisions: [ADR-0006](../architecture/0006-flash-overlay-app-modules.md),
   [ADR-0007](../architecture/0007-ui-and-application-structure.md),
-  [ADR-0008](../architecture/0008-app-catalogue-and-launcher.md)
+  [ADR-0008](../architecture/0008-app-catalogue-and-launcher.md),
+  [ADR-0009](../architecture/0009-ab-firmware-update-foundation.md),
+  [ADR-0010](../architecture/0010-durable-ui-settings.md)
 - Evidence: [Implementation ledger](ui-app-structure-rework-ledger.md)
 
 ## Objective
@@ -16,6 +19,10 @@ task, touch pipeline, dirty-region conversion, panel refresh policy, and device 
 
 Native app installation is an optional research branch. The product path must remain complete if the
 loader is rejected.
+
+Safe full-firmware replacement is a separate system concern. A bounded A/B feasibility and
+foundation gate follows the compiled catalogue so the launcher can expose a base-owned update surface,
+but precedes durable UI settings and any native-loader flash allocation.
 
 ## Invariants
 
@@ -29,6 +36,8 @@ loader is rejected.
 8. Actual dirty output and refresh policy remain separate from a surface's refresh intent.
 9. Durable settings, volatile navigation, device lifecycle, and provider residency remain separate.
 10. A phase advances only after its acceptance evidence is entered in the ledger.
+11. Firmware staging, validation, activation, and boot confirmation are owned by a base system service;
+    UI providers may request an update and present status but never own flash or boot metadata.
 
 Explicit user direction may prepare non-hardware work from a later phase while an earlier physical
 gate is unavailable. That work remains provisional: record the deviation, do not mark either phase
@@ -43,6 +52,7 @@ In scope:
 - lazy screen lifecycle;
 - base and provider overlays;
 - compiled catalogue, launcher, and filtered views;
+- a bounded A/B firmware-update feasibility and foundation gate;
 - durable UI settings and optional short-window navigation retention;
 - a bounded native-loader feasibility spike and decision gate.
 
@@ -52,6 +62,7 @@ Out of scope until explicitly promoted:
 - production native-module format or compatibility promise;
 - install-on-launch;
 - SD catalogue caching;
+- production network update transport before the A/B foundation passes;
 - background services owned by UI providers;
 - visual redesign unrelated to the ownership migration.
 
@@ -150,26 +161,99 @@ Acceptance:
 - catalogue and presenter capacities are in the DRAM ledger;
 - no SD scan or native install dependency exists.
 
+## Phase 5A: A/B firmware-update feasibility and foundation decision
+
+Run after Phase 5 and before choosing the Phase 6 storage layout. Treat A/B as boot and recovery
+infrastructure, not as a launcher implementation. First prove host- or SD-staged replacement; network
+transport and polished update UX are not prerequisites for the gate.
+
+Acceptance:
+
+- an exact 4 MiB partition budget fits two copies of the measured release application with explicit
+  margins, alignment, OTA metadata, NVS/PHY needs, and a non-overlapping app-state partition;
+- the exact shipped bootloader binary and configuration are pinned and prove OTA selection,
+  pending-verify handling, automatic rollback, and serial recovery without relying on an assumed
+  `espflash` default;
+- `AppStateStore` moves out of the final flash sector with an interruption-safe, idempotent migration
+  from the single-image layout;
+- full-flash and app-only host workflows resolve partition labels and offsets from the accepted layout;
+  no production fallback retains a hard-coded `0x10000` application target;
+- a base-owned update service erases and writes only the inactive slot in bounded chunks, verifies
+  image structure, exact length, compatibility, and content authenticity before activation, and
+  exposes status without transferring flash ownership to LVGL;
+- first boot confirms the candidate only after a bounded software-health gate; serial readiness is not
+  treated as physical panel or touch proof;
+- power interruption during erase, write, verification, metadata activation, candidate boot, and
+  confirmation leaves the previous slot bootable or causes a demonstrated automatic rollback;
+- exact artifacts, slot identities, boot reasons, update timing, cache-disabled windows, watchdog and
+  multicore behaviour, flash wear assumptions, and remaining image headroom are recorded in the ledger.
+
+Stop if two current images do not retain an explicit growth margin, the bootloader cannot prove
+automatic rollback, state migration can overwrite either slot, or recovery depends on retrying an
+ambiguous transaction.
+
+At the gate:
+
+- accepted proof creates an ADR that freezes the bootloader, partition map, update transaction,
+  authenticity policy, health-confirmation boundary, recovery path, and capacity floor before
+  production transport or UX work;
+- rejected proof retains the single-image flash path and records the stable storage layout that Phase 6
+  may use;
+- inconclusive proof stops without adding a launcher update entry or network firmware transport.
+
+## Phase 5B: Serial recovery and A/B transport throughput
+
+Run after Phase 5A has fixed the flash map and recovery authority. Improve developer full-flash and
+signed serial-update throughput without weakening exact-artifact capture, inactive-slot isolation,
+authenticity, full read-back, activation, rollback, or candidate-confirmation gates.
+
+Acceptance:
+
+- exact full flash uses the proven stub-assisted rate as its primary attempt and retries the same
+  bootloader, partition table, OTA data, and application transaction through a conservative ROM-only
+  path; automatic recovery never changes an A/B full flash into an app-only write;
+- the application update protocol negotiates capabilities before changing transport, retains the
+  Phase 5A hex protocol for older firmware, and restores the boot UART rate before line commands;
+- every binary frame, including header and CRC, fits the 128-byte UART FIFO; accepted payloads are
+  coalesced into internal-RAM writes no larger than the proven 256-byte flash-call ceiling;
+- missing acknowledgements and CRC failures may retry only the immediately previous identical frame;
+  explicit flash/protocol errors and ambiguous activation acknowledgements still stop;
+- baud and frame-size trials vary one transport property at a time and retain failed-run evidence;
+- a complete signed inactive-slot update proves the staged digest, full read-back, activation,
+  pending-verify boot, software-health confirmation, final slot identity, and end-to-end timing.
+
+This phase does not add network firmware transport, compression, update UX, or a launcher entry.
+
 ## Phase 6: Durable UI settings and optional resume
 
-Define versioned, checksummed, recoverable storage for ambient binding, pins, enablement, and startup
-composition. Add short-window navigation retention only after deep sleep explicitly retains the chosen
-RTC memory.
+Run only after Phase 5A records an accepted or rejected stable flash-layout decision. Define versioned,
+checksummed, recoverable storage for ambient binding, pins, enablement, and startup composition. Add
+short-window navigation retention only after deep sleep explicitly retains the chosen RTC memory.
 
 Acceptance:
 
 - interrupted writes, corrupt versions, unknown ids, unavailable providers, and write-rate limits
   have deterministic fallbacks;
 - boot never installs a provider and always reaches the base ambient surface;
+- durable UI settings do not overlap app state, OTA metadata, either firmware slot, or any explicitly
+  reserved recovery region;
 - volatile navigation does not enter `AppStateSnapshot` or durable UI settings;
 - invalid or stale RTC state falls back without a boot loop;
 - cold-boot and deep-sleep evidence distinguish serial readiness from physical panel correctness.
 
+Completed 2026-08-11. E-0016 and E-0017 cover the implementation, identified-artifact boot, and
+host recovery gates; E-0018 covers deferred-save persistence across physical power cycles plus panel
+legibility and touch operation. Optional RTC navigation resume remains unimplemented because retained
+RTC memory is not configured, so no deep-sleep-resume claim is made.
+
 ## Phase 7: Native-loader feasibility spike and decision
 
-Run only after Phases 1 through 5 are stable. Implement the smallest two-provider experiment that can
-falsify ADR-0006's placement, ABI, runtime-state, eviction, transaction, operational, and recovery
-requirements.
+Run only after Phases 1 through 5 are stable and Phase 5A has fixed the flash-layout direction. If A/B
+is accepted, first recalculate whether any non-overlapping native-module region remains without
+reducing either firmware slot below its capacity floor. Absence of such a region parks or rejects the
+native-loader path without implementation. Otherwise implement the smallest two-provider experiment
+that can falsify ADR-0006's placement, ABI, runtime-state, eviction, transaction, operational, and
+recovery requirements.
 
 Acceptance is exactly ADR-0006's required proof. Partial success is not promotion evidence.
 
@@ -192,6 +276,13 @@ Acceptance:
 - installation is acknowledged, verified, power-fail-safe, and never runs during boot;
 - removal and eviction satisfy the provider teardown transaction;
 - supported hardware passes repeated install, switch, sleep, boot, corruption, and power-cut matrices.
+
+## Terminal state
+
+The base-resident product path through Phase 6 is complete. Phase 7 is parked because ADR-0009 leaves
+no non-overlapping native-module region above the firmware capacity floor, so Phase 8's prerequisite
+is unmet and external installation remains out of scope. Reopening either branch requires a successor
+capacity decision; it is not remaining work in this plan.
 
 ## Validation and evidence policy
 

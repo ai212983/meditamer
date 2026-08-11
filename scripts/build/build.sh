@@ -82,6 +82,8 @@ run_cargo_build() {
 
     if [[ "$mode" == "release" ]]; then
         cmd+=(--release)
+    elif [[ "$mode" == "ble-release" ]]; then
+        cmd+=(--profile ble-release)
     fi
     apply_profile_args "$profile"
     cmd+=("${PROFILE_ARGS[@]}")
@@ -122,13 +124,16 @@ else
 fi
 
 if [[ "$#" -gt 2 ]]; then
-    echo "usage: $0 [debug|release|clippy] [default|minimal|slim|telemetry|all-features]" >&2
+    echo "usage: $0 [debug|release|ble-release|clippy] [default|minimal|slim|telemetry|all-features]" >&2
     exit 2
 fi
 
 case "$mode" in
 "" | "release")
     run_cargo_build "release" "$profile"
+    ;;
+"ble-release")
+    run_cargo_build "ble-release" "$profile"
     ;;
 "debug")
     run_cargo_build "debug" "$profile"
@@ -137,7 +142,7 @@ case "$mode" in
     run_cargo_clippy "$profile"
     ;;
 *)
-    echo "usage: $0 [debug|release|clippy] [default|minimal|slim|telemetry|all-features]" >&2
+    echo "usage: $0 [debug|release|ble-release|clippy] [default|minimal|slim|telemetry|all-features]" >&2
     exit 2
     ;;
 esac

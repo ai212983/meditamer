@@ -40,6 +40,20 @@ pub(super) async fn handle_serial_command(
         SerialCommand::UiProviderFixtureStep => {
             run_ui_provider_fixture_step_command(uart, state).await;
         }
+        SerialCommand::FirmwareStatus
+        | SerialCommand::FirmwarePrepare
+        | SerialCommand::FirmwareBegin { .. }
+        | SerialCommand::FirmwareChunk { .. }
+        | SerialCommand::FirmwareStream { .. }
+        | SerialCommand::FirmwareFinish
+        | SerialCommand::FirmwareActivate
+        | SerialCommand::FirmwareAbort => {
+            handle_firmware_command(uart, state, cmd).await;
+        }
+        #[cfg(feature = "ble-foundation")]
+        SerialCommand::BleProbeStart | SerialCommand::BleProbeStatus => {
+            handle_local_command(uart, state, cmd).await;
+        }
         SerialCommand::Ping
         | SerialCommand::Metrics
         | SerialCommand::TouchSchedReset
@@ -202,6 +216,34 @@ async fn handle_local_command(
         SerialCommand::AllocatorAllocProbe { bytes } => {
             run_allocator_alloc_probe(uart, bytes as usize).await;
         }
+        #[cfg(feature = "ble-foundation")]
+        SerialCommand::BleProbeStart => {
+            let response = match crate::firmware::ble::request_phase1d_probe() {
+                Ok(()) => b"BLEPROBE QUEUED\r\n".as_slice(),
+                Err(crate::firmware::ble::ProbeRequestError::Busy) => {
+                    b"BLEPROBE BUSY\r\n".as_slice()
+                }
+                Err(crate::firmware::ble::ProbeRequestError::OwnershipUnknown) => {
+                    b"BLEPROBE ERR reason=ownership_unknown reboot_required=true\r\n".as_slice()
+                }
+            };
+            let _ = uart_write_all(uart, response).await;
+        }
+        #[cfg(feature = "ble-foundation")]
+        SerialCommand::BleProbeStatus => {
+            let status = crate::firmware::ble::phase1d_status();
+            let mut line = heapless::String::<176>::new();
+            let _ = write!(
+                &mut line,
+                "BLEPROBE state={} cycle={} failure={} build_id={} cycles={} coex=true\r\n",
+                status.state_label(),
+                status.cycle,
+                status.failure_label(),
+                status.build_id,
+                status.cycles,
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+        }
         SerialCommand::SdWait { target, timeout_ms } => {
             let last_sd_request_id = state.last_sd_request_id();
             run_sdwait_command(
@@ -215,6 +257,154 @@ async fn handle_local_command(
         }
         _ => unreachable!("local serial command must map to local dispatch"),
     }
+}
+
+async fn handle_firmware_command(
+    uart: &mut SerialUart,
+    state: &mut SerialTaskState,
+    cmd: SerialCommand,
+) {
+    match cmd {
+        SerialCommand::FirmwareStatus => write_firmware_status(uart).await,
+        SerialCommand::FirmwarePrepare => prepare_firmware_update(uart, state).await,
+        SerialCommand::FirmwareBegin {
+            image_len,
+            digest,
+            signature,
+        } => match crate::firmware::firmware_update::begin(image_len, digest, signature) {
+            Ok(target) => {
+                let mut line = heapless::String::<96>::new();
+                let _ = write!(
+                    &mut line,
+                    "FWBEGIN OK target={} total={}\r\n",
+                    target.label(),
+                    image_len,
+                );
+                let _ = uart_write_all(uart, line.as_bytes()).await;
+            }
+            Err(error) => write_firmware_error(uart, "FWBEGIN", error).await,
+        },
+        SerialCommand::FirmwareChunk { offset, bytes, len } => {
+            match crate::firmware::firmware_update::write_chunk(offset, &bytes[..len as usize]) {
+                Ok(written) => {
+                    let mut line = heapless::String::<64>::new();
+                    let _ = write!(&mut line, "FWCHUNK OK written={}\r\n", written);
+                    let _ = uart_write_all(uart, line.as_bytes()).await;
+                }
+                Err(error) => write_firmware_error(uart, "FWCHUNK", error).await,
+            }
+        }
+        SerialCommand::FirmwareStream { baud } => {
+            super::firmware_stream::begin_stream(uart, state, baud).await;
+        }
+        SerialCommand::FirmwareFinish => finish_firmware_update(uart, state).await,
+        SerialCommand::FirmwareActivate => match crate::firmware::firmware_update::activate() {
+            Ok(target) => {
+                let mut line = heapless::String::<80>::new();
+                let _ = write!(
+                    &mut line,
+                    "FWACTIVATE OK target={} rebooting=yes\r\n",
+                    target.label(),
+                );
+                let _ = uart_write_all(uart, line.as_bytes()).await;
+                esp_hal::system::software_reset();
+            }
+            Err(error) => write_firmware_error(uart, "FWACTIVATE", error).await,
+        },
+        SerialCommand::FirmwareAbort => {
+            crate::firmware::firmware_update::abort();
+            let _ = uart_write_all(uart, b"FWABORT OK\r\n").await;
+            release_firmware_update_hardware(state).await;
+            crate::firmware::firmware_update::end_transport();
+        }
+        _ => unreachable!("firmware command must map to firmware dispatch"),
+    }
+}
+
+async fn prepare_firmware_update(uart: &mut SerialUart, state: &mut SerialTaskState) {
+    crate::firmware::firmware_update::prepare_transport();
+    if state.begin_firmware_update_hardware_lease() {
+        crate::firmware::panel_bus::suspend_clients().await;
+        crate::firmware::flash::park_other_core_for_update();
+    }
+    let _ = uart_write_all(
+        uart,
+        b"FWPREPARE OK quiet=yes panel_clients=suspended other_core=parked\r\n",
+    )
+    .await;
+}
+
+async fn finish_firmware_update(uart: &mut SerialUart, state: &mut SerialTaskState) {
+    match crate::firmware::firmware_update::finish() {
+        Ok(digest) => {
+            let mut line = heapless::String::<96>::new();
+            let _ = line.push_str("FWFINISH OK sha256=");
+            for byte in digest {
+                let _ = write!(&mut line, "{byte:02x}");
+            }
+            let _ = line.push_str("\r\n");
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+            release_firmware_update_hardware(state).await;
+        }
+        Err(error) => {
+            write_firmware_error(uart, "FWFINISH", error).await;
+            release_firmware_update_hardware(state).await;
+            crate::firmware::firmware_update::end_transport();
+        }
+    }
+}
+
+async fn release_firmware_update_hardware(state: &mut SerialTaskState) {
+    let _ = crate::firmware::flash::unpark_other_core_after_update();
+    if state.end_firmware_update_hardware_lease() {
+        let _ = crate::firmware::panel_bus::try_request_clients_resume(true);
+    }
+}
+
+async fn write_firmware_status(uart: &mut SerialUart) {
+    match crate::firmware::firmware_update::status() {
+        Ok(status) => {
+            let end_transport =
+                status.phase == crate::firmware::firmware_update::SessionPhase::Verified;
+            let mut line = heapless::String::<320>::new();
+            let _ = write!(
+                &mut line,
+                "FWSTATUS build_id={} booted={} selected={} state={} phase={} target={} written={} total={} key={} key_id={:02x}{:02x}{:02x}{:02x} erase_max_us={} write_max_us={} verify_read_us={} multicore=transaction_park stream=bin1@{}\r\n",
+                status.build_id,
+                status.booted.label(),
+                status.selected.map_or("none", |slot| slot.label()),
+                status.image_state.map_or("none", crate::firmware::firmware_update::image_state_label),
+                status.phase.label(),
+                status.target.map_or("none", |slot| slot.label()),
+                status.written,
+                status.total,
+                if status.public_key_configured { "configured" } else { "missing" },
+                status.public_key_id[0],
+                status.public_key_id[1],
+                status.public_key_id[2],
+                status.public_key_id[3],
+                status.max_erase_us,
+                status.max_write_us,
+                status.verify_read_us,
+                super::firmware_stream::STREAM_BAUD,
+            );
+            let _ = uart_write_all(uart, line.as_bytes()).await;
+            if end_transport {
+                crate::firmware::firmware_update::end_transport();
+            }
+        }
+        Err(error) => write_firmware_error(uart, "FWSTATUS", error).await,
+    }
+}
+
+async fn write_firmware_error(
+    uart: &mut SerialUart,
+    command: &str,
+    error: crate::firmware::firmware_update::UpdateError,
+) {
+    let mut line = heapless::String::<96>::new();
+    let _ = write!(&mut line, "{} ERR reason={}\r\n", command, error.label());
+    let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
 #[cfg(feature = "asset-upload-http")]

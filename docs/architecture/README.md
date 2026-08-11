@@ -13,8 +13,11 @@ vocabulary, numbering, and amendment rules.
 | [0006](0006-flash-overlay-app-modules.md) | Evaluate native flash-overlay app modules | Proposed (blocked on feasibility) |
 | [0007](0007-ui-and-application-structure.md) | UI shell and application structure | Proposed |
 | [0008](0008-app-catalogue-and-launcher.md) | App catalogue and launcher | Proposed |
+| [0009](0009-ab-firmware-update-foundation.md) | Signed A/B firmware-update foundation | Accepted |
+| [0010](0010-durable-ui-settings.md) | Durable UI settings transaction | Accepted |
+| [0011](0011-bounded-ble-service-foundation.md) | Bounded coordinated BLE service foundation | Proposed |
 
-Execution for ADR-0006 through ADR-0008 is tracked in the
+Execution for ADR-0006 through ADR-0010 is tracked in the
 [UI and app structure rework plan](../plans/ui-app-structure-rework-plan.md) and its
 [implementation ledger](../plans/ui-app-structure-rework-ledger.md).
 

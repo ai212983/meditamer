@@ -1,4 +1,5 @@
 mod basic;
+mod firmware;
 mod sd_control;
 mod sdfat;
 mod util;
@@ -14,12 +15,23 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
 }
 
 fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
+    if let Some(command) = firmware::parse_firmware_command(line) {
+        return Some(command);
+    }
     #[cfg(feature = "ui-provider-fixture")]
     if basic::parse_ui_provider_fixture_step_command(line) {
         return Some(SerialCommand::UiProviderFixtureStep);
     }
     if basic::parse_ui_cycle_step_command(line) {
         return Some(SerialCommand::UiCycleStep);
+    }
+    #[cfg(feature = "ble-foundation")]
+    if basic::parse_ble_probe_start_command(line) {
+        return Some(SerialCommand::BleProbeStart);
+    }
+    #[cfg(feature = "ble-foundation")]
+    if basic::parse_ble_probe_status_command(line) {
+        return Some(SerialCommand::BleProbeStatus);
     }
     if basic::parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);

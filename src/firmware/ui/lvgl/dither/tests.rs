@@ -4,6 +4,11 @@ fn area(x1: i32, y1: i32, x2: i32, y2: i32) -> DirtyArea {
     DirtyArea { x1, y1, x2, y2 }
 }
 
+/// Byte index of `column` within panel `row`.
+fn at(row: usize, column: usize) -> usize {
+    ROW_BYTES * row + column
+}
+
 #[test]
 fn maps_l8_extremes_into_rotated_panel_bytes() {
     let mut framebuffer = [0u8; FRAMEBUFFER_BYTES];
@@ -15,8 +20,8 @@ fn maps_l8_extremes_into_rotated_panel_bytes() {
         8,
         &mut framebuffer,
     ));
-    assert_eq!(framebuffer[ROW_BYTES * 0 + 74], 0xBF);
-    assert_eq!(framebuffer[ROW_BYTES * 7 + 74], 0xBF);
+    assert_eq!(framebuffer[at(0, 74)], 0xBF);
+    assert_eq!(framebuffer[at(7, 74)], 0xBF);
 }
 
 #[test]
@@ -53,7 +58,7 @@ fn solid_rectangle_matches_direct_pixel_mapping() {
         for y in rectangle.y1 as usize..=rectangle.y2 as usize {
             let panel_x = WIDTH - 1 - y;
             let panel_y = x;
-            expected[ROW_BYTES * panel_y + panel_x / 8] |= 1 << (panel_x % 8);
+            expected[at(panel_y, panel_x / 8)] |= 1 << (panel_x % 8);
         }
     }
 

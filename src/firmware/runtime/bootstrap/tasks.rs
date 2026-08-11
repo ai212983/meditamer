@@ -1,3 +1,4 @@
+use embassy_time::{Duration, Timer};
 use esp_hal::{
     gpio::Input, interrupt::software::SoftwareInterrupt, peripherals::CPU_CTRL, system::Stack,
 };
@@ -107,6 +108,39 @@ pub(super) async fn board_runtime_task(
     spawn_task(spawner, TaskClass::Battery, battery_task().unwrap());
     spawn_task(spawner, TaskClass::Sd, storage::sd_task(sd_probe).unwrap());
     spawn_task(spawner, TaskClass::Serial, serial_task(uart).unwrap());
+    spawn_task(
+        spawner,
+        TaskClass::Diagnostics,
+        firmware_health_task().unwrap(),
+    );
+}
+
+#[embassy_executor::task]
+async fn firmware_health_task() {
+    let pending = crate::firmware::firmware_update::status()
+        .map(|status| {
+            status.image_state == Some(esp_bootloader_esp_idf::ota::OtaImageState::PendingVerify)
+        })
+        .unwrap_or(false);
+    if !pending {
+        return;
+    }
+
+    if option_env!("MEDITAMER_FIRMWARE_SKIP_CONFIRMATION").is_some() {
+        esp_println::println!(
+            "FIRMWARE_HEALTH state=pending gate=confirmation_withheld build_fixture=yes"
+        );
+        return;
+    }
+
+    esp_println::println!("FIRMWARE_HEALTH state=pending gate=runtime_ready_plus_5000ms");
+    while !super::super::scheduling::runtime_ready() {
+        Timer::after(Duration::from_millis(50)).await;
+    }
+    Timer::after(Duration::from_secs(5)).await;
+    if let Err(error) = crate::firmware::firmware_update::confirm_pending_image() {
+        esp_println::println!("FIRMWARE_CONFIRM status=error reason={}", error.label());
+    }
 }
 
 fn start_touch_core(

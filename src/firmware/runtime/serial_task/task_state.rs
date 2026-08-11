@@ -24,6 +24,8 @@ pub(super) struct SerialTaskState {
     next_state_request_id: u16,
     last_sd_request_id: Option<u32>,
     sd_result_cache: heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>,
+    firmware_stream_active: bool,
+    firmware_update_clients_suspended: bool,
 }
 
 impl SerialTaskState {
@@ -33,7 +35,33 @@ impl SerialTaskState {
             next_state_request_id: 1,
             last_sd_request_id: None,
             sd_result_cache: heapless::Vec::new(),
+            firmware_stream_active: false,
+            firmware_update_clients_suspended: false,
         }
+    }
+
+    pub(super) fn begin_firmware_stream(&mut self) {
+        self.firmware_stream_active = true;
+    }
+
+    pub(super) fn end_firmware_stream(&mut self) {
+        self.firmware_stream_active = false;
+    }
+
+    pub(super) fn firmware_stream_active(&self) -> bool {
+        self.firmware_stream_active
+    }
+
+    pub(super) fn begin_firmware_update_hardware_lease(&mut self) -> bool {
+        if self.firmware_update_clients_suspended {
+            return false;
+        }
+        self.firmware_update_clients_suspended = true;
+        true
+    }
+
+    pub(super) fn end_firmware_update_hardware_lease(&mut self) -> bool {
+        core::mem::take(&mut self.firmware_update_clients_suspended)
     }
 
     pub(super) fn next_sd_request_id(&mut self) -> u32 {
@@ -88,39 +116,52 @@ impl SerialTaskState {
     }
 
     pub(super) async fn drain_runtime_samples(&mut self, uart: &mut SerialUart) {
+        let quiet = crate::firmware::firmware_update::transport_quiet();
         while let Ok(event) = SERIAL_STATUS_EVENTS.try_receive() {
-            let line = format_status(event);
-            let _ = uart_write_all(uart, line.as_bytes()).await;
+            if !quiet {
+                let line = format_status(event);
+                let _ = uart_write_all(uart, line.as_bytes()).await;
+            }
         }
 
         if TOUCH_EVENT_TRACE_ENABLED {
             while let Ok(event) = TOUCH_EVENT_TRACE_SAMPLES.try_receive() {
-                write_touch_event_trace_sample(uart, event).await;
+                if !quiet {
+                    write_touch_event_trace_sample(uart, event).await;
+                }
             }
         }
 
         #[cfg(not(feature = "wifi-debug-slim-app"))]
         if TOUCH_TRACE_ENABLED {
             while let Ok(sample) = TOUCH_TRACE_SAMPLES.try_receive() {
-                write_touch_trace_sample(uart, sample).await;
+                if !quiet {
+                    write_touch_trace_sample(uart, sample).await;
+                }
             }
         }
 
         if TAP_TRACE_ENABLED {
             while let Ok(sample) = TAP_TRACE_SAMPLES.try_receive() {
-                write_tap_trace_sample(uart, sample).await;
+                if !quiet {
+                    write_tap_trace_sample(uart, sample).await;
+                }
             }
         }
 
         while let Ok(line) = SD_SERIAL_LINES.try_receive() {
-            let _ = uart_write_all(uart, line.as_bytes()).await;
-            yield_now().await;
+            if !quiet {
+                let _ = uart_write_all(uart, line.as_bytes()).await;
+                yield_now().await;
+            }
         }
 
         while let Ok(result) = SD_RESULTS.try_receive() {
             cache_sd_result(&mut self.sd_result_cache, result);
-            write_sd_result(uart, result).await;
-            yield_now().await;
+            if !quiet {
+                write_sd_result(uart, result).await;
+                yield_now().await;
+            }
         }
     }
 }

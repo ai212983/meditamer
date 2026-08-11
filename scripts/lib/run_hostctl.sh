@@ -144,6 +144,8 @@ run_hostctl() {
     _run_hostctl_normalize_path_env_vars \
         HOSTCTL_LOG_JSON_PATH \
         HOSTCTL_FLASH_CAPTURE_LOG_PATH \
+        HOSTCTL_FIRMWARE_UPDATE_LOG_PATH \
+        HOSTCTL_REPAINT_LOG_PATH \
         HOSTCTL_NET_LOG_PATH \
         HOSTCTL_NET_POLICY_PATH \
         HOSTCTL_NET_DISCOVERY_PROFILE_PATH \

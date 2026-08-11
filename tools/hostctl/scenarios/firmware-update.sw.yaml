@@ -1,0 +1,52 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "firmware-update"
+  version: "1.0.0"
+do:
+  - preflight:
+      call: "preflight"
+      then: "query_status"
+  - query_status:
+      call: "query_status"
+      then: "prepare_update"
+  - prepare_update:
+      call: "prepare_update"
+      then: "begin_update"
+  - begin_update:
+      call: "begin_update"
+      then: "stream_mode_gate"
+  - stream_mode_gate:
+      switch:
+        - binary_stream:
+            when: "${ .stream_available == true }"
+            then: "stream_image_binary"
+        - default:
+            then: "stream_image_legacy"
+  - stream_image_binary:
+      call: "stream_image_binary"
+      then: "finish_update"
+  - stream_image_legacy:
+      call: "stream_image_legacy"
+      then: "finish_update"
+  - finish_update:
+      call: "finish_update"
+      then: "query_staged_status"
+  - query_staged_status:
+      call: "query_staged_status"
+      then: "activation_gate"
+  - activation_gate:
+      switch:
+        - activate:
+            when: "${ .activate == true }"
+            then: "activate_update"
+        - default:
+            then: "write_summary"
+  - activate_update:
+      call: "activate_update"
+      then: "await_candidate"
+  - await_candidate:
+      call: "await_candidate"
+      then: "write_summary"
+  - write_summary:
+      call: "write_summary"

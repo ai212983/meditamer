@@ -88,6 +88,12 @@ pub(crate) async fn request_touch_acquisition_resume(reset_pipeline: bool) {
         .await;
 }
 
+pub(crate) fn try_request_touch_acquisition_resume(reset_pipeline: bool) -> bool {
+    TOUCH_ACQUISITION_COMMANDS
+        .try_send(TouchAcquisitionCommand::Resume { reset_pipeline })
+        .is_ok()
+}
+
 pub(crate) async fn request_touch_pipeline_replay_probe() {
     TOUCH_ACQUISITION_COMMANDS
         .send(TouchAcquisitionCommand::ReplayPipelineTap)

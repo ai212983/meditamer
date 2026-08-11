@@ -1,12 +1,15 @@
+mod ambient_picker;
 mod backend;
 mod base_overlays;
 mod carousel;
+mod catalogue_presenter;
 mod dither;
 mod gesture_test;
 mod home;
 mod intent_bridge;
 mod io;
 mod launcher;
+mod overlay_settings;
 #[cfg(feature = "ui-provider-fixture")]
 mod provider_fixture;
 

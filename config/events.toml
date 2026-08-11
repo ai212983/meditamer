@@ -10,7 +10,7 @@ min_gap_ms = 55
 max_gap_ms = 700
 last_max_gap_ms = 900
 cooldown_ms = 900
-debounce_ms = 110
+debounce_ms = 70
 seq_finish_debounce_ms = 55
 gyro_veto_hold_ms = 180
 

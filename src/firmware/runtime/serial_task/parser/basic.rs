@@ -15,6 +15,8 @@ pub(super) use common::{
     parse_metrics_net_command, parse_ping_command, parse_repaint_command, parse_scheduler_command,
     parse_sdprobe_command, parse_touch_sched_reset_command, parse_ui_cycle_step_command,
 };
+#[cfg(feature = "ble-foundation")]
+pub(super) use common::{parse_ble_probe_start_command, parse_ble_probe_status_command};
 #[cfg(feature = "asset-upload-http")]
 pub(super) use network::{
     parse_net_listener_command, parse_net_recover_command, parse_net_start_command,

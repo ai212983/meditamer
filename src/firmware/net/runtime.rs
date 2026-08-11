@@ -4,6 +4,8 @@
 //! knows what the stack will carry -- the upload HTTP server is one consumer,
 //! not the owner.
 
+#[cfg(feature = "ble-foundation")]
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_net::{Runner, Stack, StackResources};
 use esp_hal::rng::Rng;
 use esp_println::println;
@@ -14,6 +16,47 @@ use super::wifi::{WifiController, WifiDevice};
 use crate::firmware::types::WifiCredentials;
 
 const NET_STACK_SOCKETS: usize = 4;
+
+#[cfg(feature = "ble-foundation")]
+static WIFI_CONTROLLER_TASK_RESIDENT: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "ble-foundation")]
+static NET_RUNNER_TASK_RESIDENT: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "ble-foundation")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NetRuntimeResidency {
+    pub(crate) wifi_controller_task: bool,
+    pub(crate) net_runner_task: bool,
+}
+
+#[cfg(feature = "ble-foundation")]
+struct ResidencyGuard(&'static AtomicBool);
+
+#[cfg(feature = "ble-foundation")]
+impl ResidencyGuard {
+    fn enter(slot: &'static AtomicBool) -> Self {
+        assert!(
+            !slot.swap(true, Ordering::AcqRel),
+            "network runtime owner started twice"
+        );
+        Self(slot)
+    }
+}
+
+#[cfg(feature = "ble-foundation")]
+impl Drop for ResidencyGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(feature = "ble-foundation")]
+pub(crate) fn residency_snapshot() -> NetRuntimeResidency {
+    NetRuntimeResidency {
+        wifi_controller_task: WIFI_CONTROLLER_TASK_RESIDENT.load(Ordering::Acquire),
+        net_runner_task: NET_RUNNER_TASK_RESIDENT.load(Ordering::Acquire),
+    }
+}
 
 fn wifi_setup_stage_trace_enabled() -> bool {
     match option_env!("MEDITAMER_WIFI_SETUP_STAGE_TRACE") {
@@ -73,10 +116,14 @@ pub(crate) async fn wifi_connection_task(
     credentials: Option<WifiCredentials>,
     stack: Stack<'static>,
 ) {
+    #[cfg(feature = "ble-foundation")]
+    let _residency = ResidencyGuard::enter(&WIFI_CONTROLLER_TASK_RESIDENT);
     wifi::run_wifi_connection_task(controller, credentials, stack).await;
 }
 
 #[embassy_executor::task]
 pub(crate) async fn net_task(mut runner: Runner<'static, WifiDevice>) {
+    #[cfg(feature = "ble-foundation")]
+    let _residency = ResidencyGuard::enter(&NET_RUNNER_TASK_RESIDENT);
     runner.run().await
 }

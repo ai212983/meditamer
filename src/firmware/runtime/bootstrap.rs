@@ -43,6 +43,8 @@ pub fn run() -> ! {
     let hal_config = esp_hal::Config::default();
     let hal_config = hal_config.with_cpu_clock(CpuClock::_240MHz);
     let peripherals = esp_hal::init(hal_config);
+    #[cfg(feature = "ble-foundation")]
+    let ble_peripheral = peripherals.BT;
     esp_println::println!("CPU_CLOCK hz={}", esp_hal::clock::cpu_clock().as_hz());
     esp_println::println!(
         "PANEL_TIMING cl_high_hold_cycles={}",
@@ -77,8 +79,13 @@ pub fn run() -> ! {
         .with_tx(peripherals.GPIO1)
         .into_async();
 
-    let mut app_state_store = AppStateStore::new(peripherals.FLASH);
+    super::super::flash::initialize(peripherals.FLASH);
+    let mut app_state_store = AppStateStore::new();
     let mut persisted_state = app_state_store.load_state().unwrap_or_default();
+    if let Err(error) = super::super::firmware_update::initialize_boot_state() {
+        esp_println::println!("FIRMWARE_BOOT status=error reason={}", error.label());
+        halt_forever();
+    }
     let mut initial_snapshot = AppStateSnapshot::from_persisted_sanitized(persisted_state);
 
     #[cfg(not(feature = "asset-upload-http"))]
@@ -242,6 +249,12 @@ pub fn run() -> ! {
     let mut executor = esp_rtos::embassy::Executor::new();
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
+        #[cfg(feature = "ble-foundation")]
+        spawner.spawn(
+            super::super::ble::phase1_task(ble_peripheral)
+                .expect("BLE Phase 1 task pool exhausted"),
+        );
+
         #[cfg(feature = "asset-upload-http")]
         let boot_scan_only_diag_active = net::boot_scan_only_diag_enabled();
         #[cfg(not(feature = "asset-upload-http"))]

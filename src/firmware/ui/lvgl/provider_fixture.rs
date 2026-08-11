@@ -54,7 +54,7 @@ pub(super) unsafe fn create(user_data: *mut core::ffi::c_void) -> Option<Provide
             screen,
             370,
             c"Remove provider".as_ptr(),
-            Some(intent_bridge::home_callback),
+            Some(intent_bridge::navigation_callback),
             user_data,
         )
     };
@@ -65,6 +65,12 @@ pub(super) unsafe fn create(user_data: *mut core::ffi::c_void) -> Option<Provide
         unsafe { lv::lv_obj_delete(screen) };
         return None;
     }
+    unsafe {
+        lv::lv_obj_set_user_data(
+            remove_button,
+            intent_bridge::action_user_data(intent_bridge::HOME_NAVIGATION_INDEX),
+        )
+    };
     Some(ProviderFixtureScreen {
         root: screen,
         remove_button,

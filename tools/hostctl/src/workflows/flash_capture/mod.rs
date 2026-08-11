@@ -127,6 +127,8 @@ pub(super) struct OutputPaths {
     summary: PathBuf,
     firmware_elf: PathBuf,
     app_bin: PathBuf,
+    bootloader_bin: PathBuf,
+    partition_table_bin: PathBuf,
     hashes: PathBuf,
     build_metadata: PathBuf,
 }
@@ -176,8 +178,8 @@ pub enum CommandProgressMode {
 }
 
 const DEFAULT_LOG_DRAIN_TIMEOUT: Duration = Duration::from_millis(1_000);
-const DEFAULT_ENABLE_FALLBACK: bool = false;
-pub const DEFAULT_FLASH_BAUD: u32 = 115_200;
+const DEFAULT_ENABLE_FALLBACK: bool = true;
+pub const DEFAULT_FLASH_BAUD: u32 = 460_800;
 
 #[derive(Debug)]
 pub(super) struct LogRelayThread {

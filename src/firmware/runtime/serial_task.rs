@@ -2,6 +2,7 @@ extern crate alloc;
 
 mod command_dispatch;
 mod commands;
+mod firmware_stream;
 mod io;
 mod labels;
 mod line_reader;
@@ -23,6 +24,7 @@ use super::super::{touch::debug_log::uart_write_all, types::SerialUart};
 #[embassy_executor::task]
 pub(crate) async fn serial_task(mut uart: SerialUart) {
     let mut line_reader = SerialLineReader::new();
+    let mut frame_reader = firmware_stream::FirmwareFrameReader::new();
     let mut rx = [0u8; 128];
     let mut state = SerialTaskState::new();
 
@@ -35,7 +37,17 @@ pub(crate) async fn serial_task(mut uart: SerialUart) {
             with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await
         {
             for byte in rx[..read].iter().copied() {
-                handle_uart_byte(&mut uart, &mut line_reader, &mut state, byte).await;
+                if state.firmware_stream_active() {
+                    let event = frame_reader.push_byte(byte);
+                    if !matches!(&event, firmware_stream::FrameReadEvent::None) {
+                        firmware_stream::handle_frame(&mut uart, &mut state, event).await;
+                    }
+                    if !state.firmware_stream_active() {
+                        frame_reader.reset();
+                    }
+                } else {
+                    handle_uart_byte(&mut uart, &mut line_reader, &mut state, byte).await;
+                }
             }
         }
         yield_now().await;

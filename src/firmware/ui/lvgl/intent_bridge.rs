@@ -7,21 +7,32 @@ use core::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex::Mutex};
 use lightvgl_sys as lv;
 
+use crate::firmware::ui::shell::settings::UiSettingsIntent;
 #[cfg(feature = "ui-provider-fixture")]
 use crate::firmware::ui::shell::types::ProviderToken;
 use crate::firmware::ui::shell::{
     callback_action_queue::CallbackActionQueue,
     callback_routes::{CallbackRoute, CallbackRouteTable},
+    catalogue::CATALOGUE_CAPACITY,
     model::SHELL_INTENT_QUEUE_CAPACITY,
     types::{
-        OwnedCompositionIntent, OwnedNavIntent, OwnedRefreshIntent, OwnedShellIntent,
-        SurfaceInstanceToken,
+        CompositionIntent, NavIntent, OwnedCompositionIntent, OwnedNavIntent, OwnedRefreshIntent,
+        OwnedShellIntent, OwnedUiSettingsIntent, SurfaceInstanceToken,
     },
 };
 
 // The sticky refresh control remains live while origin + destination screens
 // and departing + promoted modals coexist during one atomic handoff.
 const CALLBACK_BINDING_CAPACITY: usize = 5;
+pub(super) const SCREEN_NAVIGATION_CAPACITY: usize = CATALOGUE_CAPACITY + 2;
+pub(super) const HOME_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY;
+pub(super) const BACK_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY + 1;
+
+#[derive(Clone, Copy)]
+pub(super) enum ScreenAction {
+    Navigate(NavIntent),
+    Configure(UiSettingsIntent),
+}
 
 pub(super) type CallbackRouteError =
     crate::firmware::ui::shell::callback_routes::CallbackRouteError;
@@ -29,10 +40,9 @@ pub(super) type CallbackRouteError =
 #[derive(Clone, Copy)]
 pub(super) enum IntentBindings {
     Screen {
-        open_launcher: OwnedNavIntent,
-        launch_diagnostics: OwnedNavIntent,
-        home: OwnedNavIntent,
-        show_confirm: OwnedCompositionIntent,
+        source: SurfaceInstanceToken,
+        actions: [Option<ScreenAction>; SCREEN_NAVIGATION_CAPACITY],
+        show_confirm: CompositionIntent,
     },
     Modal {
         dismiss: OwnedCompositionIntent,
@@ -47,15 +57,30 @@ impl IntentBindings {
     fn references_provider(self, owner: ProviderToken) -> bool {
         match self {
             Self::Screen {
-                open_launcher,
-                launch_diagnostics,
-                home,
+                source,
+                actions,
                 show_confirm,
             } => {
-                OwnedShellIntent::Navigate(open_launcher).references_provider(owner)
-                    || OwnedShellIntent::Navigate(launch_diagnostics).references_provider(owner)
-                    || OwnedShellIntent::Navigate(home).references_provider(owner)
-                    || OwnedShellIntent::Compose(show_confirm).references_provider(owner)
+                source.surface.owner == owner
+                    || actions.into_iter().flatten().any(|action| {
+                        match action {
+                            ScreenAction::Navigate(intent) => {
+                                OwnedShellIntent::Navigate(OwnedNavIntent { source, intent })
+                            }
+                            ScreenAction::Configure(intent) => {
+                                OwnedShellIntent::Configure(OwnedUiSettingsIntent {
+                                    source,
+                                    intent,
+                                })
+                            }
+                        }
+                        .references_provider(owner)
+                    })
+                    || OwnedShellIntent::Compose(OwnedCompositionIntent {
+                        source,
+                        intent: show_confirm,
+                    })
+                    .references_provider(owner)
             }
             Self::Modal { dismiss } => {
                 OwnedShellIntent::Compose(dismiss).references_provider(owner)
@@ -74,8 +99,12 @@ pub(super) struct CallbackLease {
 
 impl CallbackLease {
     pub(super) fn user_data(&self) -> *mut c_void {
-        self.route.encoded() as usize as *mut c_void
+        core::ptr::without_provenance_mut(self.route.encoded() as usize)
     }
+}
+
+pub(super) fn action_user_data(index: usize) -> *mut c_void {
+    core::ptr::without_provenance_mut(index + 1)
 }
 
 static BINDINGS: Mutex<
@@ -157,7 +186,7 @@ fn enqueue(
     if event.is_null() {
         return;
     }
-    let encoded = unsafe { lv::lv_event_get_user_data(event) } as usize as u32;
+    let encoded = unsafe { lv::lv_event_get_user_data(event) }.addr() as u32;
     let Some(route) = CallbackRoute::from_encoded(encoded) else {
         return;
     };
@@ -172,36 +201,46 @@ fn enqueue(
     });
 }
 
-pub(super) unsafe extern "C" fn open_launcher_callback(event: *mut lv::lv_event_t) {
-    enqueue(event, |bindings| match bindings {
-        IntentBindings::Screen { open_launcher, .. } => {
-            Some(OwnedShellIntent::Navigate(open_launcher))
-        }
-        IntentBindings::Modal { .. } | IntentBindings::Refresh { .. } => None,
-    });
-}
-
-pub(super) unsafe extern "C" fn launch_diagnostics_callback(event: *mut lv::lv_event_t) {
+pub(super) unsafe extern "C" fn navigation_callback(event: *mut lv::lv_event_t) {
+    let target = unsafe { lv::lv_event_get_target_obj(event) };
+    if target.is_null() {
+        return;
+    }
+    let Some(index) = unsafe { lv::lv_obj_get_user_data(target) }
+        .addr()
+        .checked_sub(1)
+    else {
+        return;
+    };
     enqueue(event, |bindings| match bindings {
         IntentBindings::Screen {
-            launch_diagnostics, ..
-        } => Some(OwnedShellIntent::Navigate(launch_diagnostics)),
-        IntentBindings::Modal { .. } | IntentBindings::Refresh { .. } => None,
-    });
-}
-
-pub(super) unsafe extern "C" fn home_callback(event: *mut lv::lv_event_t) {
-    enqueue(event, |bindings| match bindings {
-        IntentBindings::Screen { home, .. } => Some(OwnedShellIntent::Navigate(home)),
+            source, actions, ..
+        } => actions
+            .get(index)
+            .copied()
+            .flatten()
+            .map(|action| match action {
+                ScreenAction::Navigate(intent) => {
+                    OwnedShellIntent::Navigate(OwnedNavIntent { source, intent })
+                }
+                ScreenAction::Configure(intent) => {
+                    OwnedShellIntent::Configure(OwnedUiSettingsIntent { source, intent })
+                }
+            }),
         IntentBindings::Modal { .. } | IntentBindings::Refresh { .. } => None,
     });
 }
 
 pub(super) unsafe extern "C" fn show_confirm_callback(event: *mut lv::lv_event_t) {
     enqueue(event, |bindings| match bindings {
-        IntentBindings::Screen { show_confirm, .. } => {
-            Some(OwnedShellIntent::Compose(show_confirm))
-        }
+        IntentBindings::Screen {
+            source,
+            show_confirm,
+            ..
+        } => Some(OwnedShellIntent::Compose(OwnedCompositionIntent {
+            source,
+            intent: show_confirm,
+        })),
         IntentBindings::Modal { .. } | IntentBindings::Refresh { .. } => None,
     });
 }

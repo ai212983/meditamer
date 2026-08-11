@@ -31,11 +31,16 @@
 
 /* E-paper UI should not schedule continuous animation work. */
 #define LV_USE_LOG 0
+#define LV_USE_FLOAT 1
 #define LV_USE_ANIMIMG 0
 #define LV_USE_LOTTIE 0
 #define LV_USE_GIF 0
 #define LV_THEME_DEFAULT_GROW 0
 #define LV_THEME_DEFAULT_TRANSITION_TIME 0
+
+/* Recognize two-contact pinch, rotation, and swipe gestures in lv_indev.
+ * The ELAN adapter supplies stable slot IDs and timestamps from its reports. */
+#define LV_USE_GESTURE_RECOGNITION 1
 
 /* Launcher hierarchy: readable labels at the panel's physical size. */
 #define LV_FONT_MONTSERRAT_14 1

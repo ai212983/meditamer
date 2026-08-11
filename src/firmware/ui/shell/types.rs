@@ -252,10 +252,17 @@ pub(crate) struct OwnedRefreshIntent {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OwnedUiSettingsIntent {
+    pub(crate) source: SurfaceInstanceToken,
+    pub(crate) intent: super::settings::UiSettingsIntent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OwnedShellIntent {
     Navigate(OwnedNavIntent),
     Compose(OwnedCompositionIntent),
     Refresh(OwnedRefreshIntent),
+    Configure(OwnedUiSettingsIntent),
 }
 
 impl OwnedShellIntent {
@@ -264,6 +271,7 @@ impl OwnedShellIntent {
             Self::Navigate(intent) => intent.source,
             Self::Compose(intent) => intent.source,
             Self::Refresh(intent) => intent.source,
+            Self::Configure(intent) => intent.source,
         }
     }
 
@@ -289,6 +297,10 @@ impl OwnedShellIntent {
                 }
             }
             Self::Refresh(intent) => {
+                intent.source.surface.owner.id.0 == owner.id.0
+                    && intent.source.surface.owner.generation.0 == owner.generation.0
+            }
+            Self::Configure(intent) => {
                 intent.source.surface.owner.id.0 == owner.id.0
                     && intent.source.surface.owner.generation.0 == owner.generation.0
             }

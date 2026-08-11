@@ -147,8 +147,10 @@ pub(super) unsafe fn create(user_data: *mut core::ffi::c_void) -> Option<Gesture
         if !carousel::add_navigation(
             screen,
             c"3 / 3".as_ptr(),
-            Some(intent_bridge::home_callback),
-            Some(intent_bridge::home_callback),
+            Some(intent_bridge::navigation_callback),
+            intent_bridge::HOME_NAVIGATION_INDEX,
+            Some(intent_bridge::navigation_callback),
+            intent_bridge::HOME_NAVIGATION_INDEX,
             user_data,
         ) {
             lv::lv_obj_delete(screen);

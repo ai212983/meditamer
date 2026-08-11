@@ -82,8 +82,10 @@ pub(super) unsafe fn create(user_data: *mut core::ffi::c_void) -> Option<HomeScr
         if !carousel::add_navigation(
             screen,
             c"1 / 3".as_ptr(),
-            Some(intent_bridge::open_launcher_callback),
-            Some(intent_bridge::open_launcher_callback),
+            Some(intent_bridge::navigation_callback),
+            0,
+            Some(intent_bridge::navigation_callback),
+            0,
             user_data,
         ) {
             lv::lv_obj_delete(screen);
@@ -117,9 +119,10 @@ unsafe fn create_top_test_button(
         lv::lv_obj_set_style_radius(button, 8, STYLE_DEFAULT);
         lv::lv_obj_set_style_bg_color(button, black, STYLE_PRESSED);
         lv::lv_obj_set_style_text_color(button, white, STYLE_PRESSED);
+        lv::lv_obj_set_user_data(button, intent_bridge::action_user_data(0));
         if lv::lv_obj_add_event_cb(
             button,
-            Some(intent_bridge::open_launcher_callback),
+            Some(intent_bridge::navigation_callback),
             lv::lv_event_code_t_LV_EVENT_CLICKED,
             user_data,
         )

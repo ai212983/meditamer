@@ -71,7 +71,9 @@ async fn ensure_initialized_for_request(
         Err(err) => {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
-            esp_println::println!("sdtask: init_timeout id={} err={:?}", request.id, err);
+            if !crate::firmware::firmware_update::transport_quiet() {
+                esp_println::println!("sdtask: init_timeout id={} err={:?}", request.id, err);
+            }
             return Some(SdResult {
                 id: request.id,
                 kind,
@@ -86,7 +88,9 @@ async fn ensure_initialized_for_request(
     if let Err(err) = init {
         sd_probe.recover_after_timeout();
         fat_engine.invalidate();
-        esp_println::println!("sdtask: init_error id={} err={:?}", request.id, err);
+        if !crate::firmware::firmware_update::transport_quiet() {
+            esp_println::println!("sdtask: init_error id={} err={:?}", request.id, err);
+        }
         return Some(SdResult {
             id: request.id,
             kind,
@@ -174,13 +178,17 @@ async fn reinitialize_after_retry(
         Ok(Err(err)) => {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
-            esp_println::println!("sdtask: retry_init_error id={} err={:?}", request_id, err);
+            if !crate::firmware::firmware_update::transport_quiet() {
+                esp_println::println!("sdtask: retry_init_error id={} err={:?}", request_id, err);
+            }
             Err(SdResultCode::InitFailed)
         }
         Err(err) => {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
-            esp_println::println!("sdtask: retry_init_timeout id={} err={:?}", request_id, err);
+            if !crate::firmware::firmware_update::transport_quiet() {
+                esp_println::println!("sdtask: retry_init_timeout id={} err={:?}", request_id, err);
+            }
             Err(SdResultCode::InitFailed)
         }
     }

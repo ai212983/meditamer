@@ -32,7 +32,11 @@ use crate::firmware::{
 pub(super) const SERVICE_PERIOD_MS: u64 = 8;
 
 pub(super) async fn initialize(context: &mut DisplayContext, state: &mut LvglState) -> bool {
-    let (backend, rendered) = match Backend::initialize(&mut context.inkplate) {
+    let persisted_settings = context
+        .app_state_store
+        .load_ui_settings()
+        .unwrap_or_default();
+    let (backend, rendered) = match Backend::initialize(&mut context.inkplate, persisted_settings) {
         Ok(initialized) => initialized,
         Err(error) => {
             let reason = match error {
@@ -85,7 +89,12 @@ pub(super) async fn initialize(context: &mut DisplayContext, state: &mut LvglSta
         rendered.is_some(),
         refresh_ms,
     );
-    esp_println::println!("UI_STATE screen=home state=entered");
+    let active_surface = state
+        .backend
+        .as_ref()
+        .and_then(Backend::active_surface_label)
+        .unwrap_or("unknown");
+    esp_println::println!("UI_STATE screen={} state=entered", active_surface);
     true
 }
 
@@ -194,7 +203,9 @@ pub(super) async fn process_cycle(
         if let Some(dirty) = rendered {
             state.record_dirty(dirty);
         }
-        esp_println::println!("LVGL_MULTITOUCH phase=reset reason=delivery_discontinuity");
+        if !crate::firmware::firmware_update::transport_quiet() {
+            esp_println::println!("LVGL_MULTITOUCH phase=reset reason=delivery_discontinuity");
+        }
         process_gestures(context, state);
     }
 
@@ -232,7 +243,27 @@ pub(super) async fn process_cycle(
             refresh_panel(context, state, RefreshRequest::from_service(dirty)).await;
         }
     }
+    flush_ui_settings(context, state, now_ms);
     service_panel_power_lease(context, state).await;
+}
+
+#[inline(never)]
+fn flush_ui_settings(context: &mut DisplayContext, state: &mut LvglState, now_ms: u64) {
+    let Some(settings) = state
+        .backend
+        .as_mut()
+        .and_then(|backend| backend.take_due_settings_write(now_ms))
+    else {
+        return;
+    };
+    let saved = context.app_state_store.save_ui_settings(settings);
+    if let Some(backend) = state.backend.as_mut() {
+        backend.complete_settings_write(saved, Instant::now().as_millis());
+    }
+    esp_println::println!(
+        "UI_SETTINGS_SAVE status={}",
+        if saved { "complete" } else { "retry_scheduled" },
+    );
 }
 
 pub(super) async fn handle_ui_cycle_step(

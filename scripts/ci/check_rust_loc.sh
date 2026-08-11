@@ -13,8 +13,16 @@ if [[ "$#" -ne 0 ]]; then
   exit 2
 fi
 
-warn_limit="${RUST_LOC_WARN:-220}"
-max_limit="${RUST_LOC_MAX:-300}"
+# Aligned with the enforced SLOC ratchet in `config/rca-baseline.json`.
+# This remains a raw-line advisory; the rust-code-analysis SLOC gate is the
+# blocking authority.
+warn_limit="${RUST_LOC_WARN:-600}"
+max_limit="${RUST_LOC_MAX:-1000}"
+
+# Test modules are exempt. Table-driven tests are legitimately long and
+# repetitive, and splitting a table destroys the thing that makes it readable.
+# Mirrors the append-only exemption in the Markdown LOC policy.
+exclude_regex="${RUST_LOC_EXCLUDE_REGEX:-(^|/)tests?(/|\\.rs$)}"
 
 if ! [[ "$warn_limit" =~ ^[0-9]+$ ]] || ! [[ "$max_limit" =~ ^[0-9]+$ ]]; then
   echo "check_rust_loc.sh: RUST_LOC_WARN and RUST_LOC_MAX must be integers" >&2
@@ -35,18 +43,30 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 declare -a files=()
+excluded_count=0
+collect() {
+  local file="$1"
+  [[ "$file" == *.rs ]] || return 0
+  [[ -f "$file" ]] || return 0
+  if [[ -n "$exclude_regex" ]] && [[ "$file" =~ $exclude_regex ]]; then
+    excluded_count=$((excluded_count + 1))
+    return 0
+  fi
+  files+=("$file")
+}
+
 if [[ "$mode" == "staged" ]]; then
   while IFS= read -r -d '' file; do
-    [[ "$file" == *.rs ]] || continue
-    [[ -f "$file" ]] || continue
-    files+=("$file")
-  done < <(git diff --cached --name-only --diff-filter=ACMRTUXB -z -- src tools/hostctl/src)
+    collect "$file"
+  done < <(git diff --cached --name-only --diff-filter=ACMRTUXB -z -- src packages tools)
 else
   while IFS= read -r -d '' file; do
-    [[ "$file" == *.rs ]] || continue
-    [[ -f "$file" ]] || continue
-    files+=("$file")
-  done < <(git ls-files -z -- src tools/hostctl/src)
+    collect "$file"
+  done < <(git ls-files -z -- src packages tools)
+fi
+
+if (( excluded_count > 0 )); then
+  echo "rust-loc: skipping ${excluded_count} test file(s) (${exclude_regex})"
 fi
 
 if (( ${#files[@]} == 0 )); then
@@ -65,16 +85,16 @@ for file in "${files[@]}"; do
 
   if (( lines > max_limit )); then
     printf '%s\t%s\n' "$lines" "$file" >>"$tmp_hard"
-  elif (( lines > warn_limit )); then
+  elif (( lines >= warn_limit )); then
     printf '%s\t%s\n' "$lines" "$file" >>"$tmp_warn"
   fi
 done
 
-echo "rust-loc: checked ${checked_count} file(s) (warn>${warn_limit}, high-attention>${max_limit}, advisory-only)"
+echo "rust-loc: checked ${checked_count} file(s) (warn>=${warn_limit}, high-attention>${max_limit}, advisory-only)"
 
 if [[ -s "$tmp_warn" ]]; then
   echo
-  echo "rust-loc warnings (over ${warn_limit} lines):"
+  echo "rust-loc warnings (at least ${warn_limit} lines):"
   sort -nr "$tmp_warn" | awk -F '\t' '{ printf "  - %s (%s lines)\n", $2, $1 }'
 fi
 

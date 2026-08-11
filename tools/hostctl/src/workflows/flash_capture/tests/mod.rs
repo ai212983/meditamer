@@ -2,8 +2,13 @@ mod command_run;
 
 use std::{fs, path::PathBuf};
 
-use super::artifacts::{archive_firmware_artifacts, validate_post_command_options};
-use super::flash::build_app_flash_command;
+use super::artifacts::{
+    archive_firmware_artifacts, validate_post_command_options, ArchiveFirmwareArtifactsOptions,
+};
+use super::flash::{
+    build_app_flash_command, build_full_flash_command, resolve_partition_offset,
+    FullFlashCommandOptions,
+};
 use super::paths::{
     acquire_port_lock, build_firmware_command, normalize_output_root, prepare_output_paths,
 };
@@ -36,6 +41,8 @@ fn output_paths_default_under_repo_logs() {
     assert!(paths.summary.ends_with("summary.txt"));
     assert!(paths.firmware_elf.ends_with("firmware.elf"));
     assert!(paths.app_bin.ends_with("app.bin"));
+    assert!(paths.bootloader_bin.ends_with("bootloader.bin"));
+    assert!(paths.partition_table_bin.ends_with("partition-table.bin"));
     assert!(paths.hashes.ends_with("sha256.txt"));
     assert!(paths.build_metadata.ends_with("build-metadata.txt"));
 }
@@ -78,8 +85,8 @@ fn flash_options() -> FlashCaptureOptions {
 }
 
 #[test]
-fn full_flash_default_baud_matches_board_safe_rate() {
-    assert_eq!(DEFAULT_FLASH_BAUD, 115_200);
+fn full_flash_default_baud_uses_the_proven_stub_rate() {
+    assert_eq!(DEFAULT_FLASH_BAUD, 460_800);
 }
 
 #[test]
@@ -106,14 +113,29 @@ fn explicit_app_image_is_archived_with_hash_and_metadata() {
     fs::write(&source, b"deterministic firmware").expect("write source");
     let outputs = prepare_output_paths(Some(&temp.path().join("artifacts"))).expect("output paths");
 
-    archive_firmware_artifacts(&source, &outputs, temp.path(), "release", true).expect("archive");
+    let bootloader = temp.path().join("target/ota-bootloader/bootloader");
+    let partition_table = temp.path().join("target/ota-bootloader/partition_table");
+    fs::create_dir_all(&bootloader).expect("bootloader dir");
+    fs::create_dir_all(&partition_table).expect("partition dir");
+    fs::write(bootloader.join("bootloader.bin"), b"bootloader").expect("bootloader");
+    fs::write(partition_table.join("partition-table.bin"), b"partitions").expect("partitions");
+    archive_firmware_artifacts(ArchiveFirmwareArtifactsOptions {
+        image_path: &source,
+        outputs: &outputs,
+        repo_dir: temp.path(),
+        profile: "release",
+        skip_update_check: true,
+    })
+    .expect("archive");
 
     assert_eq!(
         fs::read(&outputs.app_bin).expect("app bin"),
         b"deterministic firmware"
     );
     let hashes = fs::read_to_string(&outputs.hashes).expect("hashes");
-    assert!(hashes.ends_with("  app.bin\n"));
+    assert!(hashes.contains("  app.bin\n"));
+    assert!(hashes.contains("  bootloader.bin\n"));
+    assert!(hashes.ends_with("  partition-table.bin\n"));
     let metadata = fs::read_to_string(&outputs.build_metadata).expect("metadata");
     assert!(metadata.contains("profile=release"));
     assert!(metadata.contains("git_status_begin"));
@@ -131,6 +153,7 @@ fn app_only_flash_command_uses_idf_python_and_esptool() {
         &idf_env,
         "/dev/cu.usbserial-510",
         115_200,
+        0x20000,
         PathBuf::from("/tmp/app.bin").as_path(),
     );
     assert_eq!(spec.program, idf_env.python_bin.into_os_string());
@@ -141,7 +164,87 @@ fn app_only_flash_command_uses_idf_python_and_esptool() {
         .collect();
     assert_eq!(args[0], "/tmp/idf/esptool.py");
     assert!(args.contains(&"--no-stub".to_string()));
-    assert!(args.contains(&"0x10000".to_string()));
+    assert!(args.contains(&"0x20000".to_string()));
+}
+
+#[test]
+fn full_flash_command_uses_pinned_artifacts_and_resolved_offsets() {
+    let idf_env = IdfEnv {
+        idf_root: PathBuf::from("/tmp/idf"),
+        python_bin: PathBuf::from("/tmp/idf/python"),
+        esptool_bin: PathBuf::from("/tmp/idf/esptool.py"),
+        idf_py_bin: None,
+    };
+    let bootloader = PathBuf::from("/tmp/bootloader.bin");
+    let partition_table = PathBuf::from("/tmp/partition-table.bin");
+    let ota_data = PathBuf::from("/tmp/ota-data.bin");
+    let app_bin = PathBuf::from("/tmp/app.bin");
+    let spec = build_full_flash_command(FullFlashCommandOptions {
+        idf_env: &idf_env,
+        port: "/dev/cu.usbserial-510",
+        flash_baud: 115_200,
+        no_stub: false,
+        bootloader: &bootloader,
+        partition_table: &partition_table,
+        ota_data_offset: 0xf000,
+        ota_data: &ota_data,
+        app_offset: 0x20000,
+        app_bin: &app_bin,
+    });
+    let args: Vec<_> = spec
+        .args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(spec.program, idf_env.python_bin.into_os_string());
+    assert!(!args.contains(&"--no-stub".to_string()));
+    assert!(args.contains(&"/tmp/bootloader.bin".to_string()));
+    assert!(args.contains(&"/tmp/partition-table.bin".to_string()));
+    assert!(args.contains(&"0xf000".to_string()));
+    assert!(args.contains(&"0x20000".to_string()));
+    assert!(args.contains(&"/tmp/app.bin".to_string()));
+}
+
+#[test]
+fn conservative_full_flash_disables_the_stub() {
+    let idf_env = IdfEnv {
+        idf_root: PathBuf::from("/tmp/idf"),
+        python_bin: PathBuf::from("/tmp/idf/python"),
+        esptool_bin: PathBuf::from("/tmp/idf/esptool.py"),
+        idf_py_bin: None,
+    };
+    let artifact = PathBuf::from("/tmp/artifact.bin");
+    let spec = build_full_flash_command(FullFlashCommandOptions {
+        idf_env: &idf_env,
+        port: "/dev/cu.usbserial-510",
+        flash_baud: 115_200,
+        no_stub: true,
+        bootloader: &artifact,
+        partition_table: &artifact,
+        ota_data_offset: 0xf000,
+        ota_data: &artifact,
+        app_offset: 0x20000,
+        app_bin: &artifact,
+    });
+    let args: Vec<_> = spec
+        .args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    assert!(args.contains(&"--no-stub".to_string()));
+}
+
+#[test]
+fn app_offset_is_resolved_from_the_accepted_partition_table() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("tools dir")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let offset = resolve_partition_offset(&repo_root.join("config/partitions-ab.csv"), "ota_0")
+        .expect("ota_0 offset");
+    assert_eq!(offset, 0x20000);
 }
 
 #[test]
@@ -176,6 +279,20 @@ fn firmware_build_command_uses_canonical_script_and_clears_host_overrides() {
     assert!(spec.env_remove.contains(&"CARGO_BUILD_TARGET".into()));
     assert!(spec.env_remove.contains(&"CARGO_ENCODED_RUSTFLAGS".into()));
     assert!(spec.env_remove.contains(&"RUSTFLAGS".into()));
+}
+
+#[test]
+fn firmware_build_command_accepts_the_ble_probe_profile() {
+    let temp = tempdir().expect("tempdir");
+    let scripts = temp.path().join("scripts/build");
+    fs::create_dir_all(&scripts).expect("scripts dir");
+    fs::write(scripts.join("build.sh"), "#!/bin/sh\n").expect("build script");
+
+    let spec = build_firmware_command("ble-release", temp.path()).expect("ble profile");
+    assert!(spec
+        .args
+        .iter()
+        .any(|arg| arg.to_string_lossy() == "ble-release"));
 }
 
 #[test]

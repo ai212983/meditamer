@@ -99,6 +99,15 @@ The include check remains advisory until the legacy hand-written sites are gone.
 The orphan check is blocking; conventional `fixtures/`, `snapshots/`, and
 `testdata/` directories are treated as data rather than compilable Rust source.
 
+Focused app-state flash recovery tests:
+
+```bash
+scripts/tests/host/test_app_state_store_host.sh
+```
+
+The harness runs the production record, migration, and alternating-sector
+algorithm against independent in-memory sectors with injected write and read-back failures.
+
 Rust-analyzer baseline lint:
 
 ```bash

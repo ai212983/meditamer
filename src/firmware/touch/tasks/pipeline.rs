@@ -47,10 +47,20 @@ pub(crate) async fn suspend_touch_pipeline() {
 }
 
 pub(crate) async fn resume_touch_pipeline() {
+    request_touch_pipeline_resume().await;
+    while TOUCH_PIPELINE_STATE.wait().await != TouchPipelineState::Running {}
+}
+
+pub(crate) async fn request_touch_pipeline_resume() {
     TOUCH_PIPELINE_COMMANDS
         .send(TouchPipelineCommand::Resume)
         .await;
-    while TOUCH_PIPELINE_STATE.wait().await != TouchPipelineState::Running {}
+}
+
+pub(crate) fn try_request_touch_pipeline_resume() -> bool {
+    TOUCH_PIPELINE_COMMANDS
+        .try_send(TouchPipelineCommand::Resume)
+        .is_ok()
 }
 
 #[embassy_executor::task]

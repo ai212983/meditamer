@@ -103,6 +103,26 @@ impl SerialConsole {
         Ok(())
     }
 
+    pub fn send_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.port
+            .write_all(bytes)
+            .context("failed to write binary serial payload")?;
+        self.port.flush()?;
+        Ok(())
+    }
+
+    pub fn set_baud_rate(&mut self, baud: u32) -> Result<()> {
+        self.port
+            .set_baud_rate(baud)
+            .with_context(|| format!("failed to set serial baud rate to {baud}"))
+    }
+
+    pub fn set_read_timeout(&mut self, timeout: Duration) -> Result<()> {
+        self.port
+            .set_timeout(timeout)
+            .context("failed to set serial read timeout")
+    }
+
     pub fn settle(&mut self, settle_ms: u64) -> Result<()> {
         if settle_ms == 0 {
             return Ok(());
@@ -184,22 +204,31 @@ impl SerialConsole {
         ack_tag: &str,
         timeout: Duration,
     ) -> Result<(AckStatus, Option<String>)> {
-        let pattern = Regex::new(&format!(r"{} (OK|BUSY|ERR)\b", regex::escape(ack_tag)))?;
+        // A concurrent writer can interleave its bytes into the same line, so the
+        // status token is not always followed by a word boundary -- `UIFIXTURE OK`
+        // can run straight into `tap_trace,...`. Require only that the token is not
+        // continued by another uppercase letter, which still keeps `OKAY` and
+        // `ERROR` from reading as `OK` and `ERR`.
+        let pattern = Regex::new(&format!(
+            r"{} (OK|BUSY|ERR)([^A-Z]|$)",
+            regex::escape(ack_tag)
+        ))?;
         let line = self.wait_for_regex_since(start_mark, &pattern, timeout)?;
         let Some(line) = line else {
             return Ok((AckStatus::None, None));
         };
 
-        if line.contains(" OK") {
-            return Ok((AckStatus::Ok, Some(line)));
-        }
-        if line.contains(" BUSY") {
-            return Ok((AckStatus::Busy, Some(line)));
-        }
-        if line.contains(" ERR") {
-            return Ok((AckStatus::Err, Some(line)));
-        }
-        Ok((AckStatus::None, Some(line)))
+        // Read the status from the match rather than scanning the whole line: an
+        // interleaved line can carry another command's " OK" alongside this ack.
+        let status = match pattern.captures(&line).and_then(|caps| caps.get(1)) {
+            Some(status) => match status.as_str() {
+                "OK" => AckStatus::Ok,
+                "BUSY" => AckStatus::Busy,
+                _ => AckStatus::Err,
+            },
+            None => AckStatus::None,
+        };
+        Ok((status, Some(line)))
     }
 
     pub fn find_first_regex_since(&self, start_mark: usize, regex: &Regex) -> Option<String> {

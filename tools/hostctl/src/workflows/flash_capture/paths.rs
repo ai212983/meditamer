@@ -35,10 +35,20 @@ pub fn prepare_output_paths(explicit: Option<&Path>) -> Result<OutputPaths> {
         summary: root.join("summary.txt"),
         firmware_elf: root.join("firmware.elf"),
         app_bin: root.join("app.bin"),
+        bootloader_bin: root.join("bootloader.bin"),
+        partition_table_bin: root.join("partition-table.bin"),
         hashes: root.join("sha256.txt"),
         build_metadata: root.join("build-metadata.txt"),
         root,
     })
+}
+
+pub(super) fn build_ota_bootloader_command(repo_dir: &Path) -> Result<CommandSpec> {
+    let script = repo_dir.join("scripts/build/ota_bootloader.sh");
+    if !script.is_file() {
+        bail!("missing OTA bootloader build script {}", script.display());
+    }
+    Ok(CommandSpec::new(script.as_os_str()).current_dir(repo_dir))
 }
 
 pub fn normalize_output_root(explicit: Option<&Path>) -> (Option<PathBuf>, Option<String>) {
@@ -153,8 +163,8 @@ pub(super) fn build_firmware_image(
 
 pub fn build_firmware_command(profile: &str, repo_dir: &Path) -> Result<CommandSpec> {
     match profile {
-        "debug" | "release" => {}
-        _ => bail!("unsupported profile `{profile}` (use debug|release)"),
+        "debug" | "release" | "ble-release" => {}
+        _ => bail!("unsupported profile `{profile}` (use debug|release|ble-release)"),
     }
 
     let script = repo_dir.join("scripts/build/build.sh");

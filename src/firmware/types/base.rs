@@ -220,7 +220,7 @@ pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 pub(crate) struct DisplayContext {
     pub(crate) inkplate: InkplateDriver,
-    pub(crate) app_state_store: AppStateStore<'static>,
+    pub(crate) app_state_store: AppStateStore,
     pub(crate) _panel_pins: PanelPinHold<'static>,
 }
 

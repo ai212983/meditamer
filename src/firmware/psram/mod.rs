@@ -173,13 +173,15 @@ fn maybe_log_new_peak(tag: &str, peak_used_bytes: usize, total_bytes: usize, fre
             Ordering::Relaxed,
         ) {
             Ok(_) => {
-                esp_println::println!(
-                    "psram: high_water tag={} peak_used_bytes={} total_bytes={} free_bytes={}",
-                    tag,
-                    peak_used_bytes,
-                    total_bytes,
-                    free_bytes
-                );
+                if !crate::firmware::firmware_update::transport_quiet() {
+                    esp_println::println!(
+                        "psram: high_water tag={} peak_used_bytes={} total_bytes={} free_bytes={}",
+                        tag,
+                        peak_used_bytes,
+                        total_bytes,
+                        free_bytes
+                    );
+                }
                 break;
             }
             Err(observed) => last_logged = observed,

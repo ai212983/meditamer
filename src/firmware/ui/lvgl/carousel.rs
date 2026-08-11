@@ -8,19 +8,48 @@ const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;
 const NAV_BUTTON_Y: i32 = 522;
 const NAV_BUTTON_HIT_PADDING: i32 = 24;
 
+struct NavigationButton {
+    x: i32,
+    label: *const c_char,
+    callback: lv::lv_event_cb_t,
+    action_index: usize,
+}
+
 pub(super) unsafe fn add_navigation(
     screen: *mut lv::lv_obj_t,
     page_label: *const c_char,
     previous: lv::lv_event_cb_t,
+    previous_action_index: usize,
     next: lv::lv_event_cb_t,
+    next_action_index: usize,
     user_data: *mut core::ffi::c_void,
 ) -> bool {
     let black = unsafe { lv::lv_color_black() };
     let white = unsafe { lv::lv_color_white() };
     unsafe {
-        if !create_button(screen, 30, c"<".as_ptr(), previous, user_data, black, white)
-            || !create_button(screen, 490, c">".as_ptr(), next, user_data, black, white)
-        {
+        if !create_button(
+            screen,
+            NavigationButton {
+                x: 30,
+                label: c"<".as_ptr(),
+                callback: previous,
+                action_index: previous_action_index,
+            },
+            user_data,
+            black,
+            white,
+        ) || !create_button(
+            screen,
+            NavigationButton {
+                x: 490,
+                label: c">".as_ptr(),
+                callback: next,
+                action_index: next_action_index,
+            },
+            user_data,
+            black,
+            white,
+        ) {
             return false;
         }
     }
@@ -44,9 +73,7 @@ pub(super) unsafe fn add_navigation(
 
 unsafe fn create_button(
     screen: *mut lv::lv_obj_t,
-    x: i32,
-    label_text: *const c_char,
-    callback: lv::lv_event_cb_t,
+    spec: NavigationButton,
     user_data: *mut core::ffi::c_void,
     black: lv::lv_color_t,
     white: lv::lv_color_t,
@@ -58,7 +85,7 @@ unsafe fn create_button(
     unsafe {
         lv::lv_obj_remove_style_all(button);
         lv::lv_obj_set_size(button, 80, 56);
-        lv::lv_obj_set_pos(button, x, NAV_BUTTON_Y);
+        lv::lv_obj_set_pos(button, spec.x, NAV_BUTTON_Y);
         lv::lv_obj_set_ext_click_area(button, NAV_BUTTON_HIT_PADDING);
         lv::lv_obj_set_style_bg_color(button, white, STYLE_DEFAULT);
         lv::lv_obj_set_style_bg_opa(button, 255, STYLE_DEFAULT);
@@ -69,9 +96,13 @@ unsafe fn create_button(
         lv::lv_obj_set_style_bg_color(button, black, STYLE_PRESSED);
         lv::lv_obj_set_style_bg_opa(button, 255, STYLE_PRESSED);
         lv::lv_obj_set_style_text_color(button, white, STYLE_PRESSED);
+        lv::lv_obj_set_user_data(
+            button,
+            super::intent_bridge::action_user_data(spec.action_index),
+        );
         lv::lv_obj_add_event_cb(
             button,
-            callback,
+            spec.callback,
             lv::lv_event_code_t_LV_EVENT_CLICKED,
             user_data,
         );
@@ -82,7 +113,7 @@ unsafe fn create_button(
         return false;
     }
     unsafe {
-        lv::lv_label_set_text(label, label_text);
+        lv::lv_label_set_text(label, spec.label);
         lv::lv_obj_set_style_text_font(
             label,
             ptr::addr_of!(lv::lv_font_montserrat_32),

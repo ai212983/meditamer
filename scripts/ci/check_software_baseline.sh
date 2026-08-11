@@ -13,10 +13,10 @@ usage() {
         '' \
         'lanes:' \
         '  source            formatting, lock metadata, diff, and secret checks' \
-        '  host-tests        all host regression tests, including packages/sdcard' \
+        '  host-tests        all host regression tests, including scene tools and packages/sdcard' \
         '  host-lint         strict host-tool and packages/sdcard Clippy' \
         '  host              host-tests plus host-lint' \
-        '  firmware-builds   locked default, minimal, slim, telemetry, and all-feature builds' \
+        '  firmware-builds   locked default, BLE candidate, minimal, slim, telemetry, and all-feature builds' \
         '  firmware-clippy   strict minimal and all-feature firmware Clippy' \
         '  firmware          firmware-builds plus firmware-clippy' \
         '  static-source     stack, FAT, and panel ownership guards' \
@@ -44,12 +44,18 @@ run_source() {
     rustup run "$host_toolchain" cargo metadata --locked --no-deps --format-version 1 >/dev/null
     run git diff --check
     run "$repo_root/scripts/ci/check_secrets.sh"
+    run "$repo_root/scripts/ci/check_ble_controller_patch.sh"
 }
 
 run_host_tests() {
     cd "$repo_root"
+    run "$repo_root/scripts/tests/host/test_code_analysis_guard.sh"
+    run "$repo_root/scripts/tests/host/test_include_usage.sh"
+    run "$repo_root/scripts/tests/host/test_orphan_modules.sh"
     run "$repo_root/scripts/tests/host/test_event_config_host.sh"
     run "$repo_root/scripts/tests/host/test_event_engine_host.sh"
+    run "$repo_root/scripts/tests/host/test_app_state_store_host.sh"
+    run "$repo_root/scripts/tests/host/test_ui_shell_host.sh"
     run "$repo_root/scripts/tests/host/test_touch_core_host.sh"
     run "$repo_root/scripts/tests/host/test_touch_replay_host.sh"
     run "$repo_root/scripts/tests/host/test_hostctl_host.sh"
@@ -65,6 +71,14 @@ run_host_tests() {
         host_test_workdir="$(mktemp -d)"
         trap 'rm -rf "$host_test_workdir"' EXIT
         cd "$host_test_workdir"
+        run rustup run "$host_toolchain" cargo test \
+            --locked \
+            --manifest-path "$repo_root/tools/scene_maker/Cargo.toml" \
+            --target "$target"
+        run rustup run "$host_toolchain" cargo test \
+            --locked \
+            --manifest-path "$repo_root/tools/scene_viewer/Cargo.toml" \
+            --target "$target"
         run rustup run "$host_toolchain" cargo test \
             --locked \
             --manifest-path "$repo_root/packages/sdcard/Cargo.toml" \
@@ -103,6 +117,8 @@ run_firmware_builds() {
     cd "$repo_root"
     run env -u CARGO_FEATURES -u CARGO_NO_DEFAULT_FEATURES \
         CARGO_LOCKED=1 "$build_script" release default
+    run env -u CARGO_NO_DEFAULT_FEATURES CARGO_FEATURES=ble-foundation \
+        CARGO_LOCKED=1 "$build_script" ble-release default
     run env -u CARGO_FEATURES -u CARGO_NO_DEFAULT_FEATURES \
         CARGO_LOCKED=1 "$build_script" debug minimal
     run env -u CARGO_FEATURES -u CARGO_NO_DEFAULT_FEATURES \
@@ -127,6 +143,7 @@ run_static_source() {
     run "$repo_root/scripts/tests/host/test_check_stack_risk.sh"
     run "$repo_root/scripts/ci/check_fat_engine_stackless.sh"
     run "$repo_root/scripts/ci/check_panel_bus_gating.sh"
+    run "$repo_root/scripts/ci/check_ui_shell_ownership.sh"
 }
 
 run_static_firmware() {
@@ -134,6 +151,7 @@ run_static_firmware() {
     run "$repo_root/scripts/ci/check_panel_waveform_placement.sh"
     run "$repo_root/scripts/ci/check_pinned_linker_scripts.sh"
     run "$repo_root/scripts/ci/check_iram_flash_refs.sh"
+    run "$repo_root/scripts/ci/check_ble_image_budget.sh"
 }
 
 run_static() {
@@ -145,6 +163,8 @@ run_quality() {
     cd "$repo_root"
     run "$repo_root/scripts/ci/check_rust_loc.sh"
     run "$repo_root/scripts/ci/check_markdown_loc.sh"
+    run env INCLUDE_USAGE_ENFORCE=1 "$repo_root/scripts/ci/check_include_usage.sh"
+    run "$repo_root/scripts/ci/check_orphan_modules.sh"
     run "$repo_root/scripts/ci/lint_rust_analyzer.sh"
     run env RCA_ENFORCE=1 RCA_RATCHET=1 "$repo_root/scripts/ci/lint_code_analysis.sh"
 }

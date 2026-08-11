@@ -64,16 +64,22 @@ line, not a real near-exhaustion.
 
 ### UI shell reservation and latest lifecycle measurement
 
-Capacities remain providers 8, surfaces 16, navigation 8, overlays 4, modals 4, intents 8, callback routes 5, and UI-step acknowledgements 2. The fifth route belongs to the base sticky refresh control while four remain available for an atomic screen/modal handoff. Retained payload is zero; four future references are unallocated.
+Capacities remain providers 8, surfaces 16, navigation 8, overlays 4, modals 4, intents 8, callback
+routes 5, and UI-step acknowledgements 2. The compiled catalogue and each filtered presenter view
+hold at most 8 entries; each screen callback binding holds 8 catalogue selections plus dedicated Home
+and Back actions. The fifth callback route belongs to the base sticky refresh control while four remain
+available for an atomic screen/modal handoff. Retained payload is zero; four future references are
+unallocated.
 
 | Exact debug layout | Xtensa bytes |
 | --- | ---: |
 | `ShellModel` (`1048` host) / `CompositionReferences<4, 4>` | 1008 / 232 |
-| `Backend` / `LvglState` / display-loop state | 1576 / 1808 / 1840 |
+| `Backend` / `LvglState` / display-loop state | 1904 / 1808 / 1840 |
+| `CompiledCatalogue<8>` / filtered `CatalogueView<8>` | 328 / 324 |
 | `ActiveOverlay` / `OwnedShellIntent` | 36 / 36 |
 | `PreparedNavigation` / `CompositionPlan` / `PreparedComposition` | 812 / 640 / 644 |
 | `ProviderRemovalPlan` / pending removal / runtime audit | 824 / 32 / 8 |
-| Callback action queue / route table, including mutex wrappers | 304 / 684 |
+| Callback action queue / one `IntentBindings` / route table, including mutex wrappers | 304 / 192 / 1004 |
 | Full-repaint request latch | 1 |
 | `lv_mem_monitor_t` / allocator snapshot stack temporaries | 28 / 52 |
 
@@ -86,6 +92,49 @@ The identified base-modal release uses pool 4448, sections 14428/68260/113372, a
 and a deepest known debug removal chain near 8288 bytes. Two device removals measured CPU0 minimum
 98384, LVGL use 9628/9668, 193 blocks, 3% fragmentation, and constant external-heap use. No budget
 blocker was observed; repeat the exact-owner unload gate before promoting external providers.
+
+The Phase 5 default release uses display-task pool 5024 and sections `.data` 14972, `.bss` 68844,
+`.stack` 112244, and `.dram2_uninit` 104392. Against the E-0011 pre-catalogue release, linked `.data`
+plus `.bss` grew 776 bytes and the stack remainder fell by the same 776 bytes. The catalogue accounts
+for 328 bytes of `Backend`; the enlarged callback bindings account for 320 bytes of the linked static
+increase. The 324-byte filtered view is a bounded transition/presenter stack temporary rather than
+persistent storage. Physical runtime stack and LVGL high-water evidence remains a device gate.
+
+The Phase 5A signed A/B release uses sections `.data` 15852, `.bss` 68884, `.stack` 111324, and
+`.dram2_uninit` 104392; `.data.wifi` is a 540-byte subsection of `.data`. Relative to Phase 5,
+linked `.data` plus `.bss` grows 920 bytes and the stack remainder falls by the same amount. The
+update session's largest dedicated buffer is a 240-byte internal-RAM flash batch; the 48-byte last
+chunk, hash/signature state, and OTA metadata are fixed-size, and no complete image is buffered in
+RAM. The measured minimum stack remainder remains above the earlier Phase 4 removal chain, but the
+identified device update evidence is a serial/boot gate rather than a new full UI lifecycle run.
+
+The Phase 6 signed release uses display-task pool 5392 and sections `.data` 15804, `.bss` 69420,
+`.stack` 110836, and `.dram2_uninit` 104392; `.data.wifi` remains 540 bytes. Relative to the accepted
+Phase 5B release, linked `.data` plus `.bss` grows 392 bytes and the stack remainder falls by the same
+amount. The settings persistence controller accounts for the 368-byte display-pool increase.
+The flash envelope grows from 64 to 128 bytes; encode and read-back verification use bounded 128-byte
+stack buffers and allocate no settings data dynamically.
+
+### BLE Phase 1 fixed-cost candidate
+
+The non-default `ble-foundation` candidate uses the dedicated `ble-release` profile; the ordinary
+production `release` profile remains at optimization level 3. The callback-fenced Phase 1D baseline
+implementation measures `.data` 18,260, `.data.wifi` 1,872, `.bss` 77,116, `.stack` 33,812, and
+`.dram2_uninit` 104,392 bytes. The `.stack` value is after ESP32 Bluetooth's fixed `0x10000` DRAM
+reservation and all linked probe statics.
+
+Named BLE/lifecycle statics total 6,729 bytes: the Embassy task pool 2,712; controller `BT_STATE`
+1,336; reusable GATT server 1,116; host resources 600; host stack 328; async HCI TX collector 288;
+four-slot first-party packet pool 264; two 12-byte HCI wakers; the 12-byte probe signal; and 49 bytes
+of transport, callback-fence, network-residency, probe-state, and pool counters/latches. The BTDM
+controller task still consumes at least 4,112 release bytes from the separate internal heap, plus its
+control block and opaque controller allocations; runtime heap high-water remains a device gate.
+
+The application image is 1,837,168 bytes, leaving 63,376 bytes below the BLE plan ceiling. The
+callback-fence source guard, four host evidence-parser tests, three deterministic cancellation-guard
+tests, and locked builds pass, but Phase 1 remains reopened until its complete source identity is
+durable. This is build/link evidence only: no controller lifecycle, runtime stack/heap, power, Wi-Fi
+coexistence, touch, or panel result is implied.
 
 ## What Was Recovered
 

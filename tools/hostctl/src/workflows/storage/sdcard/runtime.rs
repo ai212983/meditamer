@@ -18,7 +18,6 @@ use super::{
     templates::{optional_arg_u32, required_arg_str, resolve_templates},
 };
 
-
 pub(super) struct SdcardScenarioRuntime<'a> {
     pub(super) logger: &'a mut Logger,
     pub(super) console: &'a mut SerialConsole,

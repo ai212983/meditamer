@@ -1,8 +1,10 @@
-use super::artifacts::{archive_firmware_artifacts, validate_post_command_options};
+use super::artifacts::{
+    archive_firmware_artifacts, validate_post_command_options, ArchiveFirmwareArtifactsOptions,
+};
 use super::flash::{run_app_only_flash, run_full_flash, AppOnlyFlashOptions, FullFlashOptions};
 use super::paths::{
-    acquire_port_lock, build_firmware_image, ensure_port_available, normalize_output_root,
-    prepare_output_paths, resolve_explicit_image, resolve_port,
+    acquire_port_lock, build_firmware_image, build_ota_bootloader_command, ensure_port_available,
+    normalize_output_root, prepare_output_paths, resolve_explicit_image, resolve_port,
 };
 use super::runtime_helpers::context_set_string;
 use super::{
@@ -166,18 +168,36 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
+    pub(super) fn action_prepare_bootloader(&mut self) -> Result<()> {
+        self.logger
+            .info("building pinned OTA bootloader (ESP-IDF v5.5.2)");
+        let command = build_ota_bootloader_command(&self.repo_dir)?;
+        let status = super::command_run::run_command_logged(
+            &command,
+            &self.outputs.flash_log,
+            super::command_run::CommandRunOptions::new(super::DEFAULT_LOG_DRAIN_TIMEOUT),
+        )?;
+        if !status.success() {
+            bail!(
+                "OTA bootloader build failed; see {}",
+                self.outputs.flash_log.display()
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn action_archive_image(&mut self) -> Result<()> {
         let image_path = self
             .image_path
             .as_deref()
             .ok_or_else(|| anyhow!("image_path not resolved before archive"))?;
-        archive_firmware_artifacts(
+        archive_firmware_artifacts(ArchiveFirmwareArtifactsOptions {
             image_path,
-            &self.outputs,
-            &self.repo_dir,
-            &self.opts.profile,
-            self.skip_update_check,
-        )
+            outputs: &self.outputs,
+            repo_dir: &self.repo_dir,
+            profile: &self.opts.profile,
+            skip_update_check: self.skip_update_check,
+        })
     }
 
     pub(super) fn action_post_command(&mut self, context: &mut Value) -> Result<()> {
@@ -231,15 +251,35 @@ impl FlashCaptureRuntime<'_> {
 
         let mut result = match strategy {
             "full" => run_full_flash(FullFlashOptions {
-                image_path,
+                repo_dir: &self.repo_dir,
+                image_path: &self.outputs.app_bin,
                 flash_log: &self.outputs.flash_log,
                 port: &self.port,
                 flash_baud: self.flash_baud,
+                no_stub: false,
                 flash_timeout: self.flash_timeout,
                 flash_status_interval: self.flash_status_interval,
-                skip_update_check: self.skip_update_check,
+                flash_idle_timeout: self.flash_idle_timeout,
+                flash_progress_stall_timeout: self.flash_progress_stall_timeout,
+                flash_log_drain_timeout: self.flash_log_drain_timeout,
+                idf_env: self.idf_env.as_ref(),
+            })?,
+            "full-safe" => run_full_flash(FullFlashOptions {
+                repo_dir: &self.repo_dir,
+                image_path: &self.outputs.app_bin,
+                flash_log: &self.outputs.flash_log,
+                port: &self.port,
+                flash_baud: self.fallback_baud,
+                no_stub: true,
+                flash_timeout: self.flash_timeout,
+                flash_status_interval: self.flash_status_interval,
+                flash_idle_timeout: self.flash_idle_timeout,
+                flash_progress_stall_timeout: self.flash_progress_stall_timeout,
+                flash_log_drain_timeout: self.flash_log_drain_timeout,
+                idf_env: self.idf_env.as_ref(),
             })?,
             "app-only" => run_app_only_flash(AppOnlyFlashOptions {
+                repo_dir: &self.repo_dir,
                 image_path,
                 flash_log: &self.outputs.flash_log,
                 port: &self.port,
