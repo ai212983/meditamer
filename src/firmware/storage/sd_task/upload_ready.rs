@@ -1,5 +1,27 @@
 #[cfg(feature = "asset-upload-http")]
-fn disabled_upload_result() -> SdUploadResult {
+use embassy_time::with_timeout;
+#[cfg(feature = "asset-upload-http")]
+use embassy_time::Duration;
+#[cfg(feature = "asset-upload-http")]
+use sdcard::fat::FatEngine;
+
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::types::{SdPowerRequest, SdProbeDriver};
+#[cfg(feature = "asset-upload-http")]
+use super::power::request_sd_power;
+
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::types::{
+    SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, WifiConfigResponse,
+    WifiConfigResultCode,
+};
+#[cfg(feature = "asset-upload-http")]
+use super::upload::SdUploadSession;
+
+#[cfg(feature = "asset-upload-http")]
+use super::upload::process_upload_request;
+#[cfg(feature = "asset-upload-http")]
+pub(super) fn disabled_upload_result() -> SdUploadResult {
     SdUploadResult {
         ok: false,
         code: SdUploadResultCode::Busy,
@@ -13,7 +35,7 @@ fn disabled_upload_result() -> SdUploadResult {
 }
 
 #[cfg(feature = "asset-upload-http")]
-fn disabled_wifi_config_response() -> WifiConfigResponse {
+pub(super) fn disabled_wifi_config_response() -> WifiConfigResponse {
     WifiConfigResponse {
         ok: false,
         code: WifiConfigResultCode::Busy,
@@ -22,7 +44,7 @@ fn disabled_wifi_config_response() -> WifiConfigResponse {
 }
 
 #[cfg(feature = "asset-upload-http")]
-fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
+pub(super) fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
     let mapped = match code {
         SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
         SdUploadResultCode::InitFailed => WifiConfigResultCode::InitFailed,
@@ -36,7 +58,7 @@ fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
 }
 
 #[cfg(feature = "asset-upload-http")]
-async fn ensure_upload_storage_ready(
+pub(super) async fn ensure_upload_storage_ready(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
@@ -73,7 +95,7 @@ async fn ensure_upload_storage_ready(
 }
 
 #[cfg(feature = "asset-upload-http")]
-async fn abort_active_upload_session(
+pub(super) async fn abort_active_upload_session(
     upload_session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,

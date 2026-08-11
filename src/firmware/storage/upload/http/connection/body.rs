@@ -7,8 +7,8 @@ use super::super::helpers::{write_response, write_roundtrip_error_response};
 use super::fairness::IngressFairnessAdaptive;
 use crate::firmware::telemetry;
 use crate::firmware::types::{
-    HTTP_INGRESS_ADAPTIVE_FAIRNESS, HTTP_INGRESS_COOP_YIELD_BYTES,
-    HTTP_INGRESS_COOP_YIELD_READS, HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS,
+    HTTP_INGRESS_ADAPTIVE_FAIRNESS, HTTP_INGRESS_COOP_YIELD_BYTES, HTTP_INGRESS_COOP_YIELD_READS,
+    HTTP_INGRESS_TRY_DRAIN_INTERVAL_READS,
 };
 
 mod error;
@@ -18,9 +18,14 @@ mod progress;
 mod stats;
 
 use error::{abort_upload_roundtrip_bounded, log_upload_body_read_error, UploadBodyError};
-use pipeline::{drain_inflight_on_error, flush_inflight_chunk, queue_chunk_for_sd, try_drain_inflight_chunk, InflightChunk};
+use pipeline::{
+    drain_inflight_on_error, flush_inflight_chunk, queue_chunk_for_sd, try_drain_inflight_chunk,
+    InflightChunk,
+};
 use progress::UploadBodyProgress;
-pub(crate) use stats::{elapsed_ms_u32, log_upload_stats, usize_to_u32_saturating, UploadBodyStats};
+pub(crate) use stats::{
+    elapsed_ms_u32, log_upload_stats, usize_to_u32_saturating, UploadBodyStats,
+};
 
 pub(super) async fn forward_upload_body_or_http_error(
     socket: &mut TcpSocket<'_>,
@@ -44,8 +49,12 @@ pub(super) async fn forward_upload_body_or_http_error(
             }
             log_upload_body_read_error(socket, err, consumed, content_length, pending, want);
             if abort_on_error {
-                abort_upload_roundtrip_bounded(if reset { "read_body_reset" } else { "read_body" })
-                    .await;
+                abort_upload_roundtrip_bounded(if reset {
+                    "read_body_reset"
+                } else {
+                    "read_body"
+                })
+                .await;
             }
             Err("read body")
         }
@@ -106,7 +115,10 @@ async fn forward_upload_body(
             try_drain_inflight_chunk(&mut inflight, &mut progress)?;
             progress.reset_try_drain_counter();
         }
-        let want = min(chunk_buf.len().saturating_sub(pending), content_length - consumed);
+        let want = min(
+            chunk_buf.len().saturating_sub(pending),
+            content_length - consumed,
+        );
         progress.note_pre_read(pre_read_queue);
         let read_started_at = embassy_time::Instant::now();
         let n = match socket.read(&mut chunk_buf[pending..pending + want]).await {

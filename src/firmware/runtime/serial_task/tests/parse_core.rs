@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn parses_sdfatstat() {
     let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt");
@@ -73,6 +75,15 @@ fn parses_psram_allocator_status_command() {
 fn parses_ping_command() {
     let cmd = parse_serial_command(b"PING");
     assert!(matches!(cmd, Some(SerialCommand::Ping)));
+}
+
+#[test]
+fn parses_ui_cycle_step_command_without_arguments() {
+    assert!(matches!(
+        parse_serial_command(b"UISTEP"),
+        Some(SerialCommand::UiCycleStep)
+    ));
+    assert!(parse_serial_command(b"UISTEP 2").is_none());
 }
 
 #[test]

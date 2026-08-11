@@ -77,7 +77,7 @@ fn sd_kind_label(kind: SdCommandKind) -> &'static str {
     }
 }
 
-fn sd_result_code_label(code: SdResultCode) -> &'static str {
+pub fn sd_result_code_label(code: SdResultCode) -> &'static str {
     match code {
         SdResultCode::Ok => "ok",
         SdResultCode::PowerOnFailed => "power_on_failed",
@@ -107,7 +107,7 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
     }
 }
 
-fn now_ms_u32() -> u32 {
+pub fn now_ms_u32() -> u32 {
     let now_ms = embassy_time::Instant::now().as_millis();
     if now_ms > u32::MAX as u64 {
         u32::MAX

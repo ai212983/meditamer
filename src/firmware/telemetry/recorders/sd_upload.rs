@@ -1,3 +1,15 @@
+use core::sync::atomic::Ordering;
+
+use super::super::counters::*;
+#[cfg(feature = "asset-upload-http")]
+use super::super::types::SdUploadRoundtripPhase;
+#[cfg(all(feature = "asset-upload-http", feature = "telemetry-defmt"))]
+use super::helpers::sd_upload_result_code_to_u8;
+#[cfg(feature = "asset-upload-http")]
+use super::helpers::{saturating_add_u32, update_max_u32};
+#[cfg(feature = "asset-upload-http")]
+use crate::firmware::types::SdUploadResultCode;
+
 #[cfg(feature = "asset-upload-http")]
 pub(crate) fn record_sd_upload_roundtrip_timeout() {
     SD_UPLOAD_ERRORS.fetch_add(1, Ordering::Relaxed);

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn maps_sdfatstat_to_event_and_responses() {
     let cmd = parse_serial_command(b"SDFATSTAT /notes/TODO.txt").expect("command");

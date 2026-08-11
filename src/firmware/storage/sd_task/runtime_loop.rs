@@ -1,7 +1,46 @@
+use super::dispatch::process_request;
+use super::logging::publish_result;
+#[cfg(feature = "asset-upload-http")]
+use super::logging::{publish_upload_result, publish_wifi_config_response};
+use super::power::{duration_ms_since, failure_backoff_ms, request_sd_power};
+#[cfg(not(feature = "asset-upload-http"))]
+use super::receive::receive_core_request;
+#[cfg(feature = "asset-upload-http")]
+use super::upload::process_upload_request;
+#[cfg(feature = "asset-upload-http")]
+use super::upload_ready::{
+    abort_active_upload_session, disabled_upload_result, disabled_wifi_config_response,
+    ensure_upload_storage_ready, wifi_config_error_response,
+};
+#[cfg(feature = "asset-upload-http")]
+use super::wifi_config::process_wifi_config_request;
+use super::SD_BOOT_POWER_OFF_GRACE_MS;
+#[cfg(feature = "asset-upload-http")]
+use super::SD_IDLE_POWER_OFF_MS;
+#[cfg(feature = "asset-upload-http")]
+use super::SD_UPLOAD_SESSION_IDLE_ABORT_MS;
 extern crate alloc;
 
-#[path = "runtime_startup.rs"]
-mod runtime_startup;
+#[cfg(feature = "asset-upload-http")]
+use embassy_futures::select::{select3, Either3};
+#[cfg(feature = "asset-upload-http")]
+use embassy_time::with_timeout;
+use embassy_time::{Duration, Instant, Timer};
+use sdcard::fat::FatEngine;
+use sdcard::runtime as sd_ops;
+
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::config::WIFI_CONFIG_REQUESTS;
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::config::{SD_REQUESTS, SD_UPLOAD_REQUESTS};
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::runtime::service_mode;
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::telemetry;
+use super::super::super::types::{SdPowerRequest, SdProbeDriver, SdRequest};
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::types::{SdUploadRequest, SdUploadResult, SdUploadResultCode};
+use super::upload::SdUploadSession;
 
 struct SdTaskRuntime {
     sd_probe: SdProbeDriver,
@@ -31,7 +70,7 @@ impl SdTaskRuntime {
             backoff_until: None,
         };
         let mut no_power = |_action: sd_ops::SdPowerAction| -> Result<(), ()> { Ok(()) };
-        (runtime.consecutive_failures, runtime.backoff_until) = runtime_startup::initialize(
+        (runtime.consecutive_failures, runtime.backoff_until) = super::runtime_startup::initialize(
             &mut runtime.sd_probe,
             &mut runtime.powered,
             &mut no_power,
@@ -85,7 +124,7 @@ impl SdTaskRuntime {
         if !service_mode::upload_transfers_enabled() {
             return Some(UploadAbortReason::ModeOff);
         }
-        let last_activity_at = upload::active_session_last_activity(&self.upload_session)?;
+        let last_activity_at = super::upload::active_session_last_activity(&self.upload_session)?;
         let idle_ms = duration_ms_since(last_activity_at);
         (idle_ms >= SD_UPLOAD_SESSION_IDLE_ABORT_MS).then_some(UploadAbortReason::Idle { idle_ms })
     }
@@ -142,7 +181,7 @@ impl SdTaskRuntime {
     }
 
     #[cfg(feature = "asset-upload-http")]
-    async fn process_wifi_config_request(
+    pub(super) async fn process_wifi_config_request(
         &mut self,
         request: crate::firmware::types::WifiConfigRequest,
     ) {
@@ -174,7 +213,7 @@ impl SdTaskRuntime {
     }
 
     #[cfg(feature = "asset-upload-http")]
-    async fn process_upload_request(&mut self, request: SdUploadRequest) {
+    pub(super) async fn process_upload_request(&mut self, request: SdUploadRequest) {
         if !service_mode::upload_transfers_enabled() {
             publish_upload_result(disabled_upload_result());
             return;

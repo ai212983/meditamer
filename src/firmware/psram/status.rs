@@ -1,3 +1,12 @@
+use core::sync::atomic::Ordering;
+
+use super::{
+    current_allocator_state, maybe_log_new_peak, min_or_zero, update_min_observed,
+    update_peak_used_bytes, used_bytes, AllocatorMemorySnapshot, AllocatorState, AllocatorStatus,
+    LARGE_ALLOC_EXTERNAL_OK, LARGE_ALLOC_FAIL, LARGE_ALLOC_INTERNAL_OK, MIN_FREE_BYTES,
+    MIN_FREE_EXTERNAL_BYTES, MIN_FREE_INTERNAL_BYTES,
+};
+
 pub(crate) fn allocator_status() -> AllocatorStatus {
     let (total_bytes, free_bytes) = {
         let stats = esp_alloc::HEAP.stats();

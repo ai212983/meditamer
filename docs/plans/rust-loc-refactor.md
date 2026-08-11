@@ -1,10 +1,37 @@
 # RFC: Rust LOC Refactor Plan (>280 LOC Inventory, <300 LOC Target)
 
-- Status: Proposed
+- Status: Superseded — see the Code size policy in `AGENTS.md`
 - Last-reviewed: 2026-08-10
 - Owner: Firmware + Host Tools
 - Date: 2026-03-02
 - Scope: Rust files currently above 280 LOC across firmware, packages, and tools
+
+## 0. Why this is superseded
+
+The 300-LOC "hard limit" in this RFC was never wired to a blocking gate.
+`scripts/ci/check_rust_loc.sh` is advisory and exits 0; the blocking file-size
+check is the SLOC ratchet in `config/rca-baseline.json` (warn 600 / hard 1000).
+Work aimed at the unenforced 300 rather than a genuine cohesion boundary, and the
+gap was closed by textual splits instead of module splits — 144 `include!` sites
+across 34 parent files, plus `part-NN` test shards, none of which create a module
+boundary. That is the outcome the anti-sharding rule already forbids for Markdown.
+
+The replacement policy lives in `AGENTS.md` under "Code size policy": one number,
+aligned to the enforced ratchet, tests exempt, and `include!` restricted to
+build-script output (`scripts/ci/check_include_usage.sh`).
+
+The inventory in section 4 is retained as a historical record and is stale — 14
+of its 36 files no longer exist under the listed paths.
+
+### Resolution of section 11's open questions
+
+- *Enforce a CI guard for max LOC (>300 hard fail, >280 warning)?* Not at those
+  thresholds. The enforced production-file SLOC gate is advisory at 600 and hard
+  at 1000; the raw-line check remains advisory at the same thresholds.
+- *Should test files have a separate threshold?* They are exempt. Table-driven
+  tests are legitimately long, and splitting a table destroys it.
+- *Normalize on `foo.rs` + `foo/` hybrid facades?* Yes, where the pieces are real
+  modules. A split that does not create a module boundary is not a split.
 
 ## 1. Summary
 

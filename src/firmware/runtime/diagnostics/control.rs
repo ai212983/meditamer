@@ -1,3 +1,17 @@
+use super::model::{
+    set_status, SessionInterrupt, SessionOutcome, CODE_CANCELED, CODE_INVALID_TARGETS, CODE_OK,
+    CODE_UNSUPPORTED_TARGETS, STATE_CANCELED, STATE_DONE, STATE_FAILED, STATE_IDLE, STATE_RUNNING,
+    STEP_CANCELED, STEP_COMPLETE, STEP_IDLE, STEP_START, TARGET_DISPLAY, TARGET_IMU, TARGET_SD,
+    TARGET_TOUCH, TARGET_WIFI,
+};
+use super::sd_checks::run_sd_checks;
+use super::wifi::run_wifi_check;
+
+use crate::firmware::{
+    app_state::{AppStateDiagControl, DiagKind},
+    config::DIAG_CONTROL_EVENTS,
+};
+
 #[embassy_executor::task]
 pub(crate) async fn diagnostics_task() {
     set_status(STATE_IDLE, STEP_IDLE, CODE_OK, 0);
@@ -78,10 +92,13 @@ fn validate_targets(targets: u8) -> Result<(), u8> {
     Ok(())
 }
 
-fn session_interrupt_outcome(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+pub(super) fn session_interrupt_outcome(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
     poll_session_interrupt(kind, targets).map(session_outcome_from_interrupt)
 }
-fn poll_session_interrupt(active_kind: DiagKind, active_targets: u8) -> Option<SessionInterrupt> {
+pub(super) fn poll_session_interrupt(
+    active_kind: DiagKind,
+    active_targets: u8,
+) -> Option<SessionInterrupt> {
     let mut latest = None;
     while let Ok(control) = DIAG_CONTROL_EVENTS.try_receive() {
         latest = Some(control);
@@ -104,7 +121,7 @@ fn poll_session_interrupt(active_kind: DiagKind, active_targets: u8) -> Option<S
     }
 }
 
-fn session_outcome_from_interrupt(interrupt: SessionInterrupt) -> SessionOutcome {
+pub(super) fn session_outcome_from_interrupt(interrupt: SessionInterrupt) -> SessionOutcome {
     match interrupt {
         SessionInterrupt::Stopped => SessionOutcome::Stopped,
         SessionInterrupt::Restart { kind, targets } => SessionOutcome::Restart { kind, targets },

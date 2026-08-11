@@ -14,6 +14,13 @@ pub(super) fn parse_serial_command(line: &[u8]) -> Option<SerialCommand> {
 }
 
 fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
+    #[cfg(feature = "ui-provider-fixture")]
+    if basic::parse_ui_provider_fixture_step_command(line) {
+        return Some(SerialCommand::UiProviderFixtureStep);
+    }
+    if basic::parse_ui_cycle_step_command(line) {
+        return Some(SerialCommand::UiCycleStep);
+    }
     if basic::parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
     }

@@ -7,5 +7,6 @@ mod sdcard_tests;
 pub mod serial;
 pub mod storage;
 pub mod troubleshoot;
+pub mod ui_lifecycle;
 pub mod upload;
 pub mod wifi;

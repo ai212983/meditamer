@@ -44,6 +44,15 @@ pub(in super::super) fn parse_ping_command(line: &[u8]) -> bool {
     trim_ascii_whitespace(line) == b"PING"
 }
 
+pub(in super::super) fn parse_ui_cycle_step_command(line: &[u8]) -> bool {
+    trim_ascii_whitespace(line) == b"UISTEP"
+}
+
+#[cfg(feature = "ui-provider-fixture")]
+pub(in super::super) fn parse_ui_provider_fixture_step_command(line: &[u8]) -> bool {
+    trim_ascii_whitespace(line) == b"UIFIXTURE"
+}
+
 pub(in super::super) fn parse_allocator_status_command(line: &[u8]) -> bool {
     let cmd = trim_ascii_whitespace(line);
     cmd == b"PSRAM" || cmd == b"ALLOCATOR" || cmd == b"HEAP"

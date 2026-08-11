@@ -1,4 +1,11 @@
-fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPipelineGate> {
+use crate::firmware::psram;
+use crate::firmware::telemetry;
+use embassy_net::Stack;
+use embassy_time::Instant;
+
+pub(super) fn dhcp_ipv4_status(
+    stack: &Stack<'static>,
+) -> Result<[u8; 4], telemetry::NetPipelineGate> {
     // Use Wi-Fi task connectivity + non-zero DHCP lease as the listener gate.
     // `stack.is_link_up()` can transiently lag reconnect state and block listener
     // arming even when connect+lease have already recovered.
@@ -18,7 +25,7 @@ fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPip
     Err(telemetry::NetPipelineGate::NoIpv4)
 }
 
-fn net_pipeline_gate_reason_str(reason: telemetry::NetPipelineGate) -> &'static str {
+pub(super) fn net_pipeline_gate_reason_str(reason: telemetry::NetPipelineGate) -> &'static str {
     match reason {
         telemetry::NetPipelineGate::WifiDown => "wifi_down",
         telemetry::NetPipelineGate::LinkDown => "link_down",
@@ -26,7 +33,7 @@ fn net_pipeline_gate_reason_str(reason: telemetry::NetPipelineGate) -> &'static 
     }
 }
 
-fn elapsed_ms_u32(started_at: Instant) -> u32 {
+pub(super) fn elapsed_ms_u32(started_at: Instant) -> u32 {
     let elapsed = started_at.elapsed().as_millis();
     if elapsed > u32::MAX as u64 {
         u32::MAX
@@ -35,7 +42,7 @@ fn elapsed_ms_u32(started_at: Instant) -> u32 {
     }
 }
 
-fn log_http_mem_diag(stage: &str) {
+pub(super) fn log_http_mem_diag(stage: &str) {
     if !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP)
         && !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET)
     {

@@ -65,8 +65,3 @@ root — reference sibling checkouts as plain paths instead.
 frozen and their internal links are not maintained. Archive a document when its
 investigation closes rather than deleting it — the Wi-Fi and upload series are
 kept specifically for the experiment novelty gate in `AGENTS.md`.
-
-## Known drift
-
-`development/` still holds the UI/app structure rework plan and its ledger.
-They belong in `plans/` and move there once the current edit settles.

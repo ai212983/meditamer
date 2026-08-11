@@ -1,4 +1,7 @@
-fn sdreq_regex(op: Option<&str>) -> Result<Regex> {
+use anyhow::Result;
+use regex::Regex;
+
+pub(super) fn sdreq_regex(op: Option<&str>) -> Result<Regex> {
     match op {
         Some(op) => Regex::new(&format!(r"^SDREQ id=([0-9]+) op={}\b", regex::escape(op)))
             .map_err(Into::into),

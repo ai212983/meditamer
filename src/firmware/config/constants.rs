@@ -15,5 +15,7 @@ pub(crate) const BACKLIGHT_FADE_MS: u64 = 2_000;
 // State transitions may trigger service teardown/allocation paths that can exceed
 // short UART command deadlines on real hardware.
 pub(crate) const APP_STATE_APPLY_ACK_TIMEOUT_MS: u64 = 150_000;
+// A UI step includes a synchronous e-paper refresh before it is acknowledged.
+pub(crate) const UI_CYCLE_STEP_ACK_TIMEOUT_MS: u64 = 150_000;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) const WIFI_CONFIG_RESPONSE_TIMEOUT_MS: u64 = 10_000;

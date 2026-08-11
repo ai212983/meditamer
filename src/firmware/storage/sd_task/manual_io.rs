@@ -224,7 +224,7 @@ pub(super) async fn run_rw_verify(
     }
 }
 
-async fn read_sector(
+pub async fn read_sector(
     reason: &str,
     phase: &str,
     lba: u32,

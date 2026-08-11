@@ -7,7 +7,7 @@ pub(crate) enum DitherMode {
 }
 
 impl DitherMode {
-    fn from_str(raw: &str) -> Result<Self, String> {
+    pub(super) fn from_str(raw: &str) -> Result<Self, String> {
         match raw {
             "none" => Ok(Self::None),
             "bayer4" => Ok(Self::Bayer4),
@@ -25,7 +25,7 @@ pub(crate) enum OutputMode {
 }
 
 impl OutputMode {
-    fn from_str(raw: &str) -> Result<Self, String> {
+    pub(super) fn from_str(raw: &str) -> Result<Self, String> {
         match raw {
             "mono1" => Ok(Self::Mono1),
             "gray3" => Ok(Self::Gray3),
@@ -56,7 +56,7 @@ pub(crate) enum ToneCurve {
 }
 
 impl ToneCurve {
-    fn from_str(raw: &str) -> Result<Self, String> {
+    pub(super) fn from_str(raw: &str) -> Result<Self, String> {
         match raw {
             "linear" => Ok(Self::Linear),
             "wash" => Ok(Self::Wash),
@@ -70,12 +70,12 @@ impl ToneCurve {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum RenderPreset {
+pub(super) enum RenderPreset {
     SumiE,
 }
 
 impl RenderPreset {
-    fn from_str(raw: &str) -> Result<Self, String> {
+    pub(super) fn from_str(raw: &str) -> Result<Self, String> {
         match raw {
             "sumi-e" => Ok(Self::SumiE),
             _ => Err(format!("invalid preset '{raw}', expected sumi-e")),

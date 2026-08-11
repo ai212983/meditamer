@@ -1,5 +1,18 @@
+use super::super::{
+    probe::{ProbeRoundState, RoundSample},
+    WifiDiscoveryRuntime,
+};
+use crate::workflows::wifi::common::{ctx_get_string, fmt_min, wait_net_ack};
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+
 impl WifiDiscoveryRuntime<'_> {
-    fn record_round_results(&mut self, round: u32, state: &ProbeRoundState, zero_discovery: bool) {
+    pub(super) fn record_round_results(
+        &mut self,
+        round: u32,
+        state: &ProbeRoundState,
+        zero_discovery: bool,
+    ) {
         let mut scan_zero_events = state.scan_zero_events;
         let mut scan_nonzero_events = state.scan_nonzero_events;
         let mut no_ap_found_events = state.no_ap_found_events;
@@ -77,7 +90,7 @@ impl WifiDiscoveryRuntime<'_> {
         ));
     }
 
-    fn handle_evaluate_results(&mut self) -> Value {
+    pub(super) fn handle_evaluate_results(&mut self) -> Value {
         let pass_zero = self.zero_discovery_rounds <= self.profile.max_zero_discovery_rounds;
         let pass_ready = self.ready_rounds >= self.profile.min_ready_rounds;
         let scan_evidence_rounds = self
@@ -132,7 +145,7 @@ impl WifiDiscoveryRuntime<'_> {
         })
     }
 
-    fn handle_print_summary(&mut self) -> Result<()> {
+    pub(super) fn handle_print_summary(&mut self) -> Result<()> {
         let scan_evidence_rounds = self
             .samples
             .iter()
@@ -197,7 +210,7 @@ impl WifiDiscoveryRuntime<'_> {
         Ok(())
     }
 
-    fn handle_fail_run(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn handle_fail_run(&mut self, context: &mut Value) -> Result<()> {
         if self.profile.disable_listener_during_probe_rounds {
             if let Err(err) = wait_net_ack(&mut self.console, "NET LISTENER ON") {
                 self.logger

@@ -43,8 +43,10 @@ scripts/ci/setup_hooks.sh
 
 Current pre-commit hook:
 
-- Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
+- Runs `cargo fmt --all` when staged Rust files match `src/**/*.rs`, `packages/**/*.rs`, `tools/**/*.rs`, or `build.rs`.
 - Auto-stages formatter edits (`stage_fixed: true`) so commits include rustfmt output.
+- Reports the repository-wide 600/1000 raw Rust line-count advisory and legacy hand-written `include!` inventory.
+- Blocks tracked Rust files that are unreachable from every Cargo target via `scripts/ci/check_orphan_modules.sh`.
 - Validates links in staged Markdown files via `scripts/ci/check_markdown_links.sh`.
 - Scans staged files for leaked Wi-Fi credentials via `scripts/ci/check_secrets.sh --staged`.
 - Uses `lychee` in `--offline` mode by default for reliable local commits.
@@ -60,7 +62,8 @@ Current commit-msg hook:
 Current pre-push hook:
 
 - Runs strict firmware clippy through `scripts/build/build.sh clippy`, which shares the production LVGL native-toolchain setup, when pushed files touch firmware/workspace Rust paths.
-- Runs strict code-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
+- Runs the strict 600/1000 production-file SLOC and function-metrics ratchet via `RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh` on Rust/workspace changes.
+- Rechecks Cargo-target source reachability when Rust sources, manifests, or the checker change.
 
 CI includes a dedicated secret-scan workflow (`.github/workflows/secret_scan.yml`) that runs `scripts/ci/check_secrets.sh` on pull requests and pushes to `master`.
 
@@ -81,6 +84,20 @@ Refresh ratchet baseline after intentional refactors:
 ```bash
 RCA_UPDATE_BASELINE=1 scripts/ci/lint_code_analysis.sh
 ```
+
+Baseline refreshes are deliberate policy changes: use them only for an offender
+named by an active plan, and never to accept unrelated growth or complexity.
+
+Repository-wide module guards:
+
+```bash
+scripts/ci/check_include_usage.sh
+scripts/ci/check_orphan_modules.sh
+```
+
+The include check remains advisory until the legacy hand-written sites are gone.
+The orphan check is blocking; conventional `fixtures/`, `snapshots/`, and
+`testdata/` directories are treated as data rather than compilable Rust source.
 
 Rust-analyzer baseline lint:
 

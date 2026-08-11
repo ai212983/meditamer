@@ -1,3 +1,5 @@
+use super::*;
+
 #[cfg(feature = "asset-upload-http")]
 #[test]
 fn parses_netcfg_set_with_password() {

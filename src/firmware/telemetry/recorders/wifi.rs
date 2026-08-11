@@ -1,3 +1,9 @@
+use core::sync::atomic::Ordering;
+
+use super::super::counters::*;
+use super::super::types::WifiScanPhase;
+use super::helpers::{saturating_add_u32, update_max_u32};
+
 pub(crate) fn record_wifi_connect_attempt(_channel_hint: Option<u8>, _auth_idx: usize) {
     WIFI_CONNECT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]

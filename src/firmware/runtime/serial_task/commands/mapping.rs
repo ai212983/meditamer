@@ -1,4 +1,7 @@
-pub(super) fn serial_command_event_and_responses(
+use super::types::SerialCommand;
+use crate::firmware::types::{AppEvent, SdCommand};
+
+pub(in crate::firmware::runtime) fn serial_command_event_and_responses(
     cmd: SerialCommand,
 ) -> (
     Option<AppEvent>,
@@ -118,6 +121,11 @@ pub(super) fn serial_command_event_and_responses(
             b"SDFATTRUNC BUSY\r\n",
         ),
         SerialCommand::Ping => unreachable!("ping command is handled inline"),
+        SerialCommand::UiCycleStep => unreachable!("UI step command is handled inline"),
+        #[cfg(feature = "ui-provider-fixture")]
+        SerialCommand::UiProviderFixtureStep => {
+            unreachable!("UI provider fixture command is handled inline")
+        }
         SerialCommand::Metrics
         | SerialCommand::TouchSchedReset
         | SerialCommand::Scheduler { .. }

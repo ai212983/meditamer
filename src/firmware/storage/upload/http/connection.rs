@@ -14,7 +14,7 @@ mod routes;
 pub(super) const HTTP_HEADER_READ_TIMEOUT_MS: u64 = 10_000;
 pub(super) const HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS: u64 = 500;
 pub(super) const HTTP_UPLOAD_BODY_READ_TIMEOUT_MS: u64 = 6_000;
-type SdPath = ([u8; SD_PATH_MAX], u8);
+pub type SdPath = ([u8; SD_PATH_MAX], u8);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RequestRouteKind {

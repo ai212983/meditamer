@@ -12,6 +12,7 @@ directory; nothing here should be treated as current guidance.
 | [`wifi/`](wifi/) | The zero-discovery blackout hunt: ~70 dated narrowing notes, the decision ledger, the regression protocol, and the [blackout diagnostic knobs](wifi/blackout-diagnostic-knobs.md) | The experiment novelty gate in `AGENTS.md` requires searching it before re-running any Wi-Fi knob |
 | [`upload/`](upload/) | Upload throughput history and the upload RFC, both sharded into `part-NN.md` | Same novelty gate; also the measurement record behind current throughput expectations |
 | [`research/`](research/) | Early product-vision research reports and brainstorming | Background for `docs/product/`; superseded by it |
+| [`refactors/`](refactors/) | Completed structural refactor plans, with their outcome, deviations, and device evidence | The record of why the module tree is shaped the way it is, and what was measured to prove each move safe |
 
 ## Before re-running a Wi-Fi or upload experiment
 

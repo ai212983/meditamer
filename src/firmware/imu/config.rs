@@ -5,7 +5,7 @@ use embassy_sync::{
 use super::types::{ImuPipelineInput, ImuSamplingDemand, ImuTraceContext};
 
 pub(crate) const IMU_INIT_RETRY_MS: u64 = 2_000;
-pub(crate) const TAP_TRACE_ENABLED: bool = false;
+pub(crate) const TAP_TRACE_ENABLED: bool = true;
 pub(crate) const TAP_TRACE_SAMPLE_MS: u64 = 25;
 pub(crate) const TAP_TRACE_AUX_SAMPLE_MS: u64 = 250;
 

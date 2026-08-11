@@ -161,6 +161,18 @@ pub struct DebugSnapshot {
     pub pcal_cfg1: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BinaryFramebufferDebugSnapshot {
+    pub current_hash: u32,
+    pub previous_hash: Option<u32>,
+    pub changed_bytes: usize,
+    pub changed_pixels: u32,
+    pub min_row: Option<usize>,
+    pub max_row: Option<usize>,
+    pub min_byte_column: Option<usize>,
+    pub max_byte_column: Option<usize>,
+}
+
 pub type Result<T, E> = core::result::Result<T, InkplateHalError<E>>;
 
 pub struct InkplateHal<I2C, D> {
@@ -175,7 +187,7 @@ pub struct InkplateHal<I2C, D> {
     /// Previous frame, used only to diff against `framebuffer_bw` when building
     /// the partial transition. Never read by an interrupt-masked scan pass, so
     /// unlike `framebuffer_bw` it can live in PSRAM; see
-    /// docs/development/dram-budget.md.
+    /// docs/reference/dram-budget.md.
     framebuffer_bw_previous: Option<&'static mut [u8; FRAMEBUFFER_BYTES]>,
     partial_transition: Option<&'static mut [u8; PARTIAL_TRANSITION_BYTES]>,
     partial_ready: bool,
@@ -199,5 +211,6 @@ mod panel_lifecycle;
 mod partial_transition;
 pub mod touch;
 mod waveform;
+pub(crate) use waveform::PANEL_CL_HIGH_HOLD_CYCLES;
 
 use hardware::*;

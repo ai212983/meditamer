@@ -1,20 +1,23 @@
-use embassy_time::Instant;
+use embassy_futures::yield_now;
+use embassy_time::{Instant, Timer};
 
-use super::{
-    panel_power_lease::{LeaseMaintenance, LeaseRefreshKind},
-    refresh_tracking::CompletedRefresh,
-    LvglState,
-};
+use super::{panel_power_lease::LeaseMaintenance, refresh_tracking::CompletedRefresh, LvglState};
 use crate::drivers::inkplate::{PartialGateDrainTiming, E_INK_HEIGHT};
 use crate::firmware::{
     config::AUTOMATIC_FULL_REFRESH_AFTER_PARTIAL_UPDATES, panel_bus, types::DisplayContext,
     ui::lvgl::DirtyArea,
 };
 
+const FORCE_FULL_REFRESH_DIAGNOSTIC: bool =
+    option_env!("MEDITAMER_TOUCH_FORCE_FULL_REFRESH").is_some();
+const POST_RELEASE_SETTLE_DIAGNOSTIC: bool =
+    option_env!("MEDITAMER_TOUCH_POST_RELEASE_SETTLE").is_some();
+
 pub(super) struct RefreshRequest<'a> {
     dirty: DirtyArea,
     input_ms: Option<u64>,
     phase: &'a str,
+    source: &'a str,
 }
 
 impl<'a> RefreshRequest<'a> {
@@ -23,6 +26,20 @@ impl<'a> RefreshRequest<'a> {
             dirty,
             input_ms: Some(input_ms),
             phase,
+            source: "physical_touch",
+        }
+    }
+
+    pub(super) const fn from_synthetic_touch(
+        dirty: DirtyArea,
+        input_ms: u64,
+        phase: &'a str,
+    ) -> Self {
+        Self {
+            dirty,
+            input_ms: Some(input_ms),
+            phase,
+            source: "synthetic_touch",
         }
     }
 
@@ -31,6 +48,16 @@ impl<'a> RefreshRequest<'a> {
             dirty,
             input_ms: None,
             phase: "service",
+            source: "service",
+        }
+    }
+
+    pub(super) const fn from_ui_cycle(dirty: DirtyArea) -> Self {
+        Self {
+            dirty,
+            input_ms: None,
+            phase: "ui_cycle_step",
+            source: "serial_ui_step",
         }
     }
 }
@@ -39,24 +66,21 @@ impl<'a> RefreshRequest<'a> {
 struct RefreshPlan {
     recovery_requested: bool,
     full_refresh: bool,
-    leave_panel_on: bool,
+    hold_terminal_state: bool,
 }
 
 impl RefreshPlan {
     fn for_state(state: &LvglState) -> Self {
         let recovery_requested = state.refresh_tracking.recovery_required();
-        let full_refresh = state
-            .refresh_tracking
-            .should_request_full(AUTOMATIC_FULL_REFRESH_AFTER_PARTIAL_UPDATES);
-        let leave_panel_on = !full_refresh
-            && state
-                .panel_power_lease
-                .policy()
-                .should_leave_on_for_partial();
+        let full_refresh = FORCE_FULL_REFRESH_DIAGNOSTIC
+            || state
+                .refresh_tracking
+                .should_request_full(AUTOMATIC_FULL_REFRESH_AFTER_PARTIAL_UPDATES);
+        let hold_terminal_state = !full_refresh && state.panel_power_lease.policy().enabled();
         Self {
             recovery_requested,
             full_refresh,
-            leave_panel_on,
+            hold_terminal_state,
         }
     }
 }
@@ -69,7 +93,6 @@ struct PanelRefreshOutcome {
 
 #[derive(Clone, Copy)]
 struct RefreshMeasurements {
-    finished_ms: u64,
     bus_quiet_wait_ms: u64,
     refresh_ms: u64,
     input_to_visible_ms: u64,
@@ -83,7 +106,6 @@ impl RefreshMeasurements {
             None => 0,
         };
         Self {
-            finished_ms: refresh_finished_ms,
             bus_quiet_wait_ms,
             refresh_ms: refresh_finished_ms.saturating_sub(refresh_started_ms),
             input_to_visible_ms,
@@ -138,7 +160,7 @@ pub(super) async fn service_panel_power_lease(context: &mut DisplayContext, stat
             panel_bus::resume_clients(false).await;
             match shutdown {
                 Ok(()) => esp_println::println!(
-                    "LVGL_PANEL_POWER_LEASE event=shutdown reason=idle_timeout status=ok active_ms={} shutdown_ms={}",
+                    "LVGL_PANEL_LEASE event=shutdown mode=terminal_hold reason=idle_timeout status=ok active_ms={} shutdown_ms={}",
                     active_ms,
                     Instant::now()
                         .as_millis()
@@ -147,7 +169,7 @@ pub(super) async fn service_panel_power_lease(context: &mut DisplayContext, stat
                 Err(error) => {
                     state.refresh_tracking.record_failure();
                     esp_println::println!(
-                        "LVGL_PANEL_POWER_LEASE event=shutdown reason=idle_timeout status=error error={:?} recovery=full_next active_ms={} shutdown_ms={}",
+                        "LVGL_PANEL_LEASE event=shutdown mode=terminal_hold reason=idle_timeout status=error error={:?} recovery=full_next active_ms={} shutdown_ms={}",
                         error,
                         active_ms,
                         Instant::now()
@@ -198,73 +220,74 @@ pub(super) async fn refresh_panel(
 ) -> bool {
     let refresh_started_ms = Instant::now().as_millis();
     let plan = RefreshPlan::for_state(state);
-    // The opt-in lease parks every successful partial transaction. Full
-    // refreshes and recovery transactions retain the mandatory shutdown
-    // boundary, while the idle timeout owns the eventual partial shutdown.
+
+    if POST_RELEASE_SETTLE_DIAGNOSTIC && request.phase == "released" {
+        esp_println::println!("LVGL_REFRESH phase=released settle_ms=5000");
+        Timer::after_millis(5_000).await;
+    }
+
+    if option_env!("MEDITAMER_PANEL_FRAME_DEBUG").is_some() {
+        let snapshot = context.inkplate.binary_framebuffer_debug_snapshot();
+        esp_println::println!(
+            "PANEL_FRAME phase=pre_refresh current_hash={:#010x} previous_hash={:?} changed_bytes={} changed_pixels={} rows={:?}..{:?} byte_columns={:?}..{:?}",
+            snapshot.current_hash,
+            snapshot.previous_hash,
+            snapshot.changed_bytes,
+            snapshot.changed_pixels,
+            snapshot.min_row,
+            snapshot.max_row,
+            snapshot.min_byte_column,
+            snapshot.max_byte_column,
+        );
+    }
+
+    // Keep an executor boundary between an LVGL flush into the binary
+    // framebuffer and the interrupt-locked panel scan. Hardware A/B testing
+    // showed identical framebuffer bytes corrupt without this handoff and
+    // remain stable with a single yield; no timed delay is required.
+    yield_now().await;
+
     let bus_quiet_started_ms = Instant::now().as_millis();
     panel_bus::suspend_clients().await;
     let bus_quiet_wait_ms = Instant::now()
         .as_millis()
         .saturating_sub(bus_quiet_started_ms);
-    let mut refresh_result = if plan.full_refresh {
-        match context
+
+    let refresh_result = if plan.full_refresh {
+        context
             .inkplate
             .display_bw_cooperative_async(
-                plan.leave_panel_on,
+                false,
                 panel_bus::open_touch_waveform_window,
                 panel_bus::close_touch_waveform_window,
             )
             .await
-        {
-            Ok(()) => Ok(PanelRefreshOutcome {
+            .map(|()| PanelRefreshOutcome {
                 completed: CompletedRefresh::Full,
                 timing: None,
-            }),
-            Err(error) => Err(error),
-        }
+            })
     } else {
-        match context
+        context
             .inkplate
             .display_bw_partial_gate_drain_no_cleanup_cooperative_async(
-                plan.leave_panel_on,
+                plan.hold_terminal_state,
                 panel_bus::open_touch_waveform_window,
                 panel_bus::close_touch_waveform_window,
             )
             .await
-        {
-            Ok(timing) => {
-                let completed = if timing.full_fallback {
+            .map(|timing| PanelRefreshOutcome {
+                completed: if timing.full_fallback {
                     CompletedRefresh::Full
                 } else if timing.scan_rows == 0 {
                     CompletedRefresh::NoChange
                 } else {
                     CompletedRefresh::Partial
-                };
-                Ok(PanelRefreshOutcome {
-                    completed,
-                    timing: Some(timing),
-                })
-            }
-            Err(error) => Err(error),
-        }
+                },
+                timing: Some(timing),
+            })
     };
-    // The partial API can fall back to a full waveform when its baseline is
-    // unavailable. That is not a successful partial, so close the parked
-    // transaction before releasing shared I2C ownership.
-    let parked_full_fallback = match &refresh_result {
-        Ok(outcome) => {
-            plan.leave_panel_on
-                && matches!(outcome.completed, CompletedRefresh::Full)
-                && matches!(outcome.timing, Some(timing) if timing.full_fallback)
-        }
-        Err(_) => false,
-    };
-    if parked_full_fallback {
-        if let Err(error) = context.inkplate.eink_off_async().await {
-            refresh_result = Err(error);
-        }
-    }
     panel_bus::resume_clients(false).await;
+
     let measurements =
         RefreshMeasurements::finish(refresh_started_ms, bus_quiet_wait_ms, request.input_ms);
     match refresh_result {
@@ -273,15 +296,16 @@ pub(super) async fn refresh_panel(
             state.refresh_tracking.record_failure();
             state.panel_power_lease.mark_panel_off();
             esp_println::println!(
-                "LVGL_REFRESH phase={} status=error requested={} error={:?} recovery=full_next dirty={},{},{},{} leave_on_requested={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={}",
+                "LVGL_REFRESH phase={} source={} status=error requested={} error={:?} recovery=full_next dirty={},{},{},{} terminal_hold_requested={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={}",
                 request.phase,
+                request.source,
                 if plan.full_refresh { "full" } else { "partial" },
                 error,
                 request.dirty.x1,
                 request.dirty.y1,
                 request.dirty.x2,
                 request.dirty.y2,
-                plan.leave_panel_on,
+                plan.hold_terminal_state,
                 measurements.bus_quiet_wait_ms,
                 measurements.refresh_ms,
                 measurements.input_to_visible_ms,
@@ -300,25 +324,34 @@ fn record_refresh_success(
     outcome: PanelRefreshOutcome,
 ) -> bool {
     state.refresh_tracking.record_success(outcome.completed);
-    let (lease_kind, kind, partial_strategy) = match outcome.completed {
-        CompletedRefresh::Full => (LeaseRefreshKind::Full, "full", "not_applicable"),
-        CompletedRefresh::Partial => (LeaseRefreshKind::Partial, "partial", "gate_neutral_drain"),
-        CompletedRefresh::NoChange => (LeaseRefreshKind::NoChange, "no_change", "not_applicable"),
+    let lease_renewed = match outcome.completed {
+        CompletedRefresh::Partial if plan.hold_terminal_state => state
+            .panel_power_lease
+            .record_partial_success(Instant::now().as_millis()),
+        CompletedRefresh::Full => {
+            state.panel_power_lease.mark_panel_off();
+            false
+        }
+        CompletedRefresh::Partial => false,
+        CompletedRefresh::NoChange => false,
     };
-    let lease_renewed = state
-        .panel_power_lease
-        .record_refresh_success(lease_kind, measurements.finished_ms);
+    let (kind, partial_strategy) = match outcome.completed {
+        CompletedRefresh::Full => ("full", "not_applicable"),
+        CompletedRefresh::Partial => ("partial", "gate_neutral_drain"),
+        CompletedRefresh::NoChange => ("no_change", "not_applicable"),
+    };
     let partial = PartialRefreshMetrics::from_timing(outcome.timing);
     esp_println::println!(
-        "LVGL_REFRESH phase={} status=ok kind={} recovery_requested={} dirty={},{},{},{} leave_on_requested={} power_lease_renewed={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={} partial_strategy={} transition_scan_rows={} neutral_drain_rows={} cleanup_zero_passes=0 cleanup_neutral_passes=0 waveform_us={} full_fallback={}",
+        "LVGL_REFRESH phase={} source={} status=ok kind={} recovery_requested={} dirty={},{},{},{} terminal_held={} lease_renewed={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={} partial_strategy={} transition_scan_rows={} neutral_drain_rows={} cleanup_zero_passes=0 cleanup_neutral_passes=0 waveform_us={} full_fallback={}",
         request.phase,
+        request.source,
         kind,
         plan.recovery_requested,
         request.dirty.x1,
         request.dirty.y1,
         request.dirty.x2,
         request.dirty.y2,
-        plan.leave_panel_on,
+        plan.hold_terminal_state,
         lease_renewed,
         measurements.bus_quiet_wait_ms,
         measurements.refresh_ms,
@@ -328,7 +361,7 @@ fn record_refresh_success(
         partial.transition_scan_rows,
         partial.neutral_drain_rows,
         partial.waveform_us,
-        partial.full_fallback
+        partial.full_fallback,
     );
     true
 }

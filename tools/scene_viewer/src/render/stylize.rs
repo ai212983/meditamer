@@ -1,4 +1,4 @@
-fn build_depth_relit_map(
+pub(super) fn build_depth_relit_map(
     depth: &[u8],
     normal_xy: Option<(&[u8], &[u8])>,
     width: usize,
@@ -66,7 +66,7 @@ fn build_depth_relit_map(
     out
 }
 
-fn ink_brush_delta(
+pub(super) fn ink_brush_delta(
     idx: usize,
     x: usize,
     y: usize,
@@ -156,7 +156,7 @@ fn hash01(x: i32, y: i32, seed: u32) -> f32 {
     (v as f32) / (u32::MAX as f32)
 }
 
-fn paper_noise_u8(x: i32, y: i32) -> u8 {
+pub(super) fn paper_noise_u8(x: i32, y: i32) -> u8 {
     let mut v = (x as u32).wrapping_mul(0x9E37_79B1) ^ (y as u32).wrapping_mul(0x85EB_CA77);
     v ^= v >> 15;
     v = v.wrapping_mul(0xC2B2_AE3D);

@@ -1,5 +1,9 @@
+use super::chain::write_fat_value;
+use crate::fat::engine::{CommandStage, FatBufferId, FatEngine, FatIoAction, FatStep};
+use crate::fat::{SdFatError, FAT32_EOC};
+
 impl FatEngine {
-    pub(super) fn advance_free(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn advance_free(&mut self) -> Result<FatStep, SdFatError> {
         if self.free.current < 2 {
             self.stage = CommandStage::Mutate;
             return Ok(FatStep::Continue);
@@ -69,7 +73,7 @@ impl FatEngine {
             write_fat_value(&mut self.workspace.sector, index, 0);
             count = count.saturating_add(1);
 
-            if !(2..super::super::FAT32_EOC).contains(&next) {
+            if !(2..FAT32_EOC).contains(&next) {
                 current = 0;
                 break;
             }

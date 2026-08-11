@@ -2,11 +2,14 @@ use crate::firmware::app_state::{AppStateCommand, DiagKind, DiagTargets};
 use crate::firmware::runtime::scheduling::SchedulerProfile;
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::types::NetConfigSet;
-use crate::firmware::types::{AppEvent, SdCommand, SD_PATH_MAX, SD_WRITE_MAX};
+use crate::firmware::types::{SD_PATH_MAX, SD_WRITE_MAX};
 
 #[derive(Clone, Copy)]
-pub(super) enum SerialCommand {
+pub(in crate::firmware::runtime) enum SerialCommand {
     Ping,
+    UiCycleStep,
+    #[cfg(feature = "ui-provider-fixture")]
+    UiProviderFixtureStep,
     Repaint,
     Metrics,
     TouchSchedReset,
@@ -103,19 +106,19 @@ pub(super) enum SerialCommand {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum SchedulerOperation {
+pub(in crate::firmware::runtime) enum SchedulerOperation {
     Status,
     Automatic,
     Profile(SchedulerProfile),
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum StateSetOperation {
+pub(in crate::firmware::runtime) enum StateSetOperation {
     Upload(bool),
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum TelemetryDomain {
+pub(in crate::firmware::runtime) enum TelemetryDomain {
     Wifi,
     Reassoc,
     Net,
@@ -124,7 +127,7 @@ pub(super) enum TelemetryDomain {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum TelemetrySetOperation {
+pub(in crate::firmware::runtime) enum TelemetrySetOperation {
     Domain {
         domain: TelemetryDomain,
         enabled: bool,
@@ -136,7 +139,7 @@ pub(super) enum TelemetrySetOperation {
 }
 
 impl StateSetOperation {
-    pub(super) fn as_state_command(self) -> AppStateCommand {
+    pub(in crate::firmware::runtime) fn as_state_command(self) -> AppStateCommand {
         match self {
             Self::Upload(enabled) => AppStateCommand::SetUpload(enabled),
         }
@@ -144,7 +147,7 @@ impl StateSetOperation {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum SdWaitTarget {
+pub(in crate::firmware::runtime) enum SdWaitTarget {
     Next,
     Last,
     Id(u32),

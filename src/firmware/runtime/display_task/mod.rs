@@ -90,7 +90,7 @@ async fn process_runtime_tasks(context: &mut DisplayContext, state: &mut Display
     // Button-only diagnostics resolve directly from edge events and therefore
     // do not run the touchscreen pipeline.
     if !matches!(state.gpio36_mode, Gpio36Mode::ButtonOnly) {
-        lvgl::process_cycle(context, &mut state.lvgl).await;
+        lvgl::process_cycle(context, &mut state.lvgl, !upload_enabled).await;
     }
     if upload_enabled {
         return;

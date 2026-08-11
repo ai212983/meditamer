@@ -1,10 +1,7 @@
-use super::super::super::{
-    app_state::AppStateCommand,
-    config::APP_STATE_APPLY_ACKS,
-    types::{AppEvent, AppStateApplyAck, DisplayContext, TouchStatus},
-};
+//! App-event handling for the display task.
 
-use super::gpio36_feedback::handle_gpio36_action;
+use super::super::super::types::DisplayContext;
+
 use super::state::DisplayLoopState;
 
 pub(super) async fn handle_pending_imu_actions(
@@ -27,8 +24,11 @@ pub(super) async fn handle_pending_imu_actions(
     }
 }
 
-include!("app_events/status_mapping.rs");
-include!("app_events/dispatch.rs");
-include!("app_events/lifecycle.rs");
-include!("app_events/repaint.rs");
-include!("app_events/apply_state.rs");
+mod apply_state;
+mod dispatch;
+mod lifecycle;
+mod repaint;
+mod status_mapping;
+mod ui_cycle;
+
+pub(super) use dispatch::handle_app_event;

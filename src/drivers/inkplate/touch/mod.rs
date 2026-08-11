@@ -2,6 +2,8 @@ mod elan;
 mod power;
 mod protocol;
 
+pub(crate) use protocol::{active_slots, is_touch_report};
+
 use super::{I2cOps, InkplateHalError, Result};
 
 pub struct InkplateTouch<I2C> {

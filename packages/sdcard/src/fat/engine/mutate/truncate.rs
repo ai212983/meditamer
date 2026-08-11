@@ -1,5 +1,11 @@
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatEngine, FatReadReturn, FatRequest, FatResult, FatStep, FatWriteReturn,
+};
+use crate::fat::{clusters_for_size, SdFatError, FAT32_EOC, FAT32_EOC_WRITE, SD_SECTOR_SIZE};
+
 impl FatEngine {
-    fn begin_truncate(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_truncate(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         if found.record.is_dir() {
             return Err(SdFatError::IsDirectory);
@@ -58,7 +64,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn advance_truncate_traverse(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn advance_truncate_traverse(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.traverse_remaining == 0 {
             if self.mutation.target_clusters > self.mutation.old_clusters {
                 let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
@@ -82,10 +88,13 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    pub(super) fn after_truncate_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn after_truncate_fat_read(
+        &mut self,
+        value: u32,
+    ) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         if self.fat_read_return == FatReadReturn::TruncateFreeStart {
-            self.mutation.free_start = if value >= super::super::FAT32_EOC {
+            self.mutation.free_start = if value >= FAT32_EOC {
                 0
             } else if value < 2 || value > volume.total_clusters.saturating_add(1) {
                 return Err(SdFatError::BadCluster(value));
@@ -99,9 +108,7 @@ impl FatEngine {
             self.stage = CommandStage::WriteFat;
             return Ok(FatStep::Continue);
         }
-        if !(2..super::super::FAT32_EOC).contains(&value)
-            || value > volume.total_clusters.saturating_add(1)
-        {
+        if !(2..FAT32_EOC).contains(&value) || value > volume.total_clusters.saturating_add(1) {
             return Err(SdFatError::ClusterChainTooLong);
         }
         self.mutation.tail_cluster = value;
@@ -110,7 +117,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn finish_truncate_allocation(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn finish_truncate_allocation(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.old_clusters == 0 {
             self.mutation.new_first = self.allocation.first;
             self.mutation.tail_cluster = self.allocation.first;
@@ -124,14 +131,14 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn read_truncate_free_start(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn read_truncate_free_start(&mut self) -> Result<FatStep, SdFatError> {
         self.fat_read.start(self.mutation.tail_cluster);
         self.fat_read_return = FatReadReturn::TruncateFreeStart;
         self.stage = CommandStage::ReadFat;
         Ok(FatStep::Continue)
     }
 
-    fn free_truncated_suffix(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn free_truncated_suffix(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.free_start >= 2 {
             self.free.start(
                 self.mutation.free_start,
@@ -148,7 +155,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn start_truncate_zero(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn start_truncate_zero(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.target_size > self.mutation.old_size {
             let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
             let cluster_size = SD_SECTOR_SIZE as u32 * u32::from(volume.sectors_per_cluster);
@@ -192,7 +199,7 @@ impl FatEngine {
         self.finish_truncate()
     }
 
-    fn finish_truncate(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn finish_truncate(&mut self) -> Result<FatStep, SdFatError> {
         self.mutation.data_len = self.mutation.target_size;
         self.mutation.stage = MutationStage::WaitData;
         self.stage = CommandStage::Mutate;

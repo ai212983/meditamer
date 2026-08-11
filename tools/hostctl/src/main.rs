@@ -17,6 +17,7 @@ use workflows::runtime_modes::RuntimeModesSmokeOptions;
 use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
 use workflows::serial::RepaintOptions;
 use workflows::troubleshoot::TroubleshootOptions;
+use workflows::ui_lifecycle::UiLifecycleOptions;
 use workflows::upload::UploadOptions;
 use workflows::wifi::acceptance::WifiAcceptanceOptions;
 use workflows::wifi::discovery::WifiDiscoveryDebugOptions;
@@ -107,6 +108,7 @@ enum TestSubcommand {
     SdcardHw(SdcardArgs),
     SdcardBurstRegression(SdcardBurstArgs),
     Troubleshoot(TroubleshootArgs),
+    UiLifecycle(UiLifecycleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -148,6 +150,16 @@ struct SdcardBurstArgs {
 struct TroubleshootArgs {
     #[arg(long, default_value = "debug")]
     build_mode: String,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct UiLifecycleArgs {
+    #[arg(long, default_value_t = 2)]
+    cycles: u16,
+    #[arg(long, default_value_t = 0)]
+    max_baseline_drift_bytes: usize,
     #[arg(long)]
     output: Option<PathBuf>,
 }
@@ -252,6 +264,14 @@ fn run(cli: Cli) -> Result<()> {
                 &mut logger,
                 TroubleshootOptions {
                     build_mode: test_args.build_mode,
+                    output_path: test_args.output,
+                },
+            ),
+            TestSubcommand::UiLifecycle(test_args) => workflows::ui_lifecycle::run_ui_lifecycle(
+                &mut logger,
+                UiLifecycleOptions {
+                    cycles: test_args.cycles,
+                    max_baseline_drift_bytes: test_args.max_baseline_drift_bytes,
                     output_path: test_args.output,
                 },
             ),

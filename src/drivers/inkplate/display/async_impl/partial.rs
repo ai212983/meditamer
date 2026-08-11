@@ -86,10 +86,9 @@ where
         transaction
     }
 
-    /// Production fast partial transaction. It scans through the final changed
-    /// gate, drains the remaining gate chain with neutral source data, omits
-    /// uniform cleanup scans, and retains the terminal vscan_start() parking
-    /// step used by every other waveform.
+    /// Scans through the final changed gate, drains the remaining gate chain
+    /// with neutral source data, and omits the reference cleanup passes. Panel
+    /// power finalization remains controlled by `leave_on`.
     pub(crate) async fn display_bw_partial_gate_drain_no_cleanup_cooperative_async<
         Open,
         OpenFuture,

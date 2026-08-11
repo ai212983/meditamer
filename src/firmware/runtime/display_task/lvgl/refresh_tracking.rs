@@ -42,9 +42,7 @@ impl RefreshTracking {
                 self.partial_count = self.partial_count.saturating_add(1);
                 self.recovery_required = false;
             }
-            CompletedRefresh::NoChange => {
-                self.recovery_required = false;
-            }
+            CompletedRefresh::NoChange => {}
         }
     }
 

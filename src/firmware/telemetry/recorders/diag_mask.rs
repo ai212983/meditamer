@@ -1,3 +1,7 @@
+use core::sync::atomic::Ordering;
+
+use super::super::counters::{DIAG_MASK, DIAG_MASK_ALL};
+
 pub(crate) fn diag_mask() -> u32 {
     DIAG_MASK.load(Ordering::Relaxed)
 }

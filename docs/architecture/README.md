@@ -15,8 +15,8 @@ vocabulary, numbering, and amendment rules.
 | [0008](0008-app-catalogue-and-launcher.md) | App catalogue and launcher | Proposed |
 
 Execution for ADR-0006 through ADR-0008 is tracked in the
-[UI and app structure rework plan](../development/ui-app-structure-rework-plan.md) and its
-[implementation ledger](../development/ui-app-structure-rework-ledger.md).
+[UI and app structure rework plan](../plans/ui-app-structure-rework-plan.md) and its
+[implementation ledger](../plans/ui-app-structure-rework-ledger.md).
 
 ADRs 0001–0008 pre-date the `Author:` convention and are unattributed. Do not
 backfill them with a guess; new ADRs must carry the line.

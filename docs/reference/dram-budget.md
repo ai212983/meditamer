@@ -64,27 +64,28 @@ line, not a real near-exhaustion.
 
 ### UI shell reservation and latest lifecycle measurement
 
-Capacities remain providers 8, surfaces 16, navigation 8, overlays 4, modals 4, intents 8, callback
-routes 2, and UI-step acknowledgements 2. Retained payload is zero; four future references are unallocated.
+Capacities remain providers 8, surfaces 16, navigation 8, overlays 4, modals 4, intents 8, callback routes 5, and UI-step acknowledgements 2. The fifth route belongs to the base sticky refresh control while four remain available for an atomic screen/modal handoff. Retained payload is zero; four future references are unallocated.
 
 | Exact debug layout | Xtensa bytes |
 | --- | ---: |
-| `ShellModel` (`960` host) / `CompositionReferences<4, 4>` | 924 / 168 |
-| `Backend` / `LvglState` | 1104 / 1336 |
-| `ActiveSurface` / `TimerServiceMetrics` | 52 / 24 |
-| `PreparedNavigation` / `NavigationPlan` / `TransitionResult` | 172 / 152 / 136 |
-| Callback intent queue / route table, including mutex wrappers | 272 / 212 |
+| `ShellModel` (`1048` host) / `CompositionReferences<4, 4>` | 1008 / 232 |
+| `Backend` / `LvglState` / display-loop state | 1576 / 1808 / 1840 |
+| `ActiveOverlay` / `OwnedShellIntent` | 36 / 36 |
+| `PreparedNavigation` / `CompositionPlan` / `PreparedComposition` | 812 / 640 / 644 |
+| `ProviderRemovalPlan` / pending removal / runtime audit | 824 / 32 / 8 |
+| Callback action queue / route table, including mutex wrappers | 304 / 684 |
+| Full-repaint request latch | 1 |
 | `lv_mem_monitor_t` / allocator snapshot stack temporaries | 28 / 52 |
 
-The Phase 3 release ELF has pool 4128 bytes, callback storage 272/212/1, `.data` 14036, `.bss` 67876,
-`.stack` 114156, and `.dram2_uninit` 104392. Against E-0003, named UI storage grew 376 bytes, linked
-`.data` plus `.bss` grew 360, and stack remainder fell 352; alignment absorbed the difference.
+The Phase 3 release ELF has pool 4128, callback storage 272/212/1, `.data` 14036, `.bss` 67876, `.stack` 114156, and `.dram2_uninit` 104392; against E-0003, linked `.data` plus `.bss` grew 360.
 
-The E-0006 lane added a 40-byte result channel; its release artifact has `.data` 14156, `.bss` 67916,
-and `.stack` 113988. Release/debug cycles recorded CPU0 minima 101064/101304 and stable LVGL blocks.
+E-0006 added a 40-byte result channel; its release `.data`/`.bss`/`.stack` is 14156/67916/113988, and release/debug cycles recorded CPU0 minima 101064/101304 with stable LVGL blocks.
 
-The Phase 4 pure model adds 48 bytes to the shell/backend/state/display pool (now 4176). Release is
-`.data` 14092, `.bss` 67948, `.stack` 114020; callback/ACK statics and capacities are unchanged.
+The identified base-modal release uses pool 4448, sections 14428/68260/113372, and CPU0 minimum
+98976. The identified fixture uses pool 4648, sections 14484/68468/113116, `.dram2_uninit` 104392,
+and a deepest known debug removal chain near 8288 bytes. Two device removals measured CPU0 minimum
+98384, LVGL use 9628/9668, 193 blocks, 3% fragmentation, and constant external-heap use. No budget
+blocker was observed; repeat the exact-owner unload gate before promoting external providers.
 
 ## What Was Recovered
 

@@ -39,11 +39,23 @@ the user actually lifts a finger.
 - `tasks/acquisition.rs`: GPIO36 ownership, controller lifecycle, and raw sample publication.
 - `tasks/acquisition/state.rs`: pure acquisition timing state.
 - `tasks/pipeline.rs`: normalization and gesture time advancement.
+- `lvgl_multitouch.rs`: stable two-slot transition records for LVGL's multi-touch recognizers.
 - `scheduling.rs`: acquisition-loop and active-sample latency telemetry.
 - `normalize.rs`: continuity + filtering for noisy frames.
 - `core.rs`: `statig` gesture engine.
 - `debug_log.rs`: UART formatting for touch traces.
 - `mod.rs`: adapter from HAL samples to normalized core events.
+
+The existing normalized single-touch engine remains authoritative for taps, long presses, and
+one-finger swipes. Raw two-slot reports also enter a bounded LVGL-only lane while both contacts are
+active, followed by one terminating report. LVGL recognizes pinch, rotation, and two-finger swipe
+gestures from that lane. A queue discontinuity releases all LVGL slots and suppresses the rest of
+that physical gesture so dropped reports cannot create a false recognition.
+
+The two-page LVGL carousel contains Home and Multi-gesture pages, navigated by the left/right
+buttons. The gesture page displays the completed recognizer type and measurements after the
+controller confirms that all contact slots are released, avoiding an e-paper refresh in the middle
+of gesture teardown.
 
 ## Shared GPIO36 Input
 

@@ -1,3 +1,9 @@
+use core::sync::atomic::Ordering;
+
+use super::super::counters::*;
+use super::super::types::{NetPipelineGate, UploadHttpPhaseMetrics};
+use super::helpers::{saturating_add_u32, update_max_u32};
+
 pub(crate) fn record_upload_http_accept() {
     UPLOAD_HTTP_ACCEPTS.fetch_add(1, Ordering::Relaxed);
     #[cfg(feature = "telemetry-defmt")]

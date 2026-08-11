@@ -8,10 +8,12 @@ mod state;
 #[path = "basic/telemetry.rs"]
 mod telemetry;
 
+#[cfg(feature = "ui-provider-fixture")]
+pub(super) use common::parse_ui_provider_fixture_step_command;
 pub(super) use common::{
     parse_allocator_alloc_probe_command, parse_allocator_status_command, parse_metrics_command,
     parse_metrics_net_command, parse_ping_command, parse_repaint_command, parse_scheduler_command,
-    parse_sdprobe_command, parse_touch_sched_reset_command,
+    parse_sdprobe_command, parse_touch_sched_reset_command, parse_ui_cycle_step_command,
 };
 #[cfg(feature = "asset-upload-http")]
 pub(super) use network::{

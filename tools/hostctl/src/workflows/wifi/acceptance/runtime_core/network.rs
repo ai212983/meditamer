@@ -1,5 +1,27 @@
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
+use super::health::{
+    is_ready_without_listener, should_force_recover_before_start,
+    should_retry_wait_ready_after_recover,
+};
+
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+
+use crate::{
+    env_utils,
+    workflows::wifi::common::{
+        ctx_get_u32, is_ready, netcfg_set_payload, query_net_status, wait_net_ack, NetStatus,
+    },
+};
+
+use super::super::{wait_ready::wait_ready, WifiAcceptanceRuntime};
+
 impl WifiAcceptanceRuntime<'_> {
-    fn handle_net_apply_config(&mut self) -> Result<()> {
+    pub(super) fn handle_net_apply_config(&mut self) -> Result<()> {
         if query_net_status(&mut self.console)?
             .as_ref()
             .is_some_and(|status| is_ready(status, true))
@@ -12,7 +34,7 @@ impl WifiAcceptanceRuntime<'_> {
         wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
     }
 
-    fn handle_net_start(&mut self) -> Result<()> {
+    pub(super) fn handle_net_start(&mut self) -> Result<()> {
         if self.should_skip_net_start_if_ready()? {
             return Ok(());
         }
@@ -168,7 +190,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_init_wait_ready_recovery(&mut self) -> Result<Value> {
+    pub(super) fn handle_init_wait_ready_recovery(&mut self) -> Result<Value> {
         let recover_retries =
             env_utils::parse_env_u32("HOSTCTL_NET_WAIT_READY_RECOVER_RETRIES", 1)?;
         Ok(serde_json::json!({
@@ -181,7 +203,7 @@ impl WifiAcceptanceRuntime<'_> {
         }))
     }
 
-    fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<Value> {
+    pub(super) fn handle_net_wait_ready_once(&mut self, context: &mut Value) -> Result<Value> {
         let result = match wait_ready(&mut self.console, self.policy) {
             Ok(result) => result,
             Err(err) => {
@@ -222,5 +244,4 @@ impl WifiAcceptanceRuntime<'_> {
             "upload_error": ""
         }))
     }
-
 }

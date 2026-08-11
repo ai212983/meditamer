@@ -1,8 +1,16 @@
-fn validate_post_command_options(opts: &FlashCaptureOptions) -> Result<()> {
-    match (
-        opts.post_command.as_deref(),
-        opts.post_pattern.as_deref(),
-    ) {
+use super::flash::build_app_binary;
+use super::{FlashCaptureOptions, OutputPaths};
+use std::{
+    env,
+    fs::{self},
+    path::Path,
+    process::Command,
+};
+
+use anyhow::{anyhow, bail, Result};
+
+pub fn validate_post_command_options(opts: &FlashCaptureOptions) -> Result<()> {
+    match (opts.post_command.as_deref(), opts.post_pattern.as_deref()) {
         (Some(command), Some(pattern)) if !command.trim().is_empty() && !pattern.is_empty() => {}
         (None, None) => return Ok(()),
         (Some(_), None) => bail!("--post-pattern is required with --post-command"),
@@ -15,7 +23,7 @@ fn validate_post_command_options(opts: &FlashCaptureOptions) -> Result<()> {
     Ok(())
 }
 
-fn archive_firmware_artifacts(
+pub fn archive_firmware_artifacts(
     image_path: &Path,
     outputs: &OutputPaths,
     repo_dir: &Path,

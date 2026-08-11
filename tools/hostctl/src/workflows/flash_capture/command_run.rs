@@ -1,16 +1,34 @@
+use super::command_relay::{
+    handle_idle_timeout, handle_progress_timeout, spawn_log_tee, wait_for_log_threads,
+};
+use super::{CommandMonitorState, CommandProgressMode, CommandSpec};
+use std::{
+    fs::OpenOptions,
+    io::Write,
+    path::Path,
+    process::{Command, ExitStatus, Stdio},
+    sync::{mpsc, Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
+
+use anyhow::Result;
+
+use crate::logging::ensure_parent_dir;
+
 #[derive(Clone, Copy, Debug)]
-struct CommandRunOptions<'a> {
-    timeout: Option<Duration>,
-    progress_interval: Option<Duration>,
-    progress_label: Option<&'a str>,
-    idle_timeout: Option<Duration>,
-    progress_stall_timeout: Option<Duration>,
-    progress_mode: Option<CommandProgressMode>,
-    log_drain_timeout: Duration,
+pub struct CommandRunOptions<'a> {
+    pub(super) timeout: Option<Duration>,
+    pub(super) progress_interval: Option<Duration>,
+    pub(super) progress_label: Option<&'a str>,
+    pub(super) idle_timeout: Option<Duration>,
+    pub(super) progress_stall_timeout: Option<Duration>,
+    pub(super) progress_mode: Option<CommandProgressMode>,
+    pub(super) log_drain_timeout: Duration,
 }
 
 impl CommandRunOptions<'_> {
-    const fn new(log_drain_timeout: Duration) -> Self {
+    pub(super) const fn new(log_drain_timeout: Duration) -> Self {
         Self {
             timeout: None,
             progress_interval: None,
@@ -23,7 +41,7 @@ impl CommandRunOptions<'_> {
     }
 }
 
-fn run_command_logged(
+pub fn run_command_logged(
     spec: &CommandSpec,
     log_path: &Path,
     opts: CommandRunOptions<'_>,
@@ -104,8 +122,7 @@ fn run_command_logged(
             started,
             heartbeat_label,
         )?;
-        if let Some(status) = handle_command_timeout(&mut child, log_path, opts.timeout, started)?
-        {
+        if let Some(status) = handle_command_timeout(&mut child, log_path, opts.timeout, started)? {
             wait_for_log_threads(
                 &mut log_threads,
                 &relay_done_rx,
@@ -143,7 +160,7 @@ fn run_command_logged(
     }
 }
 
-fn append_log_line(path: &Path, line: &str) -> Result<()> {
+pub(super) fn append_log_line(path: &Path, line: &str) -> Result<()> {
     ensure_parent_dir(path)?;
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     file.write_all(line.as_bytes())?;
@@ -175,7 +192,9 @@ fn emit_heartbeat(
             let line = format!("{heartbeat_label} in progress... elapsed {elapsed}s");
             println!("{line}");
             append_log_line(log_path, &format!("{line}\n"))?;
-            *next_progress = deadline.checked_add(interval).or_else(|| now.checked_add(interval));
+            *next_progress = deadline
+                .checked_add(interval)
+                .or_else(|| now.checked_add(interval));
         }
     }
     Ok(())

@@ -65,10 +65,13 @@ where
     }
 
     pub async fn read_latest(&mut self) -> Result<RawImuSample, I2C::Error> {
+        // Sample the expander port before TAP_SRC. LIR is enabled in `init`, so
+        // reading TAP_SRC is what de-asserts INT1; the reverse order always
+        // observes a low pin and `int1` is dead.
+        let interrupt_port = self.read_register(IO_INT_ADDR, PCAL_INPUT_PORT1).await?;
         let tap_src = self
             .read_register(LSM6DS3_ADDR, LSM6DS3_REG_TAP_SRC)
             .await?;
-        let interrupt_port = self.read_register(IO_INT_ADDR, PCAL_INPUT_PORT1).await?;
         let mut raw = [0u8; 12];
         self.write_read_with_retry(LSM6DS3_ADDR, &[LSM6DS3_REG_OUTX_L_G], &mut raw)
             .await?;

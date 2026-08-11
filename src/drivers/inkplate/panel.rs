@@ -1,7 +1,7 @@
 use super::{
-    DelayOps, GpioFast, I2cOps, InkplateHal, InkplateHalError, PinMode, Result, CL_MASK, DATA_MASK,
-    GMOD, IO_INT_ADDR, OE, PANEL_OUT1_ENABLE_MASK, PANEL_OUT_ENABLE_MASK, PWRUP, PWR_GOOD_OK, SPV,
-    TPS65186_ADDR, VCOM, WAKEUP,
+    DelayOps, GpioFast, I2cOps, InkplateHal, InkplateHalError, PinMode, Result, GMOD, IO_INT_ADDR,
+    OE, PANEL_OUT1_ENABLE_MASK, PANEL_OUT_ENABLE_MASK, PWRUP, PWR_GOOD_OK, SPV, TPS65186_ADDR,
+    VCOM, WAKEUP,
 };
 
 impl<I2C, D> InkplateHal<I2C, D>
@@ -74,14 +74,12 @@ where
         self.vscan_start().await?;
         for _ in 0..8 {
             self.hscan_start(send);
-            GpioFast::out_set(send | CL_MASK);
-            GpioFast::out_clear(DATA_MASK | CL_MASK);
+            self.write_data_and_clock(send);
             for _ in 0..8 {
                 self.pulse_cl_only();
                 self.pulse_cl_only();
             }
-            GpioFast::out_set(send | CL_MASK);
-            GpioFast::out_clear(DATA_MASK | CL_MASK);
+            self.write_data_and_clock(send);
             self.vscan_end();
         }
         self.delay.delay_us(230);

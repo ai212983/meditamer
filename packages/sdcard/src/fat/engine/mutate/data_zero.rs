@@ -1,5 +1,11 @@
+use crate::fat::engine::{
+    CommandStage, FatBufferId, FatEngine, FatIoAction, FatReadReturn, FatRequest, FatStep,
+};
+use crate::fat::{cluster_to_lba, SdFatError, FAT32_EOC, SD_SECTOR_SIZE};
+use core::cmp;
+
 impl FatEngine {
-    pub(super) fn advance_data_write(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn advance_data_write(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         if self.data_write.remaining == 0 {
             if matches!(self.request, Some(FatRequest::UploadChunk { .. })) {
@@ -14,8 +20,7 @@ impl FatEngine {
                     self.stage = CommandStage::Mutate;
                     return Ok(FatStep::Continue);
                 }
-                let cluster_size =
-                    SD_SECTOR_SIZE as u32 * u32::from(volume.sectors_per_cluster);
+                let cluster_size = SD_SECTOR_SIZE as u32 * u32::from(volume.sectors_per_cluster);
                 if self.mutation.data_len != 0
                     && self.mutation.data_len.is_multiple_of(cluster_size)
                     && self.mutation.target_clusters < self.upload.allocated_clusters
@@ -128,7 +133,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    pub(super) fn advance_zero_write(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn advance_zero_write(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         if self.zero_write.remaining == 0 {
             self.stage = CommandStage::Mutate;
@@ -186,11 +191,12 @@ impl FatEngine {
         }
     }
 
-    pub(super) fn after_zero_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn after_zero_fat_read(
+        &mut self,
+        value: u32,
+    ) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-        if !(2..super::super::FAT32_EOC).contains(&value)
-            || value > volume.total_clusters.saturating_add(1)
-        {
+        if !(2..FAT32_EOC).contains(&value) || value > volume.total_clusters.saturating_add(1) {
             return Err(SdFatError::ClusterChainTooLong);
         }
         self.zero_write.cluster = value;
@@ -199,11 +205,14 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    pub(super) fn after_mutation_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn after_mutation_fat_read(
+        &mut self,
+        value: u32,
+    ) -> Result<FatStep, SdFatError> {
         match self.fat_read_return {
             FatReadReturn::DataWrite => {
                 let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-                if value >= super::super::FAT32_EOC {
+                if value >= FAT32_EOC {
                     return Err(SdFatError::ClusterChainTooLong);
                 }
                 if value < 2 || value > volume.total_clusters.saturating_add(1) {
@@ -216,7 +225,7 @@ impl FatEngine {
             }
             FatReadReturn::UploadCursor => {
                 let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-                if value >= super::super::FAT32_EOC {
+                if value >= FAT32_EOC {
                     return Err(SdFatError::ClusterChainTooLong);
                 }
                 if value < 2 || value > volume.total_clusters.saturating_add(1) {
@@ -230,11 +239,12 @@ impl FatEngine {
         }
     }
 
-    pub(super) fn after_append_fat_read(&mut self, value: u32) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn after_append_fat_read(
+        &mut self,
+        value: u32,
+    ) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-        if !(2..super::super::FAT32_EOC).contains(&value)
-            || value > volume.total_clusters.saturating_add(1)
-        {
+        if !(2..FAT32_EOC).contains(&value) || value > volume.total_clusters.saturating_add(1) {
             return Err(SdFatError::ClusterChainTooLong);
         }
         self.mutation.tail_cluster = value;

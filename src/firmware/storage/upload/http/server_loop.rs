@@ -1,4 +1,14 @@
-pub(super) async fn run_http_server(stack: Stack<'static>) {
+use crate::firmware::runtime::service_mode;
+use crate::firmware::telemetry;
+use embassy_net::Stack;
+use embassy_time::{Duration, Instant, Timer};
+
+use super::diagnostics::{
+    dhcp_ipv4_status, elapsed_ms_u32, log_http_mem_diag, net_pipeline_gate_reason_str,
+};
+use super::socket_cycle::serve_connection_cycle;
+use super::{HttpServerBuffers, HttpServerLoopState, DHCP_POLL_MS, UPLOAD_HTTP_PORT};
+pub(in crate::firmware::storage::upload) async fn run_http_server(stack: Stack<'static>) {
     let mut buffers = HttpServerBuffers::new();
     let mut state = HttpServerLoopState::new();
     telemetry::set_upload_http_listener(false, None);

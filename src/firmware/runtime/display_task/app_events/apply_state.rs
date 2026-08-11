@@ -1,4 +1,13 @@
-async fn handle_apply_app_state_command_event(
+use super::status_mapping::apply_status_code;
+use crate::firmware::{
+    app_state::AppStateCommand,
+    config::APP_STATE_APPLY_ACKS,
+    types::{AppStateApplyAck, DisplayContext},
+};
+
+use super::super::state::DisplayLoopState;
+
+pub(super) async fn handle_apply_app_state_command_event(
     context: &mut DisplayContext,
     state: &mut DisplayLoopState,
     command: AppStateCommand,

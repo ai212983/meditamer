@@ -3,6 +3,7 @@ use embassy_time::Instant;
 use super::{
     panel_power_lease::{PanelPowerLease, PanelPowerLeasePolicy},
     refresh_tracking::RefreshTracking,
+    touch_equivalence::TouchEquivalenceProbe,
 };
 use crate::firmware::ui::lvgl::{Backend, DirtyArea};
 
@@ -13,6 +14,8 @@ pub(in crate::firmware::runtime::display_task) struct LvglState {
     pub(super) refresh_tracking: RefreshTracking,
     pub(super) panel_power_lease: PanelPowerLease,
     pub(super) pending_dirty: Option<DirtyArea>,
+    pub(super) gesture_page_refresh_pending: bool,
+    pub(super) touch_equivalence: TouchEquivalenceProbe,
 }
 
 impl LvglState {
@@ -24,6 +27,8 @@ impl LvglState {
             refresh_tracking: RefreshTracking::new(),
             panel_power_lease: PanelPowerLease::new(PanelPowerLeasePolicy::configured()),
             pending_dirty: None,
+            gesture_page_refresh_pending: false,
+            touch_equivalence: TouchEquivalenceProbe::new(),
         }
     }
 

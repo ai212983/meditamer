@@ -1,15 +1,9 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+//! Runtime diagnostics session: SD and Wi-Fi self-checks driven from the serial console.
 
-use embassy_time::{with_timeout, Duration, Timer};
+mod control;
+mod model;
+mod sd_checks;
+mod wifi;
 
-use crate::firmware::{
-    app_state::{AppStateDiagControl, DiagKind},
-    config::{DIAG_CONTROL_EVENTS, SD_DIAG_RESULTS, SD_REQUESTS},
-    telemetry,
-    types::{SdCommand, SdRequest, SdResult},
-};
-
-include!("diagnostics/model.rs");
-include!("diagnostics/control.rs");
-include!("diagnostics/sd_checks.rs");
-include!("diagnostics/wifi.rs");
+pub(crate) use control::diagnostics_task;
+pub(crate) use model::read_diag_runtime_status;

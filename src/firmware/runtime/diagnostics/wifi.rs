@@ -1,4 +1,14 @@
-async fn run_wifi_check(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+use super::control::session_interrupt_outcome;
+use super::model::{
+    set_status, SessionOutcome, CODE_OK, CODE_WIFI_DISABLED, CODE_WIFI_NOT_READY, DIAG_POLL_MS,
+    DIAG_WIFI_TIMEOUT_MS, STATE_RUNNING, STEP_WIFI_READY,
+};
+
+use embassy_time::{Duration, Timer};
+
+use crate::firmware::{app_state::DiagKind, telemetry};
+
+pub(super) async fn run_wifi_check(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
     if let Some(outcome) = session_interrupt_outcome(kind, targets) {
         return Some(outcome);
     }

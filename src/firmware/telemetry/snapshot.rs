@@ -1,3 +1,8 @@
+use core::sync::atomic::Ordering;
+
+use super::counters::*;
+use super::types::Snapshot;
+
 pub(crate) fn snapshot() -> Snapshot {
     fn decode_rssi_dbm(encoded: u32) -> i32 {
         if encoded == u32::MAX {
@@ -99,8 +104,7 @@ pub(crate) fn snapshot() -> Snapshot {
             .load(Ordering::Relaxed),
         upload_http_upload_commit_ms_total: UPLOAD_HTTP_UPLOAD_COMMIT_MS_TOTAL
             .load(Ordering::Relaxed),
-        upload_http_upload_commit_ms_max: UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX
-            .load(Ordering::Relaxed),
+        upload_http_upload_commit_ms_max: UPLOAD_HTTP_UPLOAD_COMMIT_MS_MAX.load(Ordering::Relaxed),
         upload_http_upload_chunk_p50_ms_max: UPLOAD_HTTP_UPLOAD_CHUNK_P50_MS_MAX
             .load(Ordering::Relaxed),
         upload_http_upload_chunk_p95_ms_max: UPLOAD_HTTP_UPLOAD_CHUNK_P95_MS_MAX

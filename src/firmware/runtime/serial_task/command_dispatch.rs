@@ -8,23 +8,23 @@ use super::{
         SerialCommand,
     },
     io::{
-        drain_app_state_apply_acks, run_allocator_alloc_probe, run_sdwait_command,
-        wait_app_state_apply_ack, write_allocator_status_line, write_diag_status_line,
-        write_sd_request_queued, write_state_status_line,
+        drain_app_state_apply_acks, drain_ui_cycle_step_acks, run_allocator_alloc_probe,
+        run_sdwait_command, wait_app_state_apply_ack, wait_ui_cycle_step_ack,
+        write_allocator_status_line, write_diag_status_line, write_sd_request_queued,
+        write_state_status_line,
     },
     metrics,
     queue::{enqueue_app_event_with_retry, enqueue_sd_request_with_retry},
     task_state::SerialTaskState,
 };
-use crate::firmware::{
-    config::APP_STATE_APPLY_ACK_TIMEOUT_MS,
-    touch::debug_log::uart_write_all,
-    types::{AppEvent, SdCommand, SdRequest, SerialUart},
-};
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::{
-    config::NET_CONTROL_COMMANDS, runtime::service_mode, storage::upload::wifi,
-    types::NetControlCommand,
+    config::NET_CONTROL_COMMANDS, net::wifi, runtime::service_mode, types::NetControlCommand,
+};
+use crate::firmware::{
+    config::{APP_STATE_APPLY_ACK_TIMEOUT_MS, UI_CYCLE_STEP_ACK_TIMEOUT_MS},
+    touch::debug_log::uart_write_all,
+    types::{AppEvent, SdCommand, SdRequest, SerialUart, UiCycleStepStatus},
 };
 
 pub(super) async fn handle_serial_command(
@@ -33,6 +33,13 @@ pub(super) async fn handle_serial_command(
     cmd: SerialCommand,
 ) {
     match cmd {
+        SerialCommand::UiCycleStep => {
+            run_ui_cycle_step_command(uart, state).await;
+        }
+        #[cfg(feature = "ui-provider-fixture")]
+        SerialCommand::UiProviderFixtureStep => {
+            run_ui_provider_fixture_step_command(uart, state).await;
+        }
         SerialCommand::Ping
         | SerialCommand::Metrics
         | SerialCommand::TouchSchedReset
@@ -68,6 +75,62 @@ pub(super) async fn handle_serial_command(
         }
         queued_command => dispatch_queued_command(uart, state, queued_command).await,
     }
+}
+
+#[cfg(feature = "ui-provider-fixture")]
+async fn run_ui_provider_fixture_step_command(uart: &mut SerialUart, state: &mut SerialTaskState) {
+    drain_ui_cycle_step_acks();
+    let request_id = state.next_state_request_id();
+    let queued = enqueue_app_event_with_retry(AppEvent::UiProviderFixtureStep {
+        ack_request_id: request_id,
+    })
+    .await;
+    if !queued {
+        let _ = uart_write_all(uart, b"UIFIXTURE BUSY reason=app_event_queue\r\n").await;
+        return;
+    }
+    let Some(ack) = wait_ui_cycle_step_ack(request_id, UI_CYCLE_STEP_ACK_TIMEOUT_MS).await else {
+        let _ = uart_write_all(uart, b"UIFIXTURE ERR reason=timeout ambiguous=true\r\n").await;
+        return;
+    };
+    let response = match ack.status {
+        UiCycleStepStatus::Applied => b"UIFIXTURE OK\r\n".as_slice(),
+        UiCycleStepStatus::NotReady => b"UIFIXTURE ERR reason=not_ready\r\n".as_slice(),
+        UiCycleStepStatus::Busy => b"UIFIXTURE BUSY reason=display_busy\r\n".as_slice(),
+        UiCycleStepStatus::NavigationFault => {
+            b"UIFIXTURE ERR reason=navigation_fault\r\n".as_slice()
+        }
+        UiCycleStepStatus::NoDirty => b"UIFIXTURE ERR reason=no_dirty\r\n".as_slice(),
+        UiCycleStepStatus::RefreshFailed => b"UIFIXTURE ERR reason=refresh_failed\r\n".as_slice(),
+    };
+    let _ = uart_write_all(uart, response).await;
+}
+
+async fn run_ui_cycle_step_command(uart: &mut SerialUart, state: &mut SerialTaskState) {
+    drain_ui_cycle_step_acks();
+    let request_id = state.next_state_request_id();
+    let queued = enqueue_app_event_with_retry(AppEvent::UiCycleStep {
+        ack_request_id: request_id,
+    })
+    .await;
+    if !queued {
+        let _ = uart_write_all(uart, b"UISTEP BUSY reason=app_event_queue\r\n").await;
+        return;
+    }
+
+    let Some(ack) = wait_ui_cycle_step_ack(request_id, UI_CYCLE_STEP_ACK_TIMEOUT_MS).await else {
+        let _ = uart_write_all(uart, b"UISTEP ERR reason=timeout ambiguous=true\r\n").await;
+        return;
+    };
+    let response = match ack.status {
+        UiCycleStepStatus::Applied => b"UISTEP OK\r\n".as_slice(),
+        UiCycleStepStatus::NotReady => b"UISTEP ERR reason=not_ready\r\n".as_slice(),
+        UiCycleStepStatus::Busy => b"UISTEP BUSY reason=display_busy\r\n".as_slice(),
+        UiCycleStepStatus::NavigationFault => b"UISTEP ERR reason=navigation_fault\r\n".as_slice(),
+        UiCycleStepStatus::NoDirty => b"UISTEP ERR reason=no_dirty\r\n".as_slice(),
+        UiCycleStepStatus::RefreshFailed => b"UISTEP ERR reason=refresh_failed\r\n".as_slice(),
+    };
+    let _ = uart_write_all(uart, response).await;
 }
 
 async fn handle_local_command(

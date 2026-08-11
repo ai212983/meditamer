@@ -13,12 +13,14 @@ use crate::firmware::{
 mod netcfg;
 mod sdwait;
 mod state_ack;
+mod ui_cycle_ack;
 
 pub(super) const SD_RESULT_CACHE_CAP: usize = 16;
 #[cfg(feature = "asset-upload-http")]
 pub(super) use netcfg::{run_netcfg_get_command, run_netcfg_set_command};
 pub(super) use sdwait::run_sdwait_command;
 pub(super) use state_ack::{drain_app_state_apply_acks, wait_app_state_apply_ack};
+pub(super) use ui_cycle_ack::{drain_ui_cycle_step_acks, wait_ui_cycle_step_ack};
 
 pub(super) async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTraceSample) {
     let mut line = heapless::String::<256>::new();

@@ -1,4 +1,14 @@
-async fn serve_connection_cycle(
+use crate::firmware::runtime::service_mode;
+use crate::firmware::telemetry;
+use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
+use embassy_time::{Duration, Instant};
+
+use super::diagnostics::{dhcp_ipv4_status, elapsed_ms_u32, log_http_mem_diag};
+use super::{
+    HttpBuffer, HttpServerLoopState, HTTP_CHUNK_BUF_FALLBACK, HTTP_HEADER_MAX,
+    HTTP_RW_BUF_FALLBACK, HTTP_SOCKET_TIMEOUT_SECS, UPLOAD_HTTP_PORT,
+};
+pub(super) async fn serve_connection_cycle(
     stack: Stack<'static>,
     state: &mut HttpServerLoopState,
     local_ipv4: [u8; 4],
@@ -11,7 +21,7 @@ async fn serve_connection_cycle(
         let gap_us = elapsed_us_u32(closed_at);
         let after_mkdir = matches!(
             state.last_request_route,
-            Some(connection::RequestRouteKind::Mkdir)
+            Some(super::connection::RequestRouteKind::Mkdir)
         );
         telemetry::record_net_pipeline_accept_arm_gap(gap_us, after_mkdir);
         if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) && gap_us >= 500 {
@@ -36,7 +46,7 @@ async fn serve_connection_cycle(
     }
 
     let mut last_route = None;
-    let mut header_timeout_ms = connection::HTTP_HEADER_READ_TIMEOUT_MS;
+    let mut header_timeout_ms = super::connection::HTTP_HEADER_READ_TIMEOUT_MS;
     loop {
         match handle_connection_request(
             &mut socket,
@@ -60,7 +70,7 @@ async fn serve_connection_cycle(
                     }
                     break;
                 }
-                header_timeout_ms = connection::HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS;
+                header_timeout_ms = super::connection::HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS;
             }
             RequestHandling::PeerClosed => {
                 log_http_mem_diag("request_idle_close");
@@ -181,7 +191,9 @@ async fn handle_connection_request(
     header_timeout_ms: u64,
 ) -> RequestHandling {
     log_http_mem_diag("request_begin");
-    match connection::handle_connection(socket, chunk_buf, header_buf, header_timeout_ms).await {
+    match super::connection::handle_connection(socket, chunk_buf, header_buf, header_timeout_ms)
+        .await
+    {
         Ok(handled) => {
             log_http_mem_diag("request_ok");
             RequestHandling::Handled {
@@ -222,7 +234,7 @@ async fn handle_connection_request(
 
 enum RequestHandling {
     Handled {
-        route_kind: connection::RequestRouteKind,
+        route_kind: super::connection::RequestRouteKind,
         connection_close_requested: bool,
     },
     PeerClosed,

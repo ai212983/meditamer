@@ -1,4 +1,9 @@
-fn utf16_len(name: &[u8]) -> Result<usize, SdFatError> {
+use crate::fat::{
+    short_name_checksum, DirLocation, DirRecord, SdFatError, ATTR_DIRECTORY, ATTR_LONG_NAME,
+    DIR_ENTRY_SIZE, FAT_NAME_MAX, MAX_LFN_SLOTS, SD_SECTOR_SIZE,
+};
+
+pub(super) fn utf16_len(name: &[u8]) -> Result<usize, SdFatError> {
     let text = core::str::from_utf8(name).map_err(|_| SdFatError::InvalidLongName)?;
     let mut len = 0usize;
     for ch in text.chars() {
@@ -28,7 +33,7 @@ fn utf16_unit(name: &[u8], wanted: usize) -> Result<u16, SdFatError> {
     Err(SdFatError::InvalidLongName)
 }
 
-fn write_lfn_to_sector(
+pub(super) fn write_lfn_to_sector(
     sector: &mut [u8; SD_SECTOR_SIZE],
     location: DirLocation,
     record: DirRecord,
@@ -36,8 +41,8 @@ fn write_lfn_to_sector(
     lfn_count: u8,
     lfn_len: usize,
 ) -> Result<(), SdFatError> {
-    let base = location.slot as usize * super::super::DIR_ENTRY_SIZE;
-    let entry = &mut sector[base..base + super::super::DIR_ENTRY_SIZE];
+    let base = location.slot as usize * DIR_ENTRY_SIZE;
+    let entry = &mut sector[base..base + DIR_ENTRY_SIZE];
     entry.fill(0xFF);
     let sequence = lfn_count.saturating_sub(entry_index);
     entry[0] = sequence | if entry_index == 0 { 0x40 } else { 0 };
@@ -65,13 +70,13 @@ fn write_lfn_to_sector(
     Ok(())
 }
 
-fn write_record_to_sector(
+pub(super) fn write_record_to_sector(
     sector: &mut [u8; SD_SECTOR_SIZE],
     location: DirLocation,
     record: DirRecord,
 ) {
-    let base = location.slot as usize * super::super::DIR_ENTRY_SIZE;
-    sector[base..base + super::super::DIR_ENTRY_SIZE].fill(0);
+    let base = location.slot as usize * DIR_ENTRY_SIZE;
+    sector[base..base + DIR_ENTRY_SIZE].fill(0);
     sector[base..base + 11].copy_from_slice(&record.short_name);
     sector[base + 11] = record.attr;
     sector[base + 20..base + 22]
@@ -80,7 +85,7 @@ fn write_record_to_sector(
     sector[base + 28..base + 32].copy_from_slice(&record.size.to_le_bytes());
 }
 
-fn write_dot_entries(
+pub(super) fn write_dot_entries(
     sector: &mut [u8; SD_SECTOR_SIZE],
     cluster: u32,
     parent_cluster: u32,
@@ -88,18 +93,18 @@ fn write_dot_entries(
 ) {
     let dot = DirRecord {
         short_name: *b".          ",
-        display_name: [0; super::super::FAT_NAME_MAX],
+        display_name: [0; FAT_NAME_MAX],
         display_name_len: 1,
-        attr: super::super::ATTR_DIRECTORY,
+        attr: ATTR_DIRECTORY,
         first_cluster: cluster,
         size: 0,
     };
     write_record_to_sector(sector, DirLocation { lba: 0, slot: 0 }, dot);
     let dotdot = DirRecord {
         short_name: *b"..         ",
-        display_name: [0; super::super::FAT_NAME_MAX],
+        display_name: [0; FAT_NAME_MAX],
         display_name_len: 2,
-        attr: super::super::ATTR_DIRECTORY,
+        attr: ATTR_DIRECTORY,
         first_cluster: if parent_cluster >= 2 {
             parent_cluster
         } else {
@@ -108,5 +113,5 @@ fn write_dot_entries(
         size: 0,
     };
     write_record_to_sector(sector, DirLocation { lba: 0, slot: 1 }, dotdot);
-    sector[super::super::DIR_ENTRY_SIZE * 2] = 0;
+    sector[DIR_ENTRY_SIZE * 2] = 0;
 }

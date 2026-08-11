@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::{
     env_utils,
     logging::{ensure_parent_dir, Logger},
-    scenarios::{execute_workflow, load_workflow, WorkflowRuntime},
+    scenarios::WorkflowRuntime,
     serial_console::{AckStatus, SerialConsole},
 };
 
@@ -21,7 +21,7 @@ pub struct RuntimeModesSmokeOptions {
     pub suite: String,
 }
 
-fn open_console(output_path: &Path) -> Result<SerialConsole> {
+pub(super) fn open_console(output_path: &Path) -> Result<SerialConsole> {
     let port = env_utils::require_port()?;
     let baud = env_utils::baud_from_env(115200)?;
     ensure_parent_dir(output_path)?;
@@ -40,9 +40,7 @@ fn query_mode_status(
     for _ in 0..24 {
         let mark = console.mark();
         console.send_line("STATE GET")?;
-        if let Some(line) =
-            console.wait_for_regex_since(mark, &pattern, Duration::from_secs(4))?
-        {
+        if let Some(line) = console.wait_for_regex_since(mark, &pattern, Duration::from_secs(4))? {
             let upload_matches = expect_upload
                 .map(|expected| line.contains(&format!("upload={expected}")))
                 .unwrap_or(true);
@@ -94,10 +92,11 @@ fn apply_mode(
                 thread::sleep(Duration::from_secs(1));
             }
             AckStatus::Err => {
-                if line.as_deref().is_some_and(|line| line.contains("reason=timeout")) {
-                    if let Ok(status) =
-                        query_mode_status(console, expect_upload, expect_ready)
-                    {
+                if line
+                    .as_deref()
+                    .is_some_and(|line| line.contains("reason=timeout"))
+                {
+                    if let Ok(status) = query_mode_status(console, expect_upload, expect_ready) {
                         return Ok(status);
                     }
                     thread::sleep(Duration::from_secs(1));
@@ -126,7 +125,7 @@ fn run_ping_probe(console: &mut SerialConsole) -> Result<String> {
     Err(anyhow!("ping probe failed after retries"))
 }
 
-struct RuntimeModesScenarioRuntime<'a> {
+pub(super) struct RuntimeModesScenarioRuntime<'a> {
     logger: &'a mut Logger,
     console: SerialConsole,
     settle_ms: u64,
@@ -146,7 +145,7 @@ fn context_get_u32(context: &Value, key: &str) -> u32 {
 }
 
 impl<'a> RuntimeModesScenarioRuntime<'a> {
-    fn new(
+    pub(super) fn new(
         logger: &'a mut Logger,
         console: SerialConsole,
         settle_ms: u64,

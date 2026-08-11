@@ -1,8 +1,22 @@
-fn eval_condition(raw_condition: &str, context: &Value) -> Result<bool> {
+//! Condition and expression evaluation for switch cases and retry guards.
+//!
+//! [`parse`] holds the tokenizer and recursive-descent parser; this file is the
+//! evaluation entry point.
+
+use crate::scenarios::conditions::parse::coerce_bool;
+use crate::scenarios::conditions::parse::tokenize;
+use crate::scenarios::conditions::parse::ExprParser;
+use anyhow::anyhow;
+use anyhow::Result;
+use serde_json::Value;
+
+pub(crate) mod parse;
+
+pub(crate) fn eval_condition(raw_condition: &str, context: &Value) -> Result<bool> {
     coerce_bool(&eval_expression_value(raw_condition, context)?)
 }
 
-fn eval_expression_value(raw: &str, context: &Value) -> Result<Value> {
+pub(crate) fn eval_expression_value(raw: &str, context: &Value) -> Result<Value> {
     let tokens = tokenize(unwrap_expression(raw))?;
     let mut parser = ExprParser {
         tokens: &tokens,
@@ -25,13 +39,13 @@ fn unwrap_expression(raw: &str) -> &str {
     }
 }
 
-fn extract_path_value(input: &Value, path: &str) -> Result<Value> {
+pub(crate) fn extract_path_value(input: &Value, path: &str) -> Result<Value> {
     lookup_path_value(input, path)
         .cloned()
         .ok_or_else(|| anyhow!("missing input field in condition path: {path}"))
 }
 
-fn lookup_path_value<'a>(input: &'a Value, path: &str) -> Option<&'a Value> {
+pub(crate) fn lookup_path_value<'a>(input: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = input;
     for segment in path.trim().trim_start_matches('.').split('.') {
         if segment.is_empty() {
@@ -41,4 +55,3 @@ fn lookup_path_value<'a>(input: &'a Value, path: &str) -> Option<&'a Value> {
     }
     Some(current)
 }
-include!("conditions_parse.rs");

@@ -1,5 +1,16 @@
+use super::directory_encode::{write_dot_entries, write_lfn_to_sector, write_record_to_sector};
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatBufferId, FatEngine, FatIoAction, FatRequest, FatResult, FatStep,
+    FatWriteReturn,
+};
+use crate::fat::{
+    cluster_to_lba, path_segment_to_name, DirFound, DirLocation, DirRecord, SdFatError,
+    ATTR_DIRECTORY, DIR_ENTRIES_PER_SECTOR, MAX_LFN_SLOTS,
+};
+
 impl FatEngine {
-    fn link_extended_directory(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn link_extended_directory(&mut self) -> Result<FatStep, SdFatError> {
         self.mutation.directory_new_cluster = self.allocation.first;
         if self.mutation.directory_new_cluster < 2 {
             return Err(SdFatError::NoFreeCluster);
@@ -14,7 +25,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn zero_extended_directory(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn zero_extended_directory(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         if self.mutation.stage == MutationStage::WaitDirectoryLink {
             self.mutation.stage = MutationStage::ZeroDirectoryCluster;
@@ -44,14 +55,14 @@ impl FatEngine {
             .enumerate()
         {
             *location = DirLocation {
-                lba: first_lba + (index / super::super::DIR_ENTRIES_PER_SECTOR) as u32,
-                slot: (index % super::super::DIR_ENTRIES_PER_SECTOR) as u8,
+                lba: first_lba + (index / DIR_ENTRIES_PER_SECTOR) as u32,
+                slot: (index % DIR_ENTRIES_PER_SECTOR) as u8,
             };
         }
         self.prepare_new_entry(slots)
     }
 
-    fn prepare_new_entry(
+    pub(super) fn prepare_new_entry(
         &mut self,
         slots: [DirLocation; MAX_LFN_SLOTS + 1],
     ) -> Result<FatStep, SdFatError> {
@@ -76,7 +87,7 @@ impl FatEngine {
                 attr: rename_source.map_or_else(
                     || {
                         if is_directory {
-                            super::super::ATTR_DIRECTORY
+                            ATTR_DIRECTORY
                         } else {
                             0x20
                         }
@@ -104,7 +115,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn initialize_mkdir(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn initialize_mkdir(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         if self.mutation.stage == MutationStage::WaitMkdirAllocate {
             self.mutation.new_first = self.allocation.first;
@@ -139,7 +150,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn mutation_read_directory(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn mutation_read_directory(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         let location = if self.mutation.new_entry && self.mutation.entry_index < found.lfn_count {
             found.lfn_locations[self.mutation.entry_index as usize]
@@ -176,7 +187,7 @@ impl FatEngine {
         }))
     }
 
-    fn mutation_write_directory_done(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn mutation_write_directory_done(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         if self.mutation.new_entry && self.mutation.entry_index < found.lfn_count {
             self.mutation.entry_index = self.mutation.entry_index.saturating_add(1);

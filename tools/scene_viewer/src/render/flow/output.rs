@@ -1,4 +1,9 @@
-fn save_render_outputs(
+use std::fs;
+
+use super::{OptionalMaps, RenderBuffers};
+use crate::{bundle::Bundle, cli::Config, io::save_gray};
+
+pub(super) fn save_render_outputs(
     cfg: &Config,
     bundle: &Bundle,
     buffers: &RenderBuffers,

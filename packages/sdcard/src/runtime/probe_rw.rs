@@ -1,4 +1,5 @@
-use crate::{power_off, power_on_for_io, probe};
+use super::common::{power_off_io, power_on, SdPowerMode, SdRuntimeResultCode};
+use crate::probe;
 
 #[derive(Clone, Copy)]
 pub enum SdPowerAction {

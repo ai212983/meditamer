@@ -1,20 +1,24 @@
-use std::{
-    fs, thread,
-    time::{Duration, Instant},
+//! Upload cycle for the Wi-Fi acceptance run.
+//!
+mod cycle;
+mod helpers;
+
+use helpers::{
+    append_health_fail_net_status, append_panic_signal_context, classify_host_upload_failure,
+    refresh_retry_eligible_host_failure, refresh_upload_client_on_failure_enabled,
+    resolve_net_upload_retry_policy,
 };
 
+use std::time::Instant;
+
 use anyhow::{anyhow, Result};
-use regex::Regex;
 use serde_json::Value;
 
 use crate::{
     env_utils,
     workflows::{
         upload,
-        wifi::common::{
-            ctx_get_string, ctx_get_u32, is_ready, net_status_line_re, query_net_status,
-            query_net_status_line, PanicSignal,
-        },
+        wifi::common::{ctx_get_string, ctx_get_u32, query_net_status_line},
     },
 };
 
@@ -229,9 +233,6 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 }
-
-include!("runtime_upload/cycle.rs");
-include!("runtime_upload/helpers.rs");
 
 #[cfg(test)]
 #[path = "runtime_upload/tests.rs"]

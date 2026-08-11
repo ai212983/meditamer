@@ -1,5 +1,21 @@
+use std::{
+    fs, thread,
+    time::{Duration, Instant},
+};
+
+use anyhow::{anyhow, Result};
+use regex::Regex;
+use serde_json::Value;
+
+use crate::{env_utils, logging::ensure_parent_dir, serial_console::AckStatus};
+
+use super::super::{
+    boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig},
+    WifiAcceptanceRuntime,
+};
+
 impl WifiAcceptanceRuntime<'_> {
-    fn handle_wait_runtime_ready(&mut self) -> Result<()> {
+    pub(super) fn handle_wait_runtime_ready(&mut self) -> Result<()> {
         let ready_marker = Regex::new(r"^RUNTIME_READY app_state=ready display=ready$")?;
         let ready_status = Regex::new(r"^SCHEDPROFILE .*runtime_ready=on$")?;
         let timeout_ms = env_utils::parse_env_u32("HOSTCTL_NET_RUNTIME_READY_TIMEOUT_MS", 45_000)?;
@@ -25,7 +41,7 @@ impl WifiAcceptanceRuntime<'_> {
         ))
     }
 
-    fn handle_boot_discovery_gate(&mut self) -> Result<()> {
+    pub(super) fn handle_boot_discovery_gate(&mut self) -> Result<()> {
         if !env_utils::parse_env_bool01("HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE", true)? {
             return Ok(());
         }
@@ -51,7 +67,7 @@ impl WifiAcceptanceRuntime<'_> {
         )
     }
 
-    fn handle_prepare_payload(&mut self) -> Result<()> {
+    pub(super) fn handle_prepare_payload(&mut self) -> Result<()> {
         ensure_parent_dir(&self.payload_path)?;
         let mut data = vec![0u8; 524_288];
         for (i, slot) in data.iter_mut().enumerate() {
@@ -61,7 +77,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn build_start_run_result(&self) -> Value {
+    pub(super) fn build_start_run_result(&self) -> Value {
         serde_json::json!({
             "cycle": 1,
             "cycles": self.cycles,
@@ -69,7 +85,7 @@ impl WifiAcceptanceRuntime<'_> {
         })
     }
 
-    fn handle_start_run(&mut self) -> Result<()> {
+    pub(super) fn handle_start_run(&mut self) -> Result<()> {
         self.ensure_operating_upload_mode()?;
         self.mem_read_mark = self.console.mark();
         self.panic_monitoring_enabled = true;
@@ -78,7 +94,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_prepare_measurement(&mut self) -> Result<()> {
+    pub(super) fn handle_prepare_measurement(&mut self) -> Result<()> {
         let quiet = Regex::new(r"^TELEMSET OK mask=0x00 ")?;
         self.console
             .command_wait_regex("TELEMSET ALL OFF", &quiet, Duration::from_secs(3))?
@@ -93,7 +109,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    fn handle_assert_runtime_health(&mut self) -> Result<()> {
+    pub(super) fn handle_assert_runtime_health(&mut self) -> Result<()> {
         let touch_re = Regex::new(r"^METRICS TOUCH_SCHED ")?;
         let touch_line = self
             .console
@@ -226,19 +242,19 @@ impl WifiAcceptanceRuntime<'_> {
         Err(anyhow!("unreachable state-ack retry path"))
     }
 
-    fn build_init_upload_attempt_result(&self) -> Value {
+    pub(super) fn build_init_upload_attempt_result(&self) -> Value {
         serde_json::json!({
             "upload_attempt": 1,
             "upload_done": false
         })
     }
 
-    fn handle_init_upload_attempt(&self) -> Result<()> {
+    pub(super) fn handle_init_upload_attempt(&self) -> Result<()> {
         Ok(())
     }
 }
 
-fn metric_u32(line: &str, key: &str) -> Option<u32> {
+pub(super) fn metric_u32(line: &str, key: &str) -> Option<u32> {
     line.split_whitespace()
         .find_map(|token| token.strip_prefix(&format!("{key}=")))
         .and_then(|value| value.parse::<u32>().ok())

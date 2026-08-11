@@ -1,6 +1,4 @@
-use super::{
-    DelayOps, GpioFast, I2cOps, InkplateHal, Result, CL_MASK, DATA_MASK, E_INK_HEIGHT, E_INK_WIDTH,
-};
+use super::{DelayOps, I2cOps, InkplateHal, Result, E_INK_HEIGHT, E_INK_WIDTH};
 use esp_sync::raw::{RawLock, SingleCoreInterruptLock};
 
 impl<I2C, D> InkplateHal<I2C, D>
@@ -36,14 +34,12 @@ where
 
         for _ in 0..E_INK_HEIGHT {
             self.hscan_start(send);
-            GpioFast::out_set(send | CL_MASK);
-            GpioFast::out_clear(CL_MASK);
+            self.write_data_and_clock_preserve_data(send);
             for _ in 0..(E_INK_WIDTH / 8 - 1) {
                 self.pulse_cl_only();
                 self.pulse_cl_only();
             }
-            GpioFast::out_set(send | CL_MASK);
-            GpioFast::out_clear(DATA_MASK | CL_MASK);
+            self.write_data_and_clock(send);
             self.vscan_end();
         }
 

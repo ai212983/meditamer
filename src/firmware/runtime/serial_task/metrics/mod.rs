@@ -2,9 +2,9 @@ use crate::firmware::{telemetry, touch::debug_log::uart_write_all, types::Serial
 
 use super::commands::{TelemetryDomain, TelemetrySetOperation};
 
-mod metrics_dump;
-mod metrics_imu;
-mod metrics_net;
+mod dump;
+mod imu;
+mod net;
 mod telemetry_control;
 
 async fn write_line<const N: usize>(uart: &mut SerialUart, line: heapless::String<N>) {
@@ -12,11 +12,11 @@ async fn write_line<const N: usize>(uart: &mut SerialUart, line: heapless::Strin
 }
 
 pub(super) async fn write_metrics_lines(uart: &mut SerialUart) {
-    metrics_dump::write_metrics_lines(uart).await;
+    dump::write_metrics_lines(uart).await;
 }
 
 pub(super) async fn write_metrics_net_lines(uart: &mut SerialUart) {
-    metrics_net::write_metrics_net_lines(uart).await;
+    net::write_metrics_net_lines(uart).await;
 }
 
 pub(super) async fn write_telemetry_status_line(uart: &mut SerialUart) {
@@ -48,4 +48,4 @@ fn on_off(mask: u32, domain: u32) -> &'static str {
     }
 }
 
-use metrics_imu::write_metrics_imu_line;
+use imu::write_metrics_imu_line;

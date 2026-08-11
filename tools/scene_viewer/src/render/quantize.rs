@@ -1,26 +1,7 @@
-fn get_channel_or_default<'a>(
-    channels: &'a HashMap<u8, Vec<u8>>,
-    id: u8,
-    len: usize,
-    default_value: u8,
-) -> Result<&'a [u8], String> {
-    if let Some(ch) = channels.get(&id) {
-        if ch.len() != len {
-            return Err(format!(
-                "channel id={id} length mismatch expected={} got={}",
-                len,
-                ch.len()
-            ));
-        }
-        Ok(ch)
-    } else {
-        // Return a leaked backing buffer to keep interface simple and no allocations in the hot loop.
-        let boxed = vec![default_value; len].into_boxed_slice();
-        Ok(Box::leak(boxed))
-    }
-}
+use super::clamp_i16_to_u8;
+use crate::cli::{DitherMode, OutputMode, ToneCurve};
 
-fn quantize_u8(v: u8, x: i32, y: i32, mode: OutputMode, dither: DitherMode) -> u8 {
+pub(super) fn quantize_u8(v: u8, x: i32, y: i32, mode: OutputMode, dither: DitherMode) -> u8 {
     match mode {
         OutputMode::Gray8 => v,
         OutputMode::Mono1 => {
@@ -75,7 +56,7 @@ fn bayer4_value(x: i32, y: i32) -> u8 {
     BAYER4[yy][xx]
 }
 
-fn build_tone_lut(curve: ToneCurve) -> [u8; 256] {
+pub(super) fn build_tone_lut(curve: ToneCurve) -> [u8; 256] {
     let mut lut = [0u8; 256];
     for (i, entry) in lut.iter_mut().enumerate() {
         let x = (i as f32) / 255.0;
@@ -102,16 +83,4 @@ fn build_tone_lut(curve: ToneCurve) -> [u8; 256] {
         *entry = ((y.clamp(0.0, 1.0) * 255.0) + 0.5) as u8;
     }
     lut
-}
-
-fn mul8(a: u8, b: u8) -> u8 {
-    (((a as u16 * b as u16) + 128) >> 8) as u8
-}
-
-fn mix_u8(a: u8, b: u8, t: u8) -> u8 {
-    ((((a as u16) * (255 - t) as u16) + ((b as u16) * t as u16) + 128) >> 8) as u8
-}
-
-fn clamp_i16_to_u8(v: i16) -> u8 {
-    v.clamp(0, 255) as u8
 }

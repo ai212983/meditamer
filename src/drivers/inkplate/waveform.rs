@@ -3,6 +3,28 @@ use super::{
     LE_MASK, SPH_MASK1, SPV,
 };
 
+// Direct consecutive GPIO writes make CL too narrow at the firmware's 240 MHz
+// CPU clock. Hardware validation found that holding it high for 24 CPU cycles
+// prevents horizontal-band corruption while preserving fast partial updates;
+// shorter holds remain opt-in hardware experiments.
+pub(crate) const PANEL_CL_HIGH_HOLD_CYCLES: u32 =
+    if option_env!("MEDITAMER_PANEL_CL_HIGH_HOLD_6").is_some() {
+        6
+    } else if option_env!("MEDITAMER_PANEL_CL_HIGH_HOLD_9").is_some() {
+        9
+    } else if option_env!("MEDITAMER_PANEL_CL_HIGH_HOLD_12").is_some() {
+        12
+    } else if option_env!("MEDITAMER_PANEL_CL_HIGH_HOLD_24").is_some() {
+        24
+    } else {
+        48
+    };
+
+#[inline(always)]
+fn hold_panel_clock_high() {
+    esp_hal::xtensa_lx::timer::delay(PANEL_CL_HIGH_HOLD_CYCLES);
+}
+
 impl<I2C, D> InkplateHal<I2C, D>
 where
     I2C: I2cOps,
@@ -33,20 +55,6 @@ where
         Ok(())
     }
 
-    /// Leaves a powered panel in a quiescent scan state between updates.
-    ///
-    /// The reference waveform finishes with `vscan_start()`, which deliberately
-    /// leaves CKV asserted. That is safe while the reference application remains
-    /// inside its display transaction, but this firmware resumes touch I2C work
-    /// between updates. Park the fast scan pins before releasing that boundary
-    /// while keeping the PMIC on for the next interactive refresh.
-    #[inline(always)]
-    pub(super) fn park_panel_scan(&self) {
-        self.set_ckv(false);
-        self.clear_data_and_cl_le();
-        self.set_sph(true);
-    }
-
     #[inline(always)]
     pub(super) fn vscan_end(&self) {
         self.set_ckv(false);
@@ -70,12 +78,21 @@ where
     #[inline(always)]
     pub(super) fn write_data_and_clock(&self, data_word: u32) {
         GpioFast::out_set(data_word | CL_MASK);
+        hold_panel_clock_high();
         GpioFast::out_clear(DATA_MASK | CL_MASK);
+    }
+
+    #[inline(always)]
+    pub(super) fn write_data_and_clock_preserve_data(&self, data_word: u32) {
+        GpioFast::out_set(data_word | CL_MASK);
+        hold_panel_clock_high();
+        GpioFast::out_clear(CL_MASK);
     }
 
     #[inline(always)]
     pub(super) fn pulse_cl_only(&self) {
         GpioFast::out_set(CL_MASK);
+        hold_panel_clock_high();
         GpioFast::out_clear(CL_MASK);
     }
 

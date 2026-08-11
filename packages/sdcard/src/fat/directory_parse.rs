@@ -1,20 +1,29 @@
+use crate::{
+    fat::{
+        names_lfn::{build_display_name, consume_lfn_entry, parse_record, segment_matches_record},
+        DirFound, DirLocation, DirRecord, LfnState, PathSegment, ATTR_LONG_NAME, ATTR_VOLUME,
+        DIR_ENTRY_SIZE, MAX_LFN_SLOTS,
+    },
+    probe::SD_SECTOR_SIZE,
+};
+
 #[derive(Clone, Copy)]
-enum DirectorySlotOutcome {
+pub(super) enum DirectorySlotOutcome {
     Continue,
     Found,
     EarlyReturnFree,
 }
 
-struct DirectoryScanState {
-    free_slots: Option<[DirLocation; MAX_LFN_SLOTS + 1]>,
-    free_run: [DirLocation; MAX_LFN_SLOTS + 1],
-    free_run_len: usize,
-    reached_directory_end: bool,
-    lfn: LfnState,
+pub(super) struct DirectoryScanState {
+    pub(super) free_slots: Option<[DirLocation; MAX_LFN_SLOTS + 1]>,
+    pub(super) free_run: [DirLocation; MAX_LFN_SLOTS + 1],
+    pub(super) free_run_len: usize,
+    pub(super) reached_directory_end: bool,
+    pub(super) lfn: LfnState,
 }
 
 impl DirectoryScanState {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             free_slots: None,
             free_run: [DirLocation::ZERO; MAX_LFN_SLOTS + 1],
@@ -25,7 +34,7 @@ impl DirectoryScanState {
     }
 }
 
-fn process_directory_slot(
+pub(super) fn process_directory_slot(
     state: &mut DirectoryScanState,
     sector: &[u8; SD_SECTOR_SIZE],
     lba: u32,
@@ -97,7 +106,7 @@ fn process_directory_slot(
     }
 }
 
-fn classify_directory_slot(first: u8, reached_end: bool) -> (bool, bool) {
+pub(super) fn classify_directory_slot(first: u8, reached_end: bool) -> (bool, bool) {
     if reached_end || first == 0x00 {
         (true, true)
     } else if first == 0xE5 {
@@ -107,7 +116,7 @@ fn classify_directory_slot(first: u8, reached_end: bool) -> (bool, bool) {
     }
 }
 
-fn record_free_slot(
+pub(super) fn record_free_slot(
     free_run: &mut [DirLocation; MAX_LFN_SLOTS + 1],
     free_run_len: &mut usize,
     needed: usize,

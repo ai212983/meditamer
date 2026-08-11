@@ -28,6 +28,13 @@ fn parses_scheduler_profile_control() {
 }
 
 #[test]
+fn parses_only_the_exact_ui_cycle_step_command() {
+    assert!(parse_ui_cycle_step_command(b"  UISTEP\r\n"));
+    assert!(!parse_ui_cycle_step_command(b"UISTEP 3"));
+    assert!(!parse_ui_cycle_step_command(b"UI CYCLE"));
+}
+
+#[test]
 fn parses_state_set_forms() {
     assert!(matches!(
         parse_state_set_command(b"STATE SET upload=ON"),

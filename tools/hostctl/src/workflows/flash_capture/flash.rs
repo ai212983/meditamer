@@ -1,28 +1,41 @@
-struct FullFlashOptions<'a> {
-    image_path: &'a Path,
-    flash_log: &'a Path,
-    port: &'a str,
-    flash_baud: u32,
-    flash_timeout: Duration,
-    flash_status_interval: Duration,
-    skip_update_check: bool,
+use super::command_run::{run_command_logged, CommandRunOptions};
+use super::{
+    CommandProgressMode, CommandSpec, FlashResult, FlashStrategy, DEFAULT_LOG_DRAIN_TIMEOUT,
+};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use anyhow::{anyhow, bail, Result};
+
+use crate::idf_env::IdfEnv;
+
+pub(super) struct FullFlashOptions<'a> {
+    pub(super) image_path: &'a Path,
+    pub(super) flash_log: &'a Path,
+    pub(super) port: &'a str,
+    pub(super) flash_baud: u32,
+    pub(super) flash_timeout: Duration,
+    pub(super) flash_status_interval: Duration,
+    pub(super) skip_update_check: bool,
 }
 
-struct AppOnlyFlashOptions<'a> {
-    image_path: &'a Path,
-    flash_log: &'a Path,
-    port: &'a str,
-    flash_baud: u32,
-    flash_timeout: Duration,
-    flash_status_interval: Duration,
-    flash_idle_timeout: Duration,
-    flash_progress_stall_timeout: Duration,
-    flash_log_drain_timeout: Duration,
-    skip_update_check: bool,
-    idf_env: Option<&'a IdfEnv>,
+pub(super) struct AppOnlyFlashOptions<'a> {
+    pub(super) image_path: &'a Path,
+    pub(super) flash_log: &'a Path,
+    pub(super) port: &'a str,
+    pub(super) flash_baud: u32,
+    pub(super) flash_timeout: Duration,
+    pub(super) flash_status_interval: Duration,
+    pub(super) flash_idle_timeout: Duration,
+    pub(super) flash_progress_stall_timeout: Duration,
+    pub(super) flash_log_drain_timeout: Duration,
+    pub(super) skip_update_check: bool,
+    pub(super) idf_env: Option<&'a IdfEnv>,
 }
 
-fn run_full_flash(opts: FullFlashOptions<'_>) -> Result<FlashResult> {
+pub(super) fn run_full_flash(opts: FullFlashOptions<'_>) -> Result<FlashResult> {
     let mut command = CommandSpec::new("espflash")
         .args(["flash", "-c", "esp32", "-B"])
         .arg(opts.flash_baud.to_string())
@@ -54,7 +67,7 @@ fn run_full_flash(opts: FullFlashOptions<'_>) -> Result<FlashResult> {
     })
 }
 
-fn run_app_only_flash(opts: AppOnlyFlashOptions<'_>) -> Result<FlashResult> {
+pub(super) fn run_app_only_flash(opts: AppOnlyFlashOptions<'_>) -> Result<FlashResult> {
     let idf_env = opts
         .idf_env
         .ok_or_else(|| anyhow!("ESP-IDF env is required for app-only flash"))?;
@@ -95,8 +108,15 @@ fn run_app_only_flash(opts: AppOnlyFlashOptions<'_>) -> Result<FlashResult> {
     })
 }
 
-fn build_app_binary(image_path: &Path, flash_log: &Path, skip_update_check: bool) -> Result<PathBuf> {
-    let generated = flash_log.parent().expect("flash_log parent").join("app.bin");
+pub(super) fn build_app_binary(
+    image_path: &Path,
+    flash_log: &Path,
+    skip_update_check: bool,
+) -> Result<PathBuf> {
+    let generated = flash_log
+        .parent()
+        .expect("flash_log parent")
+        .join("app.bin");
     let mut save_image = CommandSpec::new("espflash")
         .args(["save-image", "--chip", "esp32"])
         .arg(image_path.as_os_str())
@@ -115,11 +135,14 @@ fn build_app_binary(image_path: &Path, flash_log: &Path, skip_update_check: bool
     if generated.is_file() {
         Ok(generated)
     } else {
-        bail!("espflash save-image did not produce {}", generated.display());
+        bail!(
+            "espflash save-image did not produce {}",
+            generated.display()
+        );
     }
 }
 
-fn build_app_flash_command(
+pub fn build_app_flash_command(
     idf_env: &IdfEnv,
     port: &str,
     flash_baud: u32,

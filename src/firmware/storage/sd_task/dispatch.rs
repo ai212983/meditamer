@@ -1,3 +1,5 @@
+use super::engine_driver::run_fat_engine_command;
+use super::manual_io::{run_probe, run_rw_verify};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use sdcard::fat::FatEngine;
 use sdcard::runtime as sd_ops;
@@ -5,8 +7,6 @@ use sdcard::runtime as sd_ops;
 use super::super::super::types::{
     SdCommand, SdCommandKind, SdPowerRequest, SdProbeDriver, SdRequest, SdResult, SdResultCode,
 };
-use super::engine_driver::run_fat_engine_command;
-use super::manual_io::{run_probe, run_rw_verify};
 use super::{
     duration_ms_since, request_sd_power, SD_POWER_CYCLE_OFF_MS, SD_RETRY_DELAY_MS,
     SD_RETRY_MAX_ATTEMPTS,

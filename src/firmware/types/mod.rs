@@ -4,6 +4,7 @@ mod modes;
 mod sd;
 mod serial;
 mod trace;
+mod ui_cycle;
 #[cfg(feature = "asset-upload-http")]
 mod wifi;
 
@@ -25,6 +26,7 @@ pub(crate) use sd::{
 };
 pub(crate) use serial::SerialStatusEvent;
 pub(crate) use trace::TapTraceSample;
+pub(crate) use ui_cycle::{UiCycleStepAck, UiCycleStepStatus};
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use wifi::{
     NetConfigSet, NetControlCommand, WifiConfigRequest, WifiConfigResponse, WifiConfigResultCode,

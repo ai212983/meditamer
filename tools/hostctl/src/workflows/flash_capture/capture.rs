@@ -1,4 +1,16 @@
-fn capture_boot_window(
+use super::{CaptureMode, FlashResult, OutputPaths};
+use std::{
+    fs::{self, File},
+    io::Write,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use anyhow::Result;
+
+use crate::serial_console::SerialConsole;
+
+pub(super) fn capture_boot_window(
     port: &str,
     baud: u32,
     duration: Duration,
@@ -12,7 +24,7 @@ fn capture_boot_window(
     Ok(bytes)
 }
 
-fn capture_stream_window(
+pub(super) fn capture_stream_window(
     port: &str,
     baud: u32,
     duration: Duration,
@@ -25,19 +37,19 @@ fn capture_stream_window(
     Ok(bytes)
 }
 
-struct SummaryInputs<'a> {
-    outputs: &'a OutputPaths,
-    port: &'a str,
-    baud: u32,
-    flash_baud: u32,
-    result: &'a FlashResult,
-    capture_mode: CaptureMode,
-    capture_bytes: usize,
-    post_command: Option<&'a str>,
-    post_command_match: Option<&'a str>,
+pub(super) struct SummaryInputs<'a> {
+    pub(super) outputs: &'a OutputPaths,
+    pub(super) port: &'a str,
+    pub(super) baud: u32,
+    pub(super) flash_baud: u32,
+    pub(super) result: &'a FlashResult,
+    pub(super) capture_mode: CaptureMode,
+    pub(super) capture_bytes: usize,
+    pub(super) post_command: Option<&'a str>,
+    pub(super) post_command_match: Option<&'a str>,
 }
 
-fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
+pub(super) fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
     let SummaryInputs {
         outputs,
         port,
@@ -58,9 +70,21 @@ fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
     writeln!(file, "capture_bytes={capture_bytes}")?;
     writeln!(file, "image_path={}", result.image_path.display())?;
     writeln!(file, "fallback_used={}", result.fallback_used)?;
-    writeln!(file, "python_bin={}", display_opt_path(result.python_bin.as_ref()))?;
-    writeln!(file, "idf_root={}", display_opt_path(result.idf_root.as_ref()))?;
-    writeln!(file, "idf_py_bin={}", display_opt_path(result.idf_py_bin.as_ref()))?;
+    writeln!(
+        file,
+        "python_bin={}",
+        display_opt_path(result.python_bin.as_ref())
+    )?;
+    writeln!(
+        file,
+        "idf_root={}",
+        display_opt_path(result.idf_root.as_ref())
+    )?;
+    writeln!(
+        file,
+        "idf_py_bin={}",
+        display_opt_path(result.idf_py_bin.as_ref())
+    )?;
     writeln!(file, "reset_mode=en-only")?;
     writeln!(file, "firmware_elf={}", outputs.firmware_elf.display())?;
     writeln!(file, "app_bin={}", outputs.app_bin.display())?;

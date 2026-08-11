@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn parses_sdwait_defaults() {
     let cmd = parse_serial_command(b"SDWAIT");
@@ -76,4 +78,3 @@ fn rejects_bad_sdfatrename() {
     let cmd = parse_serial_command(b"SDFATREN /only_one_arg");
     assert!(cmd.is_none());
 }
-

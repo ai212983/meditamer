@@ -22,7 +22,9 @@ where
     ) -> Result<(), I2C::Error> {
         match display_transaction_finalization(operation.is_ok(), leave_on) {
             DisplayTransactionFinalization::ParkPoweredPanel => {
-                self.park_panel_scan();
+                // Match the older leave-on implementation exactly: the
+                // reference waveform's terminal vscan_start() state remains
+                // untouched for a tightly bounded follow-up window.
                 operation
             }
             DisplayTransactionFinalization::ShutDownPanel => {
@@ -38,12 +40,8 @@ where
         leave_on: bool,
     ) -> core::result::Result<(), PanelRefreshError<I2C::Error>> {
         match display_transaction_finalization(operation.is_ok(), leave_on) {
-            DisplayTransactionFinalization::ParkPoweredPanel => {
-                self.park_panel_scan();
-                operation.map_err(|source| {
-                    PanelRefreshError::new(PanelRefreshErrorStage::Waveform, source)
-                })
-            }
+            DisplayTransactionFinalization::ParkPoweredPanel => operation
+                .map_err(|source| PanelRefreshError::new(PanelRefreshErrorStage::Waveform, source)),
             DisplayTransactionFinalization::ShutDownPanel => {
                 let shutdown = self.eink_off_async().await;
                 match operation {

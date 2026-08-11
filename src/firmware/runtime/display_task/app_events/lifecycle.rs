@@ -1,7 +1,8 @@
-async fn handle_battery_tick_event(
-    context: &mut DisplayContext,
-    upload_enabled: bool,
-) {
+use crate::firmware::types::{DisplayContext, TouchStatus};
+
+use super::super::state::DisplayLoopState;
+
+pub(super) async fn handle_battery_tick_event(context: &mut DisplayContext, upload_enabled: bool) {
     if upload_enabled {
         return;
     }
@@ -15,7 +16,7 @@ async fn handle_battery_tick_event(
     }
 }
 
-async fn handle_touch_status_event(
+pub(super) async fn handle_touch_status_event(
     status: TouchStatus,
     _context: &mut DisplayContext,
     state: &mut DisplayLoopState,

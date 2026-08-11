@@ -44,11 +44,38 @@ fn long_gap_in_tap_seq2_rejects_without_triggering() {
 }
 
 #[test]
-fn sampling_discontinuity_clears_partial_sequence_and_motion_history() {
+fn sampling_gap_clears_motion_history_but_keeps_partial_sequence() {
     let mut engine = EventEngine::default();
 
     let _ = engine.tick(candidate_frame(1_000));
-    let _ = engine.sampling_discontinuity(1_050);
+    let _ = engine.sampling_gap();
+    let resumed = engine.tick(candidate_frame(1_100));
+
+    // Evaluated in TapSeq1 rather than Idle: the partial sequence survived.
+    assert_eq!(resumed.trace.state_id, EngineStateId::TapSeq1);
+    assert_eq!(resumed.trace.seq_count, 1);
+    assert_eq!(resumed.trace.jerk_l1, 0);
+}
+
+#[test]
+fn sampling_gap_mid_sequence_still_triggers() {
+    let mut engine = EventEngine::default();
+
+    let _ = engine.tick(candidate_frame(1_000));
+    let _ = engine.tick(candidate_frame(1_200));
+    let _ = engine.sampling_gap();
+    let third = engine.tick(candidate_frame(1_400));
+
+    assert!(third.actions.contains_backlight_trigger());
+}
+
+#[test]
+fn imu_fault_still_clears_partial_sequence() {
+    let mut engine = EventEngine::default();
+
+    let _ = engine.tick(candidate_frame(1_000));
+    let _ = engine.imu_fault(1_050);
+    let _ = engine.imu_recovered(1_060);
     let resumed = engine.tick(candidate_frame(1_100));
 
     assert!(!resumed.actions.contains_backlight_trigger());

@@ -39,7 +39,7 @@ It is ordered by operational impact.
     - mode-cycle recovery [docs/guides/wifi-asset-upload.md](../guides/wifi-asset-upload.md)
     - reset fallback when mode recovery does not ACK [docs/guides/wifi-asset-upload.md](../guides/wifi-asset-upload.md)
   - Wi-Fi task contains extensive reassociation/scan/auth/channel fallback logic:
-    - [src/firmware/storage/upload/wifi.rs](../../src/firmware/storage/upload/wifi.rs)
+    - [src/firmware/net/wifi.rs](../../src/firmware/net/wifi.rs)
 - Mitigation path:
   - Continue instrumentation around association stages and DHCP/listener transitions.
   - Reduce need for host-driven recovery by tightening in-firmware state transitions.
@@ -92,7 +92,7 @@ It is ordered by operational impact.
     - [docs/guides/development-setup.md](../guides/development-setup.md)
   - Current hotspots exceed limits (from local scan):
     - `src/firmware/telemetry/mod.rs` (~848)
-    - `src/firmware/storage/upload/wifi.rs` (~764)
+    - `src/firmware/net/wifi.rs` (~764)
     - `src/firmware/runtime/serial_task.rs` (~577)
 - Mitigation path:
   - Split by responsibility: parser/protocol, metrics formatting, wifi scan/reassoc policy, mode transitions.

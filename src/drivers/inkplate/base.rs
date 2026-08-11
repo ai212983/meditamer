@@ -1,10 +1,16 @@
 use super::{
-    panel_lifecycle::PanelPowerState, DelayOps, I2cOps, InkplateHal, InkplateHalError, Ordering,
-    PinMode, ProbeStatus, Result, TestPattern, BUZZ_EN, E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BW,
-    FRAMEBUFFER_BYTES, FRAMEBUFFER_TAKEN, FRONTLIGHT_EN, GPIO0_ENABLE, INT1_LSM, INT2_LSM,
-    INT_APDS, IO_INT_ADDR, PARTIAL_TRANSITION_BYTES, PWRUP, SD_PMOS_PIN, TPS65186_ADDR, VCOM,
-    WAKEUP,
+    panel_lifecycle::PanelPowerState, BinaryFramebufferDebugSnapshot, DelayOps, I2cOps,
+    InkplateHal, InkplateHalError, Ordering, PinMode, ProbeStatus, Result, TestPattern, BUZZ_EN,
+    E_INK_HEIGHT, E_INK_WIDTH, FRAMEBUFFER_BW, FRAMEBUFFER_BYTES, FRAMEBUFFER_TAKEN, FRONTLIGHT_EN,
+    GPIO0_ENABLE, INT1_LSM, INT2_LSM, INT_APDS, IO_INT_ADDR, PARTIAL_TRANSITION_BYTES, PWRUP,
+    SD_PMOS_PIN, TPS65186_ADDR, VCOM, WAKEUP,
 };
+
+fn framebuffer_hash(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5, |hash, byte| {
+        (hash ^ u32::from(*byte)).wrapping_mul(0x0100_0193)
+    })
+}
 
 impl<I2C, D> InkplateHal<I2C, D>
 where
@@ -156,6 +162,51 @@ where
 
     pub(crate) fn framebuffer_bw_mut(&mut self) -> &mut [u8] {
         self.framebuffer_bw
+    }
+
+    pub fn binary_framebuffer_debug_snapshot(&self) -> BinaryFramebufferDebugSnapshot {
+        let mut snapshot = BinaryFramebufferDebugSnapshot {
+            current_hash: framebuffer_hash(self.framebuffer_bw),
+            previous_hash: self
+                .framebuffer_bw_previous
+                .as_deref()
+                .map(|previous| framebuffer_hash(previous)),
+            changed_bytes: 0,
+            changed_pixels: 0,
+            min_row: None,
+            max_row: None,
+            min_byte_column: None,
+            max_byte_column: None,
+        };
+        let Some(previous) = self.framebuffer_bw_previous.as_deref() else {
+            return snapshot;
+        };
+        let row_bytes = E_INK_WIDTH / 8;
+        for (index, (&previous, &current)) in
+            previous.iter().zip(self.framebuffer_bw.iter()).enumerate()
+        {
+            let changed = previous ^ current;
+            if changed == 0 {
+                continue;
+            }
+            let row = index / row_bytes;
+            let byte_column = index % row_bytes;
+            snapshot.changed_bytes += 1;
+            snapshot.changed_pixels += changed.count_ones();
+            snapshot.min_row = Some(snapshot.min_row.map_or(row, |value| value.min(row)));
+            snapshot.max_row = Some(snapshot.max_row.map_or(row, |value| value.max(row)));
+            snapshot.min_byte_column = Some(
+                snapshot
+                    .min_byte_column
+                    .map_or(byte_column, |value| value.min(byte_column)),
+            );
+            snapshot.max_byte_column = Some(
+                snapshot
+                    .max_byte_column
+                    .map_or(byte_column, |value| value.max(byte_column)),
+            );
+        }
+        snapshot
     }
 
     pub fn draw_test_pattern(&mut self, pattern: TestPattern) {

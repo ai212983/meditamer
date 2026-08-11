@@ -1,7 +1,14 @@
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatEngine, FatEngineError, FatReadReturn, FatRequest, FatResult, FatStep,
+    FatWriteReturn,
+};
+use crate::fat::{clusters_for_size, SdFatError, SD_SECTOR_SIZE};
+
 impl FatEngine {
-    fn begin_upload_chunk(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_upload_chunk(&mut self) -> Result<FatStep, SdFatError> {
         if !self.upload.valid {
-            return Ok(self.finish(FatResult::Error(super::FatEngineError::InvalidState)));
+            return Ok(self.finish(FatResult::Error(FatEngineError::InvalidState)));
         }
         let (input, input_len) = match self.request.as_ref() {
             Some(FatRequest::UploadChunk {
@@ -43,7 +50,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn begin_append(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_append(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         if found.record.is_dir() {
             return Err(SdFatError::IsDirectory);
@@ -89,7 +96,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn advance_append_traverse(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn advance_append_traverse(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.traverse_remaining == 0 {
             if self.mutation.append_extra == 0 {
                 return self.start_append_data();
@@ -106,7 +113,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn finish_append_allocation(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn finish_append_allocation(&mut self) -> Result<FatStep, SdFatError> {
         if self.mutation.old_first < 2 {
             self.mutation.new_first = self.allocation.first;
             self.mutation.tail_cluster = self.allocation.first;
@@ -120,7 +127,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn start_append_data(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn start_append_data(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         let cluster_size = SD_SECTOR_SIZE as u32 * u32::from(volume.sectors_per_cluster);
         let offset_in_cluster = self.mutation.old_size % cluster_size;

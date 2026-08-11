@@ -1,6 +1,6 @@
 use crate::drivers::inkplate::{
     imu::InkplateImu, touch::InkplateTouch, InkplateHal, FRAMEBUFFER_BYTES,
-    PARTIAL_TRANSITION_BYTES,
+    PANEL_CL_HIGH_HOLD_CYCLES, PARTIAL_TRANSITION_BYTES,
 };
 use embassy_embedded_hal::{adapter::BlockingAsync, shared_bus::asynch::i2c::I2cDevice};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -22,6 +22,8 @@ use esp_hal::{
 
 use super::super::config::UART_BAUD;
 #[cfg(feature = "asset-upload-http")]
+use super::super::net;
+#[cfg(feature = "asset-upload-http")]
 use super::super::storage;
 use super::super::types::{DisplayContext, PanelPinHold};
 use super::super::{
@@ -42,6 +44,10 @@ pub fn run() -> ! {
     let hal_config = hal_config.with_cpu_clock(CpuClock::_240MHz);
     let peripherals = esp_hal::init(hal_config);
     esp_println::println!("CPU_CLOCK hz={}", esp_hal::clock::cpu_clock().as_hz());
+    esp_println::println!(
+        "PANEL_TIMING cl_high_hold_cycles={}",
+        PANEL_CL_HIGH_HOLD_CYCLES
+    );
     let reset_reason = esp_hal::system::reset_reason();
     telemetry::set_boot_reset_reason_code(reset_reason.map(|value| value as u8));
     esp_println::println!(
@@ -111,7 +117,7 @@ pub fn run() -> ! {
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
     #[cfg(feature = "asset-upload-http")]
-    let upload_http_runtime = match storage::upload::setup(peripherals.WIFI) {
+    let upload_http_runtime = match net::setup(peripherals.WIFI) {
         Ok(runtime) => Some(runtime),
         Err(reason) => {
             esp_println::println!("{}", reason);
@@ -237,7 +243,7 @@ pub fn run() -> ! {
     let executor = unsafe { make_static(&mut executor) };
     executor.run(move |spawner| {
         #[cfg(feature = "asset-upload-http")]
-        let boot_scan_only_diag_active = storage::upload::boot_scan_only_diag_enabled();
+        let boot_scan_only_diag_active = net::boot_scan_only_diag_enabled();
         #[cfg(not(feature = "asset-upload-http"))]
         let boot_scan_only_diag_active = false;
 
@@ -246,7 +252,7 @@ pub fn run() -> ! {
             spawn_task(
                 spawner,
                 TaskClass::Wifi,
-                storage::upload::wifi_connection_task(
+                net::wifi_connection_task(
                     upload_http_runtime.wifi_controller,
                     upload_http_runtime.initial_credentials,
                     upload_http_runtime.stack,
@@ -257,7 +263,7 @@ pub fn run() -> ! {
                 spawn_task(
                     spawner,
                     TaskClass::Network,
-                    storage::upload::net_task(upload_http_runtime.net_runner).unwrap(),
+                    net::net_task(upload_http_runtime.net_runner).unwrap(),
                 );
                 spawn_task(
                     spawner,

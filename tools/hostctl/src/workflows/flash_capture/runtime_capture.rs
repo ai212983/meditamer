@@ -1,5 +1,13 @@
+use super::capture::{capture_boot_window, capture_stream_window};
+use super::runtime_helpers::context_set_u64;
+use super::FlashCaptureRuntime;
+use std::fs::File;
+
+use anyhow::{anyhow, bail, Result};
+use serde_json::Value;
+
 impl FlashCaptureRuntime<'_> {
-    fn action_capture(&mut self, args: &Value, context: &mut Value) -> Result<()> {
+    pub(super) fn action_capture(&mut self, args: &Value, context: &mut Value) -> Result<()> {
         let mode = args
             .get("mode")
             .and_then(Value::as_str)

@@ -1,5 +1,5 @@
-use super::super::fairness::{IngressFairnessAdaptive, IngressFairnessAdaptiveSnapshot};
 use super::super::super::super::sd_bridge::SdUploadChunkFinish;
+use super::super::fairness::{IngressFairnessAdaptive, IngressFairnessAdaptiveSnapshot};
 use super::latency::{chunk_latency_quantiles, record_chunk_latency_sample, ChunkLatencySamples};
 use super::stats::UploadBodyStats;
 
@@ -91,9 +91,14 @@ impl UploadBodyProgress {
         self.payload_copy_ms = self.payload_copy_ms.saturating_add(copy_ms);
     }
 
-    pub(super) fn should_try_drain(&self, pre_read_queue: u32, try_drain_interval_reads: u32) -> bool {
+    pub(super) fn should_try_drain(
+        &self,
+        pre_read_queue: u32,
+        try_drain_interval_reads: u32,
+    ) -> bool {
         UPLOAD_CHUNK_PIPELINE_ENABLED
-            && (pre_read_queue == 0 || self.ingress_read_ops_since_try_drain >= try_drain_interval_reads)
+            && (pre_read_queue == 0
+                || self.ingress_read_ops_since_try_drain >= try_drain_interval_reads)
     }
 
     pub(super) fn reset_try_drain_counter(&mut self) {
@@ -102,8 +107,9 @@ impl UploadBodyProgress {
 
     pub(super) fn note_pre_read(&mut self, pre_read_queue: u32) {
         self.ingress_read_calls = self.ingress_read_calls.saturating_add(1);
-        self.ingress_read_pre_queue_bytes_total =
-            self.ingress_read_pre_queue_bytes_total.saturating_add(pre_read_queue);
+        self.ingress_read_pre_queue_bytes_total = self
+            .ingress_read_pre_queue_bytes_total
+            .saturating_add(pre_read_queue);
         self.ingress_read_pre_queue_max = self.ingress_read_pre_queue_max.max(pre_read_queue);
         if pre_read_queue == 0 {
             self.ingress_read_pre_queue_empty_calls =
@@ -121,12 +127,14 @@ impl UploadBodyProgress {
     ) {
         self.body_read_ms = self.body_read_ms.saturating_add(read_wait_ms);
         if pre_read_queue == 0 {
-            self.ingress_read_wait_empty_q_ms =
-                self.ingress_read_wait_empty_q_ms.saturating_add(read_wait_ms);
+            self.ingress_read_wait_empty_q_ms = self
+                .ingress_read_wait_empty_q_ms
+                .saturating_add(read_wait_ms);
             self.ingress_read_wait_empty_q_max_ms =
                 self.ingress_read_wait_empty_q_max_ms.max(read_wait_ms);
-            self.ingress_read_empty_streak_ms =
-                self.ingress_read_empty_streak_ms.saturating_add(read_wait_ms);
+            self.ingress_read_empty_streak_ms = self
+                .ingress_read_empty_streak_ms
+                .saturating_add(read_wait_ms);
             self.ingress_read_empty_streak_ms_max = self
                 .ingress_read_empty_streak_ms_max
                 .max(self.ingress_read_empty_streak_ms);
@@ -143,8 +151,9 @@ impl UploadBodyProgress {
                     self.ingress_read_wait_empty_q_over_100ms.saturating_add(1);
             }
         } else {
-            self.ingress_read_wait_nonempty_q_ms =
-                self.ingress_read_wait_nonempty_q_ms.saturating_add(read_wait_ms);
+            self.ingress_read_wait_nonempty_q_ms = self
+                .ingress_read_wait_nonempty_q_ms
+                .saturating_add(read_wait_ms);
             self.ingress_read_empty_streak_ms = 0;
         }
         if read_wait_ms >= INGRESS_READ_WAIT_OVER_10MS {
@@ -154,8 +163,7 @@ impl UploadBodyProgress {
             self.ingress_read_wait_over_50ms = self.ingress_read_wait_over_50ms.saturating_add(1);
         }
         if read_wait_ms >= INGRESS_READ_WAIT_OVER_100MS {
-            self.ingress_read_wait_over_100ms =
-                self.ingress_read_wait_over_100ms.saturating_add(1);
+            self.ingress_read_wait_over_100ms = self.ingress_read_wait_over_100ms.saturating_add(1);
         }
         ingress_adapt.observe_read(pre_read_queue == 0, read_wait_ms);
         if n < want {
@@ -166,8 +174,7 @@ impl UploadBodyProgress {
         if pre_read_queue > 0 {
             self.ingress_read_bytes_since_yield =
                 self.ingress_read_bytes_since_yield.saturating_add(n);
-            self.ingress_read_ops_since_yield =
-                self.ingress_read_ops_since_yield.saturating_add(1);
+            self.ingress_read_ops_since_yield = self.ingress_read_ops_since_yield.saturating_add(1);
         } else {
             self.ingress_read_bytes_since_yield = 0;
             self.ingress_read_ops_since_yield = 0;
@@ -212,10 +219,11 @@ impl UploadBodyProgress {
         self.sd_task_queue_wait_ms = self
             .sd_task_queue_wait_ms
             .saturating_add(chunk_finish.queue_wait_ms);
-        self.sd_task_handler_ms = self.sd_task_handler_ms.saturating_add(chunk_finish.handler_ms);
+        self.sd_task_handler_ms = self
+            .sd_task_handler_ms
+            .saturating_add(chunk_finish.handler_ms);
         self.sd_task_residual_ms = self.sd_task_residual_ms.saturating_add(task_residual_ms);
-        self.sd_task_post_handler_ms =
-            self.sd_task_post_handler_ms.saturating_add(post_handler_ms);
+        self.sd_task_post_handler_ms = self.sd_task_post_handler_ms.saturating_add(post_handler_ms);
         self.sd_task_publish_to_receive_ms = self
             .sd_task_publish_to_receive_ms
             .saturating_add(publish_to_receive_ms);
@@ -229,7 +237,10 @@ impl UploadBodyProgress {
         record_chunk_latency_sample(&mut self.chunk_samples, roundtrip_ms);
     }
 
-    pub(super) fn finish(self, ingress_adapt_snapshot: IngressFairnessAdaptiveSnapshot) -> UploadBodyStats {
+    pub(super) fn finish(
+        self,
+        ingress_adapt_snapshot: IngressFairnessAdaptiveSnapshot,
+    ) -> UploadBodyStats {
         let (chunk_p50_ms, chunk_p95_ms) = chunk_latency_quantiles(&self.chunk_samples);
         UploadBodyStats {
             sent_bytes: self.sent_bytes,

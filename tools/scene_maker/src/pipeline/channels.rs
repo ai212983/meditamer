@@ -1,3 +1,10 @@
+use std::path::{Path, PathBuf};
+
+use image::imageops::FilterType;
+
+use super::{ChannelData, SceneDims};
+use crate::cli::{BuildConfig, ChannelId, ChannelTemplate, ExplicitChannelPaths, CHANNELS};
+
 fn explicit_channel_paths(cfg: &BuildConfig) -> ExplicitChannelPaths {
     ExplicitChannelPaths {
         albedo: cfg.albedo.clone(),
@@ -12,7 +19,10 @@ fn explicit_channel_paths(cfg: &BuildConfig) -> ExplicitChannelPaths {
     }
 }
 
-fn load_channels(cfg: &BuildConfig, total_px: usize) -> Result<Vec<ChannelData>, String> {
+pub(super) fn load_channels(
+    cfg: &BuildConfig,
+    total_px: usize,
+) -> Result<Vec<ChannelData>, String> {
     let explicit = explicit_channel_paths(cfg);
     let mut channels = Vec::with_capacity(CHANNELS.len());
     for template in CHANNELS {
@@ -51,7 +61,11 @@ fn load_channel(
     }
 }
 
-fn derive_edge_if_needed(cfg: &BuildConfig, dims: SceneDims, channels: &mut [ChannelData]) {
+pub(super) fn derive_edge_if_needed(
+    cfg: &BuildConfig,
+    dims: SceneDims,
+    channels: &mut [ChannelData],
+) {
     if !cfg.derive_edge {
         return;
     }

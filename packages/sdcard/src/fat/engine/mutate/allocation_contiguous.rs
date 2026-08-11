@@ -1,5 +1,9 @@
+use super::chain::write_fat_value;
+use crate::fat::engine::FatEngine;
+use crate::fat::{SdFatError, FAT32_EOC_WRITE};
+
 impl FatEngine {
-    fn prepare_contiguous_allocation_batch(&mut self) -> Result<(), SdFatError> {
+    pub(super) fn prepare_contiguous_allocation_batch(&mut self) -> Result<(), SdFatError> {
         let sector_first = self.allocation.sector_offset.saturating_mul(128);
         let sector_end = sector_first.saturating_add(128);
         let mut candidate = self.allocation.candidate.max(sector_first).max(2);

@@ -1,4 +1,13 @@
-fn action_write_summary(runtime: &mut FlashCaptureRuntime<'_>, context: &mut Value) -> Result<()> {
+use super::capture::{write_summary, SummaryInputs};
+use super::FlashCaptureRuntime;
+
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+
+pub(super) fn action_write_summary(
+    runtime: &mut FlashCaptureRuntime<'_>,
+    context: &mut Value,
+) -> Result<()> {
     let result = runtime
         .flash_result
         .as_ref()
@@ -22,7 +31,7 @@ fn action_write_summary(runtime: &mut FlashCaptureRuntime<'_>, context: &mut Val
     Ok(())
 }
 
-fn action_abort_flash(context: &Value) -> Result<()> {
+pub(super) fn action_abort_flash(context: &Value) -> Result<()> {
     let detail = context
         .get("flash_error")
         .and_then(Value::as_str)
@@ -31,13 +40,13 @@ fn action_abort_flash(context: &Value) -> Result<()> {
     Err(anyhow!("{detail}"))
 }
 
-fn context_set_string(context: &mut Value, key: &str, value: &str) {
+pub(super) fn context_set_string(context: &mut Value, key: &str, value: &str) {
     if let Some(map) = context.as_object_mut() {
         map.insert(key.to_string(), Value::String(value.to_string()));
     }
 }
 
-fn context_set_u64(context: &mut Value, key: &str, value: u64) {
+pub(super) fn context_set_u64(context: &mut Value, key: &str, value: u64) {
     if let Some(map) = context.as_object_mut() {
         map.insert(key.to_string(), Value::Number(value.into()));
     }

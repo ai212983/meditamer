@@ -18,15 +18,14 @@ use super::{
     templates::{optional_arg_u32, required_arg_str, resolve_templates},
 };
 
-mod cutover;
 
 pub(super) struct SdcardScenarioRuntime<'a> {
-    logger: &'a mut Logger,
-    console: &'a mut SerialConsole,
-    vars: HashMap<String, String>,
-    sdwait_timeout_ms: u32,
-    burst_mark: Option<usize>,
-    scenario_mark: usize,
+    pub(super) logger: &'a mut Logger,
+    pub(super) console: &'a mut SerialConsole,
+    pub(super) vars: HashMap<String, String>,
+    pub(super) sdwait_timeout_ms: u32,
+    pub(super) burst_mark: Option<usize>,
+    pub(super) scenario_mark: usize,
 }
 
 impl<'a> SdcardScenarioRuntime<'a> {

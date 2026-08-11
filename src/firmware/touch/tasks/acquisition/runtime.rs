@@ -11,13 +11,11 @@ use crate::firmware::{
     types::{AppEvent, Gpio36InputPin, InkplateTouchDriver, TouchSampleFrame, TouchStatus},
 };
 
-use super::{
-    state::{authoritative_touch_count, ContactSamplingState},
-    TouchAcquisitionCommand, TOUCH_ACQUISITION_COMMANDS,
-};
+use super::{state::ContactSamplingState, TouchAcquisitionCommand, TOUCH_ACQUISITION_COMMANDS};
 use crate::firmware::touch::tasks::{push_touch_input_sample, request_touch_pipeline_reset};
 
 const CLASSIFIER_PROBE_MS: u64 = 8;
+const RELEASE_TRACE_ENABLED: bool = option_env!("MEDITAMER_TOUCH_RELEASE_TRACE").is_some();
 
 pub(super) enum ProbeResult {
     Complete,
@@ -58,6 +56,7 @@ pub(super) async fn probe_asserted_line(
         if read_and_publish(
             touch,
             Instant::now().as_millis(),
+            "asserted",
             classifier,
             contact_sampling,
         )
@@ -86,11 +85,30 @@ pub(super) async fn probe_asserted_line(
 pub(super) async fn read_and_publish(
     touch: &mut InkplateTouchDriver,
     t_ms: u64,
+    phase: &str,
     classifier: &mut Gpio36Classifier,
     contact_sampling: &mut ContactSamplingState,
 ) -> Result<(), ()> {
     let sample = touch.read_sample(0).await.map_err(|_| ())?;
-    let authoritative_count = authoritative_touch_count(sample.raw[0], sample.touch_count);
+    let authoritative_count =
+        contact_sampling.classify_touch_count(&sample.raw, sample.touch_count);
+    if RELEASE_TRACE_ENABLED && contact_sampling.should_trace(t_ms, authoritative_count) {
+        esp_println::println!(
+            "TOUCH_RELEASE_TRACE phase={} t_ms={} authoritative={:?} decoded_count={} raw={:02x},{:02x},{:02x},{:02x},{:02x},{:02x},{:02x},{:02x}",
+            phase,
+            t_ms,
+            authoritative_count,
+            sample.touch_count,
+            sample.raw[0],
+            sample.raw[1],
+            sample.raw[2],
+            sample.raw[3],
+            sample.raw[4],
+            sample.raw[5],
+            sample.raw[6],
+            sample.raw[7],
+        );
+    }
     publish_action(
         classifier.observe_touch_probe(t_ms, authoritative_count.is_some_and(|count| count > 0)),
     )

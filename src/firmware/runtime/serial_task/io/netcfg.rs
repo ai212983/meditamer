@@ -7,7 +7,7 @@ use crate::firmware::{
         NET_CONFIG_SET_UPDATES, WIFI_CONFIG_REQUESTS, WIFI_CONFIG_RESPONSES,
         WIFI_CONFIG_RESPONSE_TIMEOUT_MS,
     },
-    storage::upload::wifi,
+    net::wifi,
     touch::debug_log::uart_write_all,
     types::{NetConfigSet, WifiConfigRequest},
 };

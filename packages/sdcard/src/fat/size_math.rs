@@ -1,4 +1,4 @@
-fn clusters_for_size(size: usize, cluster_size: usize) -> usize {
+pub(super) fn clusters_for_size(size: usize, cluster_size: usize) -> usize {
     if size == 0 {
         0
     } else {

@@ -1,9 +1,11 @@
 use std::{path::PathBuf, thread, time::Duration};
 
+use crate::{
+    env_utils,
+    logging::Logger,
+    serial_console::{AckStatus, SerialConsole},
+};
 use anyhow::{anyhow, Result};
-use regex::Regex;
-
-use crate::{env_utils, logging::Logger, serial_console::SerialConsole};
 
 pub struct RepaintOptions {
     pub command: Option<String>,
@@ -30,12 +32,13 @@ pub fn run_repaint(logger: &mut Logger, opts: RepaintOptions) -> Result<()> {
         .command
         .or_else(|| std::env::var("HOSTCTL_REPAINT_CMD").ok())
         .unwrap_or_else(|| "REPAINT".to_string());
+    let output_path = std::env::var_os("HOSTCTL_REPAINT_LOG_PATH").map(PathBuf::from);
 
     if retries == 0 {
         return Err(anyhow!("HOSTCTL_REPAINT_RETRIES must be >= 1"));
     }
 
-    let (mut console, port, baud) = open_console(settle_ms, None)?;
+    let (mut console, port, baud) = open_console(settle_ms, output_path)?;
     let ack_ok = format!("{} OK", command);
     let ack_busy = format!("{} BUSY", command);
 
@@ -43,24 +46,20 @@ pub fn run_repaint(logger: &mut Logger, opts: RepaintOptions) -> Result<()> {
         let mark = console.mark();
         console.send_line(&command)?;
         if wait_ack {
-            let pattern = Regex::new(&format!(r"^{} (OK|BUSY|ERR.*)$", regex::escape(&command)))?;
-            let line = console.wait_for_regex_since(
-                mark,
-                &pattern,
-                Duration::from_millis(ack_timeout_ms),
-            )?;
+            let (status, line) =
+                console.wait_ack_since(mark, &command, Duration::from_millis(ack_timeout_ms))?;
             if let Some(line) = line {
-                if line.contains(&ack_ok) {
+                if status == AckStatus::Ok && line.contains(&ack_ok) {
                     logger.info(format!(
                         "Sent ({attempt}x) with ACK: {command} -> {port} @ {baud}"
                     ));
                     return Ok(());
                 }
-                if line.contains(&ack_busy) {
+                if status == AckStatus::Busy && line.contains(&ack_busy) {
                     thread::sleep(Duration::from_millis(retry_delay_ms));
                     continue;
                 }
-                if line.contains(" ERR") {
+                if status == AckStatus::Err {
                     return Err(anyhow!("{command} failed: {line}"));
                 }
             }

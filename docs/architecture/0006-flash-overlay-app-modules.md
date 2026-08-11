@@ -7,7 +7,7 @@
 - Amended: 2026-08-09
 - References: [ADR-0007](0007-ui-and-application-structure.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
-  [UI/app rework plan](../development/ui-app-structure-rework-plan.md),
+  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
   [DRAM budget](../reference/dram-budget.md)
 
 ## Context
@@ -105,5 +105,5 @@ The spike passes only if one build demonstrates all of the following:
 ## Validation
 
 Acceptance evidence belongs in the
-[implementation ledger](../development/ui-app-structure-rework-ledger.md). A successful build or a
+[implementation ledger](../plans/ui-app-structure-rework-ledger.md). A successful build or a
 single direct call is not sufficient to promote this ADR.

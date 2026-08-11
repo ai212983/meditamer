@@ -1,4 +1,22 @@
-async fn run_sd_checks(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
+use super::control::{
+    poll_session_interrupt, session_interrupt_outcome, session_outcome_from_interrupt,
+};
+use super::model::{
+    set_status, SdWaitOutcome, SessionOutcome, CODE_OK, CODE_SD_PROBE_FAILED,
+    CODE_SD_RWVERIFY_FAILED, CODE_SD_TIMEOUT, DIAG_POLL_MS, DIAG_SD_TIMEOUT_MS,
+    NEXT_SD_DIAG_REQUEST_ID, SD_DIAG_RWVERIFY_LBA, STATE_RUNNING, STEP_SD_PROBE, STEP_SD_RWVERIFY,
+};
+use core::sync::atomic::Ordering;
+
+use embassy_time::{with_timeout, Duration};
+
+use crate::firmware::{
+    app_state::DiagKind,
+    config::{SD_DIAG_RESULTS, SD_REQUESTS},
+    types::{SdCommand, SdRequest, SdResult},
+};
+
+pub(super) async fn run_sd_checks(kind: DiagKind, targets: u8) -> Option<SessionOutcome> {
     if let Some(outcome) = session_interrupt_outcome(kind, targets) {
         return Some(outcome);
     }

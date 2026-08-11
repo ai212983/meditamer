@@ -1,10 +1,19 @@
 mod backend;
+mod base_overlays;
+mod carousel;
 mod dither;
+mod gesture_test;
 mod home;
+mod intent_bridge;
 mod io;
+mod launcher;
+#[cfg(feature = "ui-provider-fixture")]
+mod provider_fixture;
 
-pub(crate) use backend::{Backend, InitError};
+pub(crate) use backend::{Backend, InitError, UiCycleStepError};
 pub(crate) use dither::DirtyArea;
+pub(crate) use intent_bridge::take_full_repaint_request;
+pub(crate) use io::{take_gesture, LvglGestureEvent, LvglGestureKind, LvglGestureState};
 
 const WIDTH: i32 = 600;
 const HEIGHT: i32 = 600;

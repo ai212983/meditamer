@@ -1,4 +1,20 @@
-fn handle_idle_timeout(
+use super::command_run::append_log_line;
+use super::{CommandMonitorState, CommandProgressMode, LogRelayThread};
+use std::{
+    fs::OpenOptions,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    process::ExitStatus,
+    sync::{mpsc, Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
+
+use anyhow::{anyhow, bail, Result};
+
+use crate::logging::ensure_parent_dir;
+
+pub(super) fn handle_idle_timeout(
     child: &mut std::process::Child,
     log_path: &Path,
     idle_timeout: Option<Duration>,
@@ -27,7 +43,7 @@ fn handle_idle_timeout(
     Ok(Some(status))
 }
 
-fn handle_progress_timeout(
+pub(super) fn handle_progress_timeout(
     child: &mut std::process::Child,
     log_path: &Path,
     progress_stall_timeout: Option<Duration>,
@@ -68,7 +84,7 @@ fn handle_progress_timeout(
     Ok(Some(status))
 }
 
-fn spawn_log_tee<R>(
+pub(super) fn spawn_log_tee<R>(
     id: usize,
     mut reader: R,
     log_path: PathBuf,
@@ -81,7 +97,10 @@ where
 {
     let handle = thread::spawn(move || {
         ensure_parent_dir(&log_path)?;
-        let mut file = OpenOptions::new().create(true).append(true).open(&log_path)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
         let mut buffer = [0_u8; 4096];
         let mut pending = String::new();
         loop {
@@ -115,7 +134,7 @@ where
     LogRelayThread { id, handle }
 }
 
-fn wait_for_log_threads(
+pub(super) fn wait_for_log_threads(
     handles: &mut Vec<LogRelayThread>,
     done_rx: &mpsc::Receiver<usize>,
     log_path: &Path,

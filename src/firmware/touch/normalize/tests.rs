@@ -25,6 +25,6 @@ fn sample(
     )
 }
 
-mod part1;
-mod part2;
-mod part3;
+mod continuity;
+mod filtering;
+mod presence;
