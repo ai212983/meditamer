@@ -1,0 +1,8 @@
+[package]
+name = "ui_shell_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+heapless = "0.9.3"
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }

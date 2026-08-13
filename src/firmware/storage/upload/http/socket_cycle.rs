@@ -1,4 +1,15 @@
-async fn serve_connection_cycle(
+use crate::firmware::observability;
+use crate::firmware::service_mode;
+use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
+use embassy_time::{Duration, Instant};
+
+use super::listener_gate::{dhcp_ipv4_status, elapsed_ms_u32};
+use super::mem_diag::log_http_mem_diag;
+use super::{
+    HttpBuffer, HttpServerLoopState, HTTP_CHUNK_BUF_FALLBACK, HTTP_HEADER_MAX,
+    HTTP_RW_BUF_FALLBACK, HTTP_SOCKET_TIMEOUT_SECS, UPLOAD_HTTP_PORT,
+};
+pub(super) async fn serve_connection_cycle(
     stack: Stack<'static>,
     state: &mut HttpServerLoopState,
     local_ipv4: [u8; 4],
@@ -11,10 +22,10 @@ async fn serve_connection_cycle(
         let gap_us = elapsed_us_u32(closed_at);
         let after_mkdir = matches!(
             state.last_request_route,
-            Some(connection::RequestRouteKind::Mkdir)
+            Some(super::connection::RequestRouteKind::Mkdir)
         );
-        telemetry::record_net_pipeline_accept_arm_gap(gap_us, after_mkdir);
-        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) && gap_us >= 500 {
+        observability::record_net_pipeline_accept_arm_gap(gap_us, after_mkdir);
+        if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) && gap_us >= 500 {
             let prev_route = state
                 .last_request_route
                 .map(|route| route.as_str())
@@ -29,14 +40,14 @@ async fn serve_connection_cycle(
 
     let mut socket = TcpSocket::new(stack, rx_buffer.as_mut_slice(), tx_buffer.as_mut_slice());
     socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
-    telemetry::set_upload_http_listener(true, Some(local_ipv4));
+    observability::set_upload_http_listener(true, Some(local_ipv4));
 
     if !accept_connection(&mut socket, &stack, state).await {
         return;
     }
 
     let mut last_route = None;
-    let mut header_timeout_ms = connection::HTTP_HEADER_READ_TIMEOUT_MS;
+    let mut header_timeout_ms = super::connection::HTTP_HEADER_READ_TIMEOUT_MS;
     loop {
         match handle_connection_request(
             &mut socket,
@@ -52,7 +63,7 @@ async fn serve_connection_cycle(
             } => {
                 last_route = Some(route_kind);
                 if connection_close_requested {
-                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
                         esp_println::println!(
                             "upload_http: close requested by client after route={}",
                             route_kind.as_str()
@@ -60,7 +71,7 @@ async fn serve_connection_cycle(
                     }
                     break;
                 }
-                header_timeout_ms = connection::HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS;
+                header_timeout_ms = super::connection::HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS;
             }
             RequestHandling::PeerClosed => {
                 log_http_mem_diag("request_idle_close");
@@ -93,10 +104,10 @@ async fn accept_connection(
     let accept_started_at = Instant::now();
     loop {
         if !service_mode::upload_transfers_enabled() {
-            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
             state.reset_all();
-            telemetry::set_upload_http_listener(false, None);
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+            observability::set_upload_http_listener(false, None);
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
                 esp_println::println!(
                     "upload_http: accept paused while transfers are disabled; re-arm later"
                 );
@@ -105,10 +116,10 @@ async fn accept_connection(
             return false;
         }
         if !service_mode::upload_http_listener_enabled() {
-            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
             state.reset_all();
-            telemetry::set_upload_http_listener(false, None);
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+            observability::set_upload_http_listener(false, None);
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
                 esp_println::println!(
                     "upload_http: accept paused while listener gate is disabled; re-arm later"
                 );
@@ -117,11 +128,11 @@ async fn accept_connection(
             return false;
         }
         if dhcp_ipv4_status(stack).is_err() {
-            telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
-            telemetry::record_upload_http_accept_link_reset();
+            observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            observability::record_upload_http_accept_link_reset();
             state.reset_link_state();
-            telemetry::set_upload_http_listener(false, None);
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+            observability::set_upload_http_listener(false, None);
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
                 esp_println::println!(
                     "upload_http: accept paused due to connectivity gate loss; re-arm later"
                 );
@@ -142,23 +153,23 @@ async fn accept_connection(
         .await
         {
             Ok(Ok(())) => {
-                telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
-                telemetry::record_upload_http_accept();
+                observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+                observability::record_upload_http_accept();
                 log_http_mem_diag("accept_ok");
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+                if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
                     esp_println::println!("upload_http: accepted connection");
                 }
                 return true;
             }
             Ok(Err(err)) => {
-                telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
-                telemetry::record_upload_http_accept_error();
+                observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+                observability::record_upload_http_accept_error();
                 if dhcp_ipv4_status(stack).is_err() {
-                    telemetry::record_upload_http_accept_link_reset();
+                    observability::record_upload_http_accept_link_reset();
                     state.reset_link_state();
                 }
-                telemetry::set_upload_http_listener(false, None);
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+                observability::set_upload_http_listener(false, None);
+                if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
                     esp_println::println!("upload_http: accept err={:?}", err);
                 }
                 log_http_mem_diag("accept_err");
@@ -181,7 +192,9 @@ async fn handle_connection_request(
     header_timeout_ms: u64,
 ) -> RequestHandling {
     log_http_mem_diag("request_begin");
-    match connection::handle_connection(socket, chunk_buf, header_buf, header_timeout_ms).await {
+    match super::connection::handle_connection(socket, chunk_buf, header_buf, header_timeout_ms)
+        .await
+    {
         Ok(handled) => {
             log_http_mem_diag("request_ok");
             RequestHandling::Handled {
@@ -196,8 +209,8 @@ async fn handle_connection_request(
             ) {
                 return RequestHandling::PeerClosed;
             }
-            telemetry::record_upload_http_request_error();
-            telemetry::record_upload_http_request_bucket(err);
+            observability::record_upload_http_request_error();
+            observability::record_upload_http_request_bucket(err);
             if matches!(err, "read body" | "incomplete body") {
                 // Force-close transport immediately after upload-body read failures so
                 // the listener can accept the next connection without waiting for
@@ -205,7 +218,7 @@ async fn handle_connection_request(
                 socket.abort();
             }
             log_http_mem_diag("request_err");
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
                 esp_println::println!(
                     "upload_http: request err={} recv_queue={} send_queue={} state={:?} remote={:?}",
                     err,
@@ -222,7 +235,7 @@ async fn handle_connection_request(
 
 enum RequestHandling {
     Handled {
-        route_kind: connection::RequestRouteKind,
+        route_kind: super::connection::RequestRouteKind,
         connection_close_requested: bool,
     },
     PeerClosed,

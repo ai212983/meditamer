@@ -8,6 +8,13 @@ pub(crate) enum AppEvent {
     Gpio36Action(Gpio36Action),
     ImuActionsReady,
     ForceRepaint,
+    UiCycleStep {
+        ack_request_id: u16,
+    },
+    #[cfg(feature = "ui-provider-fixture")]
+    UiProviderFixtureStep {
+        ack_request_id: u16,
+    },
     ApplyAppStateCommand {
         command: AppStateCommand,
         ack_request_id: Option<u16>,

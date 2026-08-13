@@ -1,4 +1,11 @@
-fn resolve_net_upload_retry_policy() -> Result<upload::UploadRetryPolicy> {
+use anyhow::Result;
+
+use crate::{
+    env_utils,
+    workflows::{upload, wifi::common::PanicSignal},
+};
+
+pub(super) fn resolve_net_upload_retry_policy() -> Result<upload::UploadRetryPolicy> {
     let default_sd_busy_retry_s =
         env_utils::parse_env_f64("HOSTCTL_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", 30.0)?.max(1.0);
     let default_net_recovery_timeout_s =
@@ -31,7 +38,7 @@ fn resolve_net_upload_retry_policy() -> Result<upload::UploadRetryPolicy> {
     })
 }
 
-fn append_health_fail_net_status(
+pub(super) fn append_health_fail_net_status(
     detail: &mut String,
     status_query: std::result::Result<Option<String>, String>,
 ) -> String {
@@ -51,7 +58,7 @@ fn append_health_fail_net_status(
     }
 }
 
-fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
+pub(super) fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
     let lower = detail.to_ascii_lowercase();
     if lower.contains("health check failed: get")
         && (lower.contains("send failed")
@@ -73,18 +80,21 @@ fn classify_host_upload_failure(detail: &str) -> Option<&'static str> {
     None
 }
 
-fn refresh_retry_eligible_host_failure(class: &str) -> bool {
+pub(super) fn refresh_retry_eligible_host_failure(class: &str) -> bool {
     matches!(
         class,
         "host_health_send_fail" | "host_transport_send_fail" | "host_transport_connection_reset"
     )
 }
 
-fn refresh_upload_client_on_failure_enabled() -> Result<bool> {
+pub(super) fn refresh_upload_client_on_failure_enabled() -> Result<bool> {
     env_utils::parse_env_bool01("HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE", true)
 }
 
-fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>) -> bool {
+pub(super) fn append_panic_signal_context(
+    detail: &mut String,
+    signal: Option<&PanicSignal>,
+) -> bool {
     let Some(signal) = signal else {
         return false;
     };
@@ -97,7 +107,7 @@ fn append_panic_signal_context(detail: &mut String, signal: Option<&PanicSignal>
     true
 }
 
-fn avg(values: &[f64]) -> f64 {
+pub(super) fn avg(values: &[f64]) -> f64 {
     if values.is_empty() {
         0.0
     } else {
@@ -105,7 +115,7 @@ fn avg(values: &[f64]) -> f64 {
     }
 }
 
-fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
+pub(super) fn parse_metrics_key_u32(line: &str, key: &str) -> Option<u32> {
     line.split_whitespace()
         .find_map(|token| token.strip_prefix(&format!("{key}=")))
         .and_then(|value| value.parse::<u32>().ok())

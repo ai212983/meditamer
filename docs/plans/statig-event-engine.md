@@ -7,7 +7,7 @@
 
 ## Goal
 
-Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_task/mod.rs` into a reusable [statig](https://github.com/mdeloof/statig) -based engine that:
+Move sensor-event detection from ad hoc logic in `src/firmware/display.rs` into a reusable [statig](https://github.com/mdeloof/statig) -based engine that:
 
 - supports current triple-tap backlight behavior reliably,
 - is extensible to non-tap events (pickup, placement, stillness, near/far intent),
@@ -30,7 +30,7 @@ Move sensor-event detection from ad hoc logic in `src/firmware/runtime/display_t
 
 ## Current Baseline (as of this plan)
 
-- Detection and sequencing logic is embedded in `display_task` in `src/firmware/runtime/display_task/mod.rs`.
+- Detection and sequencing logic is embedded in `display_task` in `src/firmware/display.rs`.
 - Current detector uses fused signals:
   - LSM tap source bits (`TAP_SRC` axis/single/tap-event),
   - accel jerk,
@@ -244,7 +244,7 @@ Exit criteria:
 
 - Standard script flow:
   - flash: `ESPFLASH_PORT=... ./scripts/device/flash.sh release`
-  - capture: `ESPFLASH_PORT=... ./scripts/touch/tap_capture.sh logs/<name>.log`
+  - capture: `ESPFLASH_PORT=... ./scripts/touch/touch_capture.sh --mode tap logs/<name>.log`
 - Scenario matrix per firmware:
   - 3x triple taps on each of 3 sides,
   - light touches/no taps,

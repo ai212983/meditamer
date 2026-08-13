@@ -8,14 +8,6 @@ use super::{
     AppStateSnapshot,
 };
 
-fn checksum8(bytes: &[u8]) -> u8 {
-    let mut acc = 0x5Au8;
-    for &byte in bytes {
-        acc ^= byte.rotate_left(1);
-    }
-    acc
-}
-
 #[test]
 fn boot_transition_initializing_to_operating_defaults() {
     let mut engine = AppStateEngine::new(AppStateSnapshot::default());
@@ -50,15 +42,14 @@ fn persisted_roundtrip() {
     };
 
     let record = persisted.record_bytes();
-    let decoded = PersistedAppState::from_record(&record).expect("decode v3 record");
+    let decoded = PersistedAppState::from_record(&record).expect("decode v4 record");
     assert_eq!(decoded, persisted);
 }
 
 #[test]
-fn persisted_non_v3_rejected() {
+fn persisted_non_v4_rejected() {
     let mut record = PersistedAppState::default().record_bytes();
     record[4] = 7;
-    record[APP_STATE_STORE_RECORD_LEN - 1] = checksum8(&record[..APP_STATE_STORE_RECORD_LEN - 1]);
     assert!(PersistedAppState::from_record(&record).is_none());
 }
 

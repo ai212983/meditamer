@@ -1,3 +1,4 @@
+use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     mutex::{Mutex, MutexGuard},
@@ -6,13 +7,14 @@ use embassy_time::{with_timeout, Duration, Instant};
 
 use super::super::super::{
     config::{SD_UPLOAD_REQUESTS, SD_UPLOAD_RESULTS},
+    observability,
     storage::transfer_buffers,
-    telemetry,
     types::{
         SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, SD_UPLOAD_CHUNK_MAX,
     },
 };
 
+mod correlation;
 mod error;
 
 pub(crate) use error::{
@@ -21,9 +23,11 @@ pub(crate) use error::{
 
 const SD_UPLOAD_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 static SD_UPLOAD_ROUNDTRIP_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+static NEXT_SD_UPLOAD_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 
 pub(crate) struct SdUploadChunkInFlight {
     pub(crate) copy_ms: u32,
+    request_id: u32,
     started_at: Instant,
     _lock: MutexGuard<'static, CriticalSectionRawMutex, ()>,
 }
@@ -45,7 +49,7 @@ pub(crate) async fn sd_upload_chunk_start(
     data: &[u8],
 ) -> Result<SdUploadChunkInFlight, SdUploadRoundtripError> {
     if data.len() > SD_UPLOAD_CHUNK_MAX {
-        telemetry::record_sd_upload_roundtrip_code(SdUploadResultCode::OperationFailed);
+        observability::record_sd_upload_roundtrip_code(SdUploadResultCode::OperationFailed);
         return Err(SdUploadRoundtripError::Device(
             SdUploadResultCode::OperationFailed,
         ));
@@ -61,8 +65,10 @@ pub(crate) async fn sd_upload_chunk_start(
     }
     let copy_ms = elapsed_ms_u32(copy_started_at);
     let started_at = Instant::now();
+    let request_id = next_sd_upload_request_id();
     SD_UPLOAD_REQUESTS
         .send(SdUploadRequest {
+            id: request_id,
             command: SdUploadCommand::Chunk {
                 data_len: data.len() as u32,
             },
@@ -71,6 +77,7 @@ pub(crate) async fn sd_upload_chunk_start(
         .await;
     Ok(SdUploadChunkInFlight {
         copy_ms,
+        request_id,
         started_at,
         _lock: lock,
     })
@@ -80,28 +87,29 @@ pub(crate) async fn sd_upload_chunk_finish(
     inflight: SdUploadChunkInFlight,
 ) -> Result<SdUploadChunkFinish, SdUploadRoundtripError> {
     let started_at = inflight.started_at;
+    let request_id = inflight.request_id;
     let _lock = inflight._lock;
-    let result = match receive_sd_upload_result_with_timeout(started_at).await {
+    let result = match receive_sd_upload_result_with_timeout(request_id, started_at).await {
         Some(result) => result,
         None => {
             drain_stale_sd_upload_results();
             let roundtrip_ms = elapsed_ms_u32(started_at);
-            telemetry::record_sd_upload_roundtrip_timing(
-                telemetry::SdUploadRoundtripPhase::Chunk,
+            observability::record_sd_upload_roundtrip_timing(
+                observability::SdUploadRoundtripPhase::Chunk,
                 roundtrip_ms,
             );
-            telemetry::record_sd_upload_roundtrip_timeout();
+            observability::record_sd_upload_roundtrip_timeout();
             return Err(SdUploadRoundtripError::Timeout);
         }
     };
     let roundtrip_ms = elapsed_ms_u32(started_at);
-    telemetry::record_sd_upload_roundtrip_timing(
-        telemetry::SdUploadRoundtripPhase::Chunk,
+    observability::record_sd_upload_roundtrip_timing(
+        observability::SdUploadRoundtripPhase::Chunk,
         roundtrip_ms,
     );
 
     if !result.ok {
-        telemetry::record_sd_upload_roundtrip_code(result.code);
+        observability::record_sd_upload_roundtrip_code(result.code);
         return Err(SdUploadRoundtripError::Device(result.code));
     }
     let receive_at_ms = now_ms_u32();
@@ -124,15 +132,20 @@ pub(crate) fn sd_upload_chunk_try_finish(
     inflight: SdUploadChunkInFlight,
 ) -> Result<SdUploadChunkTryFinish, SdUploadRoundtripError> {
     let started_at = inflight.started_at;
-    let Ok(result) = SD_UPLOAD_RESULTS.try_receive() else {
-        return Ok(SdUploadChunkTryFinish::Pending(inflight));
+    let result = loop {
+        let Ok(result) = SD_UPLOAD_RESULTS.try_receive() else {
+            return Ok(SdUploadChunkTryFinish::Pending(inflight));
+        };
+        if correlation::result_matches_request(inflight.request_id, result.request_id) {
+            break result;
+        }
     };
-    telemetry::record_sd_upload_roundtrip_timing(
-        telemetry::SdUploadRoundtripPhase::Chunk,
+    observability::record_sd_upload_roundtrip_timing(
+        observability::SdUploadRoundtripPhase::Chunk,
         elapsed_ms_u32(started_at),
     );
     if !result.ok {
-        telemetry::record_sd_upload_roundtrip_code(result.code);
+        observability::record_sd_upload_roundtrip_code(result.code);
         return Err(SdUploadRoundtripError::Device(result.code));
     }
     let receive_at_ms = now_ms_u32();
@@ -170,62 +183,86 @@ async fn sd_upload_roundtrip_raw_locked(
     drain_stale_sd_upload_results();
 
     let started_at = Instant::now();
+    let request_id = next_sd_upload_request_id();
     SD_UPLOAD_REQUESTS
         .send(SdUploadRequest {
+            id: request_id,
             command,
             enqueued_at_ms: now_ms_u32(),
         })
         .await;
 
-    let result = match receive_sd_upload_result_with_timeout(started_at).await {
+    let result = match receive_sd_upload_result_with_timeout(request_id, started_at).await {
         Some(result) => result,
         None => {
             // If a response raced with timeout handling, clear it so the next
             // roundtrip cannot consume a stale result.
             drain_stale_sd_upload_results();
-            telemetry::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
-            telemetry::record_sd_upload_roundtrip_timeout();
+            observability::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
+            observability::record_sd_upload_roundtrip_timeout();
             return Err(SdUploadRoundtripError::Timeout);
         }
     };
-    telemetry::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
+    observability::record_sd_upload_roundtrip_timing(phase, elapsed_ms_u32(started_at));
 
     if result.ok {
         Ok(result)
     } else {
-        telemetry::record_sd_upload_roundtrip_code(result.code);
+        observability::record_sd_upload_roundtrip_code(result.code);
         Err(SdUploadRoundtripError::Device(result.code))
     }
 }
 
-async fn receive_sd_upload_result_with_timeout(started_at: Instant) -> Option<SdUploadResult> {
-    if let Ok(result) = SD_UPLOAD_RESULTS.try_receive() {
-        return Some(result);
-    }
+async fn receive_sd_upload_result_with_timeout(
+    request_id: u32,
+    started_at: Instant,
+) -> Option<SdUploadResult> {
+    loop {
+        if let Ok(result) = SD_UPLOAD_RESULTS.try_receive() {
+            if correlation::result_matches_request(request_id, result.request_id) {
+                return Some(result);
+            }
+            continue;
+        }
 
-    let remaining_ms =
-        SD_UPLOAD_RESPONSE_TIMEOUT_MS.saturating_sub(started_at.elapsed().as_millis());
-    if remaining_ms == 0 {
-        return None;
-    }
+        let remaining_ms =
+            SD_UPLOAD_RESPONSE_TIMEOUT_MS.saturating_sub(started_at.elapsed().as_millis());
+        if remaining_ms == 0 {
+            return None;
+        }
 
-    with_timeout(
-        Duration::from_millis(remaining_ms),
-        SD_UPLOAD_RESULTS.receive(),
-    )
-    .await
-    .ok()
+        match with_timeout(
+            Duration::from_millis(remaining_ms),
+            SD_UPLOAD_RESULTS.receive(),
+        )
+        .await
+        {
+            Ok(result) if correlation::result_matches_request(request_id, result.request_id) => {
+                return Some(result)
+            }
+            Ok(_) => {}
+            Err(_) => return None,
+        }
+    }
 }
 
-fn phase_for_command(command: &SdUploadCommand) -> telemetry::SdUploadRoundtripPhase {
+fn next_sd_upload_request_id() -> u32 {
+    NEXT_SD_UPLOAD_REQUEST_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(correlation::next_request_id(current))
+        })
+        .unwrap_or(1)
+}
+
+fn phase_for_command(command: &SdUploadCommand) -> observability::SdUploadRoundtripPhase {
     match command {
-        SdUploadCommand::Begin { .. } => telemetry::SdUploadRoundtripPhase::Begin,
-        SdUploadCommand::Chunk { .. } => telemetry::SdUploadRoundtripPhase::Chunk,
-        SdUploadCommand::Commit => telemetry::SdUploadRoundtripPhase::Commit,
-        SdUploadCommand::Abort => telemetry::SdUploadRoundtripPhase::Abort,
-        SdUploadCommand::Mkdir { .. } => telemetry::SdUploadRoundtripPhase::Mkdir,
-        SdUploadCommand::Remove { .. } => telemetry::SdUploadRoundtripPhase::Remove,
-        SdUploadCommand::Stat { .. } => telemetry::SdUploadRoundtripPhase::Remove,
+        SdUploadCommand::Begin { .. } => observability::SdUploadRoundtripPhase::Begin,
+        SdUploadCommand::Chunk { .. } => observability::SdUploadRoundtripPhase::Chunk,
+        SdUploadCommand::Commit => observability::SdUploadRoundtripPhase::Commit,
+        SdUploadCommand::Abort => observability::SdUploadRoundtripPhase::Abort,
+        SdUploadCommand::Mkdir { .. } => observability::SdUploadRoundtripPhase::Mkdir,
+        SdUploadCommand::Remove { .. } => observability::SdUploadRoundtripPhase::Remove,
+        SdUploadCommand::Stat { .. } => observability::SdUploadRoundtripPhase::Remove,
     }
 }
 

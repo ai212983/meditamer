@@ -5,7 +5,7 @@ Evaluate whether we should introduce metrics/telemetry in firmware, and which li
 
 ## Current Baseline
 - We already have ad-hoc telemetry over UART:
-  - `METRICS` / `PERF` command in `src/firmware/runtime/serial_task.rs` (runtime, touch, IMU, and Wi-Fi metrics).
+  - `METRICS` / `PERF` command in `src/firmware/serial.rs` (runtime, touch, IMU, and Wi-Fi metrics).
   - Structured CSV-like traces (`tap_trace`, `touch_trace`, `touch_event`, SD task lines, upload logs).
 - This is useful but fragmented. There is no centralized schema/counter registry.
 

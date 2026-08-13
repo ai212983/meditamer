@@ -16,7 +16,7 @@ The runtime path is:
 4. The pipeline emits trace rows and publishes coalesced semantic display actions.
 5. `display_task` applies frontlight/app-state effects without owning IMU timing or registers.
 
-Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/runtime/display_task/mod.rs`.
+Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside the engine and still handled in `src/firmware/display.rs`.
 
 ## File Map
 
@@ -54,10 +54,10 @@ Backlight timeline behavior (immediate ON, hold, fade) is intentionally outside 
 - `src/firmware/imu/`
   - Owns adaptive acquisition, event-pipeline state, touch/upload suppression, action delivery, and scheduling metrics.
 
-- `src/drivers/inkplate/imu.rs`
+- `src/platform/inkplate/imu.rs`
   - Owns LSM6DS3 transactions and read-only INT1/INT2 board-signal reads.
 
-- `src/firmware/runtime/display_task/mod.rs`
+- `src/firmware/display.rs`
   - Executes semantic IMU actions and retains frontlight/render ownership.
 
 ## Config Editing Workflow
@@ -137,26 +137,26 @@ cargo check
 Host-side config regression tests:
 
 ```bash
-scripts/tests/host/test_event_config_host.sh
+scripts/host-test.sh test event-config
 ```
 
 Host-side event engine state-machine tests:
 
 ```bash
-scripts/tests/host/test_event_engine_host.sh
+scripts/host-test.sh test event-engine
 ```
 
 Host-side tooling lint (clippy):
 
 ```bash
-scripts/ci/lint_host_tools.sh
+scripts/host-test.sh lint all
 ```
 
 Flash and capture:
 
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh release
-ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/touch/tap_capture.sh logs/tap_trace_test.log
+ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/touch/touch_capture.sh --mode tap logs/tap_trace_test.log
 ```
 
 Notes:

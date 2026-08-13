@@ -1,10 +1,13 @@
+use super::{SdCardProbe, SdProbeError, SdSpiBus, SD_SECTOR_SIZE, SD_WRITE_PREAMBLE_BYTES};
+use embassy_time::Instant;
+
 const SD_READY_POLL_BURST_BYTES: usize = 16;
 const SD_PROTOCOL_WAIT_DEADLINE_MS: u32 = 250;
 
-struct WaitReadyDiag {
-    released: bool,
-    elapsed_ms: u32,
-    polls: u32,
+pub(super) struct WaitReadyDiag {
+    pub(super) released: bool,
+    pub(super) elapsed_ms: u32,
+    pub(super) polls: u32,
 }
 
 impl WaitReadyDiag {
@@ -21,7 +24,7 @@ impl<'d, SPI> SdCardProbe<'d, SPI>
 where
     SPI: SdSpiBus,
 {
-    async fn transfer_write_frame(
+    pub(super) async fn transfer_write_frame(
         &mut self,
         token: u8,
         data: &[u8],
@@ -38,7 +41,7 @@ where
 
         let started_at = Instant::now();
         self.spi
-            .transfer_in_place_with_deadline(&mut self.cached_sector)
+            .transfer_in_place_to_completion(&mut self.cached_sector)
             .await?;
 
         // After the preamble and payload, two bytes clock the ignored CRC16.
@@ -61,7 +64,7 @@ where
         Ok((response, ready))
     }
 
-    async fn wait_data_token(&mut self, cmd: u8) -> Result<u8, SdProbeError> {
+    pub(super) async fn wait_data_token(&mut self, cmd: u8) -> Result<u8, SdProbeError> {
         let started_at = Instant::now();
         loop {
             let token = self.transfer_byte(0xFF).await?;
@@ -75,7 +78,7 @@ where
         }
     }
 
-    async fn wait_write_ready_timed(&mut self) -> Result<WaitReadyDiag, SdProbeError> {
+    pub(super) async fn wait_write_ready_timed(&mut self) -> Result<WaitReadyDiag, SdProbeError> {
         self.wait_write_ready_from(Instant::now(), 0).await
     }
 
@@ -89,24 +92,16 @@ where
         loop {
             response.fill(0xFF);
             self.spi
-                .transfer_in_place_with_deadline(&mut response)
+                .transfer_in_place_to_completion(&mut response)
                 .await?;
             if let Some(index) = response.iter().position(|byte| *byte == 0xFF) {
                 polls = polls.saturating_add(index as u32 + 1);
-                return Ok(WaitReadyDiag::new(
-                    true,
-                    elapsed_ms_u32(started_at),
-                    polls,
-                ));
+                return Ok(WaitReadyDiag::new(true, elapsed_ms_u32(started_at), polls));
             }
 
             polls = polls.saturating_add(SD_READY_POLL_BURST_BYTES as u32);
             if elapsed_ms_u32(started_at) >= SD_PROTOCOL_WAIT_DEADLINE_MS {
-                return Ok(WaitReadyDiag::new(
-                    false,
-                    elapsed_ms_u32(started_at),
-                    polls,
-                ));
+                return Ok(WaitReadyDiag::new(false, elapsed_ms_u32(started_at), polls));
             }
             // Small SPI ready-poll transfers may complete without producing a
             // useful executor handoff. Explicitly yield so a busy card cannot
@@ -116,7 +111,7 @@ where
     }
 }
 
-fn elapsed_ms_u32(started_at: Instant) -> u32 {
+pub(super) fn elapsed_ms_u32(started_at: Instant) -> u32 {
     let elapsed = started_at.elapsed().as_millis();
     if elapsed > u32::MAX as u64 {
         u32::MAX

@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, Result};
 use reqwest::Method;
 
-use crate::{env_utils, logging::Logger};
+use crate::{env_utils, logging::Logger, workflows::common::repo_path};
 
 use super::{
     client::{health_timeout_s, make_client, request_raw, RequestContext},
@@ -34,7 +34,8 @@ pub struct DirectUploadOptions<'a> {
     pub retry_policy: UploadRetryPolicy,
 }
 
-pub fn run_upload(logger: &mut Logger, opts: UploadOptions) -> Result<()> {
+pub fn run_upload(logger: &mut Logger, mut opts: UploadOptions) -> Result<()> {
+    opts.src = opts.src.map(repo_path);
     let client = make_client(opts.timeout_sec)?;
     let retry_policy = retry_policy_from_general_env()?;
     let token = opts.token.as_deref();

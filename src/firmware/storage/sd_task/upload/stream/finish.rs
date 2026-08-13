@@ -1,6 +1,6 @@
 use sdcard::fat::{FatEngine, FatRequest, FatResult, SdFatError};
 
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 
 use super::{
     copy_fat_path, div_or_zero, ensure_upload_ready, map_fat_result_to_upload_code, upload_result,
@@ -144,7 +144,7 @@ fn log_commit_metrics(
     sd_probe: &mut SdProbeDriver,
     final_path_str: &str,
 ) {
-    if !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if !observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         return;
     }
     let write_metrics_delta = write_metrics_delta(

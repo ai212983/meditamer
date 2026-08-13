@@ -75,7 +75,7 @@ static APP_STATE_SNAPSHOT: AtomicU32 = AtomicU32::new(AppStateSnapshot::default_
 
 pub(crate) fn publish_app_state_snapshot(snapshot: AppStateSnapshot) {
     APP_STATE_SNAPSHOT.store(snapshot.packed(), Ordering::Relaxed);
-    crate::firmware::runtime::scheduling::apply_snapshot(snapshot);
+    crate::firmware::scheduling::apply_snapshot(snapshot);
 }
 
 pub(crate) fn read_app_state_snapshot() -> AppStateSnapshot {

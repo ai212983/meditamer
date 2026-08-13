@@ -1,13 +1,18 @@
+use core::sync::atomic::{AtomicBool, AtomicU8};
+
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 
 #[cfg(not(feature = "wifi-debug-slim-app"))]
 use super::types::TouchTraceSample;
-use super::types::{TouchActivitySnapshot, TouchEvent, TouchPipelineInput, TouchStatus};
+use super::{
+    lvgl_multitouch::LvglMultitouchFrame,
+    types::{TouchActivitySnapshot, TouchEvent, TouchPipelineInput, TouchStatus},
+};
 
 #[cfg(not(feature = "wifi-debug-slim-app"))]
-pub(crate) const TOUCH_TRACE_ENABLED: bool = true;
+pub(crate) const TOUCH_TRACE_ENABLED: bool = false;
 pub(crate) const TOUCH_EVENT_TRACE_ENABLED: bool = false;
 pub(crate) const GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED: bool = false;
 // Keep touch polling at 8 ms so gesture starts are not missed between idle ticks.
@@ -36,6 +41,13 @@ pub(crate) static TOUCH_PIPELINE_INPUTS: Channel<CriticalSectionRawMutex, TouchP
     Channel::new();
 pub(crate) static TOUCH_PIPELINE_EVENTS: Channel<CriticalSectionRawMutex, TouchEvent, 64> =
     Channel::new();
+pub(crate) static TOUCH_LVGL_MULTITOUCH_FRAMES: Channel<
+    CriticalSectionRawMutex,
+    LvglMultitouchFrame,
+    64,
+> = Channel::new();
+pub(crate) static TOUCH_LVGL_MULTITOUCH_RESET: AtomicBool = AtomicBool::new(false);
+pub(crate) static TOUCH_CONTROLLER_ACTIVE_SLOTS: AtomicU8 = AtomicU8::new(0);
 pub(crate) static TOUCH_IMU_ACTIVITY: Signal<CriticalSectionRawMutex, TouchActivitySnapshot> =
     Signal::new();
 pub(crate) static TOUCH_IMU_STATUS: Signal<CriticalSectionRawMutex, TouchStatus> = Signal::new();

@@ -10,6 +10,9 @@ pub(super) async fn ensure_upload_ready(
     powered: &mut bool,
     upload_mounted: &mut bool,
 ) -> Result<(), SdUploadResultCode> {
+    if *upload_mounted && !sd_probe.is_initialized() {
+        *upload_mounted = false;
+    }
     if !*powered {
         if !request_sd_power(SdPowerRequest::On).await {
             return Err(SdUploadResultCode::PowerOnFailed);
@@ -89,6 +92,7 @@ pub(super) fn upload_result(
     bytes_written: u32,
 ) -> SdUploadResult {
     SdUploadResult {
+        request_id: 0,
         ok,
         code,
         bytes_written,

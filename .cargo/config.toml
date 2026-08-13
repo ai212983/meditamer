@@ -5,18 +5,19 @@ rustflags = [
     "link-arg=-nostartfiles",
     "-C",
     # Our own entry script, not esp-hal's `linkall.x`; it swaps in
-    # `ld/meditamer-memory.x` to extend `dram2_seg` over the APP CPU ROM stack.
+    # `config/linker/esp32/meditamer-memory.x` to extend `dram2_seg` over the
+    # APP CPU ROM stack.
     "link-arg=-Tmeditamer-linkall.x",
-    # Lets the linker find everything under `ld/`.
+    # Lets the linker find the Meditamer ESP32 linker overrides.
     "-C",
-    "link-arg=-Lld",
+    "link-arg=-Lconfig/linker/esp32",
 ]
 
 [env]
-DEP_LV_CONFIG_PATH = { value = "csrc/lvgl", relative = true }
+DEP_LV_CONFIG_PATH = { value = "config/lvgl", relative = true }
 # Keep jump tables in flash instead of DRAM. `dram_seg` is fully consumed and
 # `.stack` is only its remainder, so the 9912 bytes this frees go directly to
-# stack headroom. `ld/rwdata_hook.x` keeps back the two groups that IRAM code
-# actually dereferences; see docs/reference/dram-budget.md.
+# stack headroom. `config/linker/esp32/rwdata_hook.x` keeps back the two groups
+# that IRAM code actually dereferences; see docs/reference/dram/dram-budget.md.
 ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
 ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"

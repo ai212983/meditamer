@@ -2,7 +2,7 @@ use embassy_net::tcp::TcpSocket;
 use embassy_time::Duration;
 use esp_println::println;
 
-use super::super::super::super::telemetry;
+use super::super::super::super::observability;
 use super::super::super::super::types::SD_PATH_MAX;
 use super::helpers::target_path;
 
@@ -14,7 +14,7 @@ mod routes;
 pub(super) const HTTP_HEADER_READ_TIMEOUT_MS: u64 = 10_000;
 pub(super) const HTTP_HEADER_KEEPALIVE_IDLE_TIMEOUT_MS: u64 = 500;
 pub(super) const HTTP_UPLOAD_BODY_READ_TIMEOUT_MS: u64 = 6_000;
-type SdPath = ([u8; SD_PATH_MAX], u8);
+pub type SdPath = ([u8; SD_PATH_MAX], u8);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RequestRouteKind {
@@ -86,7 +86,7 @@ pub(super) async fn handle_connection(
         body_bytes_in_buffer: filled.saturating_sub(header_end + 4),
     };
 
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!(
             "upload_http: request method={} path={}",
             request.method, request.request_path

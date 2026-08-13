@@ -2,7 +2,8 @@ use super::utils::{int_sqrt_i32, is_axis_dominant, sample_primary, squared_dista
 use super::*;
 use statig::prelude::*;
 
-mod core;
+mod dispatch;
+mod release;
 
 pub(super) struct TouchHsm {
     origin_point: TouchPoint,

@@ -76,7 +76,7 @@ PSRAM
 Automated smoke run (mode toggles + PSRAM snapshots):
 
 ```bash
-scripts/device/runtime_modes_smoke.sh
+scripts/hostctl.sh test runtime-modes-smoke --suite full
 ```
 
 Optional env var:

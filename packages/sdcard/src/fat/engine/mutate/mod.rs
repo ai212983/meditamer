@@ -1,32 +1,29 @@
-use core::cmp;
+//! Mutating FAT commands.
+//!
+//! Each submodule owns one family of mutation -- appending and uploading,
+//! truncating, renaming and removing, directory growth, and the cluster-chain
+//! and data-write stages they all share. This module holds the stage dispatcher
+//! and the shared mutation state.
 
+mod allocation_contiguous;
+mod append_upload;
+mod chain;
+mod chain_free;
+mod data_zero;
+mod directory;
+mod directory_encode;
+mod rename_remove;
 mod state;
+mod truncate;
+mod upload_commit;
 
 pub(super) use state::{
     AllocationState, DataWriteState, FatWriteState, FreeState, MutationStage, MutationState,
     ZeroWriteState,
 };
 
-use super::super::{
-    cluster_to_lba, clusters_for_size, encode_short_name, make_short_alias, path_segment_to_name,
-    short_name_checksum, DirFound, DirLocation, DirRecord, SdFatError, ATTR_LONG_NAME,
-    FAT32_EOC_WRITE, MAX_LFN_SLOTS, SD_SECTOR_SIZE,
-};
-use super::{
-    CommandStage, FatBufferId, FatEngine, FatIoAction, FatReadReturn, FatRequest, FatResult,
-    FatStep, FatWriteReturn, ScanReturn,
-};
-
-include!("append_upload.rs");
-include!("upload_commit.rs");
-include!("truncate.rs");
-include!("rename_remove.rs");
-include!("directory.rs");
-include!("chain.rs");
-include!("allocation_contiguous.rs");
-include!("chain_free.rs");
-include!("data_zero.rs");
-include!("directory_encode.rs");
+use super::super::{clusters_for_size, DirFound, SdFatError, SD_SECTOR_SIZE};
+use super::{CommandStage, FatEngine, FatRequest, FatResult, FatStep};
 
 impl FatEngine {
     pub(super) fn begin_mutation(

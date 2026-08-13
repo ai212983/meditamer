@@ -1,6 +1,25 @@
 #[cfg(feature = "asset-upload-http")]
-fn disabled_upload_result() -> SdUploadResult {
+use sdcard::fat::FatEngine;
+
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::types::{SdPowerRequest, SdProbeDriver};
+#[cfg(feature = "asset-upload-http")]
+use super::power::request_sd_power;
+
+#[cfg(feature = "asset-upload-http")]
+use super::super::super::types::{
+    SdUploadCommand, SdUploadRequest, SdUploadResult, SdUploadResultCode, WifiConfigResponse,
+    WifiConfigResultCode,
+};
+#[cfg(feature = "asset-upload-http")]
+use super::upload::SdUploadSession;
+
+#[cfg(feature = "asset-upload-http")]
+use super::upload::process_upload_request;
+#[cfg(feature = "asset-upload-http")]
+pub(super) fn disabled_upload_result(request_id: u32) -> SdUploadResult {
     SdUploadResult {
+        request_id,
         ok: false,
         code: SdUploadResultCode::Busy,
         bytes_written: 0,
@@ -13,7 +32,7 @@ fn disabled_upload_result() -> SdUploadResult {
 }
 
 #[cfg(feature = "asset-upload-http")]
-fn disabled_wifi_config_response() -> WifiConfigResponse {
+pub(super) fn disabled_wifi_config_response() -> WifiConfigResponse {
     WifiConfigResponse {
         ok: false,
         code: WifiConfigResultCode::Busy,
@@ -22,7 +41,7 @@ fn disabled_wifi_config_response() -> WifiConfigResponse {
 }
 
 #[cfg(feature = "asset-upload-http")]
-fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
+pub(super) fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
     let mapped = match code {
         SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
         SdUploadResultCode::InitFailed => WifiConfigResultCode::InitFailed,
@@ -36,7 +55,7 @@ fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
 }
 
 #[cfg(feature = "asset-upload-http")]
-async fn ensure_upload_storage_ready(
+pub(super) async fn ensure_upload_storage_ready(
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
     upload_mounted: &mut bool,
@@ -52,16 +71,15 @@ async fn ensure_upload_storage_ready(
 
     if !*upload_mounted {
         if !sd_probe.is_initialized() {
-            match with_timeout(Duration::from_secs(2), sd_probe.init()).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(_)) => {
-                    sd_probe.recover_after_timeout();
-                    fat_engine.invalidate();
-                    return Err(SdUploadResultCode::InitFailed);
-                }
+            // SdCardProbe owns the overall cooperative deadline. Do not wrap
+            // initialization in a timeout that can drop an in-flight DMA
+            // transfer and poison the shared ESP32 SPI/DMA bus.
+            match sd_probe.init().await {
+                Ok(_) => {}
                 Err(_) => {
                     sd_probe.recover_after_timeout();
                     fat_engine.invalidate();
+                    *upload_mounted = false;
                     return Err(SdUploadResultCode::InitFailed);
                 }
             }
@@ -73,7 +91,7 @@ async fn ensure_upload_storage_ready(
 }
 
 #[cfg(feature = "asset-upload-http")]
-async fn abort_active_upload_session(
+pub(super) async fn abort_active_upload_session(
     upload_session: &mut Option<SdUploadSession>,
     sd_probe: &mut SdProbeDriver,
     powered: &mut bool,
@@ -82,6 +100,7 @@ async fn abort_active_upload_session(
 ) -> SdUploadResult {
     process_upload_request(
         SdUploadRequest {
+            id: 0,
             command: SdUploadCommand::Abort,
             enqueued_at_ms: now_ms_u32(),
         },

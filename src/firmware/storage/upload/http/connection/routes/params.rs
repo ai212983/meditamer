@@ -2,9 +2,7 @@ use core::cmp::min;
 
 use embassy_net::tcp::TcpSocket;
 
-use super::super::super::helpers::{
-    drain_remaining_body, parse_path_query, parse_u32_query,
-};
+use super::super::super::helpers::{drain_remaining_body, parse_path_query, parse_u32_query};
 use super::super::SdPath;
 use super::RequestContext;
 

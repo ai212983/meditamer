@@ -5,7 +5,7 @@ annotated for compatibility with our LVGL font pipeline.
 
 ## Our current state
 
-- `LV_COLOR_DEPTH 8` (`csrc/lvgl/lv_conf.h:6`) — LVGL renders 8-bit gray.
+- `LV_COLOR_DEPTH 8` (`config/lvgl/lv_conf.h:6`) — LVGL renders 8-bit gray.
 - `src/firmware/ui/lvgl/dither.rs` quantizes down to the panel's 3-bit (8 gray levels).
 - Built-in fonts in use: Montserrat 14/18/20/24/32.
 - `assets/fonts/IBMPlexSans-Variable.ttf` is vendored but unused.

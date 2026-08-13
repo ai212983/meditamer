@@ -1,4 +1,4 @@
-#[path = "../../../src/firmware/runtime/display_task/lvgl/refresh_tracking.rs"]
+#[path = "../../../src/firmware/display/panel/refresh_tracking.rs"]
 mod refresh_tracking;
 
 use refresh_tracking::{CompletedRefresh, RefreshTracking};

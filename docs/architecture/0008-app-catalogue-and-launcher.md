@@ -5,7 +5,7 @@
 - Amended: 2026-08-09
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0007](0007-ui-and-application-structure.md),
-  [UI/app rework plan](../development/ui-app-structure-rework-plan.md),
+  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md)
 
 ## Context
@@ -162,5 +162,5 @@ change residency and expose provider code to the shell.
 ## Validation
 
 Implementation order and gates are defined in the
-[plan](../development/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
-[ledger](../development/ui-app-structure-rework-ledger.md).
+[plan](../plans/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
+[ledger](../plans/ui-app-structure-rework-ledger.md).

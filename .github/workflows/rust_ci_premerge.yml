@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - "src/**"
-      - "csrc/**"
-      - "ld/**"
+      - "config/linker/**"
+      - "config/lvgl/**"
+      - "config/partitions-ab.csv"
       - "packages/sdcard/**"
       - "tools/event_config_compiler/**"
+      - "tools/ota_bootloader/**"
       - "scripts/build/build.sh"
+      - "scripts/build/ota_bootloader.sh"
+      - "scripts/build/xtensa_runner.sh"
       - "scripts/ci/check_*.sh"
       - "Cargo.toml"
       - "Cargo.lock"

@@ -1,3 +1,13 @@
+use core::sync::atomic::Ordering;
+
+use super::{
+    allocator_status, current_allocator_state, update_allocator_state, AllocatorState,
+    LARGE_ALLOC_EXTERNAL_OK, LARGE_ALLOC_FAIL, LARGE_ALLOC_INTERNAL_OK,
+    LAST_LOGGED_PEAK_USED_BYTES, MIN_FREE_BYTES, MIN_FREE_EXTERNAL_BYTES, MIN_FREE_INTERNAL_BYTES,
+    PEAK_USED_BYTES,
+};
+use super::{AllocatorStatus, INTERNAL_HEAP_DRAM2_BYTES};
+
 pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> AllocatorStatus {
     if matches!(current_allocator_state(), AllocatorState::Initialized) {
         return allocator_status();

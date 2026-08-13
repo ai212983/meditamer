@@ -1,6 +1,6 @@
 use super::{
-    dispatch::{sd_command_kind, sd_result_should_retry},
-    failure_backoff_ms,
+    dispatch::{operation_retry_requires_power_cycle, sd_command_kind, sd_result_should_retry},
+    power::failure_backoff_ms,
     upload::{build_temp_upload_path, parse_upload_path},
     SD_BACKOFF_BASE_MS, SD_BACKOFF_MAX_MS,
 };
@@ -52,6 +52,38 @@ fn retry_policy_matches_result_codes() {
     assert!(!sd_result_should_retry(SdResultCode::VerifyMismatch));
     assert!(!sd_result_should_retry(SdResultCode::PowerOffFailed));
     assert!(!sd_result_should_retry(SdResultCode::RefusedLba0));
+}
+
+#[test]
+fn operation_retry_power_cycles_only_transport_operations() {
+    assert!(!operation_retry_requires_power_cycle(
+        SdCommand::Probe,
+        SdResultCode::OperationFailed,
+        true
+    ));
+    assert!(operation_retry_requires_power_cycle(
+        SdCommand::RwVerify { lba: 1 },
+        SdResultCode::OperationFailed,
+        true
+    ));
+    assert!(operation_retry_requires_power_cycle(
+        SdCommand::FatStat {
+            path: [0; SD_PATH_MAX],
+            path_len: 0,
+        },
+        SdResultCode::OperationFailed,
+        true
+    ));
+    assert!(!operation_retry_requires_power_cycle(
+        SdCommand::RwVerify { lba: 1 },
+        SdResultCode::InitFailed,
+        true
+    ));
+    assert!(!operation_retry_requires_power_cycle(
+        SdCommand::RwVerify { lba: 1 },
+        SdResultCode::OperationFailed,
+        false
+    ));
 }
 
 #[test]

@@ -1,3 +1,16 @@
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    ptr::NonNull,
+    slice,
+    sync::atomic::Ordering,
+};
+
+use super::{
+    current_allocator_state, update_peak_used_bytes, AllocatorState, BufferAllocError,
+    BufferPlacement, LargeByteBuffer, LARGE_ALLOC_EXTERNAL_OK, LARGE_ALLOC_FAIL,
+    LARGE_ALLOC_INTERNAL_OK,
+};
+
 impl LargeByteBuffer {
     pub(crate) fn placement(&self) -> BufferPlacement {
         self.placement

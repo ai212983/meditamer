@@ -3,14 +3,12 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../lib/run_hostctl.sh
-source "$script_dir/../lib/run_hostctl.sh"
 
 mode="${1:-release}"
 case "$mode" in
-    debug|release) ;;
+    debug|release|ble-release) ;;
     *)
-        echo "Wrong argument. Only \"debug\"/\"release\" arguments are supported" >&2
+        echo "Wrong argument. Supported profiles: debug, release, ble-release" >&2
         exit 1
         ;;
 esac
@@ -65,4 +63,4 @@ if [[ -n "${HOSTCTL_FLASH_CAPTURE_POST_TIMEOUT_MS:-}" ]]; then
     args+=(--post-timeout-ms "$HOSTCTL_FLASH_CAPTURE_POST_TIMEOUT_MS")
 fi
 
-run_hostctl "${args[@]}"
+"$script_dir/../hostctl.sh" "${args[@]}"

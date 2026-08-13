@@ -1,29 +1,16 @@
-use std::{
-    fs, thread,
-    time::{Duration, Instant},
-};
+//! Workflow runtime for the Wi-Fi acceptance run: startup, network bring-up, health, and diagnostics.
+//!
+mod diag;
+mod health;
+mod network;
+mod start;
 
 use anyhow::{anyhow, Result};
-use regex::Regex;
-use reqwest::StatusCode;
 use serde_json::Value;
 
-use crate::{
-    env_utils,
-    logging::ensure_parent_dir,
-    scenarios::WorkflowRuntime,
-    serial_console::AckStatus,
-    workflows::wifi::common::{
-        ctx_get_u32, detect_panic_signal, extract_context_window, fmt_min, is_ready,
-        netcfg_set_payload, query_net_status, wait_net_ack, NetStatus, PanicSignal,
-    },
-};
+use crate::scenarios::WorkflowRuntime;
 
-use super::{
-    boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig},
-    wait_ready::{wait_ready, wait_state_progress},
-    WifiAcceptanceRuntime,
-};
+use super::{wait_ready::wait_state_progress, WifiAcceptanceRuntime};
 
 impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
     fn invoke(&mut self, action: &str, _args: &Value, context: &mut Value) -> Result<()> {
@@ -125,11 +112,6 @@ impl WorkflowRuntime for WifiAcceptanceRuntime<'_> {
         }
     }
 }
-
-include!("runtime_core/diag.rs");
-include!("runtime_core/start.rs");
-include!("runtime_core/network.rs");
-include!("runtime_core/health.rs");
 
 #[cfg(test)]
 #[path = "runtime_core/tests.rs"]

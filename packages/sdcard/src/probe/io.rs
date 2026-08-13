@@ -1,3 +1,5 @@
+use super::{SdCardProbe, SdProbeError, SdSpiBus, SD_CMD17, SD_CMD24, SD_CMD9, SD_SECTOR_SIZE};
+
 impl<'d, SPI> SdCardProbe<'d, SPI>
 where
     SPI: SdSpiBus,
@@ -12,7 +14,8 @@ where
             return Ok(());
         }
         let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
-        self.read_data_sector_512_into(lba, high_capacity, out).await?;
+        self.read_data_sector_512_into(lba, high_capacity, out)
+            .await?;
         self.cached_sector[..SD_SECTOR_SIZE].copy_from_slice(out);
         self.cached_sector_lba = Some(lba);
         Ok(())
@@ -56,7 +59,7 @@ where
         Ok(())
     }
 
-    async fn send_command(
+    pub(super) async fn send_command(
         &mut self,
         cmd: u8,
         arg: u32,
@@ -67,7 +70,7 @@ where
             .await
     }
 
-    async fn send_command_hold_cs(
+    pub(super) async fn send_command_hold_cs(
         &mut self,
         cmd: u8,
         arg: u32,
@@ -96,9 +99,7 @@ where
         ];
 
         self.cs.set_low();
-        self.spi
-            .transfer_in_place_with_deadline(&mut frame)
-            .await?;
+        self.transfer_init_bounded(&mut frame).await?;
 
         let mut r1 = 0xFFu8;
         let mut got_response = false;
@@ -118,9 +119,7 @@ where
 
         if !extra_response.is_empty() {
             extra_response.fill(0xFF);
-            self.spi
-                .transfer_in_place_with_deadline(extra_response)
-                .await?;
+            self.transfer_init_bounded(extra_response).await?;
         }
 
         if release_cs_after {
@@ -129,29 +128,25 @@ where
         Ok(r1)
     }
 
-    async fn send_dummy_clocks(&mut self, bytes: usize) -> Result<(), SdProbeError> {
+    pub(super) async fn send_dummy_clocks(&mut self, bytes: usize) -> Result<(), SdProbeError> {
         const DUMMY_CLOCK_CHUNK: usize = 32;
         let mut frame = [0xFFu8; DUMMY_CLOCK_CHUNK];
         let mut remaining = bytes;
         while remaining > 0 {
             let chunk = remaining.min(DUMMY_CLOCK_CHUNK);
-            self.spi
-                .transfer_in_place_with_deadline(&mut frame[..chunk])
-                .await?;
+            self.transfer_init_bounded(&mut frame[..chunk]).await?;
             remaining -= chunk;
         }
         Ok(())
     }
 
-    async fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
+    pub(super) async fn transfer_byte(&mut self, byte: u8) -> Result<u8, SdProbeError> {
         let mut frame = [byte];
-        self.spi
-            .transfer_in_place_with_deadline(&mut frame)
-            .await?;
+        self.transfer_init_bounded(&mut frame).await?;
         Ok(frame[0])
     }
 
-    async fn read_data_block(&mut self) -> Result<[u8; 16], SdProbeError> {
+    pub(super) async fn read_data_block(&mut self) -> Result<[u8; 16], SdProbeError> {
         let token = match self.wait_data_token(SD_CMD9).await {
             Ok(token) => token,
             Err(err) => {
@@ -165,16 +160,14 @@ where
         }
 
         let mut block = [0xFFu8; 16];
-        self.spi
-            .transfer_in_place_with_deadline(&mut block)
-            .await?;
+        self.transfer_init_bounded(&mut block).await?;
         // Read and discard CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
         Ok(block)
     }
 
-    async fn read_data_sector_512_into(
+    pub(super) async fn read_data_sector_512_into(
         &mut self,
         lba: u32,
         high_capacity: bool,
@@ -206,7 +199,7 @@ where
         }
 
         out.fill(0xFF);
-        self.spi.transfer_in_place_with_deadline(out).await?;
+        self.transfer_init_bounded(out).await?;
         // Discard data CRC16.
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
@@ -214,7 +207,7 @@ where
         Ok(())
     }
 
-    async fn end_transaction(&mut self) {
+    pub(super) async fn end_transaction(&mut self) {
         self.cs.set_high();
         let _ = self.transfer_byte(0xFF).await;
     }

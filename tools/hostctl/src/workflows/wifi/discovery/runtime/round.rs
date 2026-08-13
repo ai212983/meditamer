@@ -1,5 +1,19 @@
+use super::super::{
+    probe::ProbeRoundState, profile::recommended_round_timeout_ms, WifiDiscoveryRuntime,
+};
+use crate::workflows::wifi::common::{
+    ctx_get_u32, detect_panic_signal, netcfg_set_payload, wait_net_ack,
+};
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const MAX_EXPECTED_SOFT_RESET_RECOVERIES_PER_ROUND: u32 = 1;
+const FORCE_STOP_SETTLE_MS: u64 = 300;
+
 impl WifiDiscoveryRuntime<'_> {
-    fn handle_probe_round(&mut self, context: &mut Value) -> Result<Value> {
+    pub(super) fn handle_probe_round(&mut self, context: &mut Value) -> Result<Value> {
         let round = ctx_get_u32(context, "round_index")?.saturating_add(1);
         let ssid_marker = format!("scan ap ssid={}", self.ssid);
         let require_listener = !self.profile.disable_listener_during_probe_rounds;

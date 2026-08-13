@@ -41,11 +41,19 @@ impl TapHsm {
         self.seq_axis = 0;
     }
 
-    pub(super) fn reset_sampling_history(&mut self) {
+    /// Drops the derivative history that a sampling gap invalidates, leaving any
+    /// in-progress tap sequence intact. Sequence validity is timestamp-based, so
+    /// the gap checks in `tap_seq1`/`tap_seq2` still reject a stale sequence on
+    /// the next candidate.
+    pub(super) fn reset_motion_history(&mut self) {
         self.prev_accel = None;
         self.prev_jerk_l1 = 0;
         self.last_candidate_at_ms = None;
         self.last_big_gyro_at_ms = None;
+    }
+
+    pub(super) fn reset_sampling_history(&mut self) {
+        self.reset_motion_history();
         self.clear_sequence();
     }
 

@@ -1,0 +1,11 @@
+[package]
+name = "ble_transport_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["queue-host-harness"]
+queue-host-harness = []
+
+[lib]
+path = "src/lib.rs"

@@ -4,7 +4,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 use super::super::types::WifiCredentials;
 use super::super::types::{
     AppEvent, AppStateApplyAck, SdPowerRequest, SdRequest, SdResult, SdUploadRequest,
-    SdUploadResult, SerialStatusEvent, TapTraceSample,
+    SdUploadResult, SerialStatusEvent, TapTraceSample, UiCycleStepAck,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{
@@ -55,6 +55,8 @@ pub(crate) static SD_POWER_REQUESTS: Channel<CriticalSectionRawMutex, SdPowerReq
     Channel::new();
 pub(crate) static SD_POWER_RESPONSES: Channel<CriticalSectionRawMutex, bool, 2> = Channel::new();
 pub(crate) static APP_STATE_APPLY_ACKS: Channel<CriticalSectionRawMutex, AppStateApplyAck, 2> =
+    Channel::new();
+pub(crate) static UI_CYCLE_STEP_ACKS: Channel<CriticalSectionRawMutex, UiCycleStepAck, 2> =
     Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
     Channel::new();

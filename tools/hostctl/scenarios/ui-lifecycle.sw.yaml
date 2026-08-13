@@ -1,0 +1,45 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "ui-lifecycle"
+  version: "1.0.0"
+do:
+  - await_ready:
+      call: "await_ready"
+      then: "init_run"
+  - init_run:
+      call: "init_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "cycle_steps"
+  - cycle_steps:
+      do:
+        - run_step:
+            call: "run_step"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".step_count"
+            at: "step_index"
+      then: "analyze_evidence"
+  - analyze_evidence:
+      call: "analyze_evidence"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "evidence_gate"
+  - evidence_gate:
+      switch:
+        - passed:
+            when: ".run_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_evidence"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_evidence:
+      call: "fail_evidence"

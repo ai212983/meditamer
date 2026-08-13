@@ -3,16 +3,13 @@
 This runbook defines how an automation/LLM agent should run and interpret:
 
 ```bash
-scripts/tests/hw/test_troubleshoot_hw.sh
+scripts/hostctl.sh test troubleshoot
 ```
 
-The script is a wrapper around:
-
-```bash
-hostctl test troubleshoot
-```
-
-with orchestration in:
+`scripts/hostctl.sh` is the direct native-launch wrapper for `hostctl` (Cargo
+target/toolchain/env preparation only; it does not add or resolve any
+troubleshoot-specific arguments). The `troubleshoot` subcommand itself is
+orchestrated in:
 
 ```text
 tools/hostctl/scenarios/troubleshoot.sw.yaml
@@ -39,25 +36,30 @@ tools/hostctl/scenarios/troubleshoot.sw.yaml
 - `HOSTCTL_PORT` points to the intended device in multi-device setups.
 - Prefer `/dev/cu.*` ports over `/dev/tty.*` on macOS.
 - No other process owns the serial port (`lsof <port>` is clean).
-- Use `HOSTCTL_*` env vars; the wrapper rejects legacy `ESPFLASH_*` names for hostctl paths.
+- Use `HOSTCTL_*` env vars for the underlying workflow's control knobs (below);
+  `scripts/hostctl.sh` itself only understands `HOSTCTL_PORT`/`HOSTCTL_PORT_HINT`-style
+  launch env, not command-specific ones.
 
 ## Standard Invocation
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_troubleshoot_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test troubleshoot --build-mode debug
 ```
 
-Optional arguments:
+Optional arguments (`hostctl test troubleshoot --help`):
 
 ```bash
-scripts/tests/hw/test_troubleshoot_hw.sh [debug|release] [output_log_path]
+scripts/hostctl.sh test troubleshoot --build-mode [debug|release] [--output <output_log_path>]
 ```
+
+`--output`, like every path argument on this direct launcher, is not resolved
+relative to your shell's working directory -- pass an absolute path.
 
 Example:
 
 ```bash
 HOSTCTL_PORT=/dev/cu.usbserial-540 \
-  scripts/tests/hw/test_troubleshoot_hw.sh debug logs/troubleshoot_manual.log
+  scripts/hostctl.sh test troubleshoot --build-mode debug --output "$(pwd)/logs/troubleshoot_manual.log"
 ```
 
 ## Agent Control Knobs
@@ -72,7 +74,7 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 ## Deterministic Agent Procedure
 
 1. Set `HOSTCTL_PORT` explicitly.
-2. Run `scripts/tests/hw/test_troubleshoot_hw.sh` once with defaults.
+2. Run `scripts/hostctl.sh test troubleshoot --build-mode debug` once with defaults.
 3. If it fails, read summary fields: `failure_stage`, `failure_class`, `failure_detail`.
    - for runtime failures, `failure_detail` may include `runtime_subclass=...`
      (`runtime_panic_guru`, `runtime_panic_stack`, `runtime_panic_assert`, `runtime_panic_other`, `runtime_unexpected_reboot`)

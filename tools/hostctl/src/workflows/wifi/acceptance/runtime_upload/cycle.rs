@@ -1,5 +1,25 @@
+use std::{
+    fs, thread,
+    time::{Duration, Instant},
+};
+
+use super::helpers::{avg, parse_metrics_key_u32};
+
+use anyhow::{anyhow, Result};
+use regex::Regex;
+use serde_json::Value;
+
+use crate::{
+    env_utils,
+    workflows::wifi::common::{
+        ctx_get_string, ctx_get_u32, is_ready, net_status_line_re, query_net_status,
+    },
+};
+
+use super::super::WifiAcceptanceRuntime;
+
 impl WifiAcceptanceRuntime<'_> {
-    pub(super) fn handle_net_collect_diag(&mut self) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn handle_net_collect_diag(&mut self) -> Result<()> {
         let status_re = net_status_line_re();
         let mark = self.console.mark();
         self.console.send_line("NET STATUS")?;
@@ -12,7 +32,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn handle_net_recover_once(&mut self) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn handle_net_recover_once(&mut self) -> Result<()> {
         if self.reuse_upload_client {
             self.upload_client = None;
         }
@@ -27,14 +47,20 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn handle_fail_upload(&mut self, context: &mut Value) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn handle_fail_upload(
+        &mut self,
+        context: &mut Value,
+    ) -> Result<()> {
         self.log_mem_summary("failure summary");
         let detail = ctx_get_string(context, "upload_error")
             .unwrap_or_else(|_| "network/upload workflow failed".to_string());
         Err(anyhow!("{detail}"))
     }
 
-    pub(super) fn handle_finalize_cycle(&mut self, context: &mut Value) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn handle_finalize_cycle(
+        &mut self,
+        context: &mut Value,
+    ) -> Result<()> {
         let connect_ms = ctx_get_u32(context, "connect_ms")?;
         let listen_ms = ctx_get_u32(context, "listen_ms")?;
         let upload_ms = ctx_get_u32(context, "upload_ms")?;
@@ -51,7 +77,7 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn handle_print_summary(&mut self) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn handle_print_summary(&mut self) -> Result<()> {
         let avg_connect = avg(&self.connect_samples);
         let avg_listen = avg(&self.listen_samples);
         let avg_upload = avg(&self.upload_samples);
@@ -69,7 +95,9 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn query_req_read_body_reset(&mut self) -> Result<u32> {
+    pub(in crate::workflows::wifi::acceptance) fn query_req_read_body_reset(
+        &mut self,
+    ) -> Result<u32> {
         let mark = self.console.mark();
         self.console.send_line("METRICS")?;
         let re = Regex::new(r"^METRICS UPLOAD ")?;

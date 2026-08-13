@@ -1,10 +1,19 @@
-enum ListDirSlot {
+use crate::{
+    fat::{
+        names_lfn::{build_display_name_into, consume_lfn_entry},
+        DirLocation, FatDirEntry, LfnState, ATTR_DIRECTORY, ATTR_LONG_NAME, ATTR_VOLUME,
+        DIR_ENTRY_SIZE, FAT_NAME_MAX,
+    },
+    probe::SD_SECTOR_SIZE,
+};
+
+pub(super) enum ListDirSlot {
     Continue,
     End,
     Entry(FatDirEntry),
 }
 
-fn parse_list_dir_slot(
+pub(super) fn parse_list_dir_slot(
     sector: &[u8; SD_SECTOR_SIZE],
     lba: u32,
     slot: u8,

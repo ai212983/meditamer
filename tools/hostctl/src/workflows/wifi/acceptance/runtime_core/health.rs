@@ -1,5 +1,17 @@
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
+use anyhow::{anyhow, Result};
+use reqwest::StatusCode;
+
+use crate::{env_utils, workflows::wifi::common::NetStatus};
+
+use super::super::{wait_ready::wait_ready, WifiAcceptanceRuntime};
+
 impl WifiAcceptanceRuntime<'_> {
-    fn enforce_startup_health_hysteresis(
+    pub(super) fn enforce_startup_health_hysteresis(
         &mut self,
         mut connect_ms: u32,
         mut listen_ms: u32,
@@ -61,7 +73,7 @@ impl WifiAcceptanceRuntime<'_> {
     }
 }
 
-fn should_force_recover_before_start(status: &NetStatus) -> bool {
+pub(super) fn should_force_recover_before_start(status: &NetStatus) -> bool {
     matches!(
         status.state.as_deref(),
         Some(
@@ -76,7 +88,7 @@ fn should_force_recover_before_start(status: &NetStatus) -> bool {
     )
 }
 
-fn is_ready_without_listener(status: &NetStatus) -> bool {
+pub(super) fn is_ready_without_listener(status: &NetStatus) -> bool {
     matches!(status.state.as_deref(), Some("Ready"))
         && status.link.unwrap_or(false)
         && status.ipv4.as_deref().is_some_and(|ip| ip != "0.0.0.0")
@@ -84,7 +96,7 @@ fn is_ready_without_listener(status: &NetStatus) -> bool {
         && !status.listener.unwrap_or(false)
 }
 
-fn should_retry_wait_ready_after_recover(error: &str) -> bool {
+pub(super) fn should_retry_wait_ready_after_recover(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("failure class=listener_not_ready")
         || lower.contains("dhcp_no_ipv4_stall")
@@ -141,6 +153,6 @@ fn wait_startup_health_streak(
     ))
 }
 
-fn format_health_status_error(status: StatusCode) -> String {
+pub(super) fn format_health_status_error(status: StatusCode) -> String {
     format!("HTTP {}", status.as_u16())
 }

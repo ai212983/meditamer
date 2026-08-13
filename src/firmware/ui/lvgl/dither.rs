@@ -2,6 +2,7 @@
 #[path = "dither/tests.rs"]
 mod tests;
 
+#[path = "dither/types.rs"]
 mod types;
 
 pub(crate) use types::DirtyArea;

@@ -16,8 +16,9 @@ pub(super) async fn process_upload_request(
     upload_mounted: &mut bool,
     fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
+    let request_id = request.id;
     let queue_wait_ms = elapsed_since_ms_u32(request.enqueued_at_ms);
-    match split_upload_command(request.command) {
+    let mut result = match split_upload_command(request.command) {
         UploadCommandGroup::Stream(stream) => {
             process_upload_stream_request(
                 stream,
@@ -41,7 +42,16 @@ pub(super) async fn process_upload_request(
             )
             .await
         }
+    };
+    result.request_id = request_id;
+    if !sd_probe.is_initialized() {
+        // Transport recovery invalidates both the probe and FatEngine's cached
+        // upload state. Reset the software session so a retry can begin cleanly.
+        *upload_mounted = false;
+        *session = None;
+        fat_engine.invalidate();
     }
+    result
 }
 
 #[inline(never)]

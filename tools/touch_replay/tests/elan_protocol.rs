@@ -1,4 +1,4 @@
-#[path = "../../../src/drivers/inkplate/touch/protocol.rs"]
+#[path = "../../../src/platform/inkplate/touch/protocol.rs"]
 mod protocol;
 
 #[test]

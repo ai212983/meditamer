@@ -95,7 +95,8 @@ Unsupported DSL task kinds currently fail fast.
 
 1. Create or update a scenario YAML in `tools/hostctl/scenarios/`.
 2. Implement matching primitive actions in the runtime `invoke` match arm.
-3. Wire the command in `tools/hostctl/src/main.rs` and a thin shell wrapper in `scripts/`.
+3. Wire the command in `tools/hostctl/src/main.rs`; add a public shell entry point
+   only when the workflow needs policy that does not belong in the Rust command.
 4. Add/adjust tests:
 - unit tests for action helpers
 - workflow execution tests for branch/retry behavior
@@ -105,7 +106,7 @@ Unsupported DSL task kinds currently fail fast.
 Use host-only validation path (avoids embedded default target/toolchain issues):
 
 ```bash
-scripts/tests/host/test_hostctl_host.sh
+scripts/host-test.sh test hostctl
 ```
 
 ## Running

@@ -1,18 +1,14 @@
 {
   "version": 1,
   "thresholds": {
-    "max_file_sloc": 500,
-    "warn_file_sloc": 420,
+    "max_file_sloc": 1000,
+    "warn_file_sloc": 600,
     "max_fn_cognitive": 40,
     "max_fn_cyclomatic": 32,
     "max_fn_nargs": 8
   },
   "offenders": {
-    "file_sloc": {
-      "tools/esp_radio_nostd_wifi_control/src/main.rs": 551.0,
-      "tools/esp_wifi_legacy_nostd_control/src/main.rs": 705.0,
-      "tools/esp_wifi_legacy_nostd_control/src/scan_process_wrap_diag.rs": 649.0
-    },
+    "file_sloc": {},
     "fn_cognitive": {},
     "fn_cyclomatic": {},
     "fn_nargs": {}

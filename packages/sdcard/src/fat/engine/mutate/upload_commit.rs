@@ -1,7 +1,16 @@
+use super::directory_encode::write_record_to_sector;
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatBufferId, FatEngine, FatEngineError, FatIoAction, FatRequest, FatResult,
+    FatStep,
+};
+use crate::fat::SdFatError;
+use crate::SD_PATH_MAX;
+
 impl FatEngine {
-    fn begin_upload_commit(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_upload_commit(&mut self) -> Result<FatStep, SdFatError> {
         if !self.upload.valid {
-            return Ok(self.finish(FatResult::Error(super::FatEngineError::InvalidState)));
+            return Ok(self.finish(FatResult::Error(FatEngineError::InvalidState)));
         }
         self.mutation.new_first = self.upload.record.first_cluster;
         self.mutation.data_len = self.upload.record.size;
@@ -9,7 +18,7 @@ impl FatEngine {
         self.mutation_update_directory()
     }
 
-    fn begin_cached_upload_rename(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_cached_upload_rename(&mut self) -> Result<FatStep, SdFatError> {
         let source = self.target.ok_or(SdFatError::NotFound)?;
         let source_parent = self.upload.parent_cluster;
         let (dst_path, dst_len) = self.rename_destination()?;
@@ -19,9 +28,7 @@ impl FatEngine {
         self.prepare_rename_destination(dst_path, dst_len)
     }
 
-    fn rename_destination(
-        &self,
-    ) -> Result<([u8; super::super::super::SD_PATH_MAX], u8), SdFatError> {
+    pub(super) fn rename_destination(&self) -> Result<([u8; SD_PATH_MAX], u8), SdFatError> {
         match self.request.as_ref() {
             Some(FatRequest::Rename {
                 dst_path,
@@ -33,7 +40,7 @@ impl FatEngine {
         }
     }
 
-    fn rename_replace(&self) -> bool {
+    pub(super) fn rename_replace(&self) -> bool {
         match self.request.as_ref() {
             Some(FatRequest::Rename { replace, .. }) => *replace,
             Some(FatRequest::UploadCommit { .. }) => true,
@@ -41,28 +48,28 @@ impl FatEngine {
         }
     }
 
-    fn is_rename_operation(&self) -> bool {
+    pub(super) fn is_rename_operation(&self) -> bool {
         matches!(
             self.request,
             Some(FatRequest::Rename { .. } | FatRequest::UploadCommit { .. })
         )
     }
 
-    fn finish_rename_operation(&mut self) -> FatStep {
+    pub(super) fn finish_rename_operation(&mut self) -> FatStep {
         if matches!(self.request, Some(FatRequest::UploadCommit { .. })) {
             self.upload.clear();
         }
         self.finish(FatResult::Done)
     }
 
-    fn begin_upload_commit_replace(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_upload_commit_replace(&mut self) -> Result<FatStep, SdFatError> {
         self.mutation.directory_sector_pending = false;
         self.mutation.stage = MutationStage::UploadCommitReplace;
         self.stage = CommandStage::Mutate;
         Ok(FatStep::Continue)
     }
 
-    fn advance_upload_commit_replace(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn advance_upload_commit_replace(&mut self) -> Result<FatStep, SdFatError> {
         let destination = self.target.ok_or(SdFatError::NotFound)?;
         let source = self.mutation.rename_source.ok_or(SdFatError::NotFound)?;
         if !self.mutation.directory_sector_pending {

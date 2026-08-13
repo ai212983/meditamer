@@ -1,10 +1,37 @@
 # RFC: Rust LOC Refactor Plan (>280 LOC Inventory, <300 LOC Target)
 
-- Status: Proposed
+- Status: Superseded — see the Code size policy in `AGENTS.md`
 - Last-reviewed: 2026-08-10
 - Owner: Firmware + Host Tools
 - Date: 2026-03-02
 - Scope: Rust files currently above 280 LOC across firmware, packages, and tools
+
+## 0. Why this is superseded
+
+The 300-LOC "hard limit" in this RFC was never wired to a blocking gate.
+`scripts/ci/check_rust_loc.sh` is advisory and exits 0; the blocking file-size
+check is the SLOC ratchet in `config/rca-baseline.json` (warn 600 / hard 1000).
+Work aimed at the unenforced 300 rather than a genuine cohesion boundary, and the
+gap was closed by textual splits instead of module splits — 144 `include!` sites
+across 34 parent files, plus `part-NN` test shards, none of which create a module
+boundary. That is the outcome the anti-sharding rule already forbids for Markdown.
+
+The replacement policy lives in `AGENTS.md` under "Code size policy": one number,
+aligned to the enforced ratchet, tests exempt, and `include!` restricted to
+build-script output (`scripts/ci/check_include_usage.sh`).
+
+The inventory in section 4 is retained as a historical record and is stale — 14
+of its 36 files no longer exist under the listed paths.
+
+### Resolution of section 11's open questions
+
+- *Enforce a CI guard for max LOC (>300 hard fail, >280 warning)?* Not at those
+  thresholds. The enforced production-file SLOC gate is advisory at 600 and hard
+  at 1000; the raw-line check remains advisory at the same thresholds.
+- *Should test files have a separate threshold?* They are exempt. Table-driven
+  tests are legitimately long, and splitting a table destroys it.
+- *Normalize on `foo.rs` + `foo/` hybrid facades?* Yes, where the pieces are real
+  modules. A split that does not create a module boundary is not a split.
 
 ## 1. Summary
 
@@ -46,14 +73,14 @@ We should split by cohesive module groups, not by isolated file size.
 - `tools/scene_viewer/src/render.rs` (310)
 - `tools/scene_viewer/src/render/flow.rs` (335)
 - `tools/touch_replay/src/main.rs` (320)
-- `src/firmware/runtime/serial_task/tests.rs` (469)
-- `src/firmware/runtime/serial_task/commands.rs` (340)
-- `src/firmware/telemetry/recorders.rs` (462)
+- `src/firmware/serial/tests/mod.rs` (469)
+- `src/firmware/serial/commands.rs` (340)
+- `src/firmware/observability/recorders/mod.rs` (462)
 - `src/firmware/storage/upload/http.rs` (453)
 - `src/firmware/psram/mod.rs` (409)
 - `src/firmware/storage/sd_task.rs` (398)
-- `src/firmware/runtime/diagnostics.rs` (379)
-- `src/firmware/runtime/display_task/app_events.rs` (320)
+- `src/firmware/self_test.rs` (379)
+- `src/firmware/display/app_events.rs` (320)
 - `src/firmware/storage/sd_task/receive.rs` (309)
 - `src/firmware/storage/upload/wifi/connect/error/error_recovery.rs` (303)
 
@@ -68,7 +95,7 @@ We should split by cohesive module groups, not by isolated file size.
 - `src/firmware/runtime/display_task/touch_loop.rs` (284)
 - `src/firmware/touch/normalize/tests/part2.rs` (299)
 - `src/firmware/touch/core/tests.rs` (295)
-- `src/drivers/inkplate/control/touch.rs` (284)
+- `src/platform/inkplate/control/touch.rs` (284)
 
 ## 5. Grouping Strategy
 
@@ -137,9 +164,9 @@ Refactor intent:
 
 Folder scope:
 
-- `src/firmware/runtime/serial_task/{commands.rs,tests.rs}`
-- `src/firmware/runtime/diagnostics.rs`
-- `src/firmware/runtime/display_task/app_events.rs`
+- `src/firmware/serial/{commands.rs,tests/mod.rs}`
+- `src/firmware/self_test.rs`
+- `src/firmware/display/app_events.rs`
 - include near-limit `src/firmware/runtime/display_task/touch_loop.rs`
 
 Refactor intent:
@@ -153,7 +180,7 @@ Refactor intent:
 
 Folder scope:
 
-- `src/firmware/telemetry/recorders.rs`
+- `src/firmware/observability/recorders/mod.rs`
 - `src/firmware/psram/mod.rs`
 - `tools/touch_replay/src/main.rs`
 

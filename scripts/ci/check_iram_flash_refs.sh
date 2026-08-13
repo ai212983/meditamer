@@ -9,7 +9,7 @@
 # rodata window, so we count those and refuse to let the count grow.
 #
 # The baseline is not zero: esp-hal and the Wi-Fi blob already ship #[ram]
-# functions that reference flash. See docs/reference/dram-budget.md.
+# functions that reference flash. See docs/reference/dram/dram-budget.md.
 
 set -euo pipefail
 
@@ -60,7 +60,7 @@ print(hits)
 if ((count > baseline)); then
     echo "iram flash refs: FAIL: $count literals in .rwtext point into flash rodata (baseline $baseline)" >&2
     echo "  An IRAM function gained a flash-resident constant or jump table." >&2
-    echo "  Add its section to ld/rwdata_hook.x, or re-baseline if it is provably cache-safe." >&2
+    echo "  Add its section to config/linker/esp32/rwdata_hook.x, or re-baseline if it is provably cache-safe." >&2
     exit 1
 fi
 

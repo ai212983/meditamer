@@ -1,4 +1,4 @@
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 use embassy_time::Instant;
 use sdcard::fat::{FatEngine, FatRequest, FatResult};
 
@@ -22,7 +22,7 @@ pub(super) async fn handle_begin(
         path_len,
         expected_size,
     } = begin;
-    telemetry::log_stack_headroom("sd_upload_begin_entry");
+    observability::log_stack_headroom("sd_upload_begin_entry");
     if session.is_some() {
         return upload_result(false, SdUploadResultCode::Busy, 0);
     }
@@ -31,7 +31,7 @@ pub(super) async fn handle_begin(
         Ok(path) => path,
         Err(code) => return upload_result(false, code, 0),
     };
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         esp_println::println!(
             "sd_upload: begin path={} expected_size={}",
             final_path,
@@ -55,7 +55,7 @@ pub(super) async fn handle_begin(
         );
         return upload_result(false, code, 0);
     }
-    telemetry::log_stack_headroom("sd_upload_begin_ready");
+    observability::log_stack_headroom("sd_upload_begin_ready");
 
     let (temp_path, temp_len) = match build_temp_upload_path(final_path_bytes) {
         Ok(path) => path,
@@ -66,7 +66,7 @@ pub(super) async fn handle_begin(
         Err(code) => return upload_result(false, code, 0),
     };
 
-    telemetry::log_stack_headroom("sd_upload_begin_fat_before");
+    observability::log_stack_headroom("sd_upload_begin_fat_before");
     let mut output = [];
     let result = super::super::super::engine_driver::run_fat_request(
         FatRequest::UploadBegin {
@@ -84,7 +84,7 @@ pub(super) async fn handle_begin(
         esp_println::println!("sd_upload: begin engine failed result={:?}", result);
         return upload_result(false, map_fat_result_to_upload_code(&result), 0);
     }
-    telemetry::log_stack_headroom("sd_upload_begin_fat_after");
+    observability::log_stack_headroom("sd_upload_begin_fat_after");
     let mut final_path_buf = [0u8; SD_UPLOAD_PATH_BUF_MAX];
     final_path_buf[..final_path_bytes.len()].copy_from_slice(final_path_bytes);
     *session = Some(SdUploadSession {

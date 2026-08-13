@@ -1,4 +1,6 @@
-fn encode_short_name(segment: &[u8]) -> Result<[u8; 11], SdFatError> {
+use crate::fat::SdFatError;
+
+pub(super) fn encode_short_name(segment: &[u8]) -> Result<[u8; 11], SdFatError> {
     if segment == b"." || segment == b".." {
         let mut out = [b' '; 11];
         out[0] = b'.';
@@ -41,7 +43,7 @@ fn normalize_short_char(byte: u8) -> Result<u8, SdFatError> {
     }
 }
 
-fn make_short_alias(name: &[u8], attempt: u32) -> [u8; 11] {
+pub(super) fn make_short_alias(name: &[u8], attempt: u32) -> [u8; 11] {
     let mut out = [b' '; 11];
     let (base, extension) = split_name_parts(name);
     for (index, byte) in extension.iter().take(3).enumerate() {
@@ -93,7 +95,7 @@ fn suffix_digits(mut value: u32) -> ([u8; 10], usize) {
     (digits, len)
 }
 
-fn short_name_to_text(raw: &[u8; 11], out: &mut [u8]) -> usize {
+pub(super) fn short_name_to_text(raw: &[u8; 11], out: &mut [u8]) -> usize {
     let mut len = 0;
     append_short_component(&raw[..8], out, &mut len);
     if raw[8..].iter().any(|byte| *byte != b' ') && append_short_char(out, &mut len, b'.') {

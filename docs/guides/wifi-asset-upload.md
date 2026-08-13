@@ -112,14 +112,17 @@ curl -X DELETE \
 Upload an assets directory:
 
 ```bash
-scripts/assets/upload_assets_http.sh --host <device-ip> --src assets --dst /assets
+scripts/hostctl.sh upload --host <device-ip> --src assets --dst /assets
 ```
 
 Upload a single file:
 
 ```bash
-scripts/assets/upload_assets_http.sh --host <device-ip> --src ./path/to/file.bin --dst /assets
+scripts/hostctl.sh upload --host <device-ip> --src ./path/to/file.bin --dst /assets
 ```
+
+Relative `--src` paths are resolved from the repository root, independent of the caller's working
+directory and the launcher's isolated Cargo working directory.
 
 Optional upload helper tuning:
 
@@ -141,7 +144,7 @@ Optional upload helper tuning:
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
 ```bash
-scripts/assets/upload_assets_http.sh --host <device-ip> --dst /assets --rm old.bin --rm unused/
+scripts/hostctl.sh upload --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
 
 Suggested runtime flow:

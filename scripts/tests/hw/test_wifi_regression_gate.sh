@@ -4,8 +4,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../../.." && pwd)"
-# shellcheck source=../../lib/run_hostctl.sh
-source "$script_dir/../../lib/run_hostctl.sh"
+# shellcheck source=../../lib/serial_port.sh
+source "$script_dir/../../lib/serial_port.sh"
 # shellcheck source=../../lib/experiment_novelty_guard.sh
 source "$script_dir/../../lib/experiment_novelty_guard.sh"
 load_repo_env_file_if_present ".env.local"
@@ -339,7 +339,8 @@ if [[ "$panic_detected" == "true" && "$panic_auto_troubleshoot" == "1" ]]; then
     troubleshoot_log_path="${run_dir}/troubleshoot.log"
     echo "wifi_regression_gate: panic detected, running troubleshoot workflow"
     set +e
-    HOSTCTL_PORT="${HOSTCTL_NET_PORT}" "$script_dir/test_troubleshoot_hw.sh" debug "$troubleshoot_log_path"
+    HOSTCTL_PORT="${HOSTCTL_NET_PORT}" "$repo_root/scripts/hostctl.sh" test troubleshoot \
+        --build-mode debug --output "$troubleshoot_log_path"
     set -e
 fi
 

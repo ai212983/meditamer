@@ -4,7 +4,7 @@ use crate::firmware::{
     config::TAP_TRACE_SAMPLES,
     event_engine::{
         config::active_config,
-        types::{EngineAction, EngineStateId},
+        types::{EngineAction, EngineStateId, RejectReason},
         EngineTraceSample, EventEngine,
     },
     types::TapTraceSample,
@@ -41,11 +41,11 @@ pub(crate) async fn imu_pipeline_task() {
                 let _ = event_engine.imu_fault(now_ms);
             }
             ImuPipelineInput::Suppressed { now_ms, reason } => {
-                let _ = reason;
-                let _ = event_engine.sampling_discontinuity(now_ms);
+                let _ = (now_ms, reason);
+                let _ = event_engine.sampling_gap();
             }
             ImuPipelineInput::Resumed { now_ms } => {
-                let _ = event_engine.sampling_discontinuity(now_ms);
+                let _ = event_engine.sampling_gap();
                 signal_active_until(now_ms);
             }
             ImuPipelineInput::Sample {
@@ -55,7 +55,7 @@ pub(crate) async fn imu_pipeline_task() {
                 discontinuity,
             } => {
                 if discontinuity {
-                    let _ = event_engine.sampling_discontinuity(frame.now_ms);
+                    let _ = event_engine.sampling_gap();
                 }
                 let output = event_engine.tick(frame);
                 let trace = output.trace;
@@ -71,7 +71,15 @@ pub(crate) async fn imu_pipeline_task() {
                 }
 
                 let now = Instant::now();
-                if TAP_TRACE_ENABLED && now >= next_trace_at {
+                // The 25 ms floor drops ~2/3 of frames at the 125 Hz active
+                // cadence, which is exactly where a tap decision lands. Always
+                // emit a frame that carries a tap, a candidate, a live sequence,
+                // or a rejection; rate-limit only quiet frames.
+                let decisive = frame.tap_src != 0
+                    || trace.tap_candidate != 0
+                    || trace.seq_count != 0
+                    || trace.reject_reason != RejectReason::None;
+                if TAP_TRACE_ENABLED && (decisive || now >= next_trace_at) {
                     let sample = TapTraceSample {
                         t_ms: frame.now_ms,
                         tap_src: frame.tap_src,

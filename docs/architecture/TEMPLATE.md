@@ -3,7 +3,7 @@
 - Status: Proposed
 - Author: <name, or the model that wrote it, e.g. Claude/Opus5-high>
 - Date: YYYY-MM-DD
-- References: `[ADR-NNNN](NNNN-slug.md)`, `[DRAM budget](../reference/dram-budget.md)`
+- References: `[ADR-NNNN](NNNN-slug.md)`, `[DRAM budget](../reference/dram/dram-budget.md)`
 
 ## Context
 

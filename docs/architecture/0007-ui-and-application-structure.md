@@ -1,13 +1,19 @@
 # ADR-0007: UI shell and application structure
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
-- Amended: 2026-08-09
+- Amended: 2026-08-13
+- Reconciled: 2026-08-13 — every phase in the [execution ledger](../plans/ui-app-structure-rework-ledger.md)
+  is Complete/Done with device evidence (E-0002 through E-0018) and the shell (`src/firmware/ui/shell/`)
+  is live in the running firmware; this status change records that the decision is proven, not new. It
+  unblocks [source-tree-architecture-cleanup.md](../plans/source-tree-architecture-cleanup.md) S5, which
+  finishes the file-layout side of the "Module boundary" section below (moving `screen`/`overlay`/
+  `widget`/`theme` content out of `ui/lvgl`) — a structural move, not a further semantic decision.
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
-  [UI/app rework plan](../development/ui-app-structure-rework-plan.md),
+  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md),
-  [DRAM budget](../reference/dram-budget.md)
+  [DRAM budget](../reference/dram/dram-budget.md)
 
 ## Context
 
@@ -77,11 +83,17 @@ shell and are not hard-coded into navigator branches.
   entry leaves the previous composition active.
 - Instance model state is separate from its LVGL root. The model may survive ordinary back-stack
   navigation only when its owner and capacity policy allow it.
+- Overlay instances retain both the surface-definition owner and the exact provider generation that
+  requested them. Provider teardown matches either edge; a provider-requested base confirmation
+  cannot outlive its requester.
 - `leave` synchronously removes the LVGL tree and all provider callbacks, timers, user data, and
   queued work. Asynchronous LVGL deletion is forbidden at an eviction boundary.
-- Provider removal is one transaction: quiesce, remove live instances, purge navigation/overlay/modal
-  references, unregister definitions, verify no owner token remains, then release or overwrite code
-  and state.
+- Provider removal is one transaction with two explicit commits: detach quiesces the owner and
+  atomically purges navigation, composition, and queued references while retaining its registry
+  definitions; finalization unregisters only after synchronous runtime and callback-route audits find
+  no exact owner token. The shell rejects other mutations between detach and finalization. Provider
+  code and state remain pinned if cleanup is retryable and permanently unreleasable after an audit
+  failure.
 
 The initial implementation may use Rust-native callbacks because all providers are compiled
 together. Any external native provider must satisfy ADR-0006's narrower versioned C ABI.
@@ -111,12 +123,19 @@ Base confirms and critical cues always rank above provider content.
 
 Provider overlays declare two independent properties:
 
-- input: `Passive` or `Modal`;
+- input: `Passive`, `Interactive`, or `Modal`;
 - lifetime: `Transient` or `Sticky`.
 
-Passive pointer passthrough and modal focus capture must be proven against LVGL before the generic
-overlay API is accepted. At most one modal is active; queued requests retain owner tokens and are
-purged with their provider.
+Passive pointer passthrough, bounded interactive hit capture, and modal focus capture must be proven
+against LVGL before the generic overlay API is accepted. Interactive overlays capture only their
+widget bounds; at most one modal is active. Queued requests retain owner tokens and are purged with
+their provider.
+
+Modal scheduling is FIFO within each band, with base-system requests ahead of provider requests;
+numeric overlay rank does not change modal scheduling. A base modal preempts and cancels an active
+provider modal, and the preempted instance token is never reused. Provider requests cannot exhaust
+capacity needed by a protected base confirmation: when necessary, the newest queued provider modal
+is canceled; admission fails only when all queued requests are already base-owned.
 
 The shell interprets global gestures, hardware actions, Back, Home, protected confirmation, and
 modal dismissal. Providers retain local widget input and emit intents upward.
@@ -126,6 +145,9 @@ modal dismissal. Providers retain local widget input and emit intents upward.
 Instances report refresh intent such as `Micro`, `Content`, or `Boundary`; LVGL still supplies the
 actual dirty area. The shell merges live intents, but only the display refresh module chooses partial,
 full, fallback, cleanup, and panel-power behaviour.
+
+Explicit user refresh actions also travel upward as source-owned intents. The display task may reject
+them under device policy, and only its refresh module executes an accepted panel transaction.
 
 The 8 ms service period is a scheduling target, not a promise across a panel transaction. Validation
 records shell/LVGL transition time, longest timer-service gap, touch-to-render latency,
@@ -176,5 +198,5 @@ failure may silently drop navigation or leave a partially entered surface.
 ## Validation
 
 Implementation order and gates are defined in the
-[plan](../development/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
-[ledger](../development/ui-app-structure-rework-ledger.md).
+[plan](../plans/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
+[ledger](../plans/ui-app-structure-rework-ledger.md).

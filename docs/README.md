@@ -18,7 +18,7 @@ Five kinds of document, split by how they age. Put a new file where its
 - New to the repo → [guides/development-setup.md](guides/development-setup.md)
 - Building or flashing → [guides/build-and-flash.md](guides/build-and-flash.md)
 - Something is broken → [guides/troubleshooting.md](guides/troubleshooting.md)
-- Adding a large static or buffer → [reference/dram-budget.md](reference/dram-budget.md) **first**
+- Adding a large static or buffer → [reference/dram/dram-budget.md](reference/dram/dram-budget.md) **first**
 - Changing Wi-Fi, network, or upload → [guides/wifi-regression-gate.md](guides/wifi-regression-gate.md)
 - Making a decision worth remembering → [architecture/](architecture/)
 
@@ -26,15 +26,15 @@ Five kinds of document, split by how they age. Put a new file where its
 
 | Document | Read it before |
 | --- | --- |
-| [dram-budget.md](reference/dram-budget.md) | Adding statics, task-local buffers, or channel depth |
-| [dram-budget-rom-stack.md](reference/dram-budget-rom-stack.md) | Touching `ld/` or adding deep sleep |
+| [dram-budget.md](reference/dram/dram-budget.md) | Adding statics, task-local buffers, or channel depth |
+| [dram-budget-rom-stack.md](reference/dram/dram-budget-rom-stack.md) | Touching `config/linker/esp32/` or adding deep sleep |
 | [compile-time-features.md](reference/compile-time-features.md) | Adding or changing a Cargo feature |
 | [event-engine-guide.md](reference/event-engine-guide.md) | Tuning tap/gesture behavior |
-| [sensors.md](reference/sensors.md) / [sound.md](reference/sound.md) | Working with the IMU, ambient sensors, or buzzer |
+| [sensors.md](reference/hardware/inkplate/sensors.md) / [sound.md](reference/hardware/inkplate/sound.md) | Working with the IMU, ambient sensors, or buzzer |
 | [hardware-test-matrix.md](reference/hardware-test-matrix.md) | Claiming hardware coverage |
 | [reliability-issues.md](reference/reliability-issues.md) | Arguing about what is actually risky |
 
-Datasheets live in [reference/datasheets/](reference/datasheets/).
+Datasheets live in [reference/hardware/inkplate/datasheets/](reference/hardware/inkplate/datasheets/).
 
 ## Conventions
 
@@ -65,8 +65,3 @@ root — reference sibling checkouts as plain paths instead.
 frozen and their internal links are not maintained. Archive a document when its
 investigation closes rather than deleting it — the Wi-Fi and upload series are
 kept specifically for the experiment novelty gate in `AGENTS.md`.
-
-## Known drift
-
-`development/` still holds the UI/app structure rework plan and its ledger.
-They belong in `plans/` and move there once the current edit settles.

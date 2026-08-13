@@ -1,3 +1,11 @@
+use std::fs;
+use std::time::Duration;
+
+use tempfile::tempdir;
+
+use super::super::command_run::{run_command_logged, CommandRunOptions};
+use super::super::{CommandProgressMode, CommandSpec};
+
 #[test]
 fn run_command_logged_kills_idle_child_even_with_heartbeat() {
     let temp = tempdir().expect("tempdir");
@@ -89,9 +97,7 @@ fn run_command_logged_kills_child_when_esptool_write_progress_stalls() {
     let log = fs::read_to_string(&log_path).expect("read log");
     assert!(log.contains("Writing at 0x00010000... (0 %)"));
     assert!(log.contains("still alive"));
-    assert!(log.contains(
-        "command progress stalled after 1s without esptool write advancement"
-    ));
+    assert!(log.contains("command progress stalled after 1s without esptool write advancement"));
     assert!(!log.lines().any(|line| line == "done"));
 }
 

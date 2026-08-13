@@ -41,6 +41,12 @@ for symbol in "${required_iram[@]}"; do
         echo "panel waveform placement: FAIL: $symbol is not in .rwtext" >&2
         exit 1
     fi
+
+    mangled_symbol="$(awk -v name="$symbol" '$0 ~ /[.]rwtext/ && index($NF, name) { print $NF; exit }' "$symbols")"
+    if ! "$objdump" --disassemble="$mangled_symbol" "$elf" | grep -q 'rsr[.]ccount'; then
+        echo "panel waveform placement: FAIL: $symbol has no inlined CL-high cycle hold" >&2
+        exit 1
+    fi
 done
 
 for symbol in "${required_dram[@]}"; do

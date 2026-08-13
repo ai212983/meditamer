@@ -1,5 +1,13 @@
+use anyhow::{anyhow, Result};
+
+use crate::workflows::wifi::common::{
+    detect_panic_signal, extract_context_window, fmt_min, PanicSignal,
+};
+
+use super::super::WifiAcceptanceRuntime;
+
 impl WifiAcceptanceRuntime<'_> {
-    pub(super) fn capture_mem_diag_lines(&mut self) -> Result<()> {
+    pub(in crate::workflows::wifi::acceptance) fn capture_mem_diag_lines(&mut self) -> Result<()> {
         self.console.poll_once()?;
         for line in self.console.read_recent_lines(self.mem_read_mark) {
             let line_index = self.mem_read_mark;
@@ -15,11 +23,14 @@ impl WifiAcceptanceRuntime<'_> {
         Ok(())
     }
 
-    pub(super) fn panic_signal(&self) -> Option<&PanicSignal> {
+    pub(in crate::workflows::wifi::acceptance) fn panic_signal(&self) -> Option<&PanicSignal> {
         self.panic_first.as_ref()
     }
 
-    fn panic_signal_detail(&self, signal: &PanicSignal) -> String {
+    pub(in crate::workflows::wifi::acceptance) fn panic_signal_detail(
+        &self,
+        signal: &PanicSignal,
+    ) -> String {
         let excerpt_start = signal.marker_index.saturating_sub(3);
         let excerpt_source = self.console.read_recent_lines(excerpt_start);
         let excerpt = format_context_excerpt(extract_context_window(
@@ -44,7 +55,7 @@ impl WifiAcceptanceRuntime<'_> {
         }
     }
 
-    pub(super) fn log_mem_summary(&mut self, prefix: &str) {
+    pub(in crate::workflows::wifi::acceptance) fn log_mem_summary(&mut self, prefix: &str) {
         self.logger.info(format!(
             "{prefix} mem samples={} radio_samples={} upload_samples={} nomem_stage_samples={} min_internal_free={} min_external_free={} min_total_free={} min_internal_low_water={}",
             self.mem_diag.samples,
@@ -59,7 +70,7 @@ impl WifiAcceptanceRuntime<'_> {
     }
 }
 
-fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
+pub(super) fn format_context_excerpt(window: Vec<(usize, String)>) -> Option<String> {
     if window.is_empty() {
         return None;
     }

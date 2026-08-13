@@ -13,6 +13,9 @@ lease are part of every firmware build. They are not selectable Cargo features.
 - `wifi-debug-slim-app`: reduced diagnostic application; implies
   `asset-upload-http`.
 - `telemetry-defmt`: optional `defmt` telemetry.
+- `ble-foundation`: non-default Phase 1 BLE controller/host and diagnostic GATT
+  probe. It adds the bounded `BLEPROBE START`/`BLEPROBE STATUS` Phase 1D baseline
+  controls, but it is not approved for default inclusion.
 
 ## Common Profiles
 
@@ -21,6 +24,16 @@ Default production build:
 ```bash
 scripts/build/build.sh release default
 ```
+
+BLE fixed-cost candidate (size-optimized, still non-default):
+
+```bash
+CARGO_FEATURES=ble-foundation scripts/build/build.sh ble-release default
+```
+
+`ble-release` inherits the production release settings but optimizes the
+first-party firmware for size while retaining the audited radio/storage package
+overrides. The ordinary `release` profile remains unchanged until BLE promotion.
 
 No-Wi-Fi build:
 

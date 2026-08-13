@@ -5,19 +5,22 @@
 
 /.embuild
 /target
-/target-*/
 /packages/*/target/
 /packages/*/Cargo.lock
+!/packages/sdcard/Cargo.lock
 /.*_target_*/
 /tools/*/target
 /tools/*/out
 /tools/**/__pycache__/
 /tools/**/*.py[cod]
+/test-support/**/target
+/test-support/**/out
+/test-support/**/__pycache__/
+/test-support/**/*.py[cod]
 /scripts/**/__pycache__/
 /scripts/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
-/logs/coverage/
 /*.lcov
 /*.profraw
 .env.local
@@ -25,12 +28,3 @@
 .env
 .scannerwork/
 /.scratch/
-/vendor/compiler-builtins-sysroot
-# Local dependency snapshots retained for comparison; active vendored crates are
-# referenced explicitly by a manifest.
-/vendor/esp-rom-sys-0.1.3/
-/vendor/esp-sync-0.1.1/
-
-## gh-csi settings and working directory
-.gh-csi/models.toml
-.gh-csi/output

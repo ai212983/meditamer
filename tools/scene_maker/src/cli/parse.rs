@@ -1,3 +1,8 @@
+use std::path::PathBuf;
+
+use super::help::print_help;
+use super::model::{BuildConfig, Compression};
+
 pub(crate) fn parse_build_args<I>(args: I) -> Result<BuildConfig, String>
 where
     I: IntoIterator<Item = String>,
@@ -141,7 +146,7 @@ where
         .map_err(|_| format!("invalid numeric value for {name}: {raw}"))
 }
 
-pub(crate) fn parse_bool(raw: &str) -> Result<bool, String> {
+fn parse_bool(raw: &str) -> Result<bool, String> {
     match raw {
         "true" | "1" | "yes" | "on" => Ok(true),
         "false" | "0" | "no" | "off" => Ok(false),

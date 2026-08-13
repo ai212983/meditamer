@@ -1,3 +1,13 @@
+use super::decode::{decode_capacity_bytes, detect_vbr_filesystem};
+use super::{
+    SdCardProbe, SdCardVersion, SdFilesystem, SdProbeError, SdProbeStatus, SdSpiBus, SD_ACMD41,
+    SD_CMD0, SD_CMD16, SD_CMD55, SD_CMD58, SD_CMD8, SD_CMD9, SD_INIT_SPI_RATE_KHZ, SD_SECTOR_SIZE,
+};
+use embassy_time::{Duration, Instant, Timer};
+use esp_hal::spi::master::Config as SpiConfig;
+use esp_hal::spi::Mode as SpiMode;
+use esp_hal::time::Rate;
+
 impl<'d, SPI> SdCardProbe<'d, SPI>
 where
     SPI: SdSpiBus,
@@ -8,7 +18,29 @@ where
     }
 
     pub async fn probe(&mut self) -> Result<SdProbeStatus, SdProbeError> {
+        self.probe_until(Instant::now() + Duration::from_millis(super::SD_INIT_DEADLINE_MS))
+            .await
+    }
+
+    pub async fn init_until(&mut self, deadline: Instant) -> Result<SdProbeStatus, SdProbeError> {
+        self.cached_sector_lba = None;
+        self.probe_until(deadline).await
+    }
+
+    pub async fn probe_until(&mut self, deadline: Instant) -> Result<SdProbeStatus, SdProbeError> {
+        self.init_deadline = Some(deadline);
+        let result = self.probe_inner().await;
+        self.init_deadline = None;
+        if result.is_err() {
+            self.cs.set_high();
+            self.invalidate();
+        }
+        result
+    }
+
+    async fn probe_inner(&mut self) -> Result<SdProbeStatus, SdProbeError> {
         self.apply_init_clock().await?;
+        self.check_init_deadline()?;
         self.cs.set_high();
         self.send_dummy_clocks(10).await?;
         self.enter_idle_state().await?;
@@ -197,13 +229,7 @@ where
             self.read_data_sector_512_into(2, high_capacity, &mut sector)
                 .await?;
             let start = u64::from_le_bytes([
-                sector[32],
-                sector[33],
-                sector[34],
-                sector[35],
-                sector[36],
-                sector[37],
-                sector[38],
+                sector[32], sector[33], sector[34], sector[35], sector[36], sector[37], sector[38],
                 sector[39],
             ]);
             if start != 0 && start <= u32::MAX as u64 {

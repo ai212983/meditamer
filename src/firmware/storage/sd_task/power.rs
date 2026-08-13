@@ -56,7 +56,7 @@ pub(crate) async fn request_sd_power(action: SdPowerRequest) -> bool {
                 .await
                 {
                     Ok(ok) => return ok,
-                    Err(_) if crate::firmware::runtime::display_task::is_display_work_busy() => {
+                    Err(_) if crate::firmware::display::is_display_work_busy() => {
                         // The request remains queued while a display refresh
                         // owns the expander. Keep waiting for that same request
                         // instead of reporting a false timeout or enqueueing a

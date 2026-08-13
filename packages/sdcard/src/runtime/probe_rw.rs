@@ -1,4 +1,5 @@
-use crate::{power_off, power_on_for_io, probe};
+use super::common::{power_off_io, power_on, SdPowerMode, SdRuntimeResultCode};
+use crate::probe;
 
 #[derive(Clone, Copy)]
 pub enum SdPowerAction {
@@ -157,8 +158,8 @@ fn log_probe_error(reason: &str, err: probe::SdProbeError) {
                 response
             );
         }
-        probe::SdProbeError::DmaTransferTimeout => {
-            esp_println::println!("sdprobe[{}]: not_detected dma_transfer_timeout", reason);
+        probe::SdProbeError::InitDeadlineExceeded => {
+            esp_println::println!("sdprobe[{}]: not_detected init_deadline_exceeded", reason);
         }
         probe::SdProbeError::WriteBusyTimeout { elapsed_ms, polls } => {
             esp_println::println!(

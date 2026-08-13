@@ -1,5 +1,18 @@
+use super::super::{
+    probe::WifiMetricsScanCounters, profile::recommended_round_timeout_ms, WifiDiscoveryRuntime,
+};
+use crate::workflows::wifi::common::{
+    extract_context_window, netcfg_set_payload, preflight, wait_net_ack,
+};
+use anyhow::{anyhow, Result};
+use regex::Regex;
+use serde_json::Value;
+use std::time::Duration;
+
+const ACK_LOSS_RECOVERY_SETTLE_MS: u64 = 200;
+
 impl WifiDiscoveryRuntime<'_> {
-    fn build_start_run_result(&self) -> Value {
+    pub(super) fn build_start_run_result(&self) -> Value {
         serde_json::json!({
             "rounds": self.profile.rounds,
             "run_passed": false,
@@ -7,7 +20,7 @@ impl WifiDiscoveryRuntime<'_> {
         })
     }
 
-    fn handle_start_run(&mut self) -> Result<()> {
+    pub(super) fn handle_start_run(&mut self) -> Result<()> {
         self.panic_first = None;
         if self.profile.disable_listener_during_probe_rounds {
             self.run_control_command_with_guard(0, "NET LISTENER OFF", 0)?;
@@ -42,12 +55,12 @@ impl WifiDiscoveryRuntime<'_> {
         Ok(())
     }
 
-    fn handle_net_apply_config(&mut self) -> Result<()> {
+    pub(super) fn handle_net_apply_config(&mut self) -> Result<()> {
         let payload = netcfg_set_payload(&self.ssid, &self.password, self.policy);
         wait_net_ack(&mut self.console, &format!("NETCFG SET {payload}"))
     }
 
-    fn run_control_command_with_guard(
+    pub(super) fn run_control_command_with_guard(
         &mut self,
         round: u32,
         command: &str,
@@ -120,7 +133,7 @@ impl WifiDiscoveryRuntime<'_> {
         Ok(())
     }
 
-    fn query_wifi_scan_counters(&mut self) -> Result<Option<WifiMetricsScanCounters>> {
+    pub(super) fn query_wifi_scan_counters(&mut self) -> Result<Option<WifiMetricsScanCounters>> {
         let metrics_wifi_re = Regex::new(r"^METRICS WIFI ")?;
         let line =
             self.console
@@ -128,7 +141,10 @@ impl WifiDiscoveryRuntime<'_> {
         Ok(line.and_then(|value| parse_wifi_scan_counters_line(&value)))
     }
 
-    fn panic_signal_detail(&self, signal: &crate::workflows::wifi::common::PanicSignal) -> String {
+    pub(super) fn panic_signal_detail(
+        &self,
+        signal: &crate::workflows::wifi::common::PanicSignal,
+    ) -> String {
         let excerpt_start = signal.marker_index.saturating_sub(3);
         let excerpt_source = self.console.read_recent_lines(excerpt_start);
         let excerpt = format_context_excerpt(extract_context_window(

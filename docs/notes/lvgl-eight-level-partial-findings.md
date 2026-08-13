@@ -31,8 +31,8 @@ The Rust driver also supports full native grayscale. It accepts a packed
 four-bit-per-pixel framebuffer, rounds each nibble to one of eight physical
 levels, and runs the reference eight-phase waveform:
 
-- [`src/drivers/inkplate/mod.rs`](../../src/drivers/inkplate/mod.rs)
-- [`src/drivers/inkplate/display/async_impl.rs`](../../src/drivers/inkplate/display/async_impl.rs)
+- [`src/platform/inkplate/mod.rs`](../../src/platform/inkplate/mod.rs)
+- [`src/platform/inkplate/display/async_impl.rs`](../../src/platform/inkplate/display/async_impl.rs)
 
 A 600 by 600 packed Gray4 framebuffer occupies 180,000 bytes. A grayscale
 refresh invalidates the binary partial baseline because the physical screen no

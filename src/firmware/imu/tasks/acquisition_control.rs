@@ -23,8 +23,16 @@ pub(crate) async fn suspend_imu_acquisition() {
 }
 
 pub(crate) async fn resume_imu_acquisition() {
-    COMMANDS.send(ImuAcquisitionCommand::Resume).await;
+    request_imu_acquisition_resume().await;
     while STATE.wait().await != ImuAcquisitionState::Running {}
+}
+
+pub(crate) async fn request_imu_acquisition_resume() {
+    COMMANDS.send(ImuAcquisitionCommand::Resume).await;
+}
+
+pub(crate) fn try_request_imu_acquisition_resume() -> bool {
+    COMMANDS.try_send(ImuAcquisitionCommand::Resume).is_ok()
 }
 
 pub(super) async fn receive_command() -> ImuAcquisitionCommand {

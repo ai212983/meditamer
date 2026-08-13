@@ -205,9 +205,16 @@ fn candidate_source_signals(
     let src_seq_finish_assist = seq_count >= 2
         && axis_matches_sequence
         && features.jerk_l1 >= cfg.thresholds.jerk_seq_cont_min;
-    let fused_tap_candidate = src_jerk_only
-        || src_seq_finish_assist
-        || (src_axis && (src_single || src_int1 || src_tap_event || src_jerk_axis));
+    // A candidate requires the LSM6DS3's own tap detector. Its SHOCK/QUIET
+    // timing is the only thing here that separates an impact from the ringdown
+    // that follows it: post-tap ringing oscillates rather than decaying
+    // smoothly, so every jerk-derived gate (including the quiet-before-impulse
+    // one in `src_jerk_only`) fires on the dips between peaks. Measured over a
+    // tapping capture, 14 of 20 accepted candidates came from ringing via the
+    // jerk-only and sequence-assist paths, while `tap_src` never once fired on
+    // ringing. Those two signals are kept for scoring and trace only.
+    let fused_tap_candidate =
+        src_axis && (src_single || src_int1 || src_tap_event || src_jerk_axis);
 
     CandidateSourceSignals {
         src_axis,

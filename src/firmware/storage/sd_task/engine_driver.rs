@@ -7,7 +7,7 @@ use sdcard::fat::{
 };
 
 use super::super::super::{
-    telemetry,
+    observability,
     types::{SdCommand, SdProbeDriver, SdResultCode},
 };
 use super::serial_log::{self, SdSerialLine};
@@ -128,7 +128,7 @@ pub(super) async fn run_fat_request(
         match step {
             FatStep::Io(action) => {
                 cpu_transitions = 0;
-                telemetry::log_stack_headroom(stage_before_tag(engine.stage_label()));
+                observability::log_stack_headroom(stage_before_tag(engine.stage_label()));
                 completion = execute_action(action, probe, engine, input, output).await;
                 if matches!(completion, FatIoCompletion::TimedOut) {
                     queue_sd_line!(
@@ -143,7 +143,7 @@ pub(super) async fn run_fat_request(
                 ) {
                     probe.recover_after_timeout();
                 }
-                telemetry::log_stack_headroom(stage_after_tag(engine.stage_label()));
+                observability::log_stack_headroom(stage_after_tag(engine.stage_label()));
                 // A completed DMA future resumes inside the current executor poll.
                 // Yield before advancing the engine or arming another transfer so
                 // higher-priority input work can run at every I/O boundary.
@@ -171,7 +171,7 @@ pub(super) async fn run_fat_request(
                 cpu_slice_started = Instant::now();
             }
             FatStep::Complete(result) => {
-                telemetry::log_stack_headroom("sd_fat_complete");
+                observability::log_stack_headroom("sd_fat_complete");
                 if matches!(result, FatResult::Error(FatEngineError::TimedOut)) {
                     engine.invalidate();
                 }

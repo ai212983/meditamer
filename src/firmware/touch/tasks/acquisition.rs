@@ -1,30 +1,49 @@
-use embassy_futures::select::{select, Either};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use embassy_futures::{
+    select::{select, Either},
+    yield_now,
+};
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::{Duration, Instant, Timer};
+use esp_sync::raw::{RawLock, SingleCoreInterruptLock};
 
 mod runtime;
 mod state;
 
-use crate::drivers::inkplate::TouchInitStatus;
 use crate::firmware::{
     input::gpio36::{Gpio36Classifier, Gpio36Mode},
-    types::{Gpio36InputPin, InkplateTouchDriver, TouchStatus},
+    types::{Gpio36InputPin, InkplateTouchDriver, TouchSampleFrame, TouchStatus},
 };
+use crate::platform::inkplate::{TouchInitStatus, TouchPoint, TouchSample};
 
-use super::request_touch_pipeline_reset;
-use crate::firmware::touch::config::{GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED, TOUCH_INIT_RETRY_MS};
+use super::{push_touch_input_sample, request_touch_pipeline_reset, reset_touch_pipeline};
+use crate::firmware::touch::{
+    config::{GPIO36_WAKE_BUTTON_DIAGNOSTIC_ENABLED, TOUCH_INIT_RETRY_MS},
+    replay::PIPELINE_REPLAY_TAP,
+    scheduling,
+};
 use runtime::{
     handle_fault, probe_asserted_line, publish_action, publish_touch_status, read_and_publish,
     wait_for_assertion_or_recovery, AcquisitionWake, ProbeResult,
 };
 use state::ContactSamplingState;
 
+const POWER_DOWN_DURING_PANEL_DIAGNOSTIC: bool =
+    option_env!("MEDITAMER_TOUCH_POWER_DOWN_DURING_PANEL").is_some();
+const HARD_PARK_DURING_PANEL_DIAGNOSTIC: bool =
+    option_env!("MEDITAMER_TOUCH_CORE_HARD_PARK").is_some();
+
+static TOUCH_CORE_HARD_PARKED: AtomicBool = AtomicBool::new(false);
+static TOUCH_CORE_HARD_PARK_RESUME: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Copy)]
 enum TouchAcquisitionCommand {
     Suspend,
     Resume { reset_pipeline: bool },
+    ReplayPipelineTap,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,23 +62,41 @@ pub(crate) async fn suspend_touch_acquisition() {
         .send(TouchAcquisitionCommand::Suspend)
         .await;
     while TOUCH_ACQUISITION_STATE.wait().await != TouchAcquisitionState::Suspended {}
+    if HARD_PARK_DURING_PANEL_DIAGNOSTIC {
+        while !TOUCH_CORE_HARD_PARKED.load(Ordering::Acquire) {
+            yield_now().await;
+        }
+    }
 }
 
 pub(crate) async fn resume_touch_acquisition(reset_pipeline: bool) {
     TOUCH_ACQUISITION_COMMANDS
         .send(TouchAcquisitionCommand::Resume { reset_pipeline })
         .await;
+    if HARD_PARK_DURING_PANEL_DIAGNOSTIC {
+        TOUCH_CORE_HARD_PARK_RESUME.store(true, Ordering::Release);
+    }
     while TOUCH_ACQUISITION_STATE.wait().await != TouchAcquisitionState::Running {}
 }
 
-/// Queues a resume without waiting for the first post-resume I2C sample.
-///
-/// The display task uses this after panel power-up so the touch core can sample
-/// concurrently with row scanning. A later acknowledged suspend closes the
-/// window before panel power-down touches the shared I2C bus again.
+/// Queue a resume without waiting for the first post-resume controller sample.
+/// The display task uses this to sample releases concurrently with the GPIO
+/// waveform, then closes the window before panel shutdown needs shared I2C.
 pub(crate) async fn request_touch_acquisition_resume(reset_pipeline: bool) {
     TOUCH_ACQUISITION_COMMANDS
         .send(TouchAcquisitionCommand::Resume { reset_pipeline })
+        .await;
+}
+
+pub(crate) fn try_request_touch_acquisition_resume(reset_pipeline: bool) -> bool {
+    TOUCH_ACQUISITION_COMMANDS
+        .try_send(TouchAcquisitionCommand::Resume { reset_pipeline })
+        .is_ok()
+}
+
+pub(crate) async fn request_touch_pipeline_replay_probe() {
+    TOUCH_ACQUISITION_COMMANDS
+        .send(TouchAcquisitionCommand::ReplayPipelineTap)
         .await;
 }
 
@@ -98,6 +135,15 @@ pub(crate) async fn touch_acquisition_task(
     }
 
     loop {
+        // Sample at the loop boundary so the idle recovery path contributes
+        // stack evidence too. Sampling only after a GPIO assertion leaves the
+        // metric unset on an untouched device because RecoveryDue continues
+        // before reaching the interaction-completion path below.
+        if Instant::now() >= stack_sample_at {
+            crate::firmware::observability::record_touch_core_stack_headroom();
+            stack_sample_at = Instant::now() + Duration::from_secs(1);
+        }
+
         let now = Instant::now();
         if matches!(mode, Gpio36Mode::SharedWithTouch) && !touch_ready && now >= retry_at {
             publish_touch_status(TouchStatus::Initializing).await;
@@ -176,6 +222,7 @@ pub(crate) async fn touch_acquisition_task(
                     && read_and_publish(
                         &mut touch,
                         Instant::now().as_millis(),
+                        "poll",
                         &mut classifier,
                         &mut contact_sampling,
                     )
@@ -234,11 +281,6 @@ pub(crate) async fn touch_acquisition_task(
         }
         esp_println::println!("input: gpio36 raw=high");
         publish_action(classifier.on_released()).await;
-
-        if Instant::now() >= stack_sample_at {
-            crate::firmware::telemetry::record_touch_core_stack_headroom();
-            stack_sample_at = Instant::now() + Duration::from_secs(1);
-        }
     }
 }
 
@@ -252,11 +294,36 @@ async fn handle_control_command(
 ) {
     match command {
         TouchAcquisitionCommand::Resume { .. } => return,
+        TouchAcquisitionCommand::ReplayPipelineTap => {
+            run_pipeline_replay_probe(classifier, contact_sampling).await;
+            return;
+        }
         TouchAcquisitionCommand::Suspend => {}
     }
 
     classifier.cancel_pending();
+    let touch_powered_down = if POWER_DOWN_DURING_PANEL_DIAGNOSTIC && *touch_ready {
+        match touch.shutdown().await {
+            Ok(()) => {
+                // Let the controller supply and interrupt output settle before
+                // acknowledging the panel's quiet window.
+                Timer::after_millis(50).await;
+                esp_println::println!("touch: panel_quiet power=off status=ok");
+                true
+            }
+            Err(error) => {
+                esp_println::println!(
+                    "touch: panel_quiet power=off status=error error={:?}",
+                    error
+                );
+                false
+            }
+        }
+    } else {
+        false
+    };
     TOUCH_ACQUISITION_STATE.signal(TouchAcquisitionState::Suspended);
+    hard_park_touch_core_until_resume();
     let reset_pipeline = loop {
         let command = TOUCH_ACQUISITION_COMMANDS.receive().await;
         match command {
@@ -266,10 +333,33 @@ async fn handle_control_command(
             TouchAcquisitionCommand::Resume { reset_pipeline } => {
                 break reset_pipeline;
             }
+            TouchAcquisitionCommand::ReplayPipelineTap => {
+                esp_println::println!(
+                    "TOUCH_PIPELINE_REPLAY state=rejected reason=acquisition_suspended"
+                );
+            }
         }
     };
 
-    if *touch_ready {
+    if touch_powered_down {
+        publish_touch_status(TouchStatus::Initializing).await;
+        match touch.init_with_status().await {
+            Ok(TouchInitStatus::Ready { x_res, y_res }) => {
+                *touch_ready = true;
+                request_touch_pipeline_reset();
+                publish_touch_status(TouchStatus::Ready { x_res, y_res }).await;
+                esp_println::println!(
+                    "touch: panel_quiet power=on status=ready x_res={} y_res={}",
+                    x_res,
+                    y_res
+                );
+            }
+            status => {
+                esp_println::println!("touch: panel_quiet power=on status=error init={:?}", status);
+                handle_fault(touch, touch_ready, retry_at).await;
+            }
+        }
+    } else if *touch_ready {
         if reset_pipeline {
             if touch.read_sample(0).await.is_err() {
                 handle_fault(touch, touch_ready, retry_at).await;
@@ -278,6 +368,7 @@ async fn handle_control_command(
         } else if read_and_publish(
             touch,
             Instant::now().as_millis(),
+            "resume",
             classifier,
             contact_sampling,
         )
@@ -291,4 +382,74 @@ async fn handle_control_command(
     }
 
     TOUCH_ACQUISITION_STATE.signal(TouchAcquisitionState::Running);
+}
+
+async fn run_pipeline_replay_probe(
+    classifier: &mut Gpio36Classifier,
+    contact_sampling: &mut ContactSamplingState,
+) {
+    classifier.cancel_pending();
+    *contact_sampling = ContactSamplingState::new();
+    reset_touch_pipeline().await;
+
+    let started_ms = Instant::now().as_millis();
+    esp_println::println!(
+        "TOUCH_PIPELINE_REPLAY state=started core=1 frames={} x={} y={}",
+        PIPELINE_REPLAY_TAP.len(),
+        PIPELINE_REPLAY_TAP[0].x,
+        PIPELINE_REPLAY_TAP[0].y,
+    );
+
+    for (index, replay) in PIPELINE_REPLAY_TAP.iter().copied().enumerate() {
+        let due_ms = started_ms.saturating_add(replay.offset_ms);
+        let now_ms = Instant::now().as_millis();
+        if due_ms > now_ms {
+            Timer::after_millis(due_ms - now_ms).await;
+        }
+
+        let t_ms = Instant::now().as_millis();
+        let sample = TouchSample {
+            touch_count: replay.touch_count,
+            points: [
+                TouchPoint {
+                    x: replay.x,
+                    y: replay.y,
+                },
+                TouchPoint::default(),
+            ],
+            raw: replay.raw,
+        };
+        contact_sampling.record_authoritative_count(replay.touch_count);
+        scheduling::record_sample(t_ms, replay.touch_count);
+        push_touch_input_sample(TouchSampleFrame { t_ms, sample }).await;
+        esp_println::println!(
+            "TOUCH_PIPELINE_REPLAY state=frame index={} offset_ms={} t_ms={} count={} raw_mask={:#04x}",
+            index,
+            replay.offset_ms,
+            t_ms,
+            replay.touch_count,
+            replay.raw[7] & 0x03,
+        );
+    }
+
+    esp_println::println!(
+        "TOUCH_PIPELINE_REPLAY state=frames_complete elapsed_ms={}",
+        Instant::now().as_millis().saturating_sub(started_ms)
+    );
+}
+
+fn hard_park_touch_core_until_resume() {
+    if !HARD_PARK_DURING_PANEL_DIAGNOSTIC {
+        return;
+    }
+
+    TOUCH_CORE_HARD_PARK_RESUME.store(false, Ordering::Release);
+    let interrupt_lock = SingleCoreInterruptLock;
+    let interrupt_state = unsafe { interrupt_lock.enter() };
+    TOUCH_CORE_HARD_PARKED.store(true, Ordering::Release);
+    while !TOUCH_CORE_HARD_PARK_RESUME.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    TOUCH_CORE_HARD_PARKED.store(false, Ordering::Release);
+    unsafe { interrupt_lock.exit(interrupt_state) };
 }

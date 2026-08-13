@@ -5,7 +5,7 @@
 Run a UART-centric troubleshooting sequence (flash, protocol probes, boot soak):
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_troubleshoot_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test troubleshoot --build-mode debug
 ```
 
 - runs through `hostctl test troubleshoot` with declarative orchestration in
@@ -94,7 +94,6 @@ Optional soak env vars:
 - `SOAK_REQUIRE_UPTIME=1` (also require first `display uptime screen: ok` marker per cycle)
 - `COLD_BOOT_WINDOW_SEC` (cold-boot marker capture window, default `45`)
 - `COLD_BOOT_CONNECT_TIMEOUT_SEC` (time to first serial bytes after arm, default `40`)
-- `COLD_BOOT_ARM_TIMEOUT_SEC` (time for serial port to reappear after reconnect, default `20`)
 - `COLD_BOOT_LOG_DIR` (preserve cold-boot cycle logs)
 
 ## Wokwi

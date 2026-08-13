@@ -1,6 +1,39 @@
+//! Workflow task-graph execution.
+//!
+//! One submodule per task family: [`call`], [`repeat`], [`result`], and
+//! [`retry`] with its [`retry_support`] policy helpers, over the shared task
+//! indexing and value plumbing in [`support`].
+
+use crate::scenarios::conditions::eval_condition;
+use crate::scenarios::engine::call::execute_call_task;
+use crate::scenarios::engine::repeat::execute_repeatable_do_task;
+use crate::scenarios::engine::retry::execute_try_task;
+use crate::scenarios::engine::support::index_tasks;
+use crate::scenarios::engine::support::resolve_runtime_value;
+use crate::scenarios::engine::support::set_context_path;
+use crate::scenarios::engine::support::should_run;
+use crate::scenarios::engine::support::task_type_name;
+use crate::scenarios::engine::support::TaskIndex;
+use crate::scenarios::WorkflowRuntime;
+use anyhow::anyhow;
+use anyhow::Result;
+use serde_json::Value;
+use serverless_workflow_core::models::map::Map as WorkflowMap;
+use serverless_workflow_core::models::task::DoTaskDefinition;
+use serverless_workflow_core::models::task::SetTaskDefinition;
+use serverless_workflow_core::models::task::SwitchTaskDefinition;
+use serverless_workflow_core::models::task::TaskDefinition;
+
+pub(crate) mod call;
+pub(crate) mod repeat;
+pub(crate) mod result;
+pub(crate) mod retry;
+pub(crate) mod retry_support;
+pub(crate) mod support;
+
 const WORKFLOW_END_TRANSITION: &str = "__end__";
 
-fn execute_task_map<R: WorkflowRuntime>(
+pub(crate) fn execute_task_map<R: WorkflowRuntime>(
     tasks: &WorkflowMap<String, TaskDefinition>,
     runtime: &mut R,
     context: &mut Value,
@@ -117,11 +150,9 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
             None => true,
         };
         if matches {
-            return Ok(Some(
-                case.then
-                    .clone()
-                    .ok_or_else(|| anyhow!("workflow switch case '{name}' requires then"))?,
-            ));
+            return Ok(Some(case.then.clone().ok_or_else(|| {
+                anyhow!("workflow switch case '{name}' requires then")
+            })?));
         }
     }
 
@@ -133,9 +164,3 @@ fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<O
         "workflow switch had no matching case and no explicit default transition"
     ))
 }
-include!("engine_call.rs");
-include!("engine_repeat.rs");
-include!("engine_result.rs");
-include!("engine_retry.rs");
-include!("engine_retry_support.rs");
-include!("engine_support.rs");

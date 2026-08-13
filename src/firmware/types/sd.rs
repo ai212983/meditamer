@@ -114,6 +114,7 @@ pub(crate) enum SdUploadCommand {
 }
 
 pub(crate) struct SdUploadRequest {
+    pub(crate) id: u32,
     pub(crate) command: SdUploadCommand,
     pub(crate) enqueued_at_ms: u32,
 }
@@ -135,6 +136,7 @@ pub(crate) enum SdUploadResultCode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SdUploadResult {
+    pub(crate) request_id: u32,
     pub(crate) ok: bool,
     pub(crate) code: SdUploadResultCode,
     pub(crate) bytes_written: u32,

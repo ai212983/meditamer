@@ -6,12 +6,14 @@ pub(crate) mod debug_log;
 #[cfg(not(feature = "wifi-debug-slim-app"))]
 pub(crate) mod debug_log;
 mod imu_activity;
+pub(crate) mod lvgl_multitouch;
 mod normalize;
+pub(crate) mod replay;
 pub(crate) mod scheduling;
 pub(crate) mod tasks;
 pub(crate) mod types;
 
-use crate::drivers::inkplate::TouchSample as HalTouchSample;
+use crate::platform::inkplate::TouchSample as HalTouchSample;
 use normalize::{NormalizedTouchPoint, NormalizedTouchSample, TouchPresenceNormalizer};
 
 use self::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};

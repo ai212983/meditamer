@@ -1,4 +1,15 @@
-fn parse_path(path: &str, out: &mut [PathSegment; MAX_PATH_SEGMENTS]) -> Result<usize, SdFatError> {
+use crate::{
+    fat::{
+        directory_names::short_name_to_text, names_lfn::build_display_name_into, DirRecord,
+        LfnState, PathSegment, SdFatError, FAT_NAME_MAX, MAX_PATH_SEGMENTS,
+    },
+    probe::SD_SECTOR_SIZE,
+};
+
+pub(in crate::fat) fn parse_path(
+    path: &str,
+    out: &mut [PathSegment; MAX_PATH_SEGMENTS],
+) -> Result<usize, SdFatError> {
     let bytes = path.as_bytes();
     if bytes.is_empty() {
         return Ok(0);
@@ -49,13 +60,17 @@ fn next_path_segment(bytes: &[u8], idx: &mut usize) -> Result<PathSegment, SdFat
     })
 }
 
-fn path_segment_to_name(segment: PathSegment) -> [u8; FAT_NAME_MAX] {
+pub(in crate::fat) fn path_segment_to_name(segment: PathSegment) -> [u8; FAT_NAME_MAX] {
     let mut out = [0u8; FAT_NAME_MAX];
     out[..segment.len as usize].copy_from_slice(segment.as_bytes());
     out
 }
 
-fn parse_record(sector: &[u8; SD_SECTOR_SIZE], base: usize, lfn: &LfnState) -> DirRecord {
+pub(in crate::fat) fn parse_record(
+    sector: &[u8; SD_SECTOR_SIZE],
+    base: usize,
+    lfn: &LfnState,
+) -> DirRecord {
     let mut short_name = [0u8; 11];
     short_name.copy_from_slice(&sector[base..base + 11]);
     let attr = sector[base + 11];
@@ -84,12 +99,17 @@ fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).all(|(x, y)| x.eq_ignore_ascii_case(y))
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
-fn segment_matches_record(segment: &PathSegment, record: &DirRecord) -> bool {
+pub(in crate::fat) fn segment_matches_record(segment: &PathSegment, record: &DirRecord) -> bool {
     let seg = segment.as_bytes();
-    if ascii_eq_ignore_case(seg, &record.display_name[..record.display_name_len as usize]) {
+    if ascii_eq_ignore_case(
+        seg,
+        &record.display_name[..record.display_name_len as usize],
+    ) {
         return true;
     }
     let mut short_text = [0u8; 12];

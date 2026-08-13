@@ -2,8 +2,10 @@ use embassy_net::tcp::{Error as TcpError, TcpSocket};
 use embassy_time::{with_timeout, Duration};
 use esp_println::println;
 
-use super::super::super::super::sd_bridge::{roundtrip_error_log, sd_upload_roundtrip, SdUploadRoundtripError};
-use crate::firmware::telemetry;
+use super::super::super::super::sd_bridge::{
+    roundtrip_error_log, sd_upload_roundtrip, SdUploadRoundtripError,
+};
+use crate::firmware::observability;
 use crate::firmware::types::SdUploadCommand;
 
 pub(super) enum UploadBodyError {
@@ -28,7 +30,7 @@ pub(super) fn log_upload_body_read_error(
     pending: usize,
     want: usize,
 ) {
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!(
             "upload_http: body read err={:?} consumed={} of {} pending={} want={} recv_queue={} send_queue={} state={:?} remote={:?}",
             err,
@@ -51,7 +53,7 @@ pub(super) async fn abort_upload_roundtrip_bounded(reason: &str) {
     )
     .await;
     if let Ok(Err(err)) = abort_result {
-        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+        if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
             println!(
                 "upload_http: abort recovery err={} reason={}",
                 roundtrip_error_log(err),
@@ -59,7 +61,7 @@ pub(super) async fn abort_upload_roundtrip_bounded(reason: &str) {
             );
         }
     }
-    if abort_result.is_err() && telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if abort_result.is_err() && observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!(
             "upload_http: abort recovery timeout reason={} timeout_ms={}",
             reason, UPLOAD_ABORT_RECOVERY_TIMEOUT_MS

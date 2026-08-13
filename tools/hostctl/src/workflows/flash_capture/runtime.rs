@@ -1,3 +1,30 @@
+use super::artifacts::{
+    archive_firmware_artifacts, validate_post_command_options, ArchiveFirmwareArtifactsOptions,
+};
+use super::flash::{run_app_only_flash, run_full_flash, AppOnlyFlashOptions, FullFlashOptions};
+use super::paths::{
+    acquire_port_lock, build_firmware_image, build_ota_bootloader_command, ensure_port_available,
+    normalize_output_root, prepare_output_paths, resolve_explicit_image, resolve_port,
+};
+use super::runtime_helpers::context_set_string;
+use super::{
+    CaptureMode, FlashCaptureOptions, FlashCaptureRuntime, FlashMode, DEFAULT_ENABLE_FALLBACK,
+    DEFAULT_FLASH_BAUD,
+};
+use std::{env, fs::File, path::PathBuf, time::Duration};
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
+
+use crate::{
+    env_utils,
+    idf_env::bootstrap_idf_env,
+    logging::Logger,
+    scenarios::{execute_workflow, load_workflow},
+    serial_console::SerialConsole,
+    workflows::common::repo_root,
+};
+
 pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Result<()> {
     let repo_dir = repo_root();
     let (output_override, output_warning) = normalize_output_root(opts.output_path.as_deref());
@@ -10,19 +37,16 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
     ensure_port_available(&port)?;
 
     let baud = opts.baud.unwrap_or(env_utils::baud_from_env(115200)?);
-    let flash_baud = opts
-        .flash_baud
-        .unwrap_or(env_utils::parse_env_u32("ESPFLASH_BAUD", DEFAULT_FLASH_BAUD)?);
+    let flash_baud = opts.flash_baud.unwrap_or(env_utils::parse_env_u32(
+        "ESPFLASH_BAUD",
+        DEFAULT_FLASH_BAUD,
+    )?);
     let fallback_baud = env_utils::parse_env_u32("ESPFLASH_FALLBACK_BAUD", 115_200)?;
     let flash_timeout = Duration::from_secs(env_utils::parse_env_u64("FLASH_TIMEOUT_SEC", 360)?);
-    let flash_status_interval = Duration::from_secs(env_utils::parse_env_u64(
-        "FLASH_STATUS_INTERVAL_SEC",
-        15,
-    )?);
-    let flash_idle_timeout = Duration::from_secs(env_utils::parse_env_u64(
-        "FLASH_IDLE_TIMEOUT_SEC",
-        45,
-    )?);
+    let flash_status_interval =
+        Duration::from_secs(env_utils::parse_env_u64("FLASH_STATUS_INTERVAL_SEC", 15)?);
+    let flash_idle_timeout =
+        Duration::from_secs(env_utils::parse_env_u64("FLASH_IDLE_TIMEOUT_SEC", 45)?);
     let flash_progress_stall_timeout = Duration::from_secs(env_utils::parse_env_u64(
         "FLASH_PROGRESS_STALL_TIMEOUT_SEC",
         30,
@@ -35,10 +59,8 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS", 8_000)?,
     ));
     let skip_update_check = env_utils::parse_env_bool01("ESPFLASH_SKIP_UPDATE_CHECK", true)?;
-    let enable_fallback = env_utils::parse_env_bool01(
-        "ESPFLASH_ENABLE_FALLBACK",
-        DEFAULT_ENABLE_FALLBACK,
-    )?;
+    let enable_fallback =
+        env_utils::parse_env_bool01("ESPFLASH_ENABLE_FALLBACK", DEFAULT_ENABLE_FALLBACK)?;
 
     let workflow_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/flash-capture.sw.yaml");
@@ -100,7 +122,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
 }
 
 impl FlashCaptureRuntime<'_> {
-    fn action_preflight(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_preflight(&mut self, context: &mut Value) -> Result<()> {
         validate_post_command_options(&self.opts)?;
         let fallback_allowed = context
             .get("fallback_allowed")
@@ -118,7 +140,7 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
-    fn action_resolve_image(&mut self, args: &Value) -> Result<()> {
+    pub(super) fn action_resolve_image(&mut self, args: &Value) -> Result<()> {
         let source = args
             .get("source")
             .and_then(Value::as_str)
@@ -137,7 +159,7 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
-    fn action_prepare_idf_env(&mut self) -> Result<()> {
+    pub(super) fn action_prepare_idf_env(&mut self) -> Result<()> {
         let idf_env = bootstrap_idf_env(
             self.opts.idf_root.as_deref(),
             self.opts.idf_tools_path.as_deref(),
@@ -146,21 +168,44 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
-    fn action_archive_image(&mut self) -> Result<()> {
+    pub(super) fn action_prepare_bootloader(&mut self) -> Result<()> {
+        self.logger
+            .info("building pinned OTA bootloader (ESP-IDF v5.5.2)");
+        let command = build_ota_bootloader_command(&self.repo_dir)?;
+        let status = super::command_run::run_command_logged(
+            &command,
+            &self.outputs.flash_log,
+            super::command_run::CommandRunOptions::new(super::DEFAULT_LOG_DRAIN_TIMEOUT),
+        )?;
+        if !status.success() {
+            bail!(
+                "OTA bootloader build failed; see {}",
+                self.outputs.flash_log.display()
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn action_archive_image(&mut self, args: &Value) -> Result<()> {
+        let include_bootloader = args
+            .get("include_bootloader")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| anyhow!("archive_image requires include_bootloader"))?;
         let image_path = self
             .image_path
             .as_deref()
             .ok_or_else(|| anyhow!("image_path not resolved before archive"))?;
-        archive_firmware_artifacts(
+        archive_firmware_artifacts(ArchiveFirmwareArtifactsOptions {
             image_path,
-            &self.outputs,
-            &self.repo_dir,
-            &self.opts.profile,
-            self.skip_update_check,
-        )
+            outputs: &self.outputs,
+            repo_dir: &self.repo_dir,
+            profile: &self.opts.profile,
+            skip_update_check: self.skip_update_check,
+            include_bootloader,
+        })
     }
 
-    fn action_post_command(&mut self, context: &mut Value) -> Result<()> {
+    pub(super) fn action_post_command(&mut self, context: &mut Value) -> Result<()> {
         let command = self
             .opts
             .post_command
@@ -175,11 +220,8 @@ impl FlashCaptureRuntime<'_> {
         let settle_ms = env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_POST_SETTLE_MS", 200)?;
         let regex = regex::Regex::new(pattern)
             .with_context(|| format!("invalid --post-pattern `{pattern}`"))?;
-        let mut console = SerialConsole::open(
-            &self.port,
-            self.baud,
-            Some(&self.outputs.post_command_log),
-        )?;
+        let mut console =
+            SerialConsole::open(&self.port, self.baud, Some(&self.outputs.post_command_log))?;
         console.settle(settle_ms)?;
         let mark = console.mark();
         console.send_line(command)?;
@@ -198,7 +240,7 @@ impl FlashCaptureRuntime<'_> {
         Ok(())
     }
 
-    fn action_flash(&mut self, args: &Value) -> Result<()> {
+    pub(super) fn action_flash(&mut self, args: &Value) -> Result<()> {
         let image_path = self
             .image_path
             .as_deref()
@@ -214,15 +256,35 @@ impl FlashCaptureRuntime<'_> {
 
         let mut result = match strategy {
             "full" => run_full_flash(FullFlashOptions {
-                image_path,
+                repo_dir: &self.repo_dir,
+                image_path: &self.outputs.app_bin,
                 flash_log: &self.outputs.flash_log,
                 port: &self.port,
                 flash_baud: self.flash_baud,
+                no_stub: false,
                 flash_timeout: self.flash_timeout,
                 flash_status_interval: self.flash_status_interval,
-                skip_update_check: self.skip_update_check,
+                flash_idle_timeout: self.flash_idle_timeout,
+                flash_progress_stall_timeout: self.flash_progress_stall_timeout,
+                flash_log_drain_timeout: self.flash_log_drain_timeout,
+                idf_env: self.idf_env.as_ref(),
+            })?,
+            "full-safe" => run_full_flash(FullFlashOptions {
+                repo_dir: &self.repo_dir,
+                image_path: &self.outputs.app_bin,
+                flash_log: &self.outputs.flash_log,
+                port: &self.port,
+                flash_baud: self.fallback_baud,
+                no_stub: true,
+                flash_timeout: self.flash_timeout,
+                flash_status_interval: self.flash_status_interval,
+                flash_idle_timeout: self.flash_idle_timeout,
+                flash_progress_stall_timeout: self.flash_progress_stall_timeout,
+                flash_log_drain_timeout: self.flash_log_drain_timeout,
+                idf_env: self.idf_env.as_ref(),
             })?,
             "app-only" => run_app_only_flash(AppOnlyFlashOptions {
+                repo_dir: &self.repo_dir,
                 image_path,
                 flash_log: &self.outputs.flash_log,
                 port: &self.port,
@@ -241,5 +303,4 @@ impl FlashCaptureRuntime<'_> {
         self.flash_result = Some(result);
         Ok(())
     }
-
 }

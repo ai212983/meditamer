@@ -6,7 +6,7 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 
 - Board: Inkplate 4 TEMPERA (ESP32)
 - MCU module: ESP32-WROVER-E ([CNX Software, 2023-10-04](https://www.cnx-software.com/2023/10/04/inkplate-4-tempera-epaper-display-supports-esphome-arduino-and-micropython/))
-- Port: hostctl wrappers use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
+- Port: `scripts/hostctl.sh` invocations use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
 - Firmware: current `debug` build from `scripts/device/flash.sh debug` (wrapper over `hostctl flash-capture`)
 - Boot-capture artifacts: `logs/.../flash.log`, `capture.log`, `summary.txt` from the most recent flash-capture run
 
@@ -29,7 +29,7 @@ Pass criteria:
 Command:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-hw
 ```
 
 Pass criteria:
@@ -46,22 +46,22 @@ Pass criteria:
 Default behavior does not flash firmware before running. To include flash in the run:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_FLASH_FIRST=1 scripts/tests/hw/test_sdcard_hw.sh debug
+HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_FLASH_FIRST=1 scripts/hostctl.sh test sdcard-hw --build-mode debug
 ```
 
 Burst/backpressure regression only:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/tests/hw/test_sdcard_burst_regression.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-burst-regression
 ```
 
 Suite selection:
 
 ```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=baseline scripts/tests/hw/test_sdcard_hw.sh
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=burst scripts/tests/hw/test_sdcard_hw.sh
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=failures scripts/tests/hw/test_sdcard_hw.sh
-HOSTCTL_PORT=/dev/cu.usbserial-540 HOSTCTL_SDCARD_SUITE=no-card scripts/tests/hw/test_sdcard_hw.sh
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-hw --suite baseline
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-hw --suite burst
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-hw --suite failures
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/hostctl.sh test sdcard-hw --suite no-card
 ```
 
 ## 2B. Wi-Fi/Upload Regression Gate (Automated)
@@ -122,10 +122,11 @@ For Device 1, flash each profile with `scripts/device/flash.sh`, enable `TELEMSE
 failures, burst regression, 20 nested-directory writes, and the Wi-Fi/upload 1-, 3-, and 10-cycle
 gates. Preserve both `stack_diag` and `touch_core_stack_diag` minima in the summary.
 
-For Device 2, run `HOSTCTL_SDCARD_SUITE=no-card`. It must complete 20 absent-card probes with
-`status=error code=init_failed` after bounded `NoResponse` initialization attempts, then pass the
-same stack, internal-memory, touch-scheduling, panic, reset, and true-timeout checks. Also run
-`HOSTCTL_MODE_SMOKE_SUITE=no-storage scripts/device/runtime_modes_smoke.sh` and Wi-Fi discovery.
+For Device 2, run `scripts/hostctl.sh test sdcard-hw --suite no-card`. It must complete 20
+absent-card probes with `status=error code=init_failed` after bounded `NoResponse` initialization
+attempts, then pass the same stack, internal-memory, touch-scheduling, panic, reset, and
+true-timeout checks. Also run
+`scripts/hostctl.sh test runtime-modes-smoke --suite no-storage` and Wi-Fi discovery.
 Device 2's lane does not count as SD/FAT correctness or upload-throughput evidence.
 
 Pass criteria:

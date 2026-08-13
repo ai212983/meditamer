@@ -1,4 +1,4 @@
-#[path = "../../../src/drivers/inkplate/partial_transition.rs"]
+#[path = "../../../src/platform/inkplate/partial_transition.rs"]
 mod partial_transition;
 
 use partial_transition::{

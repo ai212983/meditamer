@@ -1,4 +1,17 @@
-fn encode_channels(cfg: &BuildConfig, dims: SceneDims, channels: &[ChannelData]) -> EncodedPayload {
+use super::{ChannelData, EncodedPayload, SceneDims};
+use crate::{
+    cli::{BuildConfig, Compression},
+    format::{
+        decode_len_hint, encode_strip, payload_start, raw_len_from_strip, ChannelDescriptor,
+        StripEntry,
+    },
+};
+
+pub(super) fn encode_channels(
+    cfg: &BuildConfig,
+    dims: SceneDims,
+    channels: &[ChannelData],
+) -> EncodedPayload {
     let compression = cfg.compression;
     let channel_descriptors: Vec<ChannelDescriptor> = channels
         .iter()
@@ -29,7 +42,7 @@ fn encode_channel_strips(
     cfg: &BuildConfig,
     dims: SceneDims,
     channels: &[ChannelData],
-    compression: crate::cli::Compression,
+    compression: Compression,
 ) -> Vec<Vec<Vec<u8>>> {
     let mut per_channel_encoded: Vec<Vec<Vec<u8>>> = Vec::with_capacity(channels.len());
     for ch in channels {
@@ -50,7 +63,7 @@ fn encode_channel_strips(
 
 fn build_strip_entries(
     per_channel_encoded: &[Vec<Vec<u8>>],
-    compression: crate::cli::Compression,
+    compression: Compression,
     channel_count: usize,
     strip_count: usize,
 ) -> Vec<StripEntry> {

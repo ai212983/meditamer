@@ -1,3 +1,8 @@
+use std::path::PathBuf;
+
+use super::help::print_help;
+use super::model::{Config, DitherMode, OutputMode, RenderPreset, ToneCurve};
+
 pub(crate) fn parse_render_args<I>(args: I) -> Result<Config, String>
 where
     I: IntoIterator<Item = String>,

@@ -1,4 +1,4 @@
-#[path = "../../../src/drivers/inkplate/panel_lifecycle.rs"]
+#[path = "../../../src/platform/inkplate/panel_lifecycle.rs"]
 mod panel_lifecycle;
 
 use panel_lifecycle::{

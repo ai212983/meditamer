@@ -1,0 +1,16 @@
+name	test	lint	coverage	mode	manifest	description
+code-analysis-guard	yes	no	no	self-test	-	Self-tests code-analysis enforcement and ratcheting (scripts/tests/host/test_code_analysis_guard.sh).
+include-usage	yes	no	no	self-test	-	Self-tests the generated-only include! policy (scripts/tests/host/test_include_usage.sh).
+orphan-modules	yes	no	no	self-test	-	Self-tests Rust source reachability detection (scripts/tests/host/test_orphan_modules.sh).
+event-config	yes	yes	yes	crate	tools/event_config_compiler/Cargo.toml	Event configuration compiler tests, strict Clippy, and coverage.
+event-engine	yes	yes	yes	crate	test-support/host/event_engine_host_harness/Cargo.toml	Event-engine host harness tests, strict Clippy, and coverage.
+app-state	yes	yes	yes	crate	test-support/host/app_state_store_host_harness/Cargo.toml	App-state/store host harness tests, strict Clippy, and coverage.
+net-status	yes	yes	no	crate	test-support/host/net_status_host_harness/Cargo.toml	Network/DHCP status ownership tests and strict Clippy.
+ui-shell	yes	yes	yes	crate-lvgl	test-support/host/ui_shell_host_harness/Cargo.toml	UI-shell/LVGL host harness tests, strict Clippy, and coverage (DEP_LV_CONFIG_PATH).
+ble-transport	yes	no	no	crate-ephemeral	test-support/host/ble_transport_host_harness/Cargo.toml	Bounded BLE transport host harness tests (ephemeral CARGO_TARGET_DIR).
+touch-core	yes	no	no	crate	tools/touch_replay/Cargo.toml	Touch-core tests through the touch-replay crate.
+touch-replay	yes	yes	yes	fixture-script	tools/touch_replay/Cargo.toml	Bundled touch-replay fixtures (test via run_fixtures.sh); crate Clippy and coverage.
+hostctl	yes	yes	yes	crate-hostctl	tools/hostctl/Cargo.toml	Hostctl native tests (env-sanitized, dedicated toolchain/target dir), strict Clippy, and coverage.
+scene-maker	yes	no	no	crate-workdir	tools/scene_maker/Cargo.toml	Scene-bundle builder/inspector tests.
+scene-viewer	yes	no	no	crate-workdir	tools/scene_viewer/Cargo.toml	Offline .scenebundle renderer/emulator tests.
+sdcard	yes	yes	no	crate-feature	packages/sdcard/Cargo.toml	Host-feature SD-card FAT-engine tests and strict Clippy (--features host-tests).

@@ -1,4 +1,4 @@
-use crate::drivers::inkplate::TouchSample;
+use crate::platform::inkplate::TouchSample;
 use esp_hal::gpio::Input;
 
 pub(crate) type Gpio36InputPin = Input<'static>;

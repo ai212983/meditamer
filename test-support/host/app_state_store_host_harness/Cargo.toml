@@ -1,0 +1,10 @@
+[package]
+name = "app_state_store_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+asset-upload-http = []
+
+[dependencies]
+heapless = "0.9.3"

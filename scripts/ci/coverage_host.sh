@@ -32,23 +32,35 @@ fi
 mkdir -p "$output_dir"
 rm -f "$output_dir"/host_coverage_summary.tsv "$output_dir"/*.lcov "$merged_lcov_path"
 
-declare -a manifests=(
-  "tools/event_config_compiler/Cargo.toml"
-  "tools/event_engine_host_harness/Cargo.toml"
-  "tools/touch_replay/Cargo.toml"
-  "tools/hostctl/Cargo.toml"
-)
+# scripts/host-suites.tsv is the sole test/lint/coverage membership registry;
+# read the coverage=yes manifests (and their invocation mode) from it rather
+# than hardcoding a list here.
+registry="$repo_root/scripts/host-suites.tsv"
+declare -a manifests=()
+declare -a modes=()
+while IFS=$'\t' read -r manifest mode; do
+  manifests+=("$manifest")
+  modes+=("$mode")
+done < <(awk -F'\t' 'NR>1 && $4=="yes" { print $6"\t"$5 }' "$registry")
 
 fail=0
-for manifest_rel in "${manifests[@]}"; do
+for i in "${!manifests[@]}"; do
+  manifest_rel="${manifests[$i]}"
+  mode="${modes[$i]}"
   crate_name="$(basename "$(dirname "$manifest_rel")")"
   manifest_path="$repo_root/$manifest_rel"
   lcov_path="$output_dir/${crate_name}.lcov"
 
+  declare -a extra_env=()
+  if [[ "$mode" == "crate-lvgl" ]]; then
+    extra_env=(DEP_LV_CONFIG_PATH="$repo_root/config/lvgl")
+  fi
+
   echo "coverage: $crate_name"
   (
     cd /tmp
-    RUSTUP_TOOLCHAIN="$toolchain" cargo llvm-cov \
+    env "${extra_env[@]}" \
+      RUSTUP_TOOLCHAIN="$toolchain" cargo llvm-cov \
       --locked \
       --manifest-path "$manifest_path" \
       --target "$host_target" \

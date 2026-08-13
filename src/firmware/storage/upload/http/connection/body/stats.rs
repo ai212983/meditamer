@@ -2,7 +2,7 @@ use embassy_time::Instant;
 use esp_println::println;
 
 use super::progress::UPLOAD_CHUNK_PIPELINE_ENABLED;
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 
 pub(crate) struct UploadBodyStats {
     pub(crate) sent_bytes: usize,
@@ -53,13 +53,13 @@ pub(crate) fn log_upload_stats(
     request_started_at: Instant,
     commit_ms: u32,
 ) {
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         let avg_chunk = if stats.chunk_count == 0 {
             0
         } else {
             stats.sent_bytes / stats.chunk_count as usize
         };
-        let snapshot = telemetry::snapshot();
+        let snapshot = observability::snapshot();
         println!(
             "upload_http: {} stats pipeline={} bytes={} chunks={} avg_chunk={} max_chunk={} read_wait_ms={} copy_ms={} sd_queue_ms={} sd_task_ms={} sd_task_queue_wait_ms={} sd_task_handler_ms={} sd_task_residual_ms={} sd_task_post_handler_ms={} sd_task_publish_to_receive_ms={} sd_task_residual_other_ms={} sd_ms={} chunk_p50_ms={} chunk_p95_ms={} chunk_max_ms={} chunk_samples={} chunk_samples_dropped={} ingress_flush_wait_ms={} ingress_read_calls={} ingress_pre_read_q_total={} ingress_pre_read_q_max={} ingress_pre_read_q_empty_calls={} ingress_read_short_calls={} ingress_read_wait_empty_q_ms={} ingress_read_wait_nonempty_q_ms={} ingress_read_wait_over_10ms={} ingress_read_wait_over_50ms={} ingress_read_wait_over_100ms={} ingress_read_wait_empty_q_over_10ms={} ingress_read_wait_empty_q_over_50ms={} ingress_read_wait_empty_q_over_100ms={} ingress_read_wait_empty_q_max_ms={} ingress_read_empty_streak_ms_max={} ingress_adapt_enabled={} ingress_adapt_switches={} ingress_adapt_level_max={} ingress_read_empty_streak_max={} wifi_rssi_last_dbm={} wifi_rssi_min_dbm={} wifi_rssi_max_dbm={} wifi_rssi_samples={} wifi_rssi_low_samples={} commit_ms={} req_ms={}",
             phase,

@@ -8,15 +8,20 @@ mod workflows;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use logging::Logger;
 
+use workflows::ble_phase1d::BlePhase1dOptions;
+use workflows::firmware_update::{
+    firmware_public_key_hex, run_firmware_update, FirmwareUpdateOptions,
+};
 use workflows::flash_capture::{run_flash_capture, CaptureMode, FlashCaptureOptions, FlashMode};
 use workflows::runtime_modes::RuntimeModesSmokeOptions;
 use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
 use workflows::serial::RepaintOptions;
 use workflows::troubleshoot::TroubleshootOptions;
+use workflows::ui_lifecycle::UiLifecycleOptions;
 use workflows::upload::UploadOptions;
 use workflows::wifi::acceptance::WifiAcceptanceOptions;
 use workflows::wifi::discovery::WifiDiscoveryDebugOptions;
@@ -32,9 +37,31 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     FlashCapture(FlashCaptureArgs),
+    FirmwareKey(FirmwareKeyArgs),
+    FirmwareUpdate(FirmwareUpdateArgs),
     Repaint(RepaintArgs),
     Upload(UploadArgs),
     Test(TestArgs),
+}
+
+#[derive(Debug, Args)]
+struct FirmwareKeyArgs {
+    #[arg(long)]
+    key: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct FirmwareUpdateArgs {
+    #[arg(long)]
+    image: PathBuf,
+    #[arg(long)]
+    key: PathBuf,
+    #[arg(long)]
+    port: Option<String>,
+    #[arg(long)]
+    output: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    stage_only: bool,
 }
 
 #[derive(Debug, Args)]
@@ -101,12 +128,24 @@ struct TestArgs {
 
 #[derive(Debug, Subcommand)]
 enum TestSubcommand {
+    BlePhase1d(BlePhase1dArgs),
     WifiAcceptance(WifiAcceptanceArgs),
     WifiDiscoveryDebug(WifiDiscoveryDebugArgs),
     RuntimeModesSmoke(RuntimeModesArgs),
     SdcardHw(SdcardArgs),
     SdcardBurstRegression(SdcardBurstArgs),
     Troubleshoot(TroubleshootArgs),
+    UiLifecycle(UiLifecycleArgs),
+}
+
+#[derive(Debug, Args)]
+struct BlePhase1dArgs {
+    #[arg(long)]
+    artifacts: PathBuf,
+    #[arg(long)]
+    board_id: String,
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -152,6 +191,16 @@ struct TroubleshootArgs {
     output: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct UiLifecycleArgs {
+    #[arg(long, default_value_t = 2)]
+    cycles: u16,
+    #[arg(long, default_value_t = 0)]
+    max_baseline_drift_bytes: usize,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
 fn parse_suite(raw: &str) -> Result<SdcardSuite> {
     match raw {
         "all" => Ok(SdcardSuite::All),
@@ -166,7 +215,13 @@ fn parse_suite(raw: &str) -> Result<SdcardSuite> {
     }
 }
 
+fn firmware_update_activate(cli_stage_only: bool, env_stage_only: bool) -> bool {
+    !(cli_stage_only || env_stage_only)
+}
+
 fn run(cli: Cli) -> Result<()> {
+    std::env::set_current_dir(workflows::common::repo_root())
+        .context("set hostctl runtime working directory to repository root")?;
     let mut logger = Logger::from_env()?;
 
     match cli.command {
@@ -189,6 +244,26 @@ fn run(cli: Cli) -> Result<()> {
                 post_timeout_ms: args.post_timeout_ms,
             },
         ),
+        Commands::FirmwareKey(args) => {
+            println!(
+                "MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX={}",
+                firmware_public_key_hex(&args.key)?
+            );
+            Ok(())
+        }
+        Commands::FirmwareUpdate(args) => run_firmware_update(
+            &mut logger,
+            FirmwareUpdateOptions {
+                image: args.image,
+                key: args.key,
+                port: args.port,
+                output: args.output,
+                activate: firmware_update_activate(
+                    args.stage_only,
+                    env_utils::parse_env_bool01("HOSTCTL_FIRMWARE_UPDATE_STAGE_ONLY", false)?,
+                ),
+            },
+        ),
         Commands::Repaint(args) => workflows::serial::run_repaint(
             &mut logger,
             RepaintOptions {
@@ -208,6 +283,14 @@ fn run(cli: Cli) -> Result<()> {
             },
         ),
         Commands::Test(args) => match args.test {
+            TestSubcommand::BlePhase1d(test_args) => workflows::ble_phase1d::run_ble_phase1d(
+                &mut logger,
+                BlePhase1dOptions {
+                    artifacts: test_args.artifacts,
+                    board_id: test_args.board_id,
+                    output_path: test_args.output,
+                },
+            ),
             TestSubcommand::WifiAcceptance(test_args) => {
                 workflows::wifi::acceptance::run_wifi_acceptance(
                     &mut logger,
@@ -255,6 +338,14 @@ fn run(cli: Cli) -> Result<()> {
                     output_path: test_args.output,
                 },
             ),
+            TestSubcommand::UiLifecycle(test_args) => workflows::ui_lifecycle::run_ui_lifecycle(
+                &mut logger,
+                UiLifecycleOptions {
+                    cycles: test_args.cycles,
+                    max_baseline_drift_bytes: test_args.max_baseline_drift_bytes,
+                    output_path: test_args.output,
+                },
+            ),
         },
     }
 }
@@ -264,5 +355,18 @@ fn main() {
     if let Err(err) = run(cli) {
         eprintln!("error: {err:?}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::firmware_update_activate;
+
+    #[test]
+    fn either_stage_only_control_prevents_activation() {
+        assert!(firmware_update_activate(false, false));
+        assert!(!firmware_update_activate(true, false));
+        assert!(!firmware_update_activate(false, true));
+        assert!(!firmware_update_activate(true, true));
     }
 }

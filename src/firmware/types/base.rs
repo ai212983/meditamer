@@ -1,6 +1,6 @@
 use crate::{
-    drivers::inkplate::{imu::InkplateImu, touch::InkplateTouch, InkplateHal},
-    drivers::platform::BusyDelay,
+    platform::inkplate::{imu::InkplateImu, touch::InkplateTouch, InkplateHal},
+    platform::platform::BusyDelay,
 };
 use embassy_embedded_hal::{adapter::BlockingAsync, shared_bus::asynch::i2c::I2cDevice};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -220,7 +220,7 @@ pub(crate) const WIFI_CONFIG_FILE_MAX: usize = 192;
 
 pub(crate) struct DisplayContext {
     pub(crate) inkplate: InkplateDriver,
-    pub(crate) app_state_store: AppStateStore<'static>,
+    pub(crate) app_state_store: AppStateStore,
     pub(crate) _panel_pins: PanelPinHold<'static>,
 }
 

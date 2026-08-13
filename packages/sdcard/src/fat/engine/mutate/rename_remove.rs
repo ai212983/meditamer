@@ -1,5 +1,16 @@
+use super::directory_encode::utf16_len;
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatBufferId, FatEngine, FatIoAction, FatRequest, FatResult, FatStep, ScanReturn,
+};
+use crate::fat::{
+    clusters_for_size, encode_short_name, make_short_alias, parse_path, DirLocation, SdFatError,
+    DIR_ENTRY_SIZE, MAX_LFN_SLOTS, SD_SECTOR_SIZE,
+};
+use crate::SD_PATH_MAX;
+
 impl FatEngine {
-    pub(super) fn begin_rename(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn begin_rename(&mut self) -> Result<FatStep, SdFatError> {
         let source = self.target.ok_or(SdFatError::NotFound)?;
         let source_parent = self.resolve.cluster();
         let (dst_path, dst_len) = self.rename_destination()?;
@@ -9,9 +20,9 @@ impl FatEngine {
         self.prepare_rename_destination(dst_path, dst_len)
     }
 
-    pub(super) fn prepare_rename_destination(
+    pub(in crate::fat::engine) fn prepare_rename_destination(
         &mut self,
-        dst_path: [u8; super::super::super::SD_PATH_MAX],
+        dst_path: [u8; SD_PATH_MAX],
         dst_len: u8,
     ) -> Result<FatStep, SdFatError> {
         let len = usize::from(dst_len);
@@ -19,7 +30,7 @@ impl FatEngine {
             return Err(SdFatError::InvalidPath);
         }
         let path = core::str::from_utf8(&dst_path[..len]).map_err(|_| SdFatError::InvalidPath)?;
-        let count = super::super::parse_path(path, &mut self.workspace.segments)?;
+        let count = parse_path(path, &mut self.workspace.segments)?;
         if count == 0 {
             return Err(SdFatError::InvalidPath);
         }
@@ -32,7 +43,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn begin_new_file_name(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_new_file_name(&mut self) -> Result<FatStep, SdFatError> {
         let target = self.workspace.segments[self.workspace.segment_count as usize - 1];
         self.mutation.new_entry = true;
         if let Ok(short_name) = encode_short_name(target.as_bytes()) {
@@ -81,7 +92,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    pub(super) fn after_mutation_scan(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn after_mutation_scan(&mut self) -> Result<FatStep, SdFatError> {
         match self.mutation.stage {
             MutationStage::WaitAliasScan => {
                 if self.scan.found().is_some() {
@@ -166,7 +177,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn begin_rename_replacement(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_rename_replacement(&mut self) -> Result<FatStep, SdFatError> {
         if matches!(self.request, Some(FatRequest::UploadCommit { .. })) {
             self.begin_upload_commit_replace()
         } else {
@@ -179,7 +190,7 @@ impl FatEngine {
         self.begin_new_file_name()
     }
 
-    fn begin_remove(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_remove(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         if found.record.is_dir() {
             if found.record.first_cluster < 2 {
@@ -213,7 +224,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn begin_delete_entry(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn begin_delete_entry(&mut self) -> Result<FatStep, SdFatError> {
         self.mutation.delete_index = 0;
         self.mutation.directory_sector_pending = false;
         self.mutation.stage = MutationStage::DeleteEntry;
@@ -221,7 +232,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn advance_delete_entry(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn advance_delete_entry(&mut self) -> Result<FatStep, SdFatError> {
         let found = self.target.ok_or(SdFatError::NotFound)?;
         let total = found.lfn_count.saturating_add(1);
         if self.mutation.delete_index >= total {
@@ -244,7 +255,7 @@ impl FatEngine {
             }));
         }
         self.mutation.directory_sector_pending = false;
-        let base = location.slot as usize * super::super::DIR_ENTRY_SIZE;
+        let base = location.slot as usize * DIR_ENTRY_SIZE;
         self.workspace.sector[base] = 0xE5;
         self.mutation.delete_index = self.mutation.delete_index.saturating_add(1);
         Ok(self.issue(FatIoAction::WriteSector {

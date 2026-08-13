@@ -1,0 +1,9 @@
+[package]
+name = "net_status_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["asset-upload-http"]
+asset-upload-http = []
+telemetry-defmt = []

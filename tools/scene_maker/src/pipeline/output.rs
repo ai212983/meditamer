@@ -1,4 +1,12 @@
-fn write_bundle(
+use std::{fs, io::Write, path::Path};
+
+use super::{ChannelData, EncodedPayload, Metadata, MetadataChannel};
+use crate::{
+    cli::BuildConfig,
+    format::{write_header, BundleHeader, ChannelDescriptor, StripEntry},
+};
+
+pub(super) fn write_bundle(
     cfg: &BuildConfig,
     strip_count: u16,
     encoded: &EncodedPayload,
@@ -83,7 +91,7 @@ fn bundle_size(path: &Path) -> Result<u64, String> {
         .map(|m| m.len())
 }
 
-fn build_metadata(
+pub(super) fn build_metadata(
     cfg: &BuildConfig,
     strip_count: u16,
     bundle_bytes: u64,
@@ -113,7 +121,7 @@ fn build_metadata(
     }
 }
 
-fn write_metadata(cfg: &BuildConfig, meta: &Metadata) -> Result<(), String> {
+pub(super) fn write_metadata(cfg: &BuildConfig, meta: &Metadata) -> Result<(), String> {
     let meta_json =
         serde_json::to_string_pretty(meta).map_err(|e| format!("serialize metadata: {e}"))?;
     fs::write(&cfg.metadata_out, meta_json)

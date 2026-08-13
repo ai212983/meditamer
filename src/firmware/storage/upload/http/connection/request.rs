@@ -6,7 +6,7 @@ use super::super::helpers::{
     write_response, UploadAuthError,
 };
 use super::RequestContext;
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 
 pub(super) async fn authorize_request(
     socket: &mut TcpSocket<'_>,
@@ -99,7 +99,7 @@ async fn read_header_chunk(
 }
 
 fn log_header_read_error(socket: &TcpSocket<'_>, filled: usize, err: TcpError) {
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!(
             "upload_http: header read err={:?} filled={} recv_queue={} send_queue={} state={:?} remote={:?}",
             err,
@@ -117,7 +117,7 @@ fn log_header_eof(
     filled: usize,
     header_read_ops: u32,
 ) -> Result<(usize, usize), &'static str> {
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!(
             "upload_http: header eof filled={} reads={} recv_queue={} state={:?} remote={:?}",
             filled,

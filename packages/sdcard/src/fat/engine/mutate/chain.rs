@@ -1,5 +1,12 @@
+use super::MutationStage;
+use crate::fat::engine::{
+    CommandStage, FatBufferId, FatEngine, FatIoAction, FatRequest, FatResult, FatStep,
+    FatWriteReturn,
+};
+use crate::fat::{clusters_for_size, SdFatError, FAT32_EOC_WRITE, SD_SECTOR_SIZE};
+
 impl FatEngine {
-    fn mutation_allocate(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn mutation_allocate(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
         let count = clusters_for_size(self.mutation.data_len as usize, cluster_size) as u32;
@@ -20,7 +27,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn mutation_write_data(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn mutation_write_data(&mut self) -> Result<FatStep, SdFatError> {
         self.mutation.new_first = self.allocation.first;
         if matches!(self.request, Some(FatRequest::UploadBegin { .. })) {
             self.mutation.data_len = 0;
@@ -41,16 +48,15 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    fn mutation_update_directory(&mut self) -> Result<FatStep, SdFatError> {
+    pub(super) fn mutation_update_directory(&mut self) -> Result<FatStep, SdFatError> {
         if matches!(self.request, Some(FatRequest::UploadChunk { .. })) {
             self.upload.record.first_cluster = self.mutation.new_first;
             self.upload.record.size = self.mutation.data_len;
             if self.mutation.append_extra > 0 {
                 let linked_contiguously = self.mutation.old_clusters == 0
                     || self.allocation.first == self.mutation.tail_cluster.saturating_add(1);
-                self.upload.contiguous = self.upload.contiguous
-                    && self.allocation.contiguous
-                    && linked_contiguously;
+                self.upload.contiguous =
+                    self.upload.contiguous && self.allocation.contiguous && linked_contiguously;
                 self.upload.allocated_clusters = self.mutation.target_clusters;
                 self.upload.tail_cluster = self.allocation.previous;
             }
@@ -61,7 +67,7 @@ impl FatEngine {
         Ok(FatStep::Continue)
     }
 
-    pub(super) fn advance_fat_write(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn advance_fat_write(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
         let byte_offset = self.fat_write.cluster as u64 * 4;
         let sector_offset = (byte_offset / SD_SECTOR_SIZE as u64) as u32;
@@ -104,7 +110,7 @@ impl FatEngine {
         }
     }
 
-    pub(super) fn advance_allocate(&mut self) -> Result<FatStep, SdFatError> {
+    pub(in crate::fat::engine) fn advance_allocate(&mut self) -> Result<FatStep, SdFatError> {
         if self.allocation.remaining == 0 {
             self.stage = CommandStage::Mutate;
             return Ok(FatStep::Continue);
@@ -261,10 +267,9 @@ impl FatEngine {
             }
         }
     }
-
 }
 
-fn write_fat_value(sector: &mut [u8; SD_SECTOR_SIZE], index: usize, value: u32) {
+pub(super) fn write_fat_value(sector: &mut [u8; SD_SECTOR_SIZE], index: usize, value: u32) {
     let old = u32::from_le_bytes([
         sector[index],
         sector[index + 1],

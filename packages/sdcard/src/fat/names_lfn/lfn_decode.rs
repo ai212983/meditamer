@@ -1,4 +1,9 @@
-fn short_name_checksum(short: &[u8; 11]) -> u8 {
+use crate::fat::{
+    directory_names::short_name_to_text, DirLocation, LfnState, DIR_ENTRY_SIZE, FAT_NAME_MAX,
+    MAX_LFN_SLOTS,
+};
+
+pub(in crate::fat) fn short_name_checksum(short: &[u8; 11]) -> u8 {
     let mut sum = 0u8;
     for byte in short.iter() {
         sum = ((sum & 1) << 7).wrapping_add(sum >> 1).wrapping_add(*byte);
@@ -14,7 +19,7 @@ fn lfn_expected_mask(slots: u8) -> u32 {
     }
 }
 
-fn build_display_name_into(
+pub(in crate::fat) fn build_display_name_into(
     lfn: &LfnState,
     short_name: &[u8; 11],
     out: &mut [u8; FAT_NAME_MAX],
@@ -27,7 +32,10 @@ fn build_display_name_into(
     (short_len, 0)
 }
 
-fn build_display_name(lfn: &LfnState, short_name: &[u8; 11]) -> ([u8; FAT_NAME_MAX], usize, usize) {
+pub(in crate::fat) fn build_display_name(
+    lfn: &LfnState,
+    short_name: &[u8; 11],
+) -> ([u8; FAT_NAME_MAX], usize, usize) {
     let mut out = [0u8; FAT_NAME_MAX];
     let (name_len, lfn_count) = build_display_name_into(lfn, short_name, &mut out);
     (out, name_len, lfn_count)
@@ -84,7 +92,7 @@ fn append_lfn_utf16_part(part: &[u16; 13], out: &mut [u8; FAT_NAME_MAX], len: &m
     true
 }
 
-fn consume_lfn_entry(state: &mut LfnState, location: DirLocation, entry: &[u8]) {
+pub(in crate::fat) fn consume_lfn_entry(state: &mut LfnState, location: DirLocation, entry: &[u8]) {
     if entry.len() < DIR_ENTRY_SIZE {
         state.clear();
         return;

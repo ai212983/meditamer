@@ -2,6 +2,9 @@ use std::{env, fs, path::PathBuf};
 
 use event_config_compiler::generate_from_path;
 
+const OTA_PUBLIC_KEY_ENV: &str = "MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX";
+const OTA_BUILD_ID_ENV: &str = "MEDITAMER_FIRMWARE_BUILD_ID";
+
 fn env_flag_enabled(name: &str) -> bool {
     match env::var(name) {
         Ok(value) => value != "0" && !value.is_empty(),
@@ -100,6 +103,61 @@ fn emit_legacy_wifi_link_wrappers() {
     }
 }
 
+fn decode_hex_byte(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn write_ota_build_config(out_dir: &std::path::Path) {
+    println!("cargo:rerun-if-env-changed={OTA_PUBLIC_KEY_ENV}");
+    println!("cargo:rerun-if-env-changed={OTA_BUILD_ID_ENV}");
+    let configured = env::var(OTA_PUBLIC_KEY_ENV).ok();
+    let build_id = env::var(OTA_BUILD_ID_ENV).unwrap_or_else(|_| "unlabeled".to_owned());
+    assert!(
+        !build_id.is_empty()
+            && build_id.len() <= 31
+            && build_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')),
+        "{OTA_BUILD_ID_ENV} must be 1-31 ASCII letters, digits, '.', '_' or '-'"
+    );
+    let mut key = [0u8; 32];
+    if let Some(raw) = configured.as_deref() {
+        let bytes = raw.as_bytes();
+        assert_eq!(
+            bytes.len(),
+            64,
+            "{OTA_PUBLIC_KEY_ENV} must contain 64 hex characters"
+        );
+        for (index, pair) in bytes.chunks_exact(2).enumerate() {
+            let high = decode_hex_byte(pair[0])
+                .unwrap_or_else(|| panic!("{OTA_PUBLIC_KEY_ENV} contains a non-hex character"));
+            let low = decode_hex_byte(pair[1])
+                .unwrap_or_else(|| panic!("{OTA_PUBLIC_KEY_ENV} contains a non-hex character"));
+            key[index] = (high << 4) | low;
+        }
+    }
+
+    let key_literal = key
+        .iter()
+        .map(|byte| format!("0x{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let generated = format!(
+        "pub(crate) const OTA_PUBLIC_KEY_CONFIGURED: bool = {};\n\
+         pub(crate) const OTA_PUBLIC_KEY: [u8; 32] = [{key_literal}];\n\
+         pub(crate) const OTA_BUILD_ID: &str = {build_id:?};\n",
+        configured.is_some(),
+    );
+    let path = out_dir.join("ota_build_config.rs");
+    fs::write(&path, generated)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
+}
+
 fn main() {
     println!("cargo:rerun-if-env-changed=MEDITAMER_WIFI_LEGACY_LINK_WRAPS");
     if env_flag_enabled("MEDITAMER_WIFI_LEGACY_LINK_WRAPS") {
@@ -120,6 +178,7 @@ fn main() {
     });
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing OUT_DIR"));
+    write_ota_build_config(&out_dir);
     let out_file = out_dir.join("event_config.rs");
     fs::write(&out_file, generated)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_file.display()));

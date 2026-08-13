@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "generated": "docs/plans/scripts-tools-surface-cleanup-ledger.md change set C-406",
+  "baselines": {
+    "public_executable_paths": {
+      "count": 13,
+      "ceiling": 15,
+      "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the plan's closeout limit (docs/plans/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
+    },
+    "documented_leaf_commands": {
+      "count": 13,
+      "source": "tools/hostctl/src/main.rs: enum Commands (6 variants, minus the Test container) + enum TestSubcommand (8 variants)",
+      "change_log": [
+        {
+          "date": "2026-08-13",
+          "change": "Initial baseline recorded at plan closeout (Phase 4, C-406). No hostctl CLI leaf command changed during this cleanup; count corrects an earlier arithmetic error (14) made while drafting the Phase 0 baseline record."
+        }
+      ]
+    }
+  },
+  "scripts": [
+    {
+      "path": "scripts/build/build.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline firmware-builds/firmware-clippy lanes; hostctl flash-capture build-mode",
+      "reason": "single canonical firmware build/Clippy entry point across every profile/feature combination"
+    },
+    {
+      "path": "scripts/build/ota_bootloader.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "build/xtensa_runner.sh; hostctl flash path",
+      "reason": "builds the pinned ESP-IDF A/B bootloader project, a distinct C toolchain from the Rust firmware build"
+    },
+    {
+      "path": "scripts/build/xtensa_runner.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": ".cargo/config.toml runner for the esp32 target",
+      "reason": "Cargo custom-runner hook; must exist at a fixed path for cargo run/test to invoke automatically"
+    },
+    {
+      "path": "scripts/ci/check_ble_controller_patch.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline source lane",
+      "reason": "verifies one specific bounded vendored patch invariant; not covered by any other check"
+    },
+    {
+      "path": "scripts/ci/check_ble_image_budget.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-firmware lane",
+      "reason": "enforces the BLE firmware image size ceiling; a distinct release-ELF property"
+    },
+    {
+      "path": "scripts/ci/check_commit_message.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml commit-msg hook",
+      "reason": "conventional-commit message gate; only meaningful at commit-msg hook time"
+    },
+    {
+      "path": "scripts/ci/check_fat_engine_stackless.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-source lane",
+      "reason": "rejects async/heap-backed/recursive FAT-engine state; a source-level architectural guard unique to this crate"
+    },
+    {
+      "path": "scripts/ci/check_include_usage.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit hook; aggregate baseline quality lane",
+      "reason": "enforces the generated-only include! policy; distinct from LOC/reachability checks"
+    },
+    {
+      "path": "scripts/ci/check_iram_flash_refs.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-firmware lane",
+      "reason": "ratchets IRAM references into flash-mapped data; a release-ELF-specific memory-placement guard"
+    },
+    {
+      "path": "scripts/ci/check_markdown_links.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit hook",
+      "reason": "the only lychee-based Markdown link validator; staged/all modes"
+    },
+    {
+      "path": "scripts/ci/check_markdown_loc.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit hook; docs_ci.yml; aggregate baseline quality lane",
+      "reason": "Markdown-specific length advisory, separate policy from the Rust LOC advisory"
+    },
+    {
+      "path": "scripts/ci/check_orphan_modules.py",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit/pre-push hooks; aggregate baseline quality lane",
+      "reason": "sole Rust source-reachability analyzer; the analysis needs Cargo-manifest/AST-level parsing no shell script can do"
+    },
+    {
+      "path": "scripts/ci/check_panel_bus_gating.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-source lane",
+      "reason": "guards panel-bus suspend/resume ownership; a source-level architectural invariant unique to this subsystem"
+    },
+    {
+      "path": "scripts/ci/check_panel_waveform_placement.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-firmware lane",
+      "reason": "checks release-ELF waveform symbol placement; a release-artifact-specific check"
+    },
+    {
+      "path": "scripts/ci/check_pinned_linker_scripts.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-firmware lane",
+      "reason": "detects drift in the pinned ESP32 linker override; a linker-script-specific check"
+    },
+    {
+      "path": "scripts/ci/check_rust_loc.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit hook; aggregate baseline quality lane",
+      "reason": "raw-line advisory distinct from the blocking rust-code-analysis SLOC ratchet"
+    },
+    {
+      "path": "scripts/ci/check_secrets.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-commit hook; aggregate baseline source lane",
+      "reason": "sole secret scanner for tracked/staged content"
+    },
+    {
+      "path": "scripts/ci/check_software_baseline.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "CI workflows (rust_ci.yml, rust_ci_premerge.yml); lefthook.yml host-tools-clippy hook",
+      "reason": "aggregate lane dispatcher; the single point every CI job and hook calls through"
+    },
+    {
+      "path": "scripts/ci/check_stack_risk.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-source lane",
+      "reason": "flags large firmware local arrays; a stack-risk-specific static check"
+    },
+    {
+      "path": "scripts/ci/check_ui_shell_ownership.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-source lane",
+      "reason": "enforces UI-shell/backend ownership boundaries; a source-level architectural guard unique to this crate"
+    },
+    {
+      "path": "scripts/ci/coverage_host.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "rust_ci.yml host-coverage job",
+      "reason": "produces merged host LCOV across every coverage=yes suite in scripts/host-suites.tsv"
+    },
+    {
+      "path": "scripts/ci/lint_code_analysis.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml pre-push hook; aggregate baseline quality lane",
+      "reason": "the blocking rust-code-analysis SLOC/complexity ratchet against config/rca-baseline.json"
+    },
+    {
+      "path": "scripts/ci/lint_rust_analyzer.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline quality lane",
+      "reason": "runs the repository rust-analyzer baseline; a distinct linter from Clippy/rust-code-analysis"
+    },
+    {
+      "path": "scripts/ci/sonar_scan.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/guides/development-setup.md",
+      "reason": "local SonarQube scan/quality-gate poller; an opt-in manual workflow, not part of any automated lane"
+    },
+    {
+      "path": "scripts/device/cold_boot_matrix.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/reference/hardware-test-matrix.md; docs/guides/troubleshooting.md; docs/plans/cold-boot-validation.md",
+      "reason": "human-assisted true-power-cycle matrix; requires physical power-cycling no automated lane can perform"
+    },
+    {
+      "path": "scripts/device/flash.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "AGENTS.md flash policy; every device-operations guide",
+      "reason": "canonical flash-and-boot-capture wrapper mandated by AGENTS.md; the one path every guide and agent must use"
+    },
+    {
+      "path": "scripts/device/generate_firmware_signing_key.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/guides/build-and-flash.md",
+      "reason": "creates a protected signing seed and prints its public key; a one-time credential-generation workflow"
+    },
+    {
+      "path": "scripts/device/monitor.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/guides/troubleshooting.md; scripts/touch/touch_capture.sh",
+      "reason": "passive serial monitor/capture; the sole attach point touch_capture.sh and manual debugging both build on"
+    },
+    {
+      "path": "scripts/device/soak_boot.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/guides/troubleshooting.md; DRAM reference guidance; hostctl troubleshoot workflow",
+      "reason": "repeated reset/boot-marker soak; a distinct long-running hardware exercise from a single flash/capture"
+    },
+    {
+      "path": "scripts/device/soak_refresh.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "docs/guides/troubleshooting.md; docs/reference/hardware-test-matrix.md",
+      "reason": "long refresh/panic soak; a distinct long-running hardware exercise from boot soak"
+    },
+    {
+      "path": "scripts/host-test.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "scripts/ci/check_software_baseline.sh (host-tests/host-lint); scripts/ci/coverage_host.sh reads scripts/host-suites.tsv directly",
+      "reason": "authoritative host test/lint dispatcher; the single point every host suite is reached through (also directly runnable for focused suites)"
+    },
+    {
+      "path": "scripts/hostctl.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "scripts/device/flash.sh; scripts/tests/hw/test_wifi_*.sh; direct manual invocation per current guides",
+      "reason": "the advanced explicit-mode hostctl launcher every current wrapper and guide invokes hostctl through"
+    },
+    {
+      "path": "scripts/lib/experiment_novelty_guard.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "scripts/tests/hw/test_wifi_acceptance.sh; scripts/tests/hw/test_wifi_regression_gate.sh",
+      "reason": "enforces the archived Wi-Fi/upload decision ledger before acceptance/regression runs; sourced library, not standalone"
+    },
+    {
+      "path": "scripts/lib/serial_port.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "scripts/touch/*.sh; scripts/device/{soak_boot,soak_refresh,cold_boot_matrix,monitor}.sh; scripts/tests/hw/test_wifi_*.sh",
+      "reason": "shared macOS/Linux serial-port autodetection plus hostctl port-cache/env helpers; sourced library, not standalone"
+    },
+    {
+      "path": "scripts/tests/host/test_check_stack_risk.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline static-source lane",
+      "reason": "self-test of check_stack_risk.sh; must exist independent of that guard to test it"
+    },
+    {
+      "path": "scripts/tests/host/test_code_analysis_guard.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline host-tests lane (via scripts/host-test.sh code-analysis-guard)",
+      "reason": "self-test of lint_code_analysis.sh's ratchet logic against a fixture rust-code-analysis-cli stub"
+    },
+    {
+      "path": "scripts/tests/host/test_include_usage.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline host-tests lane (via scripts/host-test.sh include-usage)",
+      "reason": "self-test of check_include_usage.sh against a fixture Git repo"
+    },
+    {
+      "path": "scripts/tests/host/test_orphan_modules.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline host-tests lane (via scripts/host-test.sh orphan-modules)",
+      "reason": "self-test of check_orphan_modules.py, including its default Git-root discovery, against fixture repos"
+    },
+    {
+      "path": "scripts/tests/hw/test_wifi_acceptance.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "AGENTS.md; network guides; scripts/tests/hw/test_wifi_regression_gate.sh",
+      "reason": "guarded Wi-Fi/upload acceptance entry point; enforces the novelty preflight no direct hostctl.sh call does"
+    },
+    {
+      "path": "scripts/tests/hw/test_wifi_discovery_debug.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "AGENTS.md; Wi-Fi guides; scripts/tests/hw/test_wifi_regression_gate.sh",
+      "reason": "guarded Wi-Fi discovery diagnostic entry point; enforces required env-var checks no direct hostctl.sh call does"
+    },
+    {
+      "path": "scripts/tests/hw/test_wifi_regression_gate.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "AGENTS.md network-change mandate",
+      "reason": "the surviving Wi-Fi regression gate; orchestrates discovery/acceptance/soak stages, panic classification, and auto-troubleshoot that no other single entry point does"
+    },
+    {
+      "path": "scripts/touch/make_touch_fixture.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "tools/touch_replay README",
+      "reason": "converts a device capture into replay fixture inputs; a format-conversion step distinct from capture or replay"
+    },
+    {
+      "path": "scripts/touch/touch_capture.sh",
+      "role": "public",
+      "owner": "Firmware + Host Tooling",
+      "caller": "tools/touch_replay README; docs/reference/event-engine-guide.md; docs/plans/statig-event-engine.md",
+      "reason": "captures raw/decoded touch traces (--mode touch) or tap/event-engine traces (--mode tap) via passive monitor attach"
+    },
+    {
+      "path": "scripts/ci/check_script_surface.py",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml; aggregate baseline quality lane",
+      "reason": "the ratchet that keeps this file (scripts/surface.json) and the script/tool surface honest; must exist outside the surface it audits"
+    }
+  ]
+}

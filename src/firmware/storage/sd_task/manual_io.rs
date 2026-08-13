@@ -1,5 +1,6 @@
 use core::fmt::Write;
 
+use embassy_time::Instant;
 use sdcard::probe::{SdCardVersion, SdFilesystem, SdProbeError, SdProbeStatus, SD_SECTOR_SIZE};
 
 use super::serial_log::{self, SdSerialLine};
@@ -18,12 +19,16 @@ macro_rules! queue_line {
     }};
 }
 
-pub(super) async fn run_probe(reason: &str, probe: &mut SdProbeDriver) -> SdResultCode {
+pub(super) async fn run_probe(
+    reason: &str,
+    probe: &mut SdProbeDriver,
+    init_deadline: Instant,
+) -> SdResultCode {
     queue_line!(
         "sdprobe: data_spi_mhz={}",
         SdProbeDriver::data_spi_rate_mhz()
     );
-    match probe.probe().await {
+    match probe.probe_until(init_deadline).await {
         Ok(status) => {
             publish_probe_status(reason, status).await;
             SdResultCode::Ok
@@ -144,8 +149,8 @@ async fn publish_probe_error(reason: &str, err: SdProbeError) {
             reason,
             response
         ),
-        SdProbeError::DmaTransferTimeout => {
-            queue_line!("sdprobe[{}]: not_detected dma_transfer_timeout", reason)
+        SdProbeError::InitDeadlineExceeded => {
+            queue_line!("sdprobe[{}]: not_detected init_deadline_exceeded", reason)
         }
         SdProbeError::WriteBusyTimeout { elapsed_ms, polls } => queue_line!(
             "sdprobe[{}]: not_detected write_busy_timeout elapsed_ms={} polls={}",
@@ -171,12 +176,13 @@ pub(super) async fn run_rw_verify(
     reason: &str,
     lba: u32,
     probe: &mut SdProbeDriver,
+    init_deadline: Instant,
 ) -> SdResultCode {
     if lba == 0 {
         queue_line!("sdrw[{}]: refused_lba0", reason);
         return SdResultCode::RefusedLba0;
     }
-    if let Err(err) = probe.init().await {
+    if let Err(err) = probe.init_until(init_deadline).await {
         probe.recover_after_timeout();
         queue_line!("sdrw[{}]: init_error={:?}", reason, err);
         return SdResultCode::InitFailed;
@@ -224,7 +230,7 @@ pub(super) async fn run_rw_verify(
     }
 }
 
-async fn read_sector(
+pub async fn read_sector(
     reason: &str,
     phase: &str,
     lba: u32,

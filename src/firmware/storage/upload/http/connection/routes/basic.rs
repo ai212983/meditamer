@@ -3,7 +3,7 @@ use esp_println::println;
 
 use super::params::{drain_body, parse_path_or_400, sd_upload_or_http_error, write_response};
 use super::RequestContext;
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 use crate::firmware::types::SdUploadCommand;
 
 pub(super) async fn handle_health(
@@ -14,8 +14,8 @@ pub(super) async fn handle_health(
     // It must remain safe to probe under pressure and must always bump telemetry
     // so host workflows can correlate reachability checks with runtime behavior.
     drain_body(socket, request).await?;
-    telemetry::record_upload_http_health_request();
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
+    observability::record_upload_http_health_request();
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
         println!("upload_http: health ok");
     }
     write_response(socket, b"200 OK", b"ok").await;
@@ -29,11 +29,11 @@ pub(super) async fn handle_mkdir(
     drain_body(socket, request).await?;
     let (path, path_len) = parse_path_or_400(socket, request.target, "/mkdir").await?;
     let path_str = core::str::from_utf8(&path[..path_len as usize]).unwrap_or("<invalid>");
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         println!("upload_http: mkdir begin path={}", path_str);
     }
     sd_upload_or_http_error(socket, SdUploadCommand::Mkdir { path, path_len }).await?;
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         println!("upload_http: mkdir done path={}", path_str);
     }
     write_response(socket, b"200 OK", b"mkdir ok").await;

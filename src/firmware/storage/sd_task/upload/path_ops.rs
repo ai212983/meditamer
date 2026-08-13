@@ -1,6 +1,6 @@
 use sdcard::fat::{FatEngine, FatEngineError, FatRequest, FatResult, SdFatError};
 
-use crate::firmware::telemetry;
+use crate::firmware::observability;
 
 use super::super::super::super::types::{
     SdProbeDriver, SdUploadResult, SdUploadResultCode, SD_PATH_MAX,
@@ -19,7 +19,7 @@ pub(super) async fn handle_mkdir(
     upload_mounted: &mut bool,
     fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         esp_println::println!("sd_upload: mkdir enter");
     }
     if session.is_some() {
@@ -42,7 +42,7 @@ pub(super) async fn handle_mkdir(
             return upload_result(false, code, 0);
         }
     };
-    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+    if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
         esp_println::println!("sd_upload: mkdir path={}", path_str);
     }
 
@@ -57,7 +57,7 @@ pub(super) async fn handle_mkdir(
     .await;
     match result {
         FatResult::Done | FatResult::Error(FatEngineError::Fat(SdFatError::AlreadyExists)) => {
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_SD) {
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
                 esp_println::println!("sd_upload: mkdir ok/already_exists");
             }
             upload_result(true, SdUploadResultCode::Ok, 0)

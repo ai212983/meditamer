@@ -4,7 +4,7 @@
 
 ## Validation
 
-- [ ] Host checks passed (`scripts/tests/host/test_hostctl_host.sh` and CI host regression).
+- [ ] Host checks passed (`scripts/host-test.sh test hostctl` and CI host regression).
 - [ ] If touched files are `>= 420` lines, split plan included.
 
 ## Wi-Fi/Upload Regression Evidence (Required If Wi-Fi/Upload Paths Touched)
