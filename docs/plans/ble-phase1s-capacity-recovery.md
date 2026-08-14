@@ -1,6 +1,6 @@
 # Phase 1S Capacity Recovery Plan
 
-- Status: Capacity passed; Wi-Fi regression gate remaining
+- Status: Capacity passed on the formal gate; Wi-Fi regression gate's SD blocker resolved (CAP-0011/CAP-0012), but a new internal-memory-floor failure at `acceptance_3_cycle` (CAP-0013) still blocks a clean pass
 - Last-reviewed: 2026-08-14
 - Started: 2026-08-14
 - Parent: [BLE foundation and upload transport plan](ble-foundation-plan.md)
@@ -155,8 +155,21 @@ device validation after its ADR decision is accepted.
 
 ## Immediate next step
 
-Capacity work is done: Steps 1–3 completed without needing a recovery candidate (CAP-0001–CAP-0009).
-The one remaining item before this plan's Acceptance section is fully satisfied is running the
-[Wi-Fi regression gate](../guides/wifi-regression-gate.md) on the same exact artifact
-(`logs/ble_phase1s_gate_20260814`, commit `9606e152e816215449486f286cb400bc52d08bab`). Once that
-passes, hand off to the parent plan for Phase 1S closure and Phase 2 reconsideration.
+Capacity work is done at source/formal-gate scope: Steps 1–3 completed without needing a recovery
+candidate (CAP-0001–CAP-0009). Running the [Wi-Fi regression gate](../guides/wifi-regression-gate.md)
+on that artifact (CAP-0010) surfaced a separate, pre-existing bug — aborted mid-write SD uploads
+permanently poisoned their directory's shared temp file (CAP-0005) — which blocked the gate's
+acceptance stage on this physical card. That bug is now root-caused, fixed, host-test-covered, and
+hardware-verified, including recovery of the poisoned card (CAP-0011/CAP-0012), and the gate's
+`discovery_debug`/`acceptance_1_cycle` stages pass clean on the fixed artifact.
+
+**The plan's acceptance bar is not yet met.** Rerunning the gate on the fixed artifact
+(commit `e0213a76cb80be5b0821e53720b9eafdf24f714f`) now fails at `acceptance_3_cycle` instead, twice
+reproducibly, on an internal-memory-floor violation (`min_internal_free_bytes` ~13,456–13,496 against
+the 16,384 floor) unrelated to CAP-0005/CAP-0011 — see CAP-0013. This is a capacity-model finding: the
+`wifi-acceptance` workflow's repeated-upload-cycle-within-one-boot load pattern reaches a materially
+lower low-water than CAP-0009's formal `ble-phase1s` 20-cycle gate did on the same source. The next
+step is a fresh capacity investigation scoped to that specific load pattern (against CAP-0002's
+owner/lifetime map and candidate list), then a clean rerun of the full Wi-Fi regression gate on a fresh
+artifact. Only once that passes clean can this plan hand off to the parent plan for Phase 1S closure and
+Phase 2 reconsideration.

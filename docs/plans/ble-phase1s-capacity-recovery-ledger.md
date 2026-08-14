@@ -1,7 +1,7 @@
 # Phase 1S Capacity Recovery Ledger
 
 - Status: Active
-- Last-reviewed: 2026-08-14
+- Last-reviewed: 2026-08-14 (CAP-0013)
 - Started: 2026-08-14
 - Plan: [Phase 1S capacity recovery](ble-phase1s-capacity-recovery.md)
 - Parent evidence: [BLE implementation ledger](ble-foundation-ledger.md)
@@ -18,10 +18,10 @@ BLE phase evidence remains in the parent ledger.
 
 | Work item | State | Evidence | Next action |
 | --- | --- | --- | --- |
-| Capacity model | **Passed** | CAP-0001–CAP-0009 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. |
+| Capacity model | Passed on the formal gate; a narrower-margin data point reopens it | CAP-0001–CAP-0009, CAP-0013 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. **CAP-0013** (2026-08-14) found the separate `wifi-acceptance` workflow's repeated-upload-cycle-in-one-boot load pattern reproducibly (2/2) drives `min_internal_free_bytes` to ~13,456–13,496 — *below* the 16,384 floor and well under CAP-0009's 19,896 low-water — on the identical fixed commit's descendant. Not yet reconciled; see CAP-0013. |
 | Recovery candidate | **Not needed** | CAP-0009 | The formal gate passed without any capacity-specific code change; none of CAP-0002's ranked candidates were implemented. |
 | Implementation | **N/A** | CAP-0009 | No capacity implementation required; the only code change this plan produced was the F-0008 credentials-retry fix (CAP-0007), unrelated to byte recovery. |
-| Device validation | Capacity passed; regression gate partial | CAP-0009, CAP-0010 | 20/20 capacity cycles clean. Wi-Fi regression gate: discovery debug passed clean; acceptance blocked by CAP-0005's pre-existing SD-card corruption on this physical card (not a regression) — needs a card reformat/swap, then rerun. |
+| Device validation | Capacity passed; regression gate still not clean | CAP-0009–CAP-0013 | 20/20 capacity cycles clean (CAP-0009). CAP-0005's `HCTLUPLD.TMP` poisoning bug is root-caused, fixed, host-test-covered, and hardware-verified (CAP-0011/CAP-0012) — both the pre-existing poisoned `/assets/HCTLUPLD.TMP` and a freshly-poisoned directory were recovered, and the fix prevents recurrence. The Wi-Fi regression gate's `discovery_debug` and `acceptance_1_cycle` stages now pass clean on the fixed artifact (CAP-0013) — CAP-0010's SD blocker is gone. `acceptance_3_cycle` now fails instead, reproducibly (2/2), on an unrelated internal-memory-floor violation (`min_internal_free_bytes` ~13,456–13,496 against the 16,384 floor, `wifi_rx_matched=true`) that CAP-0009's formal 20-cycle `ble-phase1s` gate did not surface at this margin — this reopens the capacity question for the `wifi-acceptance` workflow's specific repeated-cycle load pattern and needs its own investigation, out of CAP-0005/CAP-0011's scope. |
 
 ## Evidence entries — append only
 
@@ -417,6 +417,17 @@ exists) or instrumenting `run_network_epoch`'s retry path with additional print 
 next, then re-running this same reproduction (`repro5`'s exact parameters: fresh directory, ~10 MiB
 file, ACQUIRE sent ~1s after reaching `Serving`).
 
+**Update (CAP-0011, 2026-08-14): the `HCTLUPLD.TMP` per-directory poisoning found in item 5 above is
+root-caused and fixed.** It was not genuine on-disk corruption — `free_remove_chain_or_delete`'s
+chain-removal step budget was derived from the directory entry's on-disk `size`, which stays 0 for the
+whole life of an in-progress upload (`UploadBegin` pre-allocates and links the full expected-size chain
+up front but only persists `size` at `UploadCommit`), so any aborted-mid-write chain longer than the old
+`size(0)+32` budget was misdiagnosed as `ClusterChainTooLong`. See
+[CAP-0011](#cap-0011--cap-0005-root-caused-and-fixed-chain-free-step-budget-derived-from-a-stale-directory-entry-size-not-the-actual-chain-length)
+and [CAP-0012](#cap-0012--cap-0011-fix-hardware-verification-pre-fix-repro-post-fix-prevention-and-poisoned-file-recovery)
+for the fix and its hardware verification, including recovery of the exact `/assets/HCTLUPLD.TMP` this
+entry poisoned.
+
 ### CAP-0006 — Correction: not a hang. Bounded (~130s) self-recovery; exact root cause identified
 
 **This corrects CAP-0004/CAP-0005's "confirmed hang" finding. It was not a hang.** The device recovers
@@ -714,6 +725,244 @@ Next action: reformat or swap the physical SD card (needs hands-on access this s
 then rerun `acceptance_1_cycle` (and `_3_cycle`) on the same exact artifact to get a clean full-gate
 pass. This is the same underlying fix CAP-0005 already called for (unique per-attempt temp filenames,
 or a repair path) — fixing that closes both CAP-0005 and this item together.
+
+### CAP-0011 — CAP-0005 root-caused and fixed: chain-free step budget derived from a stale directory-entry size, not the actual chain length
+
+- Date: 2026-08-14
+- Source commit (parent, pre-fix): `e9416ca046b6459799b265fbdf11a5f8ff17addd`
+- Fix commit: `e0213a76cb80be5b0821e53720b9eafdf24f714f`
+- Scope: `packages/sdcard/src/fat/engine/mutate/{rename_remove.rs,mod.rs}` (fix),
+  `packages/sdcard/tests/fat_engine.rs` (two new host-test regressions). No firmware/`src/` changes.
+
+**Root cause.** `UploadBegin` pre-allocates and links the *entire* expected-size cluster chain
+up front (`mutation_allocate`, `packages/sdcard/src/fat/engine/mutate/chain.rs:9-28`, sized from
+`FatRequest::UploadBegin`'s `expected_size` field, not from bytes actually written), but the directory
+entry it writes to disk at that same moment always has `size = 0`
+(`mutation_write_data`, `chain.rs:30-49`: `if matches!(self.request, Some(FatRequest::UploadBegin
+{ .. })) { self.mutation.data_len = 0; ... }`). Every subsequent `UploadChunk` updates only the
+in-memory `self.upload.record.size` (`mutation_update_directory`, `chain.rs:51-68`) — the on-disk
+directory entry's `size` field is not touched again until `UploadCommit` writes the real final value.
+So for the entire lifetime of an in-progress upload, the on-disk entry says `size=0` while its chain
+already has `clusters_for_size(expected_size)` real, validly-linked clusters.
+
+Two call sites derived a chain-removal step budget from that stale on-disk `size` instead of the
+actual chain length:
+
+1. `free_remove_chain_or_delete` (`rename_remove.rs:209-225`, reached by `FatRequest::Remove` — the
+   abort path in `src/firmware/storage/sd_task/upload/stream/finish.rs:96-139`, and the `SDFATRM`
+   serial command): `max_steps = clusters_for_size(found.record.size, cluster_size) + 32` — with
+   `size=0`, this is always exactly 32.
+2. `mutation_start`'s `Write`/`UploadBegin` overwrite-existing-chain branch (`mod.rs:136-147`, reached
+   when `UploadBegin` retargets a path that already has an allocated chain — e.g. a client retrying an
+   upload to the same temp path after a prior attempt was aborted): same `size`-derived budget.
+
+Both call `advance_free` (`chain_free.rs`), whose own walk is correctly bounded and non-blocking
+(confirmed by CAP-0005 item 1 — the FAT engine itself was never at fault) but bails with
+`SdFatError::ClusterChainTooLong` (`chain_free.rs:11-13`) as soon as `self.free.steps >= self.free.max_steps`.
+For any upload whose real chain exceeds 32 clusters (512-byte clusters on the test volume: any upload
+over 16 KiB; on the physical card's real cluster size, any upload of more than a few dozen KiB), the
+walk hits that 32-step ceiling long before reaching the chain's real end and returns
+`ClusterChainTooLong` on a chain that is not actually corrupted — it is simply longer than a budget that
+was never a valid estimate of it. This matches every observed symptom: `SDFATLS`/`SDFATSTAT` reporting
+`size=0` for the poisoned file (CAP-0005 item 5), the abort failing (`finish.rs`'s `Remove` request),
+and a same-path retry failing immediately at `upload_begin` (call site 2) with no data written.
+
+This answers the task's root-cause question directly: **(c)**, a bug in the chain-free logic's step
+budget — specifically, a budget computed from a field (`size`) that this exact code path (in-progress
+upload) never keeps in sync with the real chain length — not (a) genuine on-disk corruption from
+cancelling a write mid-flight, and not a deeper bug in `chain_free.rs`'s own walk/free mechanics, which
+CAP-0005 item 1 already showed to be a bounded, non-blocking, same-step bail.
+
+**Fix.** Both call sites now bound the walk by `volume.total_clusters.saturating_add(2)` instead of a
+size-derived estimate — the same bound `free_remove_chain_or_delete` already used for directory removal
+in this exact function. This is a safe upper bound for any non-cyclic chain on the volume (files and
+directories alike): a valid chain cannot have more links than the volume has clusters, so anything
+that exceeds this bound genuinely is a cycle (real corruption), and anything within it that is merely
+long is walked and freed correctly, regardless of what `size` says. This is a root-cause fix, not a
+dodge: it does not change the temp filename scheme (still shared per directory, per
+`SD_UPLOAD_TMP_BASENAME`), does not add an out-of-band repair path, and does not touch the abort path's
+control flow — it only replaces an incorrect step-budget estimate with a correct one at both sites that
+had it.
+
+**Host-test verification.** Two new tests in `packages/sdcard/tests/fat_engine.rs`, against the crate's
+existing `FakeDisk`-backed FAT32 harness (`host-tests` feature):
+
+- `aborting_a_large_preallocated_upload_before_commit_does_not_poison_the_temp_path`: `UploadBegin`
+  with a 50-cluster (25,600-byte) `expected_size`, no chunks written, then `Remove` before commit —
+  asserts `FatResult::Done`, then asserts a fresh `UploadBegin` on the same path also succeeds.
+- `retrying_upload_begin_over_a_large_unfinished_chain_does_not_poison_the_temp_path`: same setup but
+  exercises call site 2 directly — a second `UploadBegin` on the same path with no intervening `Remove`.
+
+Both were confirmed to **fail** with `FatResult::Error(FatEngineError::Fat(SdFatError::ClusterChainTooLong))`
+against the pre-fix code (verified by `git stash`-reverting only the two fix files and rerunning —
+both tests panicked on the exact assertion that a `Remove`/retry `UploadBegin` succeeds) and to **pass**
+once the fix is restored. `cargo test --features host-tests --test fat_engine` (`packages/sdcard`):
+13/13 pass, including the two new regressions and all 11 pre-existing tests (no regression).
+
+**CI checks**, all clean on the fix commit: `scripts/ci/check_ble_controller_patch.sh`,
+`scripts/ci/check_network_owner_source.sh`, `scripts/ci/check_software_baseline.sh firmware-builds`
+(all six locked build lanes), `firmware-clippy` (minimal + all-features, zero new warnings), and
+`host-tests` (full `scripts/host-test.sh test all` run, all suites including `sdcard` pass — see the
+`sdcard` section for the `fat_engine`/`retry_policy` results above).
+
+Result: CAP-0005's root cause is identified and fixed at the source. Next action: verify on the
+physical device — reproduce pre-fix on a fresh directory, confirm the fix prevents recurrence, and
+attempt recovery of the already-poisoned `/assets/HCTLUPLD.TMP` this ledger's own earlier sessions left
+on the physical card. See CAP-0012.
+
+### CAP-0012 — CAP-0011 fix: hardware verification (pre-fix repro, post-fix prevention, and poisoned-file recovery)
+
+- Date: 2026-08-14
+- Board: `/dev/cu.usbserial-2110` (same physical card and board as CAP-0003–CAP-0010).
+- Evidence kind: five interactive device sessions using two throwaway `serialport`-crate probes
+  (`tools/hostctl/examples/serial_probe.rs` for the NETCFG/RADIOHANDOFF/upload-timed reproduction,
+  `serial_cmd.rs` for fixed SDFAT* command sequences), same pattern as every prior CAP-000x hardware
+  entry — built, used, and deleted before this entry's commit; not part of the product or tool surface.
+  Session transcripts went to the session scratchpad, not `logs/` (ephemeral, same as some artifacts
+  noted in CAP-0003/CAP-0004); the flash boot captures referenced below are preserved under `logs/`.
+
+**1. Pre-fix reproduction on a fresh, never-used directory.** Temporarily reverted only the two fixed
+files (`git stash` on `rename_remove.rs`/`mod.rs`, keeping the new tests), built/flashed
+`ble-release`/`ble-foundation` with `MEDITAMER_FIRMWARE_BUILD_ID=cap-pre-fix-repro-001` (ELF SHA-256
+`29af6ad67d6fde9ce528744650c7f9d2a3b10de4614904a88d53be09e0324596`; clean boot,
+`logs/cap_pre_fix_repro_flash/capture.log`). Reproduced CAP-0004/CAP-0006's exact trigger against a
+brand-new directory: NETCFG SET/NET START, a 10 MiB `hostctl upload` to `/assets/prefix1/`, `RADIOHANDOFF
+ACQUIRE` sent ~1s after the SD session opened (well inside `ACTIVE_OPERATION_GRACE`, guaranteeing the
+transfer is still in flight when grace expires).
+
+Result: identical failure to CAP-0004/CAP-0005/CAP-0006's original discovery, on a directory this
+session created for the first time:
+
+```
+sd_upload: abort remove failed temp_path=/assets/prefix1/HCTLUPLD.TMP result=Error(Fat(ClusterChainTooLong))
+```
+
+Confirmed permanently poisoned exactly as CAP-0005 item 5 described: a follow-up `SDFATSTAT
+/assets/prefix1/HCTLUPLD.TMP` showed `size=0`; `SDFATRM /assets/prefix1/HCTLUPLD.TMP` failed with
+`err=ClusterChainTooLong` (`rm_error`). The credentials-retry fix (CAP-0007, unaffected by this
+session's revert) still reconnected Wi-Fi correctly afterward — this run isolates the CAP-0005 defect
+alone, with no other variable changed from the current source tree.
+
+**2. Post-fix prevention on a fresh directory.** Restored the fix (`git stash pop`), rebuilt/reflashed
+with `MEDITAMER_FIRMWARE_BUILD_ID=cap-fix-verify-001` (ELF SHA-256
+`ef3d15812845280c2585a5eafd5ea1aab7d488b07f9309231102ca996131c214`; clean boot,
+`logs/cap_fix_verify_flash/capture.log`; content-identical to fix commit `e0213a76...`, built from the
+working tree immediately before that commit). Repeated the exact same trigger against a different fresh
+directory (`/assets/capfix1/`, 10 MiB file, `ACQUIRE` ~1s after SD session open).
+
+Result:
+
+```
+RADIO_HANDOFF state=off_confirmed kind=quiesced reason=none boot=986639338 epoch=1
+  internal_free=59608 block_above_reserve=31672 ... stable=true
+RADIO_HANDOFF_ACK kind=quiesced state=off_confirmed reason=none ...
+```
+
+No `abort remove failed` line anywhere in the transcript (the abort path only logs on failure — see
+`finish.rs::handle_abort`), and the acknowledgment is the clean first-attempt `quiesced` success path,
+**not** the `reason=restore_failed` retry-loop path CAP-0006/CAP-0007 observed when the SD abort still
+failed pre-CAP-0011. This is the expected signature of the abort's `Remove` now returning `Done`
+instead of `ClusterChainTooLong`. After the device reassociated, a fresh `hostctl upload` to the
+**same** `/assets/capfix1/` directory (reusing the same shared `HCTLUPLD.TMP` temp path the aborted
+attempt had just used) completed end-to-end: `Upload complete.` — direct proof the directory was not
+poisoned by the interrupted upload.
+
+**3. Recovery of both poisoned directories.** With the fix flashed (`cap-fix-verify-001`/`-002`):
+
+- `/assets/HCTLUPLD.TMP` — the file this ledger's own CAP-0004/CAP-0005/CAP-0006/CAP-0007 sessions
+  poisoned earlier today, `size=0`, confirmed unremovable in CAP-0005 and still blocking
+  `acceptance_1_cycle` in CAP-0010: `SDFATRM /assets/HCTLUPLD.TMP` now returns `rm_ok`
+  (`status=ok code=ok attempts=1 dur_ms=23`). A following `SDFATLS /assets` confirms `HCTLUPLD.TMP` no
+  longer appears in the listing.
+- `/assets/prefix1/HCTLUPLD.TMP` — the file this entry's own step 1 freshly poisoned pre-fix, on the
+  same physical card, same file, same on-disk state: after reflashing the fix
+  (`MEDITAMER_FIRMWARE_BUILD_ID=cap-fix-verify-002`, ELF SHA-256
+  `6037ecc1ac35329871be6524624ac795086645a5a755822c861981ef333e159d`, clean boot,
+  `logs/cap_fix_verify_flash2/capture.log`), `SDFATRM /assets/prefix1/HCTLUPLD.TMP` returns `rm_ok`
+  (`dur_ms=42`); `SDFATLS /assets/prefix1` afterward shows `ls_ok count=2` (only `.`/`..`) — empty and
+  clean.
+
+This is a same-file, same-card, before/after comparison for the `prefix1` case: identical file,
+identical corrupted-looking on-disk state, `ClusterChainTooLong` pre-fix and `rm_ok` post-fix with
+nothing else on the card changed in between.
+
+Result: all three verification requirements are met on hardware. (a) Pre-fix reproduction on a fresh
+directory: confirmed, matches CAP-0004/CAP-0005's original signature exactly. (b) Fix prevents
+recurrence going forward: confirmed — a forced mid-write abort under the exact CAP-0006 trigger no
+longer fails the SD remove, and the directory remains fully usable for a subsequent upload immediately
+after. (c) The already-poisoned card is recovered: confirmed for both the original `/assets/HCTLUPLD.TMP`
+and this session's own freshly-poisoned `/assets/prefix1/HCTLUPLD.TMP` — no reformat or physical card
+access was needed; `SDFATRM` now succeeds directly.
+
+Next action: rerun the [Wi-Fi regression gate](../guides/wifi-regression-gate.md) on the fixed, clean,
+committed artifact now that `/assets` is confirmed usable. See CAP-0013.
+
+### CAP-0013 — Wi-Fi regression gate rerun: CAP-0005's SD blocker is gone; a different, unrelated internal-memory-floor failure now blocks a clean pass
+
+- Date: 2026-08-14
+- Command: `HOSTCTL_NET_PORT=/dev/cu.usbserial-2110 scripts/tests/hw/test_wifi_regression_gate.sh`
+  (`.env.local` supplies `HOSTCTL_NET_SSID`/`HOSTCTL_NET_PASSWORD`/`HOSTCTL_NET_POLICY_PATH`), run twice
+  against a full reflash of the fix commit `e0213a76cb80be5b0821e53720b9eafdf24f714f`
+  (`MEDITAMER_FIRMWARE_BUILD_ID=cap-gate-002`, `ble-release`/`ble-foundation`, clean committed working
+  tree at build time, ELF SHA-256 `def615f184808a2c88fa35ca1dbdd32e863b9f5a2c8775f454a2d2d29ce2d9cb`,
+  `logs/cap_gate_002_flash/capture.log`). Reports:
+  `logs/wifi_regression_gate_20260814_130620/report.json` (run 1),
+  `logs/wifi_regression_gate_20260814_130958/report.json` (run 2, same device state, no reflash).
+
+| Stage | Run 1 | Run 2 |
+| --- | --- | --- |
+| `discovery_debug` | **passed** (73,060ms) | **passed** (72,943ms) |
+| `acceptance_1_cycle` | **passed** (50,604ms) | **passed** (30,060ms) |
+| `acceptance_3_cycle` | **failed** (37,299ms) | **failed** (46,399ms) |
+| `acceptance_soak` | skipped (fail-fast) | skipped (fail-fast) |
+
+**CAP-0010's blocker is gone.** `acceptance_1_cycle` uploads to `/assets/net_acceptance_payload.bin` —
+exactly the path CAP-0010 found permanently blocked by CAP-0005's poisoned `/assets/HCTLUPLD.TMP`. Both
+runs now pass it cleanly (`Upload complete.`, `runtime_health_gate: ... probe_stable=true` in run 1).
+This is the item this whole investigation (CAP-0011/CAP-0012) set out to unblock, and it is unblocked.
+
+**A different failure now blocks `acceptance_3_cycle`, reproduced 2/2:**
+
+```
+error: internal memory gate failed: min_internal_free_bytes=13456 floor=16384
+  min_internal_alloc_charge_bytes=1700 min_internal_alloc_internal_required=true
+  min_internal_alloc_charge_overflow=false min_internal_alloc_post_free_bytes=13456
+  min_internal_alloc_wifi_rx_matched=true
+```
+
+(run 2: `min_internal_free_bytes=13496`, `min_internal_alloc_charge_bytes=1660` — same signature,
+nearly identical magnitude.) This is the internal-heap ADR floor (16,384 bytes) being violated during
+the third of three back-to-back upload cycles within a single boot, attributed by the runtime's own
+correlation mechanism to a vendor Wi-Fi RX packet allocation
+(`min_internal_alloc_wifi_rx_matched=true`, ~1,660–1,700-byte charge) — the same owner CAP-0002 and
+CAP-0009 already identified as the dominant contributor to the historical low-water. No panic, no
+unexpected reboot (`panic_detected: false`, `unexpected_reboot_detected: false` in both `report.json`s)
+— this is a clean gate-check failure, not a crash.
+
+**This is not caused by, or related to, CAP-0005/CAP-0011's fix.** The fix is pure step-count arithmetic
+in the FAT chain-free walk (`volume.total_clusters` comparisons); it performs no heap allocation and
+touches no code on the Wi-Fi/network/memory path. It is also a *materially different* result from
+CAP-0009's formal `hostctl test ble-phase1s` 20-cycle gate on a source-equivalent commit, which found a
+19,896-byte low-water (margin +3,512 over the floor) with zero violations across 20 full cycles. The
+`wifi-acceptance` workflow's specific load pattern here — three consecutive upload cycles inside one
+boot, `net_apply_config`/`net_start` skipped because the network is "already ready" between cycles —
+evidently drives the low-water 6,400+ bytes lower than the `ble-phase1s` gate's own cycling pattern did.
+This is a genuine, reproducible finding, not a fluke (confirmed 2/2 with closely matching values), but
+it is squarely CAP-0001–CAP-0009's capacity-model subject matter, not this entry's SD-storage bug, and
+implementing a fix for it is out of this entry's scope.
+
+Result: the Wi-Fi regression gate's SD-poisoning blocker (CAP-0005/CAP-0010) is resolved and verified
+clean twice. **The gate as a whole does not yet pass** — `acceptance_3_cycle`'s internal-memory-floor
+failure is a new, separate, reproducible finding that reopens CAP-0009's capacity conclusion for this
+specific repeated-cycle load pattern (see the amended Capacity model status-table row above). The plan's
+full acceptance bar (a clean Wi-Fi regression gate run) is **not** met by this entry.
+
+Next action: this is a capacity-recovery question, not a CAP-0005 follow-up — open a new investigation
+against CAP-0002's owner/lifetime map and candidate list (serial-dispatch bypass, RX queue depth, floor
+revision) specifically for the `wifi-acceptance` workflow's repeated-cycle load pattern, since it
+demonstrably reaches a lower low-water than the `ble-phase1s` gate's own cycling does. Once that
+clears `acceptance_3_cycle` (and, if run, `acceptance_soak`), rerun this same gate command on a fresh
+artifact to get the plan's full acceptance bar to a clean pass.
 
 ## Entry requirements
 
