@@ -1,7 +1,9 @@
 # Phase 1S Capacity Recovery Ledger
 
-- Status: Active
-- Last-reviewed: 2026-08-14 (CAP-0013)
+- Status: Active — root cause identified for CAP-0013 (order-statistics behavior of a monotonic
+  since-boot register, not a leak); no safe first-party byte-recovery fix found; floor-methodology
+  question referred to the user per ADR-0011's human-acceptance requirement
+- Last-reviewed: 2026-08-14 (CAP-0014)
 - Started: 2026-08-14
 - Plan: [Phase 1S capacity recovery](ble-phase1s-capacity-recovery.md)
 - Parent evidence: [BLE implementation ledger](ble-foundation-ledger.md)
@@ -18,10 +20,10 @@ BLE phase evidence remains in the parent ledger.
 
 | Work item | State | Evidence | Next action |
 | --- | --- | --- | --- |
-| Capacity model | Passed on the formal gate; a narrower-margin data point reopens it | CAP-0001–CAP-0009, CAP-0013 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. **CAP-0013** (2026-08-14) found the separate `wifi-acceptance` workflow's repeated-upload-cycle-in-one-boot load pattern reproducibly (2/2) drives `min_internal_free_bytes` to ~13,456–13,496 — *below* the 16,384 floor and well under CAP-0009's 19,896 low-water — on the identical fixed commit's descendant. Not yet reconciled; see CAP-0013. |
-| Recovery candidate | **Not needed** | CAP-0009 | The formal gate passed without any capacity-specific code change; none of CAP-0002's ranked candidates were implemented. |
-| Implementation | **N/A** | CAP-0009 | No capacity implementation required; the only code change this plan produced was the F-0008 credentials-retry fix (CAP-0007), unrelated to byte recovery. |
-| Device validation | Capacity passed; regression gate still not clean | CAP-0009–CAP-0013 | 20/20 capacity cycles clean (CAP-0009). CAP-0005's `HCTLUPLD.TMP` poisoning bug is root-caused, fixed, host-test-covered, and hardware-verified (CAP-0011/CAP-0012) — both the pre-existing poisoned `/assets/HCTLUPLD.TMP` and a freshly-poisoned directory were recovered, and the fix prevents recurrence. The Wi-Fi regression gate's `discovery_debug` and `acceptance_1_cycle` stages now pass clean on the fixed artifact (CAP-0013) — CAP-0010's SD blocker is gone. `acceptance_3_cycle` now fails instead, reproducibly (2/2), on an unrelated internal-memory-floor violation (`min_internal_free_bytes` ~13,456–13,496 against the 16,384 floor, `wifi_rx_matched=true`) that CAP-0009's formal 20-cycle `ble-phase1s` gate did not surface at this margin — this reopens the capacity question for the `wifi-acceptance` workflow's specific repeated-cycle load pattern and needs its own investigation, out of CAP-0005/CAP-0011's scope. |
+| Capacity model | Passed on the formal gate; CAP-0013's narrower-margin data point is now root-caused | CAP-0001–CAP-0009, CAP-0013, CAP-0014 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. CAP-0013 found the separate `wifi-acceptance` workflow's repeated-upload-cycle-in-one-boot load pattern reproducibly drives `min_internal_free_bytes` below 16,384. **CAP-0014** (2026-08-14) root-causes this: `min_internal_free_bytes` is a monotonic, never-reset-except-at-boot low-water register (confirmed by source review — `seed_internal_low_water` runs once, inside `init_allocator`'s one-shot init guard). `ble-phase1s`'s 20 cycles each force a full Wi-Fi controller/stack teardown-and-recreate (a side effect of the BLE-open/close radio handoff, confirmed by source review of `run_network_epoch`), so its reported minimum is the worst of 20 independent, short, freshly-reset exposure windows. `wifi-acceptance` never tears Wi-Fi down between cycles (confirmed live: `net_apply_config`/`net_start` print `skip ... because network is already ready`), so its minimum is the worst single draw from one long, continuously-growing exposure window. Direct hardware A/B instrumentation (CAP-0014) confirms **no leak**: current/resting internal-free bytes is bit-identical cycle-to-cycle in every run; only the monotonic low-water register moves, and only downward, consistent with order statistics over a longer sample — not accumulation. |
+| Recovery candidate | **Not needed for CAP-0009's own gate; none found for CAP-0013 either** | CAP-0009, CAP-0014 | The formal `ble-phase1s` gate passed without any capacity-specific code change. CAP-0014 evaluated CAP-0002's overlap A (route `METRICS`/`METRICSNET` through the allocation-free serial-command bypass) directly on hardware and found no confirmed benefit (adding a per-cycle `METRICS` poll did not reproducibly worsen or improve the observed floor), and rejected relocating that allocation to PSRAM given an unresolved flash-cache-disabled-safety question for too small an unconfirmed gain. RX-queue-depth reduction remains known-bad (CAP-0002). No first-party fix is recommended from this investigation. |
+| Implementation | **N/A** | CAP-0009, CAP-0014 | No capacity implementation required; the only code change this plan produced was the F-0008 credentials-retry fix (CAP-0007), unrelated to byte recovery. CAP-0014 made no source changes. |
+| Device validation | Capacity passed on the formal gate; regression gate's `acceptance_3_cycle` still fails, root cause understood, no fix applied | CAP-0009–CAP-0014 | 20/20 capacity cycles clean (CAP-0009). CAP-0005's `HCTLUPLD.TMP` poisoning bug is fixed and hardware-verified (CAP-0011/CAP-0012); the regression gate's `discovery_debug` and `acceptance_1_cycle` stages pass clean. `acceptance_3_cycle` fails reproducibly (3/3 across CAP-0013 and CAP-0014) on `min_internal_free_bytes` — CAP-0014 shows this is the expected, explained behavior of a monotonic since-boot diagnostic register under a longer, continuous-session workload, not a product-safety defect: the coordinator's own real BLE-admission gate (`floor_ok` in `src/firmware/net/runtime.rs`) never reads this register at all — it re-probes *current* free bytes at the post-quiescence moment, which CAP-0009 already showed clears the real gate (20,496/4,112-contiguous) by roughly 3x margin in all 20 cycles. Whether `acceptance_3_cycle`/`acceptance_soak`'s use of the monotonic register as a hard floor check is the right test for this workload is a methodology question referred to the user (ADR-0011 candidate order 4; human acceptance required, not changed here). |
 
 ## Evidence entries — append only
 
@@ -963,6 +965,203 @@ revision) specifically for the `wifi-acceptance` workflow's repeated-cycle load 
 demonstrably reaches a lower low-water than the `ble-phase1s` gate's own cycling does. Once that
 clears `acceptance_3_cycle` (and, if run, `acceptance_soak`), rerun this same gate command on a fresh
 artifact to get the plan's full acceptance bar to a clean pass.
+
+### CAP-0014 — CAP-0013 root-caused: a monotonic since-boot low-water register sampled over a longer, teardown-free session, not a leak
+
+- Date: 2026-08-14
+- Source commit: `347b265a6e218eb0bc2f6b9a2a4ff56a30cf8fe4` (HEAD; docs-only ahead of CAP-0013's
+  `e0213a76...` — `git diff e0213a76...347b265a` is documentation-only, no `src/` change). Clean working
+  tree at every build below except the throwaway probe under `tools/hostctl/examples/` (never committed;
+  deleted before this entry's commit, same pattern as every prior CAP-000x hardware entry).
+- Evidence kind: source review (the deciding evidence) plus three fresh-boot hardware sessions on
+  `/dev/cu.usbserial-2110`, using a throwaway `serialport`-crate probe
+  (`tools/hostctl/examples/cap_cycle_probe.rs`, built/used/deleted, not part of the product or tool
+  surface) that interleaves real `hostctl upload` cycles with `PSRAM` allocator-status polls on one
+  held-open serial connection, plus one direct run of the real `test_wifi_acceptance.sh` stage.
+
+#### 1. Source review: `min_internal_free_bytes` is monotonic since boot, not per-session
+
+`psram::provenance::seed_internal_low_water` (`src/firmware/psram/provenance.rs:316-328`) is the only
+writer that can *raise* the tracked low-water; every allocation can only lower it
+(`record_internal_low_water`/`record_internal_low_water_packed`, same file). `seed_internal_low_water`
+is called from exactly one call site, `psram::init::init_allocator`
+(`src/firmware/psram/init.rs:11-48`), which itself early-returns without reseeding if the allocator
+state is already `Initialized` (line 12-14) — i.e., it runs exactly once per boot. Nothing in
+`src/firmware/net/` or `src/firmware/net/wifi/` calls it. **This means `min_internal_free_bytes` is a
+whole-boot-lifetime worst-ever reading, identical in nature whether a device has been through one Wi-Fi
+session or twenty.** The two workflows differ only in what happens *inside* that boot before the
+register is read.
+
+#### 2. Source review: `ble-phase1s` forces a full Wi-Fi teardown/recreate every cycle; `wifi-acceptance` does not
+
+Confirmed by re-reading `run_network_epoch` (`src/firmware/net/runtime.rs:299-481`, unchanged by this
+entry): once the coordinator grants `StartingBle` and the BLE window later closes, `network_owner_task`'s
+outer `loop` (`runtime.rs:223-296`) calls `run_network_epoch` again, which calls
+`wifi::initialize_runtime_sta` and `embassy_net::new(...)` fresh — a brand-new controller, station
+device, and network stack, not a reused one. Every one of `hostctl test ble-phase1s`'s 20
+acquire/BLE-window/release cycles goes through this path once. Confirmed live for `wifi-acceptance`
+today (`logs/cap0014_acceptance3_before/acceptance_3_cycle.log`, fresh boot, commit `347b265a`, build
+`cap-0014-probe-002`):
+
+```
+net_apply_config: skip NETCFG SET because network is already ready
+net_start: skip NET START because network is already ready
+```
+on cycles 2 and 3 — the Wi-Fi controller and stack from cycle 1 are reused unchanged for the rest of the
+run. `wifi-acceptance` never exercises the teardown/recreate path CAP-0013 hypothesized; this entry
+confirms that hypothesis directly from source, not just by inference.
+
+#### 3. Hardware: no leak. Current/resting internal-free bytes is stable across repeated cycles; only the monotonic register moves
+
+Two independent fresh-boot sessions, each a full reflash (`CARGO_FEATURES=ble-foundation`,
+`ble-release`/`ble-foundation`) immediately before the run:
+
+- **Run A** — `MEDITAMER_FIRMWARE_BUILD_ID=cap-0014-probe-001`, ELF SHA-256
+  `bb9c4d4a9e1eb780a34d84bcdfc0256f41c8e9137b86291f572123190c2e1a6a`
+  (`logs/cap0014_flash/capture.log`, clean boot, `RUNTIME_READY` reached, no panic). 5 upload cycles
+  (524,288-byte payload, real `hostctl upload` CLI subcommand, `Auto` transport, to `/assets/cap_probe/`)
+  with a `PSRAM` poll immediately after each upload and again 3 seconds later ("settled"). Serial
+  transcript: session scratchpad (ephemeral, not preserved under `logs/`, same as some artifacts in
+  CAP-0003/CAP-0004 — the numbers below are transcribed directly from it).
+
+  | Point | internal_free (current) | min_internal_free (register) | charge | wifi_rx_matched |
+  | --- | ---: | ---: | ---: | --- |
+  | baseline (pre-cycle-1) | 25,280 | 23,444 | 136 | false |
+  | cycle 1 immediate | 25,156 | 18,312 | 1,660 | true |
+  | cycle 1 settled | 24,968 | 18,312 | 1,660 | true |
+  | cycle 2 immediate | 23,268 | 16,436 | 1,660 | true |
+  | cycle 2 settled | 24,968 | 16,436 | 1,660 | true |
+  | cycle 3 immediate/settled | 24,968 | 16,436 | 1,660 | true |
+  | cycle 4 immediate/settled | 24,968 | 16,436 | 1,660 | true |
+  | cycle 5 immediate/settled | 24,968 | 16,436 | 1,660 | true |
+
+- **Run B** — `MEDITAMER_FIRMWARE_BUILD_ID=cap-0014-probe-002`, ELF SHA-256
+  `2e61d8f740fd7ea70321f2aa7d65e181ed2fa217be4df8337c004b96b908dae9`
+  (`logs/cap0014_flash2/capture.log`, clean boot, `RUNTIME_READY` reached, no panic). Identical to Run A
+  except a bare `METRICS` command (matching `wifi-acceptance`'s own `assert_upload_metrics` step, which
+  is *not* in the allocation-free `low_overhead_diagnostic` bypass — see part 4) was sent once per cycle,
+  immediately after the upload, before the `PSRAM` polls — testing CAP-0002's overlap A directly.
+
+  | Point | internal_free (current) | min_internal_free (register) | charge | wifi_rx_matched |
+  | --- | ---: | ---: | ---: | --- |
+  | baseline (pre-cycle-1) | 25,280 | 21,880 | 1,700 | **true** |
+  | cycle 1 immediate/settled | 23,456 / 25,156 | 18,476 | 1,700 | true |
+  | cycle 2 immediate/settled | 25,156 / 25,156 | 18,476 | 1,700 | true |
+  | cycle 3 immediate/settled | 25,156 / 25,156 | 18,232 | 1,700 | true |
+  | cycle 4 immediate/settled | 25,156 / 25,156 | 18,232 | 1,700 | true |
+  | cycle 5 immediate/settled | 25,156 / 25,156 | 16,776 | 1,660 | true |
+
+**Two findings, read together:**
+
+- **No leak.** In both runs, once the resting internal-free value is established (cycle 1), it is
+  bit-identical at every subsequent "settled" reading through cycle 5 (24,968 in Run A; 25,156 in
+  Run B). If anything were failing to release between cycles — an HTTP connection, an SD session
+  artifact, a queue registration — resting free bytes would trend downward cycle over cycle. It does
+  not, in either run. This directly rules out CAP-0002 candidates 1 and 2 (shorten a transient lifetime;
+  relocate to PSRAM) for a target that doesn't exist here — nothing is being retained.
+- **The monotonic register still finds new lows, then stops.** In both runs the register drops during
+  the first one or two cycles (matching a single ~1,660–1,700-byte vendor-RX-packet-sized charge each
+  time, `wifi_rx_matched=true` — the same owner CAP-0002/CAP-0009 already identified), then holds flat
+  for the remaining three to four cycles. Run B's baseline (before any upload) was *already*
+  `wifi_rx_matched=true` — a bad coincidence can land at essentially any point once Wi-Fi RX traffic is
+  flowing, not specifically "the 3rd cycle." This is consistent with recording the minimum of a growing
+  number of independent, similarly-distributed draws (an RX packet's ~1,660–1,700-byte charge landing at
+  an unlucky moment relative to whatever else is transiently resident on the internal heap) — exactly the
+  behavior a monotonic low-water register produces over a longer sample, with no accumulation required.
+
+Neither run reached CAP-0013's exact 13,456–13,496 or this same day's fresh `acceptance_3_cycle` rerun
+(15,116, below); the real workflow's extra per-cycle traffic (a `net_verify_once` GET beyond the upload
+PUT, `net_wait_ready_loop`'s extra status polling, and an initial `boot_discovery_gate` scan/associate
+sequence this probe did not replicate) plausibly gives it more independent draws at the same coincidence
+before its one `assert_runtime_health` check fires. That gap is not fully explained here; see the
+Gap note below.
+
+#### 4. Hardware: CAP-0002's overlap A tested directly — no confirmed benefit, and a relocation risk that outweighs it
+
+Run B's per-cycle `METRICS` command (1,200-byte `InternalValue`, per
+`src/firmware/serial.rs:109-129` — confirmed *not* in the `low_overhead_diagnostic` bypass list at
+`serial.rs:153-193`) did **not** reproduce a materially lower floor than Run A's `METRICS`-free
+cycling (16,776 vs. 16,436 — within run-to-run noise, and Run B's was marginally *higher*, i.e. better).
+This is direct hardware evidence against CAP-0002 overlap A being the dominant driver of CAP-0013's
+gap, correcting that entry's "Medium confidence" framing downward.
+
+Separately, and independent of the (weak) hardware signal: relocating `METRICS`/`METRICSNET`'s command
+future from `InternalValue` to `ExternalValue` (PSRAM) — the only way to remove this allocation from the
+internal heap without inlining it into `run_low_overhead_diagnostic_command` and growing that function's
+generated state machine (and therefore the CPU0 stack footprint of every low-overhead command, including
+ones on the BLE radio-handoff hot path) — was evaluated and rejected. `InternalValue`'s own doc comment
+(`src/firmware/psram/internal_value.rs:9-12`) states its purpose is futures "that may execute while the
+flash cache is disabled"; PSRAM is unavailable under exactly that condition (ADR-0009). This entry did
+not trace far enough to prove whether `METRICS`'s command future can ever be polled during a firmware-
+update cache-disabled flash write (ADR-0009 describes the writer parking "the other core," which may or
+may not exclude a UART/serial task sharing that core) — and given the hardware evidence above already
+argues against a meaningful benefit, resolving that open safety question was not worth the risk for a
+speculative, unconfirmed gain. No change was made.
+
+RX-queue-depth reduction (`rx_queue_size` 2→1) remains the known-bad lever CAP-0002 already flagged
+(negative prior evidence, regression risk for the Wi-Fi zero-discovery blackout this repo has a
+dedicated gate for). No other avoidable internal-heap owner was identified.
+
+#### 5. Confirming rerun of the real workflow, same fresh boot as Run B
+
+Immediately after Run B, on the same boot (`cap-0014-probe-002`, no reflash — confirmed by
+`BOOT_RESET reason=Some(ChipPowerOn)` appearing only once, before Run B, in the combined session):
+`HOSTCTL_NET_CYCLES=3 scripts/tests/hw/test_wifi_acceptance.sh` was run directly. Fresh boot confirmed
+independently in its own log
+(`logs/cap0014_acceptance3_before/acceptance_3_cycle.log:36`: `BOOT_RESET reason=Some(ChipPowerOn)
+code=1`, `internal_free_bytes=68736` — opening hostctl's serial connection resets this board, matching
+CAP-0003/CAP-0005's established finding; this was therefore an independent fresh-boot run, not a
+continuation of Run B's already-lowered state).
+
+```
+error: internal memory gate failed: min_internal_free_bytes=15116 floor=16384
+  min_internal_alloc_charge_bytes=1700 min_internal_alloc_internal_required=true
+  min_internal_alloc_charge_overflow=false min_internal_alloc_post_free_bytes=15116
+  min_internal_alloc_wifi_rx_matched=true
+```
+
+Third independent reproduction of CAP-0013's finding (CAP-0010's two runs, now this one), same
+signature, same ~1,660–1,700-byte vendor-RX-packet charge, on today's exact HEAD. `discovery_debug` and
+`acceptance_1_cycle` passed first (not shown here; same as CAP-0013).
+
+#### 6. Why this does not appear to be a product-safety issue
+
+The coordinator's actual BLE-admission gate (`floor_ok` in `network_owner_task`,
+`src/firmware/net/runtime.rs:239-273`) never reads `min_internal_free_bytes` at all. It calls
+`settled_off_resource_snapshot()`, which re-probes *current* internal free bytes and the current largest
+contiguous block above the reserve, specifically at the post-quiescence moment
+(`resource_snapshot(true)` → `psram::allocator_memory_snapshot().free_internal_bytes` and
+`psram::probe_internal_block_above_reserve`). CAP-0009 already measured this real gate directly, 20/20
+cycles, at 59,608 bytes free / 31,672-byte largest block — roughly 3x the actual 20,496/4,112-byte
+requirement, with zero drift. `wifi-acceptance`'s `assert_runtime_health` step instead compares the
+monotonic *historical* register against the same 16,384-byte number, which — per parts 1–3 above — is
+mechanically guaranteed to trend lower as a continuous, teardown-free session runs longer or does more
+cycles, independent of whether any actual BLE-open attempt would be at risk.
+
+**Gap.** This entry does not fully close the numeric distance between this investigation's probes
+(16,436–18,232 by cycle 5) and the real workflow's own reproduced floor (15,116 in 3 cycles here;
+13,456–13,496 in CAP-0013). The most likely remaining differences — `boot_discovery_gate`'s own
+scan/associate activity before cycle 1, and `net_verify_once`'s per-cycle GET beyond the upload PUT —
+were identified but not isolated by a dedicated experiment; both are consistent with "more independent
+draws before the one health check fires," not a new mechanism, but this is not proven to the same
+standard as parts 1–3.
+
+Result and effect on the capacity model: CAP-0013's finding is root-caused as expected behavior of a
+monotonic since-boot diagnostic register sampled over a longer, continuous-session workload — not a
+leak, not an accumulation, and (per part 6) not evidence that a real BLE-open attempt would be at risk
+under this load pattern. No genuine, safely-scoped, first-party byte-recovery fix was found; CAP-0002's
+overlap A was tested directly and does not clear the bar for implementation (part 4). Per this plan's
+own instructions and ADR-0011's explicit human-acceptance requirement for any floor change, this entry
+does **not** propose or make a floor revision. Whether `acceptance_3_cycle`/`acceptance_soak`'s
+comparison of this specific register against the ADR floor is measuring the right thing for this
+workload — as opposed to, say, re-probing current free bytes the way the coordinator's own gate does, or
+accepting the monotonic register's workload-length sensitivity as expected and adjusting the *test's*
+floor or scope rather than the ADR's — is a decision for the user, not this investigation.
+
+Next action: none from this investigation. If the user decides on a resolution path (floor-revision ADR
+amendment, changing what `assert_runtime_health` measures, or accepting the gate as documented and
+currently non-clean), implement and verify that decision, then rerun the full Wi-Fi regression gate on a
+fresh artifact per the plan's Step 3/4.
 
 ## Entry requirements
 
