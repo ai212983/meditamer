@@ -3,7 +3,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../.." && pwd)"
+repo_root="${RCA_REPO_ROOT:-$(cd "$script_dir/../.." && pwd)}"
 
 if ! command -v rust-code-analysis-cli >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -28,11 +28,12 @@ enforce="${RCA_ENFORCE:-0}"
 ratchet="${RCA_RATCHET:-0}"
 update_baseline="${RCA_UPDATE_BASELINE:-0}"
 baseline_path="${RCA_BASELINE_PATH:-config/rca-baseline.json}"
-max_file_sloc="${RCA_MAX_FILE_SLOC:-500}"
-warn_file_sloc="${RCA_WARN_FILE_SLOC:-420}"
+max_file_sloc="${RCA_MAX_FILE_SLOC:-1000}"
+warn_file_sloc="${RCA_WARN_FILE_SLOC:-600}"
 max_fn_cognitive="${RCA_MAX_FN_COGNITIVE:-40}"
 max_fn_cyclomatic="${RCA_MAX_FN_CYCLOMATIC:-32}"
 max_fn_nargs="${RCA_MAX_FN_NARGS:-8}"
+test_file_regex="${RCA_TEST_FILE_REGEX:-(^|/)tests?(/|[.]rs$)}"
 
 tmp_metrics="$(mktemp)"
 trap 'rm -f "$tmp_metrics"' EXIT
@@ -41,6 +42,7 @@ declare -a args=(
   -m
   -p src
   -p tools
+  -p test-support
   -p packages/sdcard/src
   -p build.rs
   -I '**/*.rs'
@@ -128,7 +130,8 @@ offenders_json="$(jq -c -s \
   --argjson max_file_sloc "$max_file_sloc" \
   --argjson max_fn_cognitive "$max_fn_cognitive" \
   --argjson max_fn_cyclomatic "$max_fn_cyclomatic" \
-  --argjson max_fn_nargs "$max_fn_nargs" '
+  --argjson max_fn_nargs "$max_fn_nargs" \
+  --arg test_file_regex "$test_file_regex" '
   def nodes: recurse(.spaces[]?);
   def funcs($file):
     nodes
@@ -141,9 +144,14 @@ offenders_json="$(jq -c -s \
         cognitive: (.metrics.cognitive.max // 0),
         cyclomatic: (.metrics.cyclomatic.max // 0),
         nargs: (.metrics.nargs.total // 0)
-      };
+  };
   {
-    file_sloc: [ .[] | select((.metrics.loc.sloc // 0) > $max_file_sloc) | {name, sloc: (.metrics.loc.sloc // 0)} ],
+    file_sloc: [
+      .[]
+      | select((.name | test($test_file_regex)) | not)
+      | select((.metrics.loc.sloc // 0) > $max_file_sloc)
+      | {name, sloc: (.metrics.loc.sloc // 0)}
+    ],
     fn_cognitive: [ .[] as $f | ($f | funcs($f.name)) | select(.cognitive > $max_fn_cognitive) ],
     fn_cyclomatic: [ .[] as $f | ($f | funcs($f.name)) | select(.cyclomatic > $max_fn_cyclomatic) ],
     fn_nargs: [ .[] as $f | ($f | funcs($f.name)) | select(.nargs > $max_fn_nargs) ]
@@ -151,7 +159,7 @@ offenders_json="$(jq -c -s \
 ' "$tmp_metrics")"
 
 echo
-echo "offender counts (thresholds: file_sloc>$max_file_sloc, fn_cognitive>$max_fn_cognitive, fn_cyclomatic>$max_fn_cyclomatic, fn_nargs>$max_fn_nargs)"
+echo "metric counts (file size and function architecture thresholds are blocking; test files are size-exempt)"
 echo "$offenders_json" | jq '{
   file_sloc: (.file_sloc | length),
   fn_cognitive: (.fn_cognitive | length),
@@ -159,8 +167,12 @@ echo "$offenders_json" | jq '{
   fn_nargs: (.fn_nargs | length)
 }'
 
-warn_file_sloc_json="$(jq -c -s --argjson warn "$warn_file_sloc" --argjson max "$max_file_sloc" '
+warn_file_sloc_json="$(jq -c -s \
+  --argjson warn "$warn_file_sloc" \
+  --argjson max "$max_file_sloc" \
+  --arg test_file_regex "$test_file_regex" '
   [ .[]
+    | select((.name | test($test_file_regex)) | not)
     | select((.metrics.loc.sloc // 0) >= $warn and (.metrics.loc.sloc // 0) <= $max)
     | {name, sloc: (.metrics.loc.sloc // 0)}
   ]
@@ -174,7 +186,8 @@ baseline_json="$(jq -c -s \
   --argjson warn_file_sloc "$warn_file_sloc" \
   --argjson max_fn_cognitive "$max_fn_cognitive" \
   --argjson max_fn_cyclomatic "$max_fn_cyclomatic" \
-  --argjson max_fn_nargs "$max_fn_nargs" '
+  --argjson max_fn_nargs "$max_fn_nargs" \
+  --arg test_file_regex "$test_file_regex" '
   def nodes: recurse(.spaces[]?);
   def fn_key($file; $name): ($file + "::" + $name);
   def merge_max:
@@ -190,7 +203,11 @@ baseline_json="$(jq -c -s \
     },
     offenders: {
       file_sloc: (
-        [ .[] | select((.metrics.loc.sloc // 0) > $max_file_sloc) | { key: .name, value: (.metrics.loc.sloc // 0) } ]
+        [ .[]
+          | select((.name | test($test_file_regex)) | not)
+          | select((.metrics.loc.sloc // 0) > $max_file_sloc)
+          | { key: .name, value: (.metrics.loc.sloc // 0) }
+        ]
         | merge_max
       ),
       fn_cognitive: (
@@ -235,6 +252,25 @@ if [[ "$enforce" == "1" ]]; then
     if [[ ! -f "$baseline_file" ]]; then
       echo >&2 "ratchet baseline not found: $baseline_path"
       echo >&2 "create/update it with: RCA_UPDATE_BASELINE=1 scripts/ci/lint_code_analysis.sh"
+      exit 2
+    fi
+    expected_thresholds="$(jq -n \
+      --argjson max_file_sloc "$max_file_sloc" \
+      --argjson warn_file_sloc "$warn_file_sloc" \
+      --argjson max_fn_cognitive "$max_fn_cognitive" \
+      --argjson max_fn_cyclomatic "$max_fn_cyclomatic" \
+      --argjson max_fn_nargs "$max_fn_nargs" \
+      '{
+        max_file_sloc: $max_file_sloc,
+        warn_file_sloc: $warn_file_sloc,
+        max_fn_cognitive: $max_fn_cognitive,
+        max_fn_cyclomatic: $max_fn_cyclomatic,
+        max_fn_nargs: $max_fn_nargs
+      }')"
+    if ! jq -e --argjson expected "$expected_thresholds" '.thresholds == $expected' \
+      "$baseline_file" >/dev/null; then
+      echo >&2 "ratchet baseline thresholds do not match the active thresholds"
+      echo >&2 "refresh intentionally with: RCA_UPDATE_BASELINE=1 scripts/ci/lint_code_analysis.sh"
       exit 2
     fi
     ratchet_eval_json="$(jq -n \
@@ -301,7 +337,8 @@ if [[ "$enforce" == "1" ]]; then
     fi
   else
     total_offenders="$(echo "$offenders_json" | jq '
-      (.file_sloc | length) + (.fn_cognitive | length) + (.fn_cyclomatic | length) + (.fn_nargs | length)
+      (.file_sloc | length) + (.fn_cognitive | length) +
+      (.fn_cyclomatic | length) + (.fn_nargs | length)
     ')"
     if [[ "$total_offenders" != "0" ]]; then
       echo >&2

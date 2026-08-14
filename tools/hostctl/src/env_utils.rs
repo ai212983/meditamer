@@ -47,7 +47,7 @@ pub fn parse_env_f64(name: &str, default: f64) -> Result<f64> {
 pub fn require_port() -> Result<String> {
     if let Ok(port) = std::env::var("HOSTCTL_PORT") {
         if !port.trim().is_empty() {
-            return Ok(port);
+            return Ok(port_detect::canonicalize_port(&port));
         }
     }
 

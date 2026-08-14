@@ -7,8 +7,8 @@ use std::{
 use image::{GrayImage, ImageBuffer};
 use serde_json::Value;
 
-use super::*;
-use crate::format::read_header;
+use super::run_build;
+use crate::{cli::CHANNELS, format::read_header};
 
 #[test]
 fn run_build_smoke_writes_bundle_and_metadata() {

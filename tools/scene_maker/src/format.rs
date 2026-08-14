@@ -161,7 +161,7 @@ pub(crate) fn compression_name(code: u8) -> &'static str {
 mod tests {
     use std::io::Cursor;
 
-    use super::*;
+    use super::{read_header, write_header, BundleHeader, HEADER_LEN};
 
     #[test]
     fn header_roundtrip_via_reader() {

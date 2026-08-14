@@ -71,13 +71,70 @@ fn gyro_veto_window_stays_active_for_hold_duration() {
     assert!(!features.gyro_veto_active);
 }
 
+/// Ringing after a tap oscillates: it clears every jerk threshold on its peaks
+/// and the quiet-before-impulse gate in its dips. Only `tap_src` distinguishes
+/// it from a real impact, so no jerk magnitude alone may produce a candidate.
 #[test]
-fn strong_jerk_candidate_is_rejected_when_debounced() {
+fn ringdown_without_tap_src_is_never_a_candidate() {
+    let config = cfg();
+    for (jerk, prev_jerk) in [(3_393, 905), (29_348, 78), (39_263, 1_000), (2_065, 900)] {
+        let ringing = MotionFeatures {
+            jerk_l1: jerk,
+            prev_jerk_l1: prev_jerk,
+            candidate_axis: LSM6_TAP_SRC_Z_BIT,
+            ..MotionFeatures::default()
+        };
+
+        // Both mid-sequence (where the assist path applies) and from idle.
+        for seq_count in [0, 2] {
+            let decision = assess_tap_candidate(
+                &ringing,
+                seq_count,
+                LSM6_TAP_SRC_Z_BIT,
+                None,
+                1_300,
+                &config,
+            );
+            assert!(
+                !decision.accepted,
+                "jerk={jerk} prev={prev_jerk} seq={seq_count} accepted without tap_src"
+            );
+            assert_eq!(decision.reason, RejectReason::CandidateWeak);
+        }
+    }
+}
+
+#[test]
+fn hardware_tap_is_a_candidate_on_any_axis() {
+    let config = cfg();
+    // A real tap reported on X while the sequence started on Z: the detector
+    // picks a different dominant axis between taps of one deliberate sequence.
+    let tap = MotionFeatures {
+        tap_axis_mask: LSM6_TAP_SRC_X_BIT,
+        has_axis_tap: true,
+        has_single_tap: true,
+        candidate_axis: LSM6_TAP_SRC_X_BIT,
+        jerk_l1: 14_941,
+        ..MotionFeatures::default()
+    };
+
+    let decision = assess_tap_candidate(&tap, 2, LSM6_TAP_SRC_Z_BIT, None, 1_300, &config);
+    assert!(decision.accepted);
+    assert_eq!(decision.reason, RejectReason::None);
+}
+
+/// The detector reports one physical tap on consecutive samples ~11 ms apart,
+/// so the debounce window still has to collapse those into a single candidate.
+#[test]
+fn repeated_tap_src_within_debounce_window_is_rejected() {
     let config = cfg();
     let features = MotionFeatures {
+        tap_axis_mask: LSM6_TAP_SRC_X_BIT,
+        has_axis_tap: true,
+        has_single_tap: true,
+        candidate_axis: LSM6_TAP_SRC_X_BIT,
         jerk_l1: 3_000,
         prev_jerk_l1: 100,
-        candidate_axis: LSM6_TAP_SRC_X_BIT,
         ..MotionFeatures::default()
     };
 

@@ -4,9 +4,16 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
 
+[features]
+default = []
+host-tests = []
+
 [dependencies]
-embassy-time = "0.5.0"
-esp-hal = { version = "1.0.0", features = ["esp32", "unstable"] }
-esp-println = { version = "0.16.1", default-features = false, features = ["esp32", "log-04", "uart"] }
-heapless = "0.8.0"
+embassy-time = "0.5.1"
+
+[target.'cfg(target_os = "none")'.dependencies]
+embassy-embedded-hal = "0.6.0"
+embassy-futures = "0.1.2"
+embedded-hal-async = "1.0.0"
+esp-hal = { version = "=1.1.1", features = ["esp32", "unstable"] }
 embedded-hal = "1.0.0"

@@ -2,14 +2,32 @@ pre-commit:
   parallel: true
   commands:
     rustfmt:
-      glob: "{src/**/*.rs,tools/**/*.rs,build.rs}"
+      glob: "{src/**/*.rs,packages/**/*.rs,tools/**/*.rs,test-support/**/*.rs,build.rs}"
       run: cargo fmt --all
       stage_fixed: true
+    test-support-rustfmt:
+      glob: "test-support/host/**/*.rs"
+      run: for manifest in test-support/host/*/Cargo.toml; do cargo fmt --manifest-path "$manifest"; done
+      stage_fixed: true
+    markdown-loc:
+      run: scripts/ci/check_markdown_loc.sh --staged
+    rust-loc:
+      run: scripts/ci/check_rust_loc.sh --staged
+    include-usage:
+      env:
+        INCLUDE_USAGE_ENFORCE: "1"
+      run: scripts/ci/check_include_usage.sh --staged
+    orphan-modules:
+      run: scripts/ci/check_orphan_modules.py --staged
+    script-surface:
+      run: scripts/ci/check_script_surface.py
     markdown-links:
       run: scripts/ci/check_markdown_links.sh
+    secrets:
+      run: scripts/ci/check_secrets.sh --staged
     host-tools-clippy:
-      glob: "{tools/**,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
-      run: scripts/ci/lint_host_tools.sh
+      glob: "{tools/**,test-support/**,packages/sdcard/**,scripts/host-test.sh,scripts/host-suites.tsv,Cargo.toml,Cargo.lock,rust-toolchain.toml}"
+      run: scripts/ci/check_software_baseline.sh host-lint
 
 commit-msg:
   commands:
@@ -19,8 +37,11 @@ commit-msg:
 pre-push:
   commands:
     firmware-clippy:
-      glob: "{src/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
-      run: cargo clippy --locked --all-features --workspace --bins --lib -- -D warnings
+      glob: "{src/**,config/lvgl/**,config/linker/**,packages/sdcard/**,scripts/build/build.sh,scripts/ci/check_software_baseline.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      run: scripts/ci/check_software_baseline.sh firmware-clippy
     code-analysis:
-      glob: "{src/**,tools/**,packages/**,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml}"
+      glob: "{src/**,tools/**,test-support/**,packages/**,scripts/ci/check_software_baseline.sh,scripts/ci/lint_code_analysis.sh,Cargo.toml,Cargo.lock,build.rs,rust-toolchain.toml,.cargo/**,config/events.toml,config/rca-baseline.json}"
       run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh
+    orphan-modules:
+      glob: "{src/**/*.rs,packages/**/*.rs,tools/**/*.rs,test-support/**/*.rs,**/Cargo.toml,scripts/ci/check_orphan_modules.py}"
+      run: scripts/ci/check_orphan_modules.py

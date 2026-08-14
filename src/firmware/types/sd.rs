@@ -82,6 +82,7 @@ pub(crate) struct SdResult {
     pub(crate) code: SdResultCode,
     pub(crate) attempts: u8,
     pub(crate) duration_ms: u32,
+    pub(crate) recover_bus: bool,
 }
 
 pub(crate) type SdResultCode = sdcard::runtime::SdRuntimeResultCode;
@@ -94,7 +95,7 @@ pub(crate) enum SdUploadCommand {
         expected_size: u32,
     },
     Chunk {
-        data_len: u16,
+        data_len: u32,
     },
     Commit,
     Abort,
@@ -106,10 +107,16 @@ pub(crate) enum SdUploadCommand {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
     },
+    Stat {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
 }
 
 pub(crate) struct SdUploadRequest {
+    pub(crate) id: u32,
     pub(crate) command: SdUploadCommand,
+    pub(crate) enqueued_at_ms: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,36 +136,15 @@ pub(crate) enum SdUploadResultCode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SdUploadResult {
+    pub(crate) request_id: u32,
     pub(crate) ok: bool,
     pub(crate) code: SdUploadResultCode,
     pub(crate) bytes_written: u32,
-}
-
-#[derive(Clone, Copy)]
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-pub(crate) struct SdAssetReadRequest {
-    pub(crate) path: [u8; SD_PATH_MAX],
-    pub(crate) path_len: u8,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-pub(crate) enum SdAssetReadResultCode {
-    Ok,
-    Busy,
-    InvalidPath,
-    NotFound,
-    SizeMismatch,
-    PowerOnFailed,
-    InitFailed,
-    OperationFailed,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct SdAssetReadResponse {
-    pub(crate) ok: bool,
-    pub(crate) code: SdAssetReadResultCode,
-    pub(crate) data_len: u16,
+    pub(crate) chunk_queue_wait_ms: u32,
+    pub(crate) chunk_handler_ms: u32,
+    pub(crate) chunk_post_handler_ms: u32,
+    pub(crate) chunk_published_at_ms: u32,
+    pub(crate) chunk_handler_done_at_ms: u32,
 }
 
 #[derive(Clone, Copy)]

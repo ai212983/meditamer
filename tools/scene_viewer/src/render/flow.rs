@@ -1,16 +1,21 @@
-use std::fs;
+//! Render orchestration: decode the bundle's channels, run the passes, write the
+//! outputs. The per-render data the stages hand to each other lives here.
 
+mod inputs;
+mod output;
+mod pass;
+
+use super::{
+    get_channel_or_default, CH_ALBEDO, CH_AO, CH_DEPTH, CH_EDGE, CH_LIGHT, CH_MASK, CH_NORMAL_X,
+    CH_NORMAL_Y, CH_STROKE,
+};
 use crate::{
     bundle::{load_bundle, Bundle},
     cli::{mode_name, Config},
-    io::{load_grayscale_resize, save_gray},
 };
-
-use super::{
-    build_depth_relit_map, build_tone_lut, clamp_i16_to_u8, get_channel_or_default,
-    ink_brush_delta, mix_u8, mul8, paper_noise_u8, quantize_u8, CH_ALBEDO, CH_AO, CH_DEPTH,
-    CH_EDGE, CH_LIGHT, CH_MASK, CH_NORMAL_X, CH_NORMAL_Y, CH_STROKE,
-};
+use inputs::{dump_channels_if_requested, prepare_optional_maps};
+use output::save_render_outputs;
+use pass::render_frame;
 
 struct RenderInputs<'a> {
     albedo: &'a [u8],
@@ -63,10 +68,7 @@ pub(super) fn run_render_with_config(cfg: Config) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_input_channels<'a>(
-    bundle: &'a Bundle,
-    total: usize,
-) -> Result<RenderInputs<'a>, String> {
+fn collect_input_channels(bundle: &Bundle, total: usize) -> Result<RenderInputs<'_>, String> {
     let albedo = get_channel_or_default(&bundle.channels, CH_ALBEDO, total, 255)?;
     let light = get_channel_or_default(&bundle.channels, CH_LIGHT, total, 255)?;
     let ao = get_channel_or_default(&bundle.channels, CH_AO, total, 255)?;
@@ -88,7 +90,7 @@ fn collect_input_channels<'a>(
     })
 }
 
-fn collect_normal_xy<'a>(bundle: &'a Bundle, total: usize) -> Option<(&'a [u8], &'a [u8])> {
+fn collect_normal_xy(bundle: &Bundle, total: usize) -> Option<(&[u8], &[u8])> {
     let nx = bundle.channels.get(&CH_NORMAL_X)?;
     let ny = bundle.channels.get(&CH_NORMAL_Y)?;
     if nx.len() != total || ny.len() != total {
@@ -103,233 +105,4 @@ fn collect_normal_xy<'a>(bundle: &'a Bundle, total: usize) -> Option<(&'a [u8], 
     } else {
         None
     }
-}
-
-fn dump_channels_if_requested(
-    cfg: &Config,
-    bundle: &Bundle,
-    inputs: &RenderInputs<'_>,
-) -> Result<(), String> {
-    let Some(out_dir) = cfg.dump_channels.as_ref() else {
-        return Ok(());
-    };
-
-    fs::create_dir_all(out_dir)
-        .map_err(|e| format!("create dump channels dir {}: {e}", out_dir.display()))?;
-    save_gray(
-        &out_dir.join("albedo.png"),
-        bundle.width,
-        bundle.height,
-        inputs.albedo,
-    )?;
-    save_gray(
-        &out_dir.join("light.png"),
-        bundle.width,
-        bundle.height,
-        inputs.light,
-    )?;
-    save_gray(
-        &out_dir.join("ao.png"),
-        bundle.width,
-        bundle.height,
-        inputs.ao,
-    )?;
-    save_gray(
-        &out_dir.join("depth.png"),
-        bundle.width,
-        bundle.height,
-        inputs.depth,
-    )?;
-    save_gray(
-        &out_dir.join("edge.png"),
-        bundle.width,
-        bundle.height,
-        inputs.edge,
-    )?;
-    save_gray(
-        &out_dir.join("mask.png"),
-        bundle.width,
-        bundle.height,
-        inputs.mask,
-    )?;
-    save_gray(
-        &out_dir.join("stroke.png"),
-        bundle.width,
-        bundle.height,
-        inputs.stroke,
-    )?;
-    if let Some((nx, ny)) = inputs.normal_xy {
-        save_gray(
-            &out_dir.join("normal_x.png"),
-            bundle.width,
-            bundle.height,
-            nx,
-        )?;
-        save_gray(
-            &out_dir.join("normal_y.png"),
-            bundle.width,
-            bundle.height,
-            ny,
-        )?;
-    }
-    Ok(())
-}
-
-fn prepare_optional_maps(
-    cfg: &Config,
-    bundle: &Bundle,
-    inputs: &RenderInputs<'_>,
-    width: usize,
-    height: usize,
-) -> Result<OptionalMaps, String> {
-    let sun_light = if cfg.sun_strength > 0 {
-        Some(build_depth_relit_map(
-            inputs.depth,
-            inputs.normal_xy,
-            width,
-            height,
-            cfg.sun_azimuth_deg,
-            cfg.sun_elevation_deg,
-        ))
-    } else {
-        None
-    };
-
-    let ghost_prev = if let Some(path) = cfg.ghost_from.as_ref() {
-        Some(load_grayscale_resize(path, bundle.width, bundle.height)?)
-    } else {
-        None
-    };
-
-    Ok(OptionalMaps {
-        sun_light,
-        ghost_prev,
-    })
-}
-
-fn render_frame(
-    cfg: &Config,
-    width: usize,
-    height: usize,
-    inputs: &RenderInputs<'_>,
-    optional: &OptionalMaps,
-) -> RenderBuffers {
-    let total = width * height;
-    let tone_lut = build_tone_lut(cfg.tone_curve);
-    let mut tone_base = vec![0u8; total];
-    let mut stylized = vec![0u8; total];
-    let mut quantized = vec![0u8; total];
-
-    for y in 0..height {
-        for x in 0..width {
-            let i = y * width + x;
-            let (base, stylized_px, quantized_px) =
-                render_pixel(cfg, x, y, i, inputs, optional, &tone_lut);
-            tone_base[i] = base;
-            stylized[i] = stylized_px;
-            quantized[i] = quantized_px;
-        }
-    }
-
-    RenderBuffers {
-        tone_base,
-        stylized,
-        quantized,
-    }
-}
-
-fn render_pixel(
-    cfg: &Config,
-    x: usize,
-    y: usize,
-    i: usize,
-    inputs: &RenderInputs<'_>,
-    optional: &OptionalMaps,
-    tone_lut: &[u8; 256],
-) -> (u8, u8, u8) {
-    let light_shaded = if let Some(sun_map) = optional.sun_light.as_ref() {
-        mix_u8(inputs.light[i], sun_map[i], cfg.sun_strength)
-    } else {
-        inputs.light[i]
-    };
-    let base = mul8(mul8(inputs.albedo[i], light_shaded), inputs.ao[i]);
-
-    let fog = mul8(inputs.depth[i], cfg.fog_strength);
-    let fogged = mix_u8(base, 255, fog);
-
-    let dark = mul8(inputs.edge[i], cfg.edge_strength);
-    let edged = fogged.saturating_sub(dark);
-
-    let stroke_delta = ink_brush_delta(
-        i,
-        x,
-        y,
-        inputs.stroke[i],
-        inputs.edge[i],
-        inputs.depth[i],
-        inputs.normal_xy,
-        cfg.stroke_strength,
-    );
-    let stroked = clamp_i16_to_u8((edged as i16) + stroke_delta);
-
-    let paper_delta =
-        ((paper_noise_u8(x as i32, y as i32) as i16) - 128) * (cfg.paper_strength as i16) / 255;
-    let papered = clamp_i16_to_u8((stroked as i16) + paper_delta);
-    let curved = tone_lut[papered as usize];
-    let masked = mix_u8(255, curved, inputs.mask[i]);
-
-    let stylized = if let Some(prev) = optional.ghost_prev.as_ref() {
-        mix_u8(masked, prev[i], cfg.ghost_alpha)
-    } else {
-        masked
-    };
-    let quantized = quantize_u8(stylized, x as i32, y as i32, cfg.mode, cfg.dither);
-    (base, stylized, quantized)
-}
-
-fn save_render_outputs(
-    cfg: &Config,
-    bundle: &Bundle,
-    buffers: &RenderBuffers,
-    optional: &OptionalMaps,
-) -> Result<(), String> {
-    if let Some(parent) = cfg.out.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create output dir {}: {e}", parent.display()))?;
-    }
-    save_gray(&cfg.out, bundle.width, bundle.height, &buffers.quantized)?;
-    println!("wrote {}", cfg.out.display());
-
-    if let Some(debug_dir) = cfg.save_debug.as_ref() {
-        fs::create_dir_all(debug_dir)
-            .map_err(|e| format!("create debug dir {}: {e}", debug_dir.display()))?;
-        save_gray(
-            &debug_dir.join("01_tone_base.png"),
-            bundle.width,
-            bundle.height,
-            &buffers.tone_base,
-        )?;
-        save_gray(
-            &debug_dir.join("02_stylized.png"),
-            bundle.width,
-            bundle.height,
-            &buffers.stylized,
-        )?;
-        save_gray(
-            &debug_dir.join("03_quantized.png"),
-            bundle.width,
-            bundle.height,
-            &buffers.quantized,
-        )?;
-        if let Some(sun_map) = optional.sun_light.as_ref() {
-            save_gray(
-                &debug_dir.join("00_sun_relight.png"),
-                bundle.width,
-                bundle.height,
-                sun_map,
-            )?;
-        }
-    }
-
-    Ok(())
 }

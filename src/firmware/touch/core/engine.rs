@@ -78,6 +78,8 @@ pub struct TouchEvent {
     pub t_ms: u64,
     pub x: u16,
     pub y: u16,
+    pub contact_x: u16,
+    pub contact_y: u16,
     pub start_x: u16,
     pub start_y: u16,
     pub duration_ms: u16,

@@ -2,5 +2,5 @@ mod prod;
 
 pub(crate) use prod::*;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;

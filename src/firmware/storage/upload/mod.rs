@@ -1,79 +1,44 @@
+//! Asset upload over HTTP.
+//!
+//! [`http`] serves the upload protocol; [`sd_bridge`] turns its routes into SD
+//! commands. The radio and the network stack belong to [`crate::firmware::net`];
+//! this module is one of its consumers.
+
 mod http;
 mod sd_bridge;
-pub(crate) mod wifi;
 
-use embassy_net::{Runner, Stack, StackResources};
-use esp_hal::rng::Rng;
-use esp_println::println;
-use esp_radio::wifi::{WifiController, WifiDevice};
-use static_cell::StaticCell;
+use core::sync::atomic::{AtomicBool, Ordering};
+use embassy_net::Stack;
 
-use super::super::types::WifiCredentials;
+static SD_UPLOAD_SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-pub(crate) struct UploadHttpRuntime {
-    pub(crate) wifi_controller: WifiController<'static>,
-    pub(crate) initial_credentials: Option<WifiCredentials>,
-    pub(crate) net_runner: Runner<'static, WifiDevice<'static>>,
-    pub(crate) stack: Stack<'static>,
-}
-
-pub(crate) fn setup(
-    wifi: esp_hal::peripherals::WIFI<'static>,
-) -> Result<UploadHttpRuntime, &'static str> {
-    let initial_credentials = wifi::compiled_wifi_credentials();
-
-    static RADIO_CTRL: StaticCell<esp_radio::Controller<'static>> = StaticCell::new();
-    static STACK_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
-
-    let radio_ctrl = match esp_radio::init() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            println!("asset-upload-http: esp_radio::init err={:?}", err);
-            return Err("asset-upload-http: esp_radio::init failed");
-        }
-    };
-    let radio_ctrl = RADIO_CTRL.init(radio_ctrl);
-    let (wifi_controller, ifaces) =
-        match esp_radio::wifi::new(radio_ctrl, wifi, wifi::wifi_runtime_config()) {
-            Ok(parts) => parts,
-            Err(err) => {
-                println!("asset-upload-http: wifi init err={:?}", err);
-                return Err("asset-upload-http: wifi init failed");
-            }
-        };
-    let rng = Rng::new();
-    let seed = (rng.random() as u64) << 32 | rng.random() as u64;
-
-    let (stack, net_runner) = embassy_net::new(
-        ifaces.sta,
-        embassy_net::Config::dhcpv4(Default::default()),
-        STACK_RESOURCES.init(StackResources::<8>::new()),
-        seed,
-    );
-
-    Ok(UploadHttpRuntime {
-        wifi_controller,
-        initial_credentials,
-        net_runner,
-        stack,
-    })
-}
-
-#[embassy_executor::task]
-pub(crate) async fn wifi_connection_task(
-    controller: WifiController<'static>,
-    credentials: Option<WifiCredentials>,
-    stack: Stack<'static>,
-) {
-    wifi::run_wifi_connection_task(controller, credentials, stack).await;
-}
-
-#[embassy_executor::task]
-pub(crate) async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
-    runner.run().await
-}
-
-#[embassy_executor::task]
-pub(crate) async fn http_server_task(stack: Stack<'static>) {
+pub(crate) async fn run_http_server(stack: Stack<'_>) {
     http::run_http_server(stack).await;
+}
+
+pub(crate) fn active_http_connections() -> u16 {
+    http::active_connections()
+}
+
+pub(crate) fn active_sd_roundtrips() -> u16 {
+    sd_bridge::active_roundtrips()
+}
+
+pub(crate) fn sd_upload_session_active() -> bool {
+    SD_UPLOAD_SESSION_ACTIVE.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_sd_upload_session_active(active: bool) {
+    SD_UPLOAD_SESSION_ACTIVE.store(active, Ordering::Release);
+}
+
+pub(crate) async fn abort_sd_upload() -> bool {
+    use crate::firmware::types::SdUploadResultCode;
+    matches!(
+        sd_bridge::sd_upload_roundtrip(crate::firmware::types::SdUploadCommand::Abort).await,
+        Ok(_)
+            | Err(sd_bridge::SdUploadRoundtripError::Device(
+                SdUploadResultCode::SessionNotActive
+            ))
+    )
 }

@@ -3,7 +3,7 @@ use statig::prelude::*;
 use super::actions::AppStateApplyStatus;
 use super::events::AppStateCommand;
 use super::snapshot::AppStateSnapshot;
-use super::types::{BaseMode, DiagKind, DiagTargets, OverlayMode, Phase};
+use super::types::{DiagKind, DiagTargets, Phase};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct AppStateMachine {
@@ -32,34 +32,8 @@ impl AppStateMachine {
         let before = self.snapshot;
         match command {
             AppStateCommand::BootComplete => return AppStateApplyStatus::Unchanged,
-            AppStateCommand::SetBase(base) => {
-                self.snapshot.base = base;
-                if matches!(base, BaseMode::TouchWizard) {
-                    self.snapshot.overlay = OverlayMode::None;
-                }
-            }
-            AppStateCommand::ToggleDayBackground => {
-                if !matches!(self.snapshot.base, BaseMode::Day) {
-                    return AppStateApplyStatus::InvalidTransition;
-                }
-                self.snapshot.day_background = self.snapshot.day_background.toggled();
-            }
-            AppStateCommand::SetDayBackground(day_background) => {
-                self.snapshot.day_background = day_background;
-            }
-            AppStateCommand::SetOverlay(overlay) => {
-                if matches!(overlay, OverlayMode::Clock)
-                    && !matches!(self.snapshot.base, BaseMode::Day)
-                {
-                    return AppStateApplyStatus::InvalidTransition;
-                }
-                self.snapshot.overlay = overlay;
-            }
             AppStateCommand::SetUpload(enabled) => {
                 self.snapshot.services.upload_enabled = enabled;
-            }
-            AppStateCommand::SetAssets(enabled) => {
-                self.snapshot.services.asset_reads_enabled = enabled;
             }
             AppStateCommand::SetDiag { kind, targets } => {
                 self.snapshot.diag_kind = kind;

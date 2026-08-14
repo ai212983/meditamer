@@ -6,12 +6,44 @@ document:
 do:
   - baseline_state:
       call: "state_get"
+      then: "initial_suite_gate"
+  - initial_suite_gate:
+      switch:
+        - no_storage:
+            when: ".suite == \"no-storage\""
+            then: "no_storage_upload_off"
+        - default:
+            then: "full_ready"
+  - no_storage_upload_off:
+      call: "apply_mode"
+      with:
+        command: "STATE SET upload=off"
+        expect_upload: "off"
+        expect_ready: false
+      then: "no_storage_ready"
+  - no_storage_ready:
+      call: "state_get"
+      with:
+        expect_upload: "off"
+        expect_ready: true
+      then: "baseline_psram"
+  - full_ready:
+      call: "state_get"
+      with:
+        expect_ready: true
       then: "baseline_psram"
   - baseline_psram:
       call: "psram_snapshot"
       with:
         label: "baseline"
-      then: "upload_on"
+      then: "action_suite_gate"
+  - action_suite_gate:
+      switch:
+        - no_storage:
+            when: ".suite == \"no-storage\""
+            then: "print_summary"
+        - default:
+            then: "upload_on"
   - upload_on:
       call: "apply_mode"
       with:
@@ -20,33 +52,31 @@ do:
       then: "init_post_upload_checks"
   - init_post_upload_checks:
       call: "init_post_upload_checks"
-      then: "post_upload_status_gate"
-  - post_upload_status_gate:
-      call: "set_post_upload_status_gate"
-      then: "post_upload_status_switch"
-  - post_upload_status_switch:
-      switch:
-        - run_status_probe:
-            when: ".run_post_upload_status_probe == true"
-            then: "run_post_upload_status_probe"
-        - status_done:
-            then: "post_upload_timeset_gate"
-  - run_post_upload_status_probe:
-      call: "run_post_upload_status_probe"
-      then: "post_upload_status_gate"
-  - post_upload_timeset_gate:
-      call: "set_post_upload_timeset_gate"
-      then: "post_upload_timeset_switch"
-  - post_upload_timeset_switch:
-      switch:
-        - run_timeset_probe:
-            when: ".run_post_upload_timeset_probe == true"
-            then: "run_post_upload_timeset_probe"
-        - timeset_done:
-            then: "upload_on_psram"
-  - run_post_upload_timeset_probe:
-      call: "run_post_upload_timeset_probe"
-      then: "post_upload_timeset_gate"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "post_upload_status_loop"
+  - post_upload_status_loop:
+      do:
+        - run_post_upload_status_probe:
+            call: "run_post_upload_status_probe"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".post_upload_status_repeats"
+            at: "post_upload_status_index"
+      then: "post_upload_ping_loop"
+  - post_upload_ping_loop:
+      do:
+        - run_post_upload_ping_probe:
+            call: "run_post_upload_ping_probe"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".post_upload_ping_repeats"
+            at: "post_upload_ping_index"
+      then: "upload_on_psram"
   - upload_on_psram:
       call: "psram_snapshot"
       with:
@@ -62,28 +92,6 @@ do:
       call: "psram_snapshot"
       with:
         label: "upload_off"
-      then: "assets_off"
-  - assets_off:
-      call: "apply_mode"
-      with:
-        command: "STATE SET assets=off"
-        expect_assets: "off"
-      then: "assets_off_psram"
-  - assets_off_psram:
-      call: "psram_snapshot"
-      with:
-        label: "assets_off"
-      then: "assets_on"
-  - assets_on:
-      call: "apply_mode"
-      with:
-        command: "STATE SET assets=on"
-        expect_assets: "on"
-      then: "assets_on_psram"
-  - assets_on_psram:
-      call: "psram_snapshot"
-      with:
-        label: "assets_on"
       then: "print_summary"
   - print_summary:
       call: "print_summary"

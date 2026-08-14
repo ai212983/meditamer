@@ -1,326 +1,208 @@
-use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
-use embassy_time::{with_timeout, Duration, Instant, Timer};
-use static_cell::StaticCell;
+//! Upload HTTP server.
+//!
+//! [`server_loop`] owns the listener lifecycle, [`socket_cycle`] one accepted
+//! connection, [`connection`] the request parsing and routing,
+//! [`listener_gate`] the DHCP/link gating they share, and [`mem_diag`] the
+//! shared memory logging. The buffers and loop state live here.
+
+use core::sync::atomic::{AtomicU16, Ordering};
+use embassy_time::Instant;
 
 mod connection;
 mod helpers;
+mod listener_gate;
+mod mem_diag;
+mod server_loop;
+mod socket_cycle;
 
-#[cfg(feature = "psram-alloc")]
-use super::super::super::types::SD_UPLOAD_CHUNK_MAX;
+use mem_diag::log_http_mem_diag;
+
+pub(super) use server_loop::run_http_server;
+
+use super::super::super::types::{HTTP_RX_BUF_TARGET_BYTES, SD_UPLOAD_CHUNK_MAX};
+use crate::firmware::observability;
 use crate::firmware::psram;
-use crate::firmware::runtime::service_mode;
-use crate::firmware::telemetry;
+use crate::firmware::service_mode;
 
-const UPLOAD_HTTP_PORT: u16 = 8080;
-const UPLOAD_HTTP_ROOT: &str = "/assets";
-const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
-#[cfg(feature = "psram-alloc")]
-const HTTP_HEADER_MAX: usize = 1024;
-#[cfg(not(feature = "psram-alloc"))]
-const HTTP_HEADER_MAX: usize = 2048;
-#[cfg(feature = "psram-alloc")]
-const HTTP_RW_BUF_FALLBACK: usize = 512;
-#[cfg(not(feature = "psram-alloc"))]
-const HTTP_RW_BUF_FALLBACK: usize = 2048;
-#[cfg(feature = "psram-alloc")]
-const HTTP_RW_BUF_TARGET: usize = 4096;
-#[cfg(not(feature = "psram-alloc"))]
-const HTTP_RW_BUF_TARGET: usize = HTTP_RW_BUF_FALLBACK;
-#[cfg(feature = "psram-alloc")]
-const HTTP_CHUNK_BUF_FALLBACK: usize = 1024;
-#[cfg(not(feature = "psram-alloc"))]
-const HTTP_CHUNK_BUF_FALLBACK: usize = 4096;
-#[cfg(feature = "psram-alloc")]
+pub(super) const UPLOAD_HTTP_PORT: u16 = 8080;
+pub(super) const UPLOAD_HTTP_ROOT: &str = "/assets";
+pub(super) const UPLOAD_HTTP_TOKEN_HEADER: &str = "x-upload-token";
+pub(super) const HTTP_HEADER_MAX: usize = 1024;
+pub(super) const HTTP_RW_BUF_FALLBACK: usize = 512;
+// Keep a large RX window in PSRAM so /upload can continue receiving while the
+// SD writer is busy; this trims body-read stalls between chunk roundtrips.
+pub const HTTP_RX_BUF_TARGET: usize = HTTP_RX_BUF_TARGET_BYTES;
+// TX path is response-only for this listener, so a smaller buffer is enough.
+const HTTP_TX_BUF_TARGET: usize = 4_096;
+pub(super) const HTTP_CHUNK_BUF_FALLBACK: usize = 1024;
 const HTTP_CHUNK_BUF_TARGET: usize = SD_UPLOAD_CHUNK_MAX;
-#[cfg(not(feature = "psram-alloc"))]
-const HTTP_CHUNK_BUF_TARGET: usize = HTTP_CHUNK_BUF_FALLBACK;
-const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
-const DHCP_POLL_MS: u64 = 250;
+pub const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
+pub(super) const DHCP_POLL_MS: u64 = 250;
 
-enum HttpBuffer<const N: usize> {
-    #[cfg(feature = "psram-alloc")]
+static ACTIVE_CONNECTIONS: AtomicU16 = AtomicU16::new(0);
+
+pub(in crate::firmware::storage::upload) fn active_connections() -> u16 {
+    ACTIVE_CONNECTIONS.load(Ordering::Acquire)
+}
+
+pub(super) struct ActiveConnectionGuard;
+
+impl ActiveConnectionGuard {
+    pub(super) fn enter() -> Self {
+        ACTIVE_CONNECTIONS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+pub(super) enum HttpBuffer<const N: usize> {
     Psram(psram::LargeByteBuffer),
-    Internal(&'static mut [u8; N]),
 }
 
 impl<const N: usize> HttpBuffer<N> {
-    fn as_mut_slice(&mut self) -> &mut [u8] {
+    pub(super) fn as_mut_slice(&mut self) -> &mut [u8] {
         match self {
-            #[cfg(feature = "psram-alloc")]
             Self::Psram(buffer) => buffer.as_mut_slice(),
-            Self::Internal(buffer) => &mut buffer[..],
         }
     }
 }
 
 fn init_http_buffer<const N: usize>(
-    cell: &'static StaticCell<[u8; N]>,
-    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] alloc_bytes: usize,
-    #[cfg_attr(not(feature = "psram-alloc"), allow(unused_variables))] tag: &'static str,
-) -> HttpBuffer<N> {
-    #[cfg(feature = "psram-alloc")]
-    {
-        match psram::alloc_large_byte_buffer(alloc_bytes) {
-            Ok(buffer) => {
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                    esp_println::println!(
-                        "upload_http: {} buffer placement={:?} bytes={}",
-                        tag,
-                        buffer.placement(),
-                        alloc_bytes
-                    );
-                }
-                psram::log_allocator_high_water(tag);
-                return HttpBuffer::Psram(buffer);
-            }
-            Err(err) => {
-                if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                    esp_println::println!(
-                        "upload_http: {} psram alloc failed ({:?}); using internal ram",
-                        tag,
-                        err
-                    );
-                }
-            }
-        }
-    }
-
-    HttpBuffer::Internal(cell.init([0u8; N]))
-}
-
-pub(super) async fn run_http_server(stack: Stack<'static>) {
-    static RX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
-    static TX_BUFFER: StaticCell<[u8; HTTP_RW_BUF_FALLBACK]> = StaticCell::new();
-    static HEADER_BUFFER: StaticCell<[u8; HTTP_HEADER_MAX]> = StaticCell::new();
-    static CHUNK_BUFFER: StaticCell<[u8; HTTP_CHUNK_BUF_FALLBACK]> = StaticCell::new();
-
-    let mut rx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
-    let mut tx_buffer: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>> = None;
-    let mut header_buffer: Option<HttpBuffer<HTTP_HEADER_MAX>> = None;
-    let mut chunk_buffer: Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>> = None;
-
-    let mut listening_logged = false;
-    let mut waiting_dhcp_logged = false;
-    let mut dhcp_wait_started_at: Option<Instant> = None;
-    let mut dhcp_ready = false;
-    telemetry::set_upload_http_listener(false, None);
-
-    loop {
-        if !service_mode::upload_transfers_enabled() {
-            listening_logged = false;
-            waiting_dhcp_logged = false;
-            dhcp_wait_started_at = None;
-            dhcp_ready = false;
-            telemetry::set_upload_http_listener(false, None);
-            Timer::after(Duration::from_millis(500)).await;
-            continue;
-        }
-        if !service_mode::upload_http_listener_enabled() {
-            listening_logged = false;
-            waiting_dhcp_logged = false;
-            dhcp_wait_started_at = None;
-            dhcp_ready = false;
-            telemetry::set_upload_http_listener(false, None);
-            log_http_mem_diag("listener_disabled_pause");
-            Timer::after(Duration::from_millis(500)).await;
-            continue;
-        }
-
-        // Gate HTTP on active link + DHCP lease to avoid advertising an unusable listener.
-        let local_ipv4 = match dhcp_ipv4_status(&stack) {
-            Ok(ipv4) => ipv4,
-            Err(gate_reason) => {
-                telemetry::record_net_pipeline_gate(gate_reason);
-                dhcp_ready = false;
-                listening_logged = false;
-                telemetry::set_upload_http_listener(false, None);
-                if !waiting_dhcp_logged {
-                    if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
-                        esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
-                    }
-                    waiting_dhcp_logged = true;
-                }
-                if dhcp_wait_started_at.is_none() {
-                    dhcp_wait_started_at = Some(Instant::now());
-                }
-                Timer::after(Duration::from_millis(DHCP_POLL_MS)).await;
-                continue;
-            }
-        };
-        if let Some(started_at) = dhcp_wait_started_at.take() {
-            telemetry::record_net_pipeline_dhcp_wait(elapsed_ms_u32(started_at));
-        }
-        if !dhcp_ready {
-            telemetry::record_net_pipeline_dhcp_ready();
-            dhcp_ready = true;
-        }
-        if waiting_dhcp_logged {
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
+    alloc_bytes: usize,
+    tag: &'static str,
+) -> Option<HttpBuffer<N>> {
+    match psram::alloc_large_byte_buffer(alloc_bytes) {
+        Ok(buffer) => {
+            if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
                 esp_println::println!(
-                    "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
-                    local_ipv4[0],
-                    local_ipv4[1],
-                    local_ipv4[2],
-                    local_ipv4[3]
+                    "upload_http: {} buffer placement={:?} bytes={}",
+                    tag,
+                    buffer.placement(),
+                    alloc_bytes
                 );
             }
-            waiting_dhcp_logged = false;
+            psram::log_allocator_high_water(tag);
+            Some(HttpBuffer::Psram(buffer))
         }
-
-        if !listening_logged {
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
-                esp_println::println!(
-                    "upload_http: listening on {}.{}.{}.{}:{}",
-                    local_ipv4[0],
-                    local_ipv4[1],
-                    local_ipv4[2],
-                    local_ipv4[3],
-                    UPLOAD_HTTP_PORT
-                );
-            }
-            listening_logged = true;
+        Err(err) => {
+            esp_println::println!(
+                "upload_http: buffer_alloc_failed tag={} placement=psram err={:?}",
+                tag,
+                err
+            );
+            None
         }
-
-        if rx_buffer.is_none() {
-            rx_buffer = Some(init_http_buffer(&RX_BUFFER, HTTP_RW_BUF_TARGET, "http_rx"));
-            tx_buffer = Some(init_http_buffer(&TX_BUFFER, HTTP_RW_BUF_TARGET, "http_tx"));
-            header_buffer = Some(init_http_buffer(
-                &HEADER_BUFFER,
-                HTTP_HEADER_MAX,
-                "http_header",
-            ));
-            chunk_buffer = Some(init_http_buffer(
-                &CHUNK_BUFFER,
-                HTTP_CHUNK_BUF_TARGET,
-                "http_chunk",
-            ));
-            log_http_mem_diag("buffers_init");
-        }
-
-        let (Some(rx_buffer), Some(tx_buffer), Some(header_buffer), Some(chunk_buffer)) = (
-            rx_buffer.as_mut(),
-            tx_buffer.as_mut(),
-            header_buffer.as_mut(),
-            chunk_buffer.as_mut(),
-        ) else {
-            telemetry::set_upload_http_listener(false, Some(local_ipv4));
-            Timer::after(Duration::from_millis(250)).await;
-            continue;
-        };
-
-        let mut socket = TcpSocket::new(stack, rx_buffer.as_mut_slice(), tx_buffer.as_mut_slice());
-        socket.set_timeout(Some(Duration::from_secs(HTTP_SOCKET_TIMEOUT_SECS)));
-        telemetry::set_upload_http_listener(true, Some(local_ipv4));
-
-        log_http_mem_diag("accept_before");
-        let accept_started_at = Instant::now();
-        let accepted = socket
-            .accept(IpListenEndpoint {
-                addr: None,
-                port: UPLOAD_HTTP_PORT,
-            })
-            .await;
-        telemetry::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
-        if let Err(err) = accepted {
-            telemetry::record_upload_http_accept_error();
-            if dhcp_ipv4_status(&stack).is_err() {
-                telemetry::record_upload_http_accept_link_reset();
-                listening_logged = false;
-                waiting_dhcp_logged = false;
-                dhcp_ready = false;
-            }
-            telemetry::set_upload_http_listener(false, None);
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET) {
-                esp_println::println!("upload_http: accept err={:?}", err);
-            }
-            log_http_mem_diag("accept_err");
-            let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
-            socket.abort();
-            continue;
-        }
-        telemetry::record_upload_http_accept();
-        log_http_mem_diag("accept_ok");
-        if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-            esp_println::println!("upload_http: accepted connection");
-        }
-
-        log_http_mem_diag("request_begin");
-        if let Err(err) = connection::handle_connection(
-            &mut socket,
-            chunk_buffer.as_mut_slice(),
-            header_buffer.as_mut_slice(),
-        )
-        .await
-        {
-            telemetry::record_upload_http_request_error();
-            telemetry::record_upload_http_request_bucket(err);
-            log_http_mem_diag("request_err");
-            if telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP) {
-                esp_println::println!(
-                    "upload_http: request err={} recv_queue={} send_queue={} state={:?} remote={:?}",
-                    err,
-                    socket.recv_queue(),
-                    socket.send_queue(),
-                    socket.state(),
-                    socket.remote_endpoint(),
-                );
-            }
-        } else {
-            log_http_mem_diag("request_ok");
-        }
-
-        let _ = with_timeout(Duration::from_millis(250), socket.flush()).await;
-        socket.close();
-        log_http_mem_diag("request_close");
     }
 }
 
-fn dhcp_ipv4_status(stack: &Stack<'static>) -> Result<[u8; 4], telemetry::NetPipelineGate> {
-    if !telemetry::wifi_link_connected() || !stack.is_link_up() {
-        if !telemetry::wifi_link_connected() {
-            return Err(telemetry::NetPipelineGate::WifiDown);
+pub(super) struct HttpServerLoopState {
+    listening_logged: bool,
+    waiting_dhcp_logged: bool,
+    dhcp_wait_started_at: Option<Instant>,
+    dhcp_gate_started_at: Option<Instant>,
+    dhcp_gate_last_reason: Option<observability::NetPipelineGate>,
+    dhcp_ready: bool,
+    transfers_pause_started_at: Option<Instant>,
+    listener_gate_last_enabled: bool,
+    listener_gate_last_seq: u32,
+    listener_gate_disabled_logged: bool,
+    last_request_closed_at: Option<Instant>,
+    last_request_route: Option<connection::RequestRouteKind>,
+}
+
+impl HttpServerLoopState {
+    pub(super) fn new() -> Self {
+        Self {
+            listening_logged: false,
+            waiting_dhcp_logged: false,
+            dhcp_wait_started_at: None,
+            dhcp_gate_started_at: None,
+            dhcp_gate_last_reason: None,
+            dhcp_ready: false,
+            transfers_pause_started_at: None,
+            listener_gate_last_enabled: service_mode::upload_http_listener_enabled(),
+            listener_gate_last_seq: service_mode::upload_http_listener_set_seq(),
+            listener_gate_disabled_logged: false,
+            last_request_closed_at: None,
+            last_request_route: None,
         }
-        return Err(telemetry::NetPipelineGate::LinkDown);
     }
-    stack
-        .config_v4()
-        .map(|cfg| cfg.address.address().octets())
-        .filter(|ip| *ip != [0, 0, 0, 0])
-        .ok_or(telemetry::NetPipelineGate::NoIpv4)
+
+    pub(super) fn reset_all(&mut self) {
+        self.listening_logged = false;
+        self.waiting_dhcp_logged = false;
+        self.dhcp_wait_started_at = None;
+        self.dhcp_gate_started_at = None;
+        self.dhcp_gate_last_reason = None;
+        self.dhcp_ready = false;
+        self.last_request_closed_at = None;
+        self.last_request_route = None;
+    }
+
+    pub(super) fn reset_link_state(&mut self) {
+        self.listening_logged = false;
+        self.waiting_dhcp_logged = false;
+        self.dhcp_gate_started_at = None;
+        self.dhcp_gate_last_reason = None;
+        self.dhcp_ready = false;
+    }
 }
 
-fn elapsed_ms_u32(started_at: Instant) -> u32 {
-    let elapsed = started_at.elapsed().as_millis();
-    if elapsed > u32::MAX as u64 {
-        u32::MAX
-    } else {
-        elapsed as u32
+pub(super) struct HttpServerBuffers {
+    rx: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
+    tx: Option<HttpBuffer<HTTP_RW_BUF_FALLBACK>>,
+    header: Option<HttpBuffer<HTTP_HEADER_MAX>>,
+    chunk: Option<HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>>,
+}
+
+impl HttpServerBuffers {
+    pub(super) fn new() -> Self {
+        Self {
+            rx: None,
+            tx: None,
+            header: None,
+            chunk: None,
+        }
+    }
+
+    pub(super) fn ensure_initialized(&mut self) {
+        if self.rx.is_some() && self.tx.is_some() && self.header.is_some() && self.chunk.is_some() {
+            return;
+        }
+
+        if self.rx.is_none() {
+            self.rx = init_http_buffer(HTTP_RX_BUF_TARGET, "http_rx");
+        }
+        if self.tx.is_none() {
+            self.tx = init_http_buffer(HTTP_TX_BUF_TARGET, "http_tx");
+        }
+        if self.header.is_none() {
+            self.header = init_http_buffer(HTTP_HEADER_MAX, "http_header");
+        }
+        if self.chunk.is_none() {
+            self.chunk = init_http_buffer(HTTP_CHUNK_BUF_TARGET, "http_chunk");
+        }
+        log_http_mem_diag("buffers_init");
+    }
+
+    pub(super) fn borrow_mut(&mut self) -> Option<HttpServerBuffersMut<'_>> {
+        Some(HttpServerBuffersMut {
+            rx: self.rx.as_mut()?,
+            tx: self.tx.as_mut()?,
+            header: self.header.as_mut()?,
+            chunk: self.chunk.as_mut()?,
+        })
     }
 }
 
-fn log_http_mem_diag(stage: &str) {
-    if !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_HTTP)
-        && !telemetry::diag_enabled(telemetry::DIAG_DOMAIN_NET)
-    {
-        return;
-    }
-    let snapshot = psram::allocator_memory_snapshot();
-    esp_println::println!(
-        "upload_http: upload_mem stage={} feature={} state={:?} total={} used={} free={} peak={} internal_free={} external_free={} min_free={} min_internal_free={} min_external_free={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}",
-        stage,
-        snapshot.feature_enabled,
-        snapshot.state,
-        snapshot.total_bytes,
-        snapshot.used_bytes,
-        snapshot.free_bytes,
-        snapshot.peak_used_bytes,
-        snapshot.free_internal_bytes,
-        snapshot.free_external_bytes,
-        snapshot.min_free_bytes,
-        snapshot.min_free_internal_bytes,
-        snapshot.min_free_external_bytes,
-        snapshot.large_alloc_external_ok,
-        snapshot.large_alloc_internal_ok,
-        snapshot.large_alloc_fail
-    );
+pub(super) struct HttpServerBuffersMut<'a> {
+    pub(super) rx: &'a mut HttpBuffer<HTTP_RW_BUF_FALLBACK>,
+    pub(super) tx: &'a mut HttpBuffer<HTTP_RW_BUF_FALLBACK>,
+    pub(super) header: &'a mut HttpBuffer<HTTP_HEADER_MAX>,
+    pub(super) chunk: &'a mut HttpBuffer<HTTP_CHUNK_BUF_FALLBACK>,
 }

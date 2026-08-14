@@ -44,6 +44,16 @@ impl EventEngine {
         self.finish(context)
     }
 
+    /// Signals that samples were missed while the sensor stayed healthy. Clears
+    /// motion history without disturbing the state machine, so a tap sequence
+    /// survives scheduler jitter and touch-bus suppression.
+    pub fn sampling_gap(&mut self) -> EngineOutput {
+        let mut context = DispatchContext::default();
+        self.machine
+            .handle_with_context(&TapHsmEvent::SamplingGap, &mut context);
+        self.finish(context)
+    }
+
     fn finish(&self, context: DispatchContext) -> EngineOutput {
         EngineOutput {
             actions: context.actions,

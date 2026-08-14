@@ -5,15 +5,26 @@
 
 /.embuild
 /target
+/packages/*/target/
+/packages/*/Cargo.lock
+!/packages/sdcard/Cargo.lock
+/.*_target_*/
 /tools/*/target
 /tools/*/out
 /tools/**/__pycache__/
 /tools/**/*.py[cod]
+/test-support/**/target
+/test-support/**/out
+/test-support/**/__pycache__/
+/test-support/**/*.py[cod]
 /scripts/**/__pycache__/
 /scripts/**/*.py[cod]
 /tools/scene_maker/assets
 /logs/
-
-## gh-csi settings and working directory
-.gh-csi/models.toml
-.gh-csi/output
+/*.lcov
+/*.profraw
+.env.local
+.env.*.local
+.env
+.scannerwork/
+/.scratch/

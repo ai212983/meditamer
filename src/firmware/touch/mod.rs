@@ -1,13 +1,19 @@
 pub(crate) mod config;
 mod core;
+#[cfg(feature = "wifi-debug-slim-app")]
+#[path = "debug_log_stub.rs"]
 pub(crate) mod debug_log;
-pub(crate) mod integration;
+#[cfg(not(feature = "wifi-debug-slim-app"))]
+pub(crate) mod debug_log;
+mod imu_activity;
+pub(crate) mod lvgl_multitouch;
 mod normalize;
+pub(crate) mod replay;
+pub(crate) mod scheduling;
 pub(crate) mod tasks;
 pub(crate) mod types;
-pub(crate) mod wizard;
 
-use crate::drivers::inkplate::TouchSample as HalTouchSample;
+use crate::platform::inkplate::TouchSample as HalTouchSample;
 use normalize::{NormalizedTouchPoint, NormalizedTouchSample, TouchPresenceNormalizer};
 
 use self::types::{TouchEvent, TouchEventKind, TouchSwipeDirection};
@@ -20,6 +26,7 @@ pub(crate) struct TouchEngineOutput {
 pub(crate) struct TouchEngine {
     inner: core::TouchEngine,
     normalizer: TouchPresenceNormalizer,
+    last_primary: core::TouchPoint,
 }
 
 impl Default for TouchEngine {
@@ -33,6 +40,7 @@ impl TouchEngine {
         Self {
             inner: core::TouchEngine::new(),
             normalizer: TouchPresenceNormalizer::new(),
+            last_primary: core::TouchPoint::default(),
         }
     }
 
@@ -62,7 +70,28 @@ impl TouchEngine {
                 core::TouchPoint::default(),
             ],
         };
+        if normalized_count > 0 {
+            self.last_primary = core_sample.points[0];
+        }
 
+        let output = self.inner.tick(now_ms, core_sample);
+        TouchEngineOutput {
+            events: output.events.map(|item| item.map(map_event)),
+        }
+    }
+
+    pub(crate) fn advance(&mut self, now_ms: u64) -> TouchEngineOutput {
+        let (normalized_count, primary) = self.normalizer.advance(now_ms);
+        if let Some(point) = primary {
+            self.last_primary = core::TouchPoint {
+                x: point.x,
+                y: point.y,
+            };
+        }
+        let core_sample = core::TouchSample {
+            touch_count: normalized_count,
+            points: [self.last_primary, core::TouchPoint::default()],
+        };
         let output = self.inner.tick(now_ms, core_sample);
         TouchEngineOutput {
             events: output.events.map(|item| item.map(map_event)),
@@ -76,6 +105,8 @@ fn map_event(event: core::TouchEvent) -> TouchEvent {
         t_ms: event.t_ms,
         x: event.x,
         y: event.y,
+        contact_x: event.contact_x,
+        contact_y: event.contact_y,
         start_x: event.start_x,
         start_y: event.start_y,
         duration_ms: event.duration_ms,

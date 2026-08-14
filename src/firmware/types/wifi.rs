@@ -177,8 +177,22 @@ pub(crate) struct NetConfigSet {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum WifiConfigRequest {
-    Load,
-    Store { credentials: WifiCredentials },
+    Load {
+        request_id: u32,
+    },
+    Store {
+        request_id: u32,
+        credentials: WifiCredentials,
+    },
+}
+
+#[cfg(feature = "asset-upload-http")]
+impl WifiConfigRequest {
+    pub(crate) const fn request_id(&self) -> u32 {
+        match self {
+            Self::Load { request_id } | Self::Store { request_id, .. } => *request_id,
+        }
+    }
 }
 
 #[cfg(feature = "asset-upload-http")]
@@ -196,6 +210,7 @@ pub(crate) enum WifiConfigResultCode {
 #[cfg(feature = "asset-upload-http")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WifiConfigResponse {
+    pub(crate) request_id: u32,
     pub(crate) ok: bool,
     pub(crate) code: WifiConfigResultCode,
     pub(crate) credentials: Option<WifiCredentials>,

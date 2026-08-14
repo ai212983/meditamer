@@ -1,4 +1,6 @@
-fn decode_capacity_bytes(csd: &[u8; 16]) -> Option<u64> {
+use super::SdFilesystem;
+
+pub(super) fn decode_capacity_bytes(csd: &[u8; 16]) -> Option<u64> {
     let csd_structure = csd_get_bits(csd, 127, 126) as u8;
     match csd_structure {
         0 => {
@@ -32,7 +34,7 @@ fn csd_get_bits(csd: &[u8; 16], msb: u8, lsb: u8) -> u32 {
     value
 }
 
-fn detect_vbr_filesystem(sector: &[u8; 512]) -> Option<SdFilesystem> {
+pub(super) fn detect_vbr_filesystem(sector: &[u8; 512]) -> Option<SdFilesystem> {
     if &sector[3..11] == b"EXFAT   " {
         return Some(SdFilesystem::ExFat);
     }
@@ -49,4 +51,19 @@ fn detect_vbr_filesystem(sector: &[u8; 512]) -> Option<SdFilesystem> {
         return Some(SdFilesystem::Fat12);
     }
     None
+}
+pub(super) fn parse_ascii_u32(value: &str) -> Option<u32> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut out = 0u32;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        let digit = (b - b'0') as u32;
+        out = out.checked_mul(10)?.checked_add(digit)?;
+    }
+    Some(out)
 }

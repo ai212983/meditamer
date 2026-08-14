@@ -44,6 +44,7 @@ pub struct OptionalEventConfig {
 
 #[derive(Clone, Copy, Debug)]
 pub struct EventEngineConfig {
+    pub imu_sampling: ImuSamplingConfig,
     pub triple_tap: TripleTapConfig,
     pub optional_events: OptionalEventConfig,
 }
@@ -52,4 +53,11 @@ include!(concat!(env!("OUT_DIR"), "/event_config.rs"));
 
 pub fn active_config() -> &'static EventEngineConfig {
     &EVENT_ENGINE_CONFIG
+}
+#[derive(Clone, Copy, Debug)]
+pub struct ImuSamplingConfig {
+    pub sensor_odr_hz: u16,
+    pub idle_hz: u16,
+    pub active_hz: u16,
+    pub active_hold_ms: u64,
 }

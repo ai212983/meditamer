@@ -1,31 +1,32 @@
 mod env_utils;
+mod idf_env;
 mod logging;
 mod port_detect;
 mod scenarios;
 mod serial_console;
-mod workflows_runtime_modes;
-mod workflows_sdcard;
-#[cfg(test)]
-mod workflows_sdcard_tests;
-mod workflows_serial;
-mod workflows_troubleshoot;
-mod workflows_upload;
-mod workflows_wifi_acceptance;
-mod workflows_wifi_discovery;
+mod workflows;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use logging::Logger;
 
-use workflows_runtime_modes::RuntimeModesSmokeOptions;
-use workflows_sdcard::{SdcardHwOptions, SdcardSuite};
-use workflows_serial::{RepaintOptions, TimeSetOptions, TouchWizardDumpOptions};
-use workflows_troubleshoot::TroubleshootOptions;
-use workflows_upload::UploadOptions;
-use workflows_wifi_acceptance::WifiAcceptanceOptions;
-use workflows_wifi_discovery::WifiDiscoveryDebugOptions;
+use workflows::artifacts::{run_artifacts_inventory, run_artifacts_prune, ArtifactsPruneOptions};
+use workflows::ble_phase1d::BlePhase1dOptions;
+use workflows::ble_phase1s::BlePhase1sOptions;
+use workflows::firmware_update::{
+    firmware_public_key_hex, run_firmware_update, FirmwareUpdateOptions,
+};
+use workflows::flash_capture::{run_flash_capture, CaptureMode, FlashCaptureOptions, FlashMode};
+use workflows::runtime_modes::RuntimeModesSmokeOptions;
+use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
+use workflows::serial::RepaintOptions;
+use workflows::troubleshoot::TroubleshootOptions;
+use workflows::ui_lifecycle::UiLifecycleOptions;
+use workflows::upload::UploadOptions;
+use workflows::wifi::acceptance::WifiAcceptanceOptions;
+use workflows::wifi::discovery::WifiDiscoveryDebugOptions;
 
 #[derive(Debug, Parser)]
 #[command(name = "hostctl")]
@@ -37,32 +38,101 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Timeset(TimeSetArgs),
+    Artifacts(ArtifactsArgs),
+    FlashCapture(FlashCaptureArgs),
+    FirmwareKey(FirmwareKeyArgs),
+    FirmwareUpdate(FirmwareUpdateArgs),
     Repaint(RepaintArgs),
-    MarbleMetrics,
-    TouchWizardDump(TouchWizardDumpArgs),
     Upload(UploadArgs),
     Test(TestArgs),
 }
 
 #[derive(Debug, Args)]
-struct TimeSetArgs {
+struct ArtifactsArgs {
+    #[command(subcommand)]
+    command: ArtifactsSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ArtifactsSubcommand {
+    Inventory(ArtifactsInventoryArgs),
+    Prune(ArtifactsPruneArgs),
+}
+
+/// Read-only totals, classifier output, and retention state for `logs/`.
+#[derive(Debug, Args)]
+struct ArtifactsInventoryArgs {}
+
+/// Recognized flash-payload thinning. Defaults to a dry run; `--apply`
+/// removes eligible payloads and writes one timestamped prune report.
+/// `--runs` also expires whole run units and standalone logs past their
+/// outcome-based age.
+#[derive(Debug, Args)]
+struct ArtifactsPruneArgs {
     #[arg(long)]
-    epoch: Option<u64>,
-    #[arg(long = "tz-offset-minutes")]
-    tz_offset_minutes: Option<i32>,
+    apply: bool,
+    #[arg(long)]
+    ignore_age: bool,
+    #[arg(long)]
+    runs: bool,
+}
+
+#[derive(Debug, Args)]
+struct FirmwareKeyArgs {
+    #[arg(long)]
+    key: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct FirmwareUpdateArgs {
+    #[arg(long)]
+    image: PathBuf,
+    #[arg(long)]
+    key: PathBuf,
+    #[arg(long)]
+    port: Option<String>,
+    #[arg(long)]
+    output: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    stage_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct FlashCaptureArgs {
+    #[arg(long, default_value = "release")]
+    profile: String,
+    #[arg(long = "log")]
+    output_path: Option<PathBuf>,
+    #[arg(long)]
+    port: Option<String>,
+    #[arg(long, value_enum, default_value_t = FlashMode::Auto)]
+    flash_mode: FlashMode,
+    #[arg(long, value_enum, default_value_t = CaptureMode::Boot)]
+    capture_mode: CaptureMode,
+    #[arg(long)]
+    image: Option<PathBuf>,
+    #[arg(long)]
+    flash_baud: Option<u32>,
+    #[arg(long)]
+    baud: Option<u32>,
+    #[arg(long)]
+    boot_window_ms: Option<u64>,
+    #[arg(long)]
+    idf_root: Option<PathBuf>,
+    #[arg(long)]
+    idf_tools_path: Option<PathBuf>,
+    #[arg(long)]
+    post_command: Option<String>,
+    #[arg(long)]
+    post_pattern: Option<String>,
+    #[arg(long)]
+    post_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Args)]
 struct RepaintArgs {
     #[arg(long)]
     command: Option<String>,
-}
-
-#[derive(Debug, Args)]
-struct TouchWizardDumpArgs {
-    #[arg(long)]
-    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -91,12 +161,37 @@ struct TestArgs {
 
 #[derive(Debug, Subcommand)]
 enum TestSubcommand {
+    BlePhase1d(BlePhase1dArgs),
+    BlePhase1s(BlePhase1sArgs),
     WifiAcceptance(WifiAcceptanceArgs),
     WifiDiscoveryDebug(WifiDiscoveryDebugArgs),
     RuntimeModesSmoke(RuntimeModesArgs),
     SdcardHw(SdcardArgs),
     SdcardBurstRegression(SdcardBurstArgs),
     Troubleshoot(TroubleshootArgs),
+    UiLifecycle(UiLifecycleArgs),
+}
+
+#[derive(Debug, Args)]
+struct BlePhase1dArgs {
+    #[arg(long)]
+    artifacts: PathBuf,
+    #[arg(long)]
+    board_id: String,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct BlePhase1sArgs {
+    #[arg(long)]
+    artifacts: PathBuf,
+    #[arg(long)]
+    board_id: String,
+    #[arg(long, default_value_t = 20)]
+    cycles: u32,
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -111,6 +206,8 @@ struct WifiDiscoveryDebugArgs {
 
 #[derive(Debug, Args)]
 struct RuntimeModesArgs {
+    #[arg(long, default_value = "full")]
+    suite: String,
     output_path: Option<PathBuf>,
 }
 
@@ -140,43 +237,97 @@ struct TroubleshootArgs {
     output: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct UiLifecycleArgs {
+    #[arg(long, default_value_t = 2)]
+    cycles: u16,
+    #[arg(long, default_value_t = 0)]
+    max_baseline_drift_bytes: usize,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
 fn parse_suite(raw: &str) -> Result<SdcardSuite> {
     match raw {
         "all" => Ok(SdcardSuite::All),
         "baseline" => Ok(SdcardSuite::Baseline),
         "burst" => Ok(SdcardSuite::Burst),
         "failures" => Ok(SdcardSuite::Failures),
+        "cutover" => Ok(SdcardSuite::Cutover),
+        "no-card" => Ok(SdcardSuite::NoCard),
         _ => Err(anyhow::anyhow!(
-            "Invalid suite `{raw}` (use all|baseline|burst|failures)"
+            "Invalid suite `{raw}` (use all|baseline|burst|failures|cutover|no-card)"
         )),
     }
 }
 
+fn firmware_update_activate(cli_stage_only: bool, env_stage_only: bool) -> bool {
+    !(cli_stage_only || env_stage_only)
+}
+
 fn run(cli: Cli) -> Result<()> {
+    std::env::set_current_dir(workflows::common::repo_root())
+        .context("set hostctl runtime working directory to repository root")?;
     let mut logger = Logger::from_env()?;
 
     match cli.command {
-        Commands::Timeset(args) => workflows_serial::run_timeset(
+        Commands::Artifacts(args) => match args.command {
+            ArtifactsSubcommand::Inventory(_) => run_artifacts_inventory(&mut logger),
+            ArtifactsSubcommand::Prune(prune_args) => run_artifacts_prune(
+                &mut logger,
+                ArtifactsPruneOptions {
+                    apply: prune_args.apply,
+                    ignore_age: prune_args.ignore_age,
+                    runs: prune_args.runs,
+                },
+            ),
+        },
+        Commands::FlashCapture(args) => run_flash_capture(
             &mut logger,
-            TimeSetOptions {
-                epoch: args.epoch,
-                tz_offset_minutes: args.tz_offset_minutes,
+            FlashCaptureOptions {
+                profile: args.profile,
+                output_path: args.output_path,
+                port: args.port,
+                flash_mode: args.flash_mode,
+                capture_mode: args.capture_mode,
+                image: args.image,
+                flash_baud: args.flash_baud,
+                baud: args.baud,
+                boot_window_ms: args.boot_window_ms,
+                idf_root: args.idf_root,
+                idf_tools_path: args.idf_tools_path,
+                post_command: args.post_command,
+                post_pattern: args.post_pattern,
+                post_timeout_ms: args.post_timeout_ms,
             },
         ),
-        Commands::Repaint(args) => workflows_serial::run_repaint(
+        Commands::FirmwareKey(args) => {
+            println!(
+                "MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX={}",
+                firmware_public_key_hex(&args.key)?
+            );
+            Ok(())
+        }
+        Commands::FirmwareUpdate(args) => run_firmware_update(
+            &mut logger,
+            FirmwareUpdateOptions {
+                image: args.image,
+                key: args.key,
+                port: args.port,
+                output: args.output,
+                activate: firmware_update_activate(
+                    args.stage_only,
+                    env_utils::parse_env_bool01("HOSTCTL_FIRMWARE_UPDATE_STAGE_ONLY", false)?,
+                ),
+            },
+        ),
+        Commands::Repaint(args) => workflows::serial::run_repaint(
             &mut logger,
             RepaintOptions {
                 command: args.command,
             },
         ),
-        Commands::MarbleMetrics => workflows_serial::run_marble_metrics(&mut logger),
-        Commands::TouchWizardDump(args) => workflows_serial::run_touch_wizard_dump(
-            &mut logger,
-            TouchWizardDumpOptions {
-                output_path: args.output,
-            },
-        ),
-        Commands::Upload(args) => workflows_upload::run_upload(
+        Commands::Upload(args) => workflows::upload::run_upload(
             &mut logger,
             UploadOptions {
                 host: args.host,
@@ -189,8 +340,25 @@ fn run(cli: Cli) -> Result<()> {
             },
         ),
         Commands::Test(args) => match args.test {
+            TestSubcommand::BlePhase1d(test_args) => workflows::ble_phase1d::run_ble_phase1d(
+                &mut logger,
+                BlePhase1dOptions {
+                    artifacts: test_args.artifacts,
+                    board_id: test_args.board_id,
+                    output_path: test_args.output,
+                },
+            ),
+            TestSubcommand::BlePhase1s(test_args) => workflows::ble_phase1s::run_ble_phase1s(
+                &mut logger,
+                BlePhase1sOptions {
+                    artifacts: test_args.artifacts,
+                    board_id: test_args.board_id,
+                    cycles: test_args.cycles,
+                    output_path: test_args.output,
+                },
+            ),
             TestSubcommand::WifiAcceptance(test_args) => {
-                workflows_wifi_acceptance::run_wifi_acceptance(
+                workflows::wifi::acceptance::run_wifi_acceptance(
                     &mut logger,
                     WifiAcceptanceOptions {
                         output_path: test_args.output_path,
@@ -198,7 +366,7 @@ fn run(cli: Cli) -> Result<()> {
                 )
             }
             TestSubcommand::WifiDiscoveryDebug(test_args) => {
-                workflows_wifi_discovery::run_wifi_discovery_debug(
+                workflows::wifi::discovery::run_wifi_discovery_debug(
                     &mut logger,
                     WifiDiscoveryDebugOptions {
                         output_path: test_args.output_path,
@@ -206,14 +374,15 @@ fn run(cli: Cli) -> Result<()> {
                 )
             }
             TestSubcommand::RuntimeModesSmoke(test_args) => {
-                workflows_runtime_modes::run_runtime_modes_smoke(
+                workflows::runtime_modes::run_runtime_modes_smoke(
                     &mut logger,
                     RuntimeModesSmokeOptions {
                         output_path: test_args.output_path,
+                        suite: test_args.suite,
                     },
                 )
             }
-            TestSubcommand::SdcardHw(test_args) => workflows_sdcard::run_sdcard_hw(
+            TestSubcommand::SdcardHw(test_args) => workflows::sdcard::run_sdcard_hw(
                 &mut logger,
                 SdcardHwOptions {
                     build_mode: test_args.build_mode,
@@ -222,16 +391,24 @@ fn run(cli: Cli) -> Result<()> {
                 },
             ),
             TestSubcommand::SdcardBurstRegression(test_args) => {
-                workflows_sdcard::run_sdcard_burst_regression(
+                workflows::sdcard::run_sdcard_burst_regression(
                     &mut logger,
                     test_args.build_mode,
                     test_args.output,
                 )
             }
-            TestSubcommand::Troubleshoot(test_args) => workflows_troubleshoot::run_troubleshoot(
+            TestSubcommand::Troubleshoot(test_args) => workflows::troubleshoot::run_troubleshoot(
                 &mut logger,
                 TroubleshootOptions {
                     build_mode: test_args.build_mode,
+                    output_path: test_args.output,
+                },
+            ),
+            TestSubcommand::UiLifecycle(test_args) => workflows::ui_lifecycle::run_ui_lifecycle(
+                &mut logger,
+                UiLifecycleOptions {
+                    cycles: test_args.cycles,
+                    max_baseline_drift_bytes: test_args.max_baseline_drift_bytes,
                     output_path: test_args.output,
                 },
             ),
@@ -244,5 +421,18 @@ fn main() {
     if let Err(err) = run(cli) {
         eprintln!("error: {err:?}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::firmware_update_activate;
+
+    #[test]
+    fn either_stage_only_control_prevents_activation() {
+        assert!(firmware_update_activate(false, false));
+        assert!(!firmware_update_activate(true, false));
+        assert!(!firmware_update_activate(false, true));
+        assert!(!firmware_update_activate(true, true));
     }
 }

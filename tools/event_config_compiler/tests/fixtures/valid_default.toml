@@ -1,3 +1,9 @@
+[imu.sampling]
+sensor_odr_hz = 416
+idle_hz = 20
+active_hz = 125
+active_hold_ms = 1000
+
 [triple_tap]
 enabled = true
 min_gap_ms = 55

@@ -4,10 +4,9 @@ use super::super::super::{
     types::{WifiConfigResponse, WifiConfigResultCode},
 };
 use super::super::super::{
-    config::{SD_ASSET_READ_RESPONSES, SD_DIAG_RESULTS, SD_RESULTS, SD_UPLOAD_RESULTS},
+    config::{SD_DIAG_RESULTS, SD_RESULTS, SD_UPLOAD_RESULTS},
     types::{
-        SdAssetReadResponse, SdAssetReadResultCode, SdCommandKind, SdPowerRequest, SdResult,
-        SdResultCode, SdUploadResult, SdUploadResultCode,
+        SdCommandKind, SdPowerRequest, SdResult, SdResultCode, SdUploadResult, SdUploadResultCode,
     },
 };
 
@@ -26,25 +25,20 @@ pub(super) fn publish_result(result: SdResult) {
     let _ = SD_DIAG_RESULTS.try_send(result);
 }
 
-pub(super) fn publish_upload_result(result: SdUploadResult) {
+pub(super) fn publish_upload_result(mut result: SdUploadResult) {
+    if result.chunk_handler_done_at_ms != 0 {
+        result.chunk_published_at_ms = now_ms_u32();
+        result.chunk_post_handler_ms = result
+            .chunk_published_at_ms
+            .wrapping_sub(result.chunk_handler_done_at_ms);
+    }
     if SD_UPLOAD_RESULTS.try_send(result).is_err() {
         esp_println::println!(
-            "sdtask: upload_result_drop ok={} code={} bytes_written={}",
+            "sdtask: upload_result_drop request_id={} ok={} code={} bytes_written={}",
+            result.request_id,
             result.ok as u8,
             sd_upload_result_code_label(result.code),
             result.bytes_written
-        );
-    }
-}
-
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-pub(super) fn publish_asset_read_response(response: SdAssetReadResponse) {
-    if SD_ASSET_READ_RESPONSES.try_send(response).is_err() {
-        esp_println::println!(
-            "sdtask: asset_read_resp_drop ok={} code={} data_len={}",
-            response.ok as u8,
-            sd_asset_read_result_code_label(response.code),
-            response.data_len
         );
     }
 }
@@ -53,7 +47,8 @@ pub(super) fn publish_asset_read_response(response: SdAssetReadResponse) {
 pub(super) fn publish_wifi_config_response(response: WifiConfigResponse) {
     if WIFI_CONFIG_RESPONSES.try_send(response).is_err() {
         esp_println::println!(
-            "sdtask: wifi_config_resp_drop ok={} code={} has_credentials={}",
+            "sdtask: wifi_config_resp_drop id={} ok={} code={} has_credentials={}",
+            response.request_id,
             response.ok as u8,
             wifi_config_result_code_label(response.code),
             response.credentials.is_some() as u8
@@ -84,7 +79,7 @@ fn sd_kind_label(kind: SdCommandKind) -> &'static str {
     }
 }
 
-fn sd_result_code_label(code: SdResultCode) -> &'static str {
+pub fn sd_result_code_label(code: SdResultCode) -> &'static str {
     match code {
         SdResultCode::Ok => "ok",
         SdResultCode::PowerOnFailed => "power_on_failed",
@@ -114,17 +109,12 @@ fn sd_upload_result_code_label(code: SdUploadResultCode) -> &'static str {
     }
 }
 
-#[cfg_attr(feature = "asset-upload-http", allow(dead_code))]
-fn sd_asset_read_result_code_label(code: SdAssetReadResultCode) -> &'static str {
-    match code {
-        SdAssetReadResultCode::Ok => "ok",
-        SdAssetReadResultCode::Busy => "busy",
-        SdAssetReadResultCode::InvalidPath => "invalid_path",
-        SdAssetReadResultCode::NotFound => "not_found",
-        SdAssetReadResultCode::SizeMismatch => "size_mismatch",
-        SdAssetReadResultCode::PowerOnFailed => "power_on_failed",
-        SdAssetReadResultCode::InitFailed => "init_failed",
-        SdAssetReadResultCode::OperationFailed => "operation_failed",
+pub fn now_ms_u32() -> u32 {
+    let now_ms = embassy_time::Instant::now().as_millis();
+    if now_ms > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        now_ms as u32
     }
 }
 

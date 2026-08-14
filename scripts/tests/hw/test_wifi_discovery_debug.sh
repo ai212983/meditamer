@@ -3,8 +3,10 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../../lib/run_hostctl.sh
-source "$script_dir/../../lib/run_hostctl.sh"
+# shellcheck source=../../lib/serial_port.sh
+source "$script_dir/../../lib/serial_port.sh"
+load_repo_env_file_if_present ".env.local"
+ensure_hostctl_net_port "test_wifi_discovery_debug.sh"
 
 reject_legacy_env_vars "test_wifi_discovery_debug.sh" \
     HOSTCTL_PORT \
@@ -33,4 +35,4 @@ args=(test wifi-discovery-debug)
 if [[ -n "${1:-}" ]]; then
     args+=("$1")
 fi
-run_hostctl "${args[@]}"
+"$script_dir/../../hostctl.sh" "${args[@]}"

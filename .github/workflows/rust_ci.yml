@@ -1,13 +1,11 @@
-name: PR Light CI
+name: Host CI (manual)
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 permissions:
   contents: read
@@ -29,7 +27,7 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Rust fmt check
-        run: cargo +stable fmt --all -- --check --color always
+        run: scripts/ci/check_software_baseline.sh source
 
   host-regression:
     name: Host Regression and Lint
@@ -46,17 +44,33 @@ jobs:
         run: cargo install --locked rust-code-analysis-cli --version 0.0.25
       - name: Install rust-analyzer component
         run: rustup component add rust-analyzer
-      - name: Run host config regression suite
-        run: scripts/tests/host/test_event_config_host.sh
-      - name: Run host event engine suite
-        run: scripts/tests/host/test_event_engine_host.sh
-      - name: Run host touch core unit suite
-        run: scripts/tests/host/test_touch_core_host.sh
-      - name: Run host touch replay suite
-        run: scripts/tests/host/test_touch_replay_host.sh
-      - name: Host tooling clippy
-        run: scripts/ci/lint_host_tools.sh
-      - name: Rust analyzer baseline
-        run: scripts/ci/lint_rust_analyzer.sh
-      - name: Code analysis ratchet
-        run: RCA_ENFORCE=1 RCA_RATCHET=1 scripts/ci/lint_code_analysis.sh
+      - name: Host regression and clippy baseline
+        run: scripts/ci/check_software_baseline.sh host
+      - name: Static source guards
+        run: scripts/ci/check_software_baseline.sh static-source
+      - name: Source quality baseline
+        run: scripts/ci/check_software_baseline.sh quality
+
+  host-coverage:
+    name: Host Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Setup stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked cargo-llvm-cov
+      - name: Run host coverage
+        run: scripts/ci/coverage_host.sh
+      - name: Upload host coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-coverage
+          path: logs/coverage/**
+          if-no-files-found: error

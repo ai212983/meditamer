@@ -93,7 +93,7 @@ impl AppStateEngine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests {
     use super::super::{events::AppStateCommand, types::*};
     use super::*;
@@ -104,30 +104,6 @@ mod tests {
         let result = engine.apply(AppStateCommand::BootComplete);
         assert!(result.changed());
         assert!(matches!(result.after.phase, Phase::Operating));
-    }
-
-    #[test]
-    fn touch_wizard_forces_overlay_none() {
-        let mut snapshot = AppStateSnapshot::default();
-        snapshot.phase = Phase::Operating;
-        snapshot.overlay = OverlayMode::Clock;
-        let mut engine = AppStateEngine::new(snapshot);
-        let result = engine.apply(AppStateCommand::SetBase(BaseMode::TouchWizard));
-        assert!(result.changed());
-        assert!(matches!(result.after.overlay, OverlayMode::None));
-    }
-
-    #[test]
-    fn clock_overlay_invalid_for_touch_wizard() {
-        let mut snapshot = AppStateSnapshot::default();
-        snapshot.phase = Phase::Operating;
-        snapshot.base = BaseMode::TouchWizard;
-        let mut engine = AppStateEngine::new(snapshot);
-        let result = engine.apply(AppStateCommand::SetOverlay(OverlayMode::Clock));
-        assert!(matches!(
-            result.status,
-            AppStateApplyStatus::InvalidTransition
-        ));
     }
 
     #[test]

@@ -1,13 +1,30 @@
 #![allow(dead_code)]
 
-use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-#[cfg(feature = "psram-alloc")]
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    ptr::NonNull,
-    slice,
+//! PSRAM-aware global allocator.
+//!
+//! The allocator state, its counters, and the buffer types live here; [`init`]
+//! brings the allocator up, [`buffer`] does large placement-aware allocations,
+//! and [`status`] reports usage and high-water marks.
+
+mod buffer;
+mod external_value;
+mod init;
+mod internal_value;
+mod provenance;
+mod status;
+
+pub(crate) use buffer::alloc_large_byte_buffer;
+pub(crate) use external_value::ExternalValue;
+pub(crate) use init::init_allocator;
+pub(crate) use internal_value::InternalValue;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) use status::probe_internal_block_above_reserve;
+pub(crate) use status::{
+    allocator_memory_snapshot, allocator_status, log_allocator_high_water, log_allocator_status,
 };
 
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use core::{alloc::Layout, ptr::NonNull};
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AllocatorState {
@@ -38,22 +55,53 @@ pub(crate) struct AllocatorMemorySnapshot {
     pub(crate) free_external_bytes: usize,
     pub(crate) min_free_bytes: usize,
     pub(crate) min_free_internal_bytes: usize,
+    pub(crate) min_internal_alloc_charge_bytes: usize,
+    pub(crate) min_internal_alloc_internal_required: bool,
+    pub(crate) min_internal_alloc_charge_overflow: bool,
+    pub(crate) min_internal_alloc_post_free_bytes: usize,
+    pub(crate) min_internal_alloc_correlation_stable: bool,
+    pub(crate) min_internal_alloc_wifi_rx_matched: bool,
+    pub(crate) min_internal_alloc_released: bool,
     pub(crate) min_free_external_bytes: usize,
     pub(crate) large_alloc_external_ok: usize,
     pub(crate) large_alloc_internal_ok: usize,
     pub(crate) large_alloc_fail: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InternalBlockProbe {
+    pub(crate) free_before_bytes: usize,
+    pub(crate) block_bytes: usize,
+    pub(crate) reserve_bytes: usize,
+    pub(crate) free_after_bytes: usize,
+    pub(crate) stable: bool,
+}
+
 static ALLOCATOR_STATE: AtomicU8 = AtomicU8::new(initial_allocator_state());
 static PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LAST_LOGGED_PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static MIN_FREE_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
-static MIN_FREE_INTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static MIN_FREE_EXTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LARGE_ALLOC_EXTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
 static LARGE_ALLOC_INTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
 static LARGE_ALLOC_FAIL: AtomicUsize = AtomicUsize::new(0);
-const INTERNAL_HEAP_BYTES: usize = 64 * 1024;
+/// The whole internal-capability heap, in `dram2_seg` (`.dram2_uninit`).
+///
+/// It deliberately takes nothing from `dram_seg`: `.stack` is whatever is left
+/// of `dram_seg` after `.data`/`.bss`, so heap placed there comes straight out
+/// of the CPU0 stack. `dram2_seg` cannot back the stack at all, which makes it
+/// free capacity by comparison. It also holds the 45000 byte `FRAMEBUFFER_BW`,
+/// so growing this past the remainder of its 113840 bytes fails at link time.
+///
+/// The 64 KiB baseline left 3,304 bytes unused in `dram2_seg`. Exact Phase 1S
+/// evidence correlated two live vendor RX packets with a 3,400-byte heap
+/// excursion and a 13,508-byte low-water, so 3,200 bytes of that tail belongs
+/// to the sole internal-capability heap while retaining a small link-time tail.
+///
+/// Do not add a second internal region in the reclaimed PRO CPU ROM stack: that
+/// was measured at an 11/40 boot panic rate. See
+/// docs/reference/dram/dram-budget-rom-stack.md.
+const INTERNAL_HEAP_DRAM2_BYTES: usize = 64 * 1024 + 3_200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferPlacement {
@@ -63,32 +111,22 @@ pub(crate) enum BufferPlacement {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferAllocError {
-    AllocatorDisabled,
     AllocatorNotReady,
     OutOfMemory,
 }
 
 pub(crate) struct LargeByteBuffer {
     placement: BufferPlacement,
-    #[cfg(feature = "psram-alloc")]
     ptr: NonNull<u8>,
-    #[cfg(feature = "psram-alloc")]
     len: usize,
-    #[cfg(feature = "psram-alloc")]
     layout: Layout,
 }
 
-#[cfg(feature = "psram-alloc")]
 unsafe impl Send for LargeByteBuffer {}
-#[cfg(feature = "psram-alloc")]
 unsafe impl Sync for LargeByteBuffer {}
 
 const fn initial_allocator_state() -> u8 {
-    if cfg!(feature = "psram-alloc") {
-        AllocatorState::NotInitialized as u8
-    } else {
-        AllocatorState::Disabled as u8
-    }
+    AllocatorState::NotInitialized as u8
 }
 
 fn allocator_state_from_u8(raw: u8) -> AllocatorState {
@@ -162,248 +200,18 @@ fn maybe_log_new_peak(tag: &str, peak_used_bytes: usize, total_bytes: usize, fre
             Ordering::Relaxed,
         ) {
             Ok(_) => {
-                esp_println::println!(
-                    "psram: high_water tag={} peak_used_bytes={} total_bytes={} free_bytes={}",
-                    tag,
-                    peak_used_bytes,
-                    total_bytes,
-                    free_bytes
-                );
+                if !crate::firmware::update::transport_quiet() {
+                    esp_println::println!(
+                        "psram: high_water tag={} peak_used_bytes={} total_bytes={} free_bytes={}",
+                        tag,
+                        peak_used_bytes,
+                        total_bytes,
+                        free_bytes
+                    );
+                }
                 break;
             }
             Err(observed) => last_logged = observed,
         }
     }
-}
-
-impl LargeByteBuffer {
-    pub(crate) fn placement(&self) -> BufferPlacement {
-        self.placement
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        #[cfg(feature = "psram-alloc")]
-        {
-            self.len
-        }
-        #[cfg(not(feature = "psram-alloc"))]
-        {
-            0
-        }
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    #[cfg(feature = "psram-alloc")]
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
-    }
-
-    #[cfg(feature = "psram-alloc")]
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
-    }
-}
-
-#[cfg(feature = "psram-alloc")]
-impl Drop for LargeByteBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            GlobalAlloc::dealloc(&esp_alloc::HEAP, self.ptr.as_ptr(), self.layout);
-        }
-    }
-}
-
-#[cfg(feature = "psram-alloc")]
-pub(crate) fn init_allocator(psram: &esp_hal::peripherals::PSRAM<'_>) -> AllocatorStatus {
-    if matches!(current_allocator_state(), AllocatorState::Initialized) {
-        return allocator_status();
-    }
-
-    // Keep an internal-capability heap region for subsystems (Wi-Fi) that
-    // cannot allocate from external PSRAM.
-    esp_alloc::heap_allocator!(size: INTERNAL_HEAP_BYTES);
-
-    let (_start, size) = esp_hal::psram::psram_raw_parts(psram);
-    if size == 0 {
-        update_allocator_state(AllocatorState::InitFailed);
-        return allocator_status();
-    }
-
-    esp_alloc::psram_allocator!(psram, esp_hal::psram);
-    PEAK_USED_BYTES.store(0, Ordering::Relaxed);
-    LAST_LOGGED_PEAK_USED_BYTES.store(0, Ordering::Relaxed);
-    MIN_FREE_BYTES.store(usize::MAX, Ordering::Relaxed);
-    MIN_FREE_INTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
-    MIN_FREE_EXTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
-    LARGE_ALLOC_EXTERNAL_OK.store(0, Ordering::Relaxed);
-    LARGE_ALLOC_INTERNAL_OK.store(0, Ordering::Relaxed);
-    LARGE_ALLOC_FAIL.store(0, Ordering::Relaxed);
-    update_allocator_state(AllocatorState::Initialized);
-    allocator_status()
-}
-
-#[cfg(not(feature = "psram-alloc"))]
-pub(crate) fn init_allocator() -> AllocatorStatus {
-    allocator_status()
-}
-
-#[cfg(feature = "psram-alloc")]
-pub(crate) fn alloc_large_byte_buffer(
-    byte_len: usize,
-) -> Result<LargeByteBuffer, BufferAllocError> {
-    if !matches!(current_allocator_state(), AllocatorState::Initialized) {
-        return Err(BufferAllocError::AllocatorNotReady);
-    }
-
-    let alloc_len = byte_len.max(1);
-    let layout =
-        Layout::from_size_align(alloc_len, 1).map_err(|_| BufferAllocError::OutOfMemory)?;
-    // Prefer PSRAM for large buffers to preserve internal-capability RAM for
-    // Wi-Fi/radio allocations.
-    let external_ptr =
-        unsafe { esp_alloc::HEAP.alloc_caps(esp_alloc::MemoryCapability::External.into(), layout) };
-    let (ptr, placement) = if let Some(ptr) = NonNull::new(external_ptr) {
-        LARGE_ALLOC_EXTERNAL_OK.fetch_add(1, Ordering::Relaxed);
-        (ptr, BufferPlacement::Psram)
-    } else {
-        let internal_ptr = unsafe {
-            esp_alloc::HEAP.alloc_caps(esp_alloc::MemoryCapability::Internal.into(), layout)
-        };
-        if let Some(ptr) = NonNull::new(internal_ptr) {
-            LARGE_ALLOC_INTERNAL_OK.fetch_add(1, Ordering::Relaxed);
-            (ptr, BufferPlacement::InternalRam)
-        } else {
-            LARGE_ALLOC_FAIL.fetch_add(1, Ordering::Relaxed);
-            return Err(BufferAllocError::OutOfMemory);
-        }
-    };
-    unsafe {
-        core::ptr::write_bytes(ptr.as_ptr(), 0, alloc_len);
-    }
-    let _ = update_peak_used_bytes(esp_alloc::HEAP.used());
-
-    Ok(LargeByteBuffer {
-        placement,
-        ptr,
-        len: byte_len,
-        layout,
-    })
-}
-
-#[cfg(not(feature = "psram-alloc"))]
-pub(crate) fn alloc_large_byte_buffer(
-    _byte_len: usize,
-) -> Result<LargeByteBuffer, BufferAllocError> {
-    Err(BufferAllocError::AllocatorDisabled)
-}
-
-pub(crate) fn allocator_status() -> AllocatorStatus {
-    #[cfg(feature = "psram-alloc")]
-    let (total_bytes, free_bytes) = {
-        let stats = esp_alloc::HEAP.stats();
-        (stats.size, esp_alloc::HEAP.free())
-    };
-    #[cfg(not(feature = "psram-alloc"))]
-    let (total_bytes, free_bytes) = (0, 0);
-    let peak_used_bytes = update_peak_used_bytes(used_bytes(total_bytes, free_bytes));
-
-    if cfg!(feature = "psram-alloc") {
-        AllocatorStatus {
-            feature_enabled: true,
-            state: current_allocator_state(),
-            total_bytes,
-            free_bytes,
-            peak_used_bytes,
-        }
-    } else {
-        AllocatorStatus {
-            feature_enabled: false,
-            state: AllocatorState::Disabled,
-            total_bytes,
-            free_bytes,
-            peak_used_bytes,
-        }
-    }
-}
-
-pub(crate) fn allocator_memory_snapshot() -> AllocatorMemorySnapshot {
-    let status = allocator_status();
-    let used_bytes = used_bytes(status.total_bytes, status.free_bytes);
-    #[cfg(feature = "psram-alloc")]
-    let (free_internal_bytes, free_external_bytes) = (
-        esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into()),
-        esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::External.into()),
-    );
-    #[cfg(not(feature = "psram-alloc"))]
-    let (free_internal_bytes, free_external_bytes) = (0, 0);
-
-    let initialized = status.feature_enabled && matches!(status.state, AllocatorState::Initialized);
-    let (min_free_bytes, min_free_internal_bytes, min_free_external_bytes) = if initialized {
-        (
-            update_min_observed(&MIN_FREE_BYTES, status.free_bytes),
-            update_min_observed(&MIN_FREE_INTERNAL_BYTES, free_internal_bytes),
-            update_min_observed(&MIN_FREE_EXTERNAL_BYTES, free_external_bytes),
-        )
-    } else {
-        (
-            MIN_FREE_BYTES.load(Ordering::Relaxed),
-            MIN_FREE_INTERNAL_BYTES.load(Ordering::Relaxed),
-            MIN_FREE_EXTERNAL_BYTES.load(Ordering::Relaxed),
-        )
-    };
-
-    AllocatorMemorySnapshot {
-        feature_enabled: status.feature_enabled,
-        state: status.state,
-        total_bytes: status.total_bytes,
-        used_bytes,
-        free_bytes: status.free_bytes,
-        peak_used_bytes: status.peak_used_bytes,
-        free_internal_bytes,
-        free_external_bytes,
-        min_free_bytes: min_or_zero(min_free_bytes),
-        min_free_internal_bytes: min_or_zero(min_free_internal_bytes),
-        min_free_external_bytes: min_or_zero(min_free_external_bytes),
-        large_alloc_external_ok: LARGE_ALLOC_EXTERNAL_OK.load(Ordering::Relaxed),
-        large_alloc_internal_ok: LARGE_ALLOC_INTERNAL_OK.load(Ordering::Relaxed),
-        large_alloc_fail: LARGE_ALLOC_FAIL.load(Ordering::Relaxed),
-    }
-}
-
-pub(crate) fn log_allocator_status() {
-    let snapshot = allocator_memory_snapshot();
-    esp_println::println!(
-        "psram: feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}",
-        snapshot.feature_enabled,
-        snapshot.state,
-        snapshot.total_bytes,
-        snapshot.used_bytes,
-        snapshot.free_bytes,
-        snapshot.peak_used_bytes,
-        snapshot.free_internal_bytes,
-        snapshot.free_external_bytes,
-        snapshot.min_free_bytes,
-        snapshot.min_free_internal_bytes,
-        snapshot.min_free_external_bytes,
-        snapshot.large_alloc_external_ok,
-        snapshot.large_alloc_internal_ok,
-        snapshot.large_alloc_fail
-    );
-}
-
-pub(crate) fn log_allocator_high_water(tag: &str) {
-    let status = allocator_status();
-    if !status.feature_enabled || !matches!(status.state, AllocatorState::Initialized) {
-        return;
-    }
-
-    maybe_log_new_peak(
-        tag,
-        status.peak_used_bytes,
-        status.total_bytes,
-        status.free_bytes,
-    );
 }

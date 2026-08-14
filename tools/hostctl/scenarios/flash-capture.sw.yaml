@@ -1,0 +1,236 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "flash-capture"
+  version: "1.0.0"
+do:
+  - preflight:
+      call: "preflight"
+      then: "init_context"
+  - init_context:
+      set:
+        flash_ok: false
+        full_flash_attempted: false
+        full_flash_ok: false
+        fallback_used: false
+        fallback_requested: false
+        flash_error: ""
+        capture_bytes: 0
+      then: "image_source_gate"
+  - image_source_gate:
+      switch:
+        - explicit_image:
+            when: "${ .image_supplied == true }"
+            then: "resolve_explicit_image"
+        - default:
+            then: "build_image"
+  - resolve_explicit_image:
+      call: "resolve_image"
+      with:
+        source: "explicit"
+      then: "artifact_mode_gate"
+  - build_image:
+      call: "resolve_image"
+      with:
+        source: "build"
+      then: "artifact_mode_gate"
+  - artifact_mode_gate:
+      switch:
+        - app_only_mode:
+            when: "${ .flash_mode == \"app-only\" }"
+            then: "archive_app_image"
+        - default:
+            then: "prepare_bootloader"
+  - prepare_bootloader:
+      call: "prepare_bootloader"
+      then: "archive_full_image"
+  - archive_full_image:
+      call: "archive_image"
+      with:
+        include_bootloader: true
+      then: "flash_mode_gate"
+  - archive_app_image:
+      call: "archive_image"
+      with:
+        include_bootloader: false
+      then: "flash_mode_gate"
+  - flash_mode_gate:
+      switch:
+        - full_mode:
+            when: "${ .flash_mode == \"full\" }"
+            then: "begin_full_flash"
+        - app_only_mode:
+            when: "${ .flash_mode == \"app-only\" }"
+            then: "begin_direct_app_only"
+        - default:
+            then: "begin_full_flash"
+  - begin_full_flash:
+      set:
+        full_flash_attempted: true
+        flash_error: ""
+      then: "prepare_full_idf_env"
+  - prepare_full_idf_env:
+      call: "prepare_idf_env"
+      then: "flash_full"
+  - flash_full:
+      try:
+        - run_flash_full:
+            call: "flash"
+            with:
+              strategy: "full"
+              fallback_used: false
+      catch:
+        as: "flash_error_ctx"
+        do:
+          - mark_full_flash_failure:
+              set:
+                flash_ok: false
+                full_flash_ok: false
+                flash_error: ".flash_error_ctx.message"
+      then: "post_full_success_gate"
+  - post_full_success_gate:
+      switch:
+        - full_flash_failed:
+            when: "${ .flash_error != \"\" }"
+            then: "post_full_gate"
+        - default:
+            then: "mark_full_flash_success"
+  - mark_full_flash_success:
+      set:
+        flash_ok: true
+        full_flash_ok: true
+        flash_error: ""
+      then: "post_full_gate"
+  - post_full_gate:
+      switch:
+        - full_flash_passed:
+            when: "${ .flash_ok == true }"
+            then: "capture_mode_gate"
+        - default:
+            then: "full_fallback_gate"
+  - full_fallback_gate:
+      switch:
+        - fallback_allowed:
+            when: "${ .fallback_allowed == true }"
+            then: "mark_full_fallback"
+        - default:
+            then: "abort_flash"
+  - mark_full_fallback:
+      set:
+        fallback_requested: true
+        flash_error: ""
+      then: "prepare_safe_full_idf_env"
+  - prepare_safe_full_idf_env:
+      call: "prepare_idf_env"
+      then: "flash_full_safe"
+  - flash_full_safe:
+      try:
+        - run_flash_full_safe:
+            call: "flash"
+            with:
+              strategy: "full-safe"
+              fallback_used: true
+      catch:
+        as: "flash_error_ctx"
+        do:
+          - mark_safe_full_flash_failure:
+              set:
+                flash_ok: false
+                flash_error: ".flash_error_ctx.message"
+      then: "post_safe_full_success_gate"
+  - post_safe_full_success_gate:
+      switch:
+        - safe_full_flash_failed:
+            when: "${ .flash_error != \"\" }"
+            then: "abort_flash"
+        - default:
+            then: "mark_safe_full_flash_success"
+  - mark_safe_full_flash_success:
+      set:
+        flash_ok: true
+        full_flash_ok: true
+        fallback_used: true
+        flash_error: ""
+      then: "capture_mode_gate"
+  - begin_direct_app_only:
+      set:
+        fallback_requested: false
+        flash_error: ""
+      then: "prepare_idf_env"
+  - prepare_idf_env:
+      call: "prepare_idf_env"
+      then: "flash_app_only"
+  - flash_app_only:
+      try:
+        - run_flash_app_only:
+            call: "flash"
+            with:
+              strategy: "app-only"
+              fallback_used: ".fallback_requested"
+      catch:
+        as: "flash_error_ctx"
+        do:
+          - mark_app_only_flash_failure:
+              set:
+                flash_ok: false
+                flash_error: ".flash_error_ctx.message"
+      then: "post_app_only_success_gate"
+  - post_app_only_success_gate:
+      switch:
+        - app_only_flash_failed:
+            when: "${ .flash_error != \"\" }"
+            then: "post_app_only_gate"
+        - default:
+            then: "mark_app_only_flash_success"
+  - mark_app_only_flash_success:
+      set:
+        flash_ok: true
+        fallback_used: ".fallback_requested"
+        flash_error: ""
+      then: "post_app_only_gate"
+  - post_app_only_gate:
+      switch:
+        - app_only_flash_passed:
+            when: "${ .flash_ok == true }"
+            then: "capture_mode_gate"
+        - default:
+            then: "abort_flash"
+  - abort_flash:
+      call: "abort_flash"
+  - capture_mode_gate:
+      switch:
+        - capture_none:
+            when: "${ .capture_mode == \"none\" }"
+            then: "capture_none"
+        - capture_stream:
+            when: "${ .capture_mode == \"stream\" }"
+            then: "capture_stream"
+        - default:
+            then: "capture_boot"
+  - capture_none:
+      call: "capture"
+      with:
+        mode: "none"
+      then: "post_command_gate"
+  - capture_stream:
+      call: "capture"
+      with:
+        mode: "stream"
+      then: "post_command_gate"
+  - capture_boot:
+      call: "capture"
+      with:
+        mode: "boot"
+      then: "post_command_gate"
+  - post_command_gate:
+      switch:
+        - run_post_command:
+            when: "${ .post_command_supplied == true }"
+            then: "post_command"
+        - default:
+            then: "write_summary"
+  - post_command:
+      call: "post_command"
+      then: "write_summary"
+  - write_summary:
+      call: "write_summary"

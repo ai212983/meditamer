@@ -1,14 +1,9 @@
-use super::types::{BaseMode, DayBackground, DiagKind, DiagTargets, OverlayMode};
+use super::types::{DiagKind, DiagTargets};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum AppStateCommand {
     BootComplete,
-    SetBase(BaseMode),
-    ToggleDayBackground,
-    SetDayBackground(DayBackground),
-    SetOverlay(OverlayMode),
     SetUpload(bool),
-    SetAssets(bool),
     SetDiag {
         kind: DiagKind,
         targets: DiagTargets,

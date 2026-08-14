@@ -1,4 +1,10 @@
-use super::*;
+use core::cmp::min;
+
+use super::{
+    assess_tap_candidate, compute_motion_features, CandidateAssessment, CandidateScore,
+    DispatchContext, EngineAction, EngineStateId, EngineTraceSample, EventDetected,
+    EventEngineConfig, EventKind, MotionFeatures, RejectReason, SensorFrame, TapHsm,
+};
 
 impl TapHsm {
     pub(super) fn new(config: &'static EventEngineConfig) -> Self {
@@ -33,6 +39,22 @@ impl TapHsm {
     pub(super) fn clear_sequence(&mut self) {
         self.seq_last_tap_ms = None;
         self.seq_axis = 0;
+    }
+
+    /// Drops the derivative history that a sampling gap invalidates, leaving any
+    /// in-progress tap sequence intact. Sequence validity is timestamp-based, so
+    /// the gap checks in `tap_seq1`/`tap_seq2` still reject a stale sequence on
+    /// the next candidate.
+    pub(super) fn reset_motion_history(&mut self) {
+        self.prev_accel = None;
+        self.prev_jerk_l1 = 0;
+        self.last_candidate_at_ms = None;
+        self.last_big_gyro_at_ms = None;
+    }
+
+    pub(super) fn reset_sampling_history(&mut self) {
+        self.reset_motion_history();
+        self.clear_sequence();
     }
 
     pub(super) fn start_sequence(&mut self, now_ms: u64, axis: u8) {

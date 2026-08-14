@@ -6,17 +6,30 @@ document:
 do:
   - prepare_payload:
       call: "prepare_payload"
+      then: "wait_runtime_ready"
+  - wait_runtime_ready:
+      call: "wait_runtime_ready"
+      then: "boot_discovery_gate"
+  - boot_discovery_gate:
+      call: "boot_discovery_gate"
       then: "start_run"
   - start_run:
       call: "start_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "prepare_measurement"
+  - prepare_measurement:
+      call: "prepare_measurement"
       then: "cycle_gate"
   - cycle_gate:
       switch:
         - run_cycle:
             when: ".cycle <= .cycles"
             then: "net_apply_config"
-        - done:
-            then: "print_summary"
+        - default:
+            then: "assert_runtime_health"
   - net_apply_config:
       call: "net_apply_config"
       then: "net_start"
@@ -25,29 +38,76 @@ do:
       then: "net_wait_state"
   - net_wait_state:
       call: "net_wait_state"
-      then: "net_wait_ready"
-  - net_wait_ready:
-      call: "net_wait_ready"
+      then: "init_wait_ready_recovery"
+  - init_wait_ready_recovery:
+      call: "init_wait_ready_recovery"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "net_wait_ready_loop"
+  - net_wait_ready_loop:
+      do:
+        - net_wait_ready_once:
+            call: "net_wait_ready_once"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+            then: "net_wait_ready_gate"
+        - net_wait_ready_gate:
+            switch:
+              - ready_passed:
+                  when: "present(.ip)"
+                  then: "__end__"
+              - retryable_failure:
+                  when: ".net_wait_ready_retryable == true && .net_wait_ready_attempt < .net_wait_ready_recover_retries"
+                  then: "net_recover_once"
+              - default:
+                  then: "fail_upload"
+        - net_recover_once:
+            call: "net_recover_once"
+            then: "net_start"
+        - net_start:
+            call: "net_start"
+            then: "increment_wait_ready_attempt"
+        - increment_wait_ready_attempt:
+            set:
+              net_wait_ready_attempt: "${ .net_wait_ready_attempt + 1 }"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".net_wait_ready_loop_budget"
+            at: "net_wait_ready_loop_index"
+            while: "!present(.ip)"
       then: "init_upload_attempt"
   - init_upload_attempt:
       call: "init_upload_attempt"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "upload_retry_gate"
   - upload_retry_gate:
       switch:
         - upload_attempt_allowed:
             when: ".upload_attempt <= .operation_retries"
             then: "net_upload_once"
-        - upload_attempt_exhausted:
+        - default:
             then: "fail_upload"
   - net_upload_once:
       call: "net_upload_once"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "upload_result_gate"
   - upload_result_gate:
       switch:
         - upload_done:
             when: ".upload_done == true"
             then: "net_verify_once"
-        - upload_failed:
+        - default:
             then: "net_collect_diag"
   - net_collect_diag:
       call: "net_collect_diag"
@@ -56,7 +116,8 @@ do:
       call: "net_recover_once"
       then: "increment_upload_attempt"
   - increment_upload_attempt:
-      call: "increment_upload_attempt"
+      set:
+        upload_attempt: "${ .upload_attempt + 1 }"
       then: "upload_retry_gate"
   - fail_upload:
       call: "net_fail"
@@ -65,9 +126,21 @@ do:
       then: "finalize_cycle"
   - finalize_cycle:
       call: "finalize_cycle"
+      then: "assert_upload_metrics"
+  - assert_upload_metrics:
+      call: "assert_upload_metrics"
+      metadata:
+        hostctl:
+          result:
+            merge: true
       then: "advance_cycle"
   - advance_cycle:
-      call: "advance_cycle"
+      set:
+        cycle: "${ .cycle + 1 }"
       then: "cycle_gate"
   - print_summary:
       call: "print_summary"
+      then: "__end__"
+  - assert_runtime_health:
+      call: "assert_runtime_health"
+      then: "print_summary"

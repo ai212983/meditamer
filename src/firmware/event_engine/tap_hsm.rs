@@ -1,5 +1,3 @@
-use core::cmp::min;
-
 use statig::{blocking::IntoStateMachineExt as _, prelude::*};
 
 use super::{
@@ -15,8 +13,15 @@ use super::{
 #[derive(Clone, Copy, Debug)]
 enum TapHsmEvent {
     Tick(SensorFrame),
-    ImuFault { now_ms: u64 },
-    ImuRecovered { now_ms: u64 },
+    ImuFault {
+        now_ms: u64,
+    },
+    ImuRecovered {
+        now_ms: u64,
+    },
+    /// Samples were missed (scheduler jitter, touch-bus suppression) but the
+    /// sensor is healthy. Invalidates motion history only, never the sequence.
+    SamplingGap,
 }
 
 #[derive(Default)]
@@ -61,7 +66,7 @@ impl TapHsm {
                 self.update_fault_trace(EngineStateId::Idle, *now_ms);
                 Handled
             }
-            TapHsmEvent::ImuFault { .. } => Super,
+            TapHsmEvent::ImuFault { .. } | TapHsmEvent::SamplingGap => Super,
         }
     }
 
@@ -88,13 +93,10 @@ impl TapHsm {
                     return Handled;
                 }
 
-                if !assessment.axis_matches_sequence {
-                    self.start_sequence(frame.now_ms, assessment.candidate_axis);
-                    self.reject_with_reason(RejectReason::AxisMismatch);
-                    Self::push_counter_reset(context, RejectReason::AxisMismatch);
-                    return Handled;
-                }
-
+                // No axis-continuity gate: the tap detector reports a different
+                // dominant axis between taps of one deliberate sequence (X and
+                // Z both appear in capture), so requiring continuity restarted
+                // legitimate sequences. `src_axis` is the discriminator now.
                 if dt < self.config.triple_tap.min_gap_ms {
                     self.start_sequence(frame.now_ms, assessment.candidate_axis);
                     self.reject_with_reason(RejectReason::GapTooShort);
@@ -109,7 +111,7 @@ impl TapHsm {
                 self.update_fault_trace(EngineStateId::TapSeq1, *now_ms);
                 Handled
             }
-            TapHsmEvent::ImuFault { .. } => Super,
+            TapHsmEvent::ImuFault { .. } | TapHsmEvent::SamplingGap => Super,
         }
     }
 
@@ -136,13 +138,6 @@ impl TapHsm {
                     return Handled;
                 }
 
-                if !assessment.axis_matches_sequence {
-                    self.start_sequence(frame.now_ms, assessment.candidate_axis);
-                    self.reject_with_reason(RejectReason::AxisMismatch);
-                    Self::push_counter_reset(context, RejectReason::AxisMismatch);
-                    return Transition(State::tap_seq1());
-                }
-
                 if dt < self.config.triple_tap.min_gap_ms {
                     self.start_sequence(frame.now_ms, assessment.candidate_axis);
                     self.reject_with_reason(RejectReason::GapTooShort);
@@ -164,7 +159,7 @@ impl TapHsm {
                 self.update_fault_trace(EngineStateId::TapSeq2, *now_ms);
                 Handled
             }
-            TapHsmEvent::ImuFault { .. } => Super,
+            TapHsmEvent::ImuFault { .. } | TapHsmEvent::SamplingGap => Super,
         }
     }
 
@@ -192,7 +187,7 @@ impl TapHsm {
                 self.update_fault_trace(EngineStateId::TriggeredCooldown, *now_ms);
                 Handled
             }
-            TapHsmEvent::ImuFault { .. } => Super,
+            TapHsmEvent::ImuFault { .. } | TapHsmEvent::SamplingGap => Super,
         }
     }
 
@@ -228,7 +223,7 @@ impl TapHsm {
                 self.update_fault_trace(EngineStateId::SensorFaultBackoff, *now_ms);
                 Handled
             }
-            TapHsmEvent::ImuRecovered { .. } => Super,
+            TapHsmEvent::ImuRecovered { .. } | TapHsmEvent::SamplingGap => Super,
         }
     }
 
@@ -237,9 +232,13 @@ impl TapHsm {
         let _ = context;
         match event {
             TapHsmEvent::ImuFault { now_ms } => {
-                self.clear_sequence();
+                self.reset_sampling_history();
                 self.update_fault_trace(EngineStateId::SensorFaultBackoff, *now_ms);
                 Transition(State::sensor_fault_backoff())
+            }
+            TapHsmEvent::SamplingGap => {
+                self.reset_motion_history();
+                Handled
             }
             _ => Super,
         }
@@ -258,5 +257,5 @@ impl TapHsm {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "none")))]
 mod tests;

@@ -1,0 +1,150 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "ble-phase1s"
+  version: "1.0.0"
+do:
+  - await_ready:
+      call: "await_ready"
+      then: "capture_owner_identity"
+  - capture_owner_identity:
+      call: "capture_owner_identity"
+      then: "close_listener"
+  - close_listener:
+      call: "close_listener"
+      then: "enable_upload"
+  - enable_upload:
+      call: "start_network"
+      then: "await_sd_ready"
+  - await_sd_ready:
+      call: "await_sd_ready"
+      then: "drain_serial_backlog"
+  - drain_serial_backlog:
+      call: "drain_serial_backlog"
+      then: "apply_network_config"
+  - apply_network_config:
+      call: "apply_network_config"
+      then: "stop_network"
+  - stop_network:
+      call: "stop_network"
+      then: "await_network_idle"
+  - await_network_idle:
+      call: "await_network_idle"
+      then: "start_network"
+  - start_network:
+      call: "start_network"
+      then: "await_network_ready"
+  - await_network_ready:
+      call: "await_network_ready"
+      then: "verify_network_config"
+  - verify_network_config:
+      call: "verify_network_config"
+      then: "open_listener"
+  - open_listener:
+      call: "open_listener"
+      then: "await_listener_ready"
+  - await_listener_ready:
+      call: "await_listener_ready"
+      then: "verify_provisioning"
+  - verify_provisioning:
+      call: "verify_provisioning"
+      then: "init_run"
+  - init_run:
+      call: "init_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "handoff_cycles"
+  - handoff_cycles:
+      do:
+        - prepare_off_window:
+            call: "prepare_off_window"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+            then: "handoff_gate"
+        - handoff_gate:
+            switch:
+              - passed:
+                  when: ".handoff_outcome == \"pass\""
+                  then: "run_ble_window"
+              - known_off_failed:
+                  when: ".handoff_outcome == \"known_off_failed\""
+                  then: "restore_after_known_failure"
+              - known_serving_failed:
+                  when: ".handoff_outcome == \"known_serving_failed\""
+                  then: "write_failure_report"
+              - default:
+                  then: "write_failure_report"
+        - run_ble_window:
+            call: "run_ble_window"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+            then: "ble_window_gate"
+        - ble_window_gate:
+            switch:
+              - passed:
+                  when: ".ble_outcome == \"pass\""
+                  then: "restore_and_complete_cycle"
+              - known_failed:
+                  when: ".ble_outcome == \"known_failed\""
+                  then: "restore_after_known_failure"
+              - default:
+                  then: "write_failure_report"
+        - restore_and_complete_cycle:
+            call: "restore_and_complete_cycle"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+            then: "restore_gate"
+        - restore_gate:
+            switch:
+              - passed:
+                  when: ".restore_outcome == \"pass\""
+                  then: "__end__"
+              - default:
+                  then: "write_failure_report"
+        - restore_after_known_failure:
+            call: "restore_after_known_failure"
+            then: "write_failure_report"
+        - write_failure_report:
+            call: "write_failure_report"
+            then: "fail_ble_window"
+        - fail_ble_window:
+            call: "fail_ble_window"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".cycle_count"
+            at: "cycle_index"
+      then: "collect_stack_metrics"
+  - collect_stack_metrics:
+      call: "collect_stack_metrics"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "metrics_gate"
+  - metrics_gate:
+      switch:
+        - passed:
+            when: ".metrics_outcome == \"pass\""
+            then: "write_report"
+        - default:
+            then: "write_final_metrics_failure_report"
+  - write_final_metrics_failure_report:
+      call: "write_failure_report"
+      then: "fail_final_metrics"
+  - fail_final_metrics:
+      call: "fail_final_metrics"
+  - write_report:
+      call: "write_report"
+      then: "assert_stack_floors"
+  - assert_stack_floors:
+      call: "assert_stack_floors"
+      then: "__end__"

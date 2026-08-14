@@ -9,6 +9,7 @@ fn sample(
 ) -> (u64, NormalizedTouchSample) {
     let mut raw = [0u8; 8];
     if raw_bit7 {
+        raw[0] = 0x5A;
         raw[7] = 0x01;
     }
     (
@@ -24,6 +25,6 @@ fn sample(
     )
 }
 
-mod part1;
-mod part2;
-mod part3;
+mod continuity;
+mod filtering;
+mod presence;
