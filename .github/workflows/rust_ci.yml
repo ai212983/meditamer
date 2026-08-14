@@ -1,13 +1,11 @@
-name: PR Light CI
+name: Host CI (manual)
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 permissions:
   contents: read

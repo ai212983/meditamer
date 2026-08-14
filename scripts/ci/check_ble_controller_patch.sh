@@ -109,7 +109,11 @@ if grep -Eq 'SemaphoreHandle|NonReentrantMutex|critical_section::|yield_task|all
 fi
 grep -Fq 'pub unsafe fn compat_queue_reclaim' "$driver_root/src/queue.rs" \
   || fail "source-quiescent queue reclamation is missing"
-driver_delete_body="$(sed -n '/unsafe fn delete(queue: QueuePtr)/,/^        }/p' "$driver_root/src/queue.rs" | head -8)"
+driver_delete_body="$(awk '
+  /unsafe fn delete\(queue: QueuePtr\)/ { capture = 1 }
+  capture && count++ < 8 { print }
+  capture && count == 8 { exit }
+' "$driver_root/src/queue.rs")"
 if grep -Eq 'Box::from_raw|drop\(' <<<"$driver_delete_body"; then
   fail "lower RTOS deletion frees callback-reachable queue storage"
 fi

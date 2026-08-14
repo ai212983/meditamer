@@ -1,31 +1,6 @@
-name: Firmware Heavy CI
+name: Firmware CI (manual)
 
 on:
-  pull_request:
-    paths:
-      - "src/**"
-      - "config/linker/**"
-      - "config/lvgl/**"
-      - "config/partitions-ab.csv"
-      - "packages/sdcard/**"
-      - "tools/event_config_compiler/**"
-      - "tools/ota_bootloader/**"
-      - "scripts/build/build.sh"
-      - "scripts/build/ota_bootloader.sh"
-      - "scripts/build/xtensa_runner.sh"
-      - "scripts/ci/check_*.sh"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "build.rs"
-      - "rust-toolchain.toml"
-      - ".cargo/**"
-      - "config/events.toml"
-      - ".github/workflows/rust_ci_premerge.yml"
-  push:
-    branches:
-      - master
-    paths-ignore:
-      - "**/*.md"
   workflow_dispatch:
 
 env:
