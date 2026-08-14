@@ -21,7 +21,7 @@ BLE phase evidence remains in the parent ledger.
 | Capacity model | **Passed** | CAP-0001–CAP-0009 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. |
 | Recovery candidate | **Not needed** | CAP-0009 | The formal gate passed without any capacity-specific code change; none of CAP-0002's ranked candidates were implemented. |
 | Implementation | **N/A** | CAP-0009 | No capacity implementation required; the only code change this plan produced was the F-0008 credentials-retry fix (CAP-0007), unrelated to byte recovery. |
-| Device validation | **Passed (capacity)** | CAP-0009 | 20/20 cycles clean. Remaining: the separate [Wi-Fi regression gate](../guides/wifi-regression-gate.md), not yet run on this exact artifact — required by the plan's Acceptance section before Phase 1S can be declared fully complete. |
+| Device validation | Capacity passed; regression gate partial | CAP-0009, CAP-0010 | 20/20 capacity cycles clean. Wi-Fi regression gate: discovery debug passed clean; acceptance blocked by CAP-0005's pre-existing SD-card corruption on this physical card (not a regression) — needs a card reformat/swap, then rerun. |
 
 ## Evidence entries — append only
 
@@ -675,6 +675,45 @@ Next action: run the Wi-Fi regression gate on this same exact artifact
 (`logs/ble_phase1s_gate_20260814`, commit `9606e152...`) to complete the plan's full Step 3 checklist.
 Once that passes, the parent ledger's P1S-A4 criterion can close and Phase 2 reconsideration can begin,
 per the plan's Acceptance section.
+
+### CAP-0010 — Wi-Fi regression gate: discovery passes clean; acceptance blocked by CAP-0005, not a regression
+
+- Date: 2026-08-14
+- Command: `scripts/tests/hw/test_wifi_regression_gate.sh` (`HOSTCTL_NET_PORT=/dev/cu.usbserial-2110`,
+  policy `tools/hostctl/scenarios/wifi-policy.default.json`), run against the same device state left by
+  CAP-0009 — no reflash, same exact `cap-gate-001` artifact / commit `9606e152...`. Report:
+  `logs/wifi_regression_gate_cap_recovery/report.json`; stage logs alongside it.
+
+| Stage | Status | Duration |
+| --- | --- | ---: |
+| `discovery_debug` | **passed** | 71,561ms (8/8 ready rounds, `zero_discovery_rounds=0`) |
+| `acceptance_1_cycle` | **failed** | 37,507ms |
+| `acceptance_3_cycle` | skipped (fail-fast) | — |
+| `acceptance_soak` | skipped | — |
+
+**Discovery debug — the stage most directly tied to this gate's original purpose (the historical Wi-Fi
+zero-discovery blackout) — passed cleanly.** 8 of 8 rounds ready, zero blackout events, `ssid_seen` and
+scan evidence present. Nothing about the F-0008 fix regressed discovery behavior.
+
+**Acceptance failed at the exact same failure signature CAP-0005 already documented and explained**:
+`error: POST http://.../upload_begin?path=/assets/net_acceptance_payload.bin&size=524288 failed: 500
+Internal Server Error sd operation failed`. `test_wifi_acceptance.sh` always uploads to `/assets`
+(hardcoded), which is the exact directory whose shared `HCTLUPLD.TMP` this session's own earlier
+CAP-0004/CAP-0006/CAP-0007 reproductions left permanently corrupted (`ClusterChainTooLong`, confirmed
+unremovable via `SDFATRM` in CAP-0005). This is **not a new regression** — it is this ledger's own prior
+testing leaving physical SD-card state that a later, unrelated test now trips over. No serial command
+exposes an SD format/repair path (`SDFATRM` is the only removal primitive, and it already fails on this
+entry); clearing it needs physical access to the card (reformat or swap).
+
+Result: the plan's Wi-Fi-regression-gate acceptance item is **not yet clean**, but for a reason fully
+explained by already-open evidence (CAP-0005), not a property of the F-0008 fix or the capacity
+conclusion (CAP-0009) — both of those are self-contained, unaffected by this card's state, and stand as
+recorded. Discovery debug, the part of this gate with the most direct historical relevance, passed.
+
+Next action: reformat or swap the physical SD card (needs hands-on access this session did not have),
+then rerun `acceptance_1_cycle` (and `_3_cycle`) on the same exact artifact to get a clean full-gate
+pass. This is the same underlying fix CAP-0005 already called for (unique per-attempt temp filenames,
+or a repair path) — fixing that closes both CAP-0005 and this item together.
 
 ## Entry requirements
 
