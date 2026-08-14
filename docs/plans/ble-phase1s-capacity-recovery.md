@@ -1,7 +1,7 @@
 # Phase 1S Capacity Recovery Plan
 
-- Status: Capacity passed on the formal gate; Wi-Fi regression gate's SD blocker resolved (CAP-0011/CAP-0012). `acceptance_3_cycle`'s internal-memory-floor failure (CAP-0013) is root-caused (CAP-0014) as expected order-statistics behavior of a monotonic since-boot diagnostic register under a longer, continuous-session workload — not a leak, and not evidence the coordinator's real BLE-admission gate is at risk (CAP-0009 already clears that gate 20/20 with ~3x margin). No safe first-party fix was found; whether the test's own floor check is measuring the right thing for this workload is referred to the user per ADR-0011's human-acceptance requirement. The gate does not yet pass clean.
-- Last-reviewed: 2026-08-14 (CAP-0014)
+- Status: **Acceptance bar met — full Wi-Fi regression gate passes clean.** Capacity passed on the formal gate (CAP-0009); the Wi-Fi regression gate's SD blocker was resolved (CAP-0011/CAP-0012); `acceptance_3_cycle`'s internal-memory-floor failure (CAP-0013) was root-caused (CAP-0014) as expected order-statistics behavior of a monotonic since-boot diagnostic register under a longer, continuous-session workload, not a leak or a product-safety risk. CAP-0015 implements the user's chosen resolution — the test now gates on a live, current internal-free reading (mirroring what the product's own BLE-admission gate actually checks) instead of the monotonic register — and all four regression-gate stages (`discovery_debug`, `acceptance_1_cycle`, `acceptance_3_cycle`, `acceptance_soak`) pass clean on hardware. This plan's Acceptance section is satisfied; Phase 1S can advance and Phase 2 reconsideration can begin.
+- Last-reviewed: 2026-08-14 (CAP-0015)
 - Started: 2026-08-14
 - Parent: [BLE foundation and upload transport plan](ble-foundation-plan.md)
 - Evidence: [Phase 1S capacity recovery ledger](ble-phase1s-capacity-recovery-ledger.md)
@@ -155,39 +155,42 @@ device validation after its ADR decision is accepted.
 
 ## Immediate next step
 
-Capacity work is done at source/formal-gate scope: Steps 1–3 completed without needing a recovery
-candidate (CAP-0001–CAP-0009). Running the [Wi-Fi regression gate](../guides/wifi-regression-gate.md)
-on that artifact (CAP-0010) surfaced a separate, pre-existing bug — aborted mid-write SD uploads
-permanently poisoned their directory's shared temp file (CAP-0005) — which blocked the gate's
-acceptance stage on this physical card. That bug is now root-caused, fixed, host-test-covered, and
-hardware-verified, including recovery of the poisoned card (CAP-0011/CAP-0012), and the gate's
-`discovery_debug`/`acceptance_1_cycle` stages pass clean on the fixed artifact.
+**None — the plan's acceptance bar is met.** Capacity work completed at source/formal-gate scope: Steps
+1–3 completed without needing a recovery candidate (CAP-0001–CAP-0009). Running the
+[Wi-Fi regression gate](../guides/wifi-regression-gate.md) on that artifact (CAP-0010) surfaced a
+separate, pre-existing bug — aborted mid-write SD uploads permanently poisoned their directory's shared
+temp file (CAP-0005) — which was root-caused, fixed, host-test-covered, and hardware-verified, including
+recovery of the poisoned card (CAP-0011/CAP-0012).
 
-**The plan's acceptance bar is not yet met.** Rerunning the gate on the fixed artifact
-(commit `e0213a76cb80be5b0821e53720b9eafdf24f714f`) fails at `acceptance_3_cycle` instead, reproducibly
-(3/3 across CAP-0013 and CAP-0014), on an internal-memory-floor violation (`min_internal_free_bytes`
-13,456–15,116 against the 16,384 floor) unrelated to CAP-0005/CAP-0011 — see CAP-0013.
+Rerunning the gate on that fixed artifact (commit `e0213a76cb80be5b0821e53720b9eafdf24f714f`) then failed
+at `acceptance_3_cycle` instead, reproducibly (3/3 across CAP-0013 and CAP-0014), on an
+internal-memory-floor violation (`min_internal_free_bytes` 13,456–15,116 against the 16,384 floor)
+unrelated to CAP-0005/CAP-0011 — see CAP-0013. **CAP-0014 (2026-08-14) root-caused this.**
+`min_internal_free_bytes` is a monotonic register that only ever records a new *lower* value from boot
+until reboot (confirmed by source review). `ble-phase1s`'s 20 cycles each force a full Wi-Fi
+controller/stack teardown-and-recreate, so its reported minimum is the worst of 20 independent, short,
+freshly-reset exposure windows (19,896, CAP-0009). `wifi-acceptance` never tears Wi-Fi down between
+cycles, so its minimum is the worst single draw from one long, continuously-growing exposure window.
+Direct hardware A/B instrumentation confirmed **no leak**: current/resting internal-free bytes is
+bit-identical cycle-to-cycle in every run; only the monotonic register moves, and only downward. The
+coordinator's actual BLE-admission gate (`floor_ok` in `src/firmware/net/runtime.rs`) never reads this
+monotonic register — it re-probes *current* free bytes at the post-quiescence moment, which CAP-0009
+already showed clears the real 20,496-byte/4,112-contiguous-block requirement by roughly 3x margin in
+all 20 cycles. CAP-0014 referred the resulting test-methodology question — whether
+`acceptance_3_cycle`/`acceptance_soak`'s use of the monotonic register as a hard floor check is the right
+test for this workload — to the user, per ADR-0011's human-acceptance requirement for any floor-adjacent
+decision.
 
-**CAP-0014 (2026-08-14) root-caused this.** `min_internal_free_bytes` is a monotonic register that only
-ever records a new *lower* value from boot until reboot (confirmed by source review). `ble-phase1s`'s
-20 cycles each force a full Wi-Fi controller/stack teardown-and-recreate (a side effect of the BLE-open/
-close radio handoff), so its reported minimum is the worst of 20 independent, short, freshly-reset
-exposure windows (19,896, CAP-0009). `wifi-acceptance` never tears Wi-Fi down between cycles (confirmed
-live: `net_apply_config`/`net_start` print `skip ... because network is already ready`), so its minimum
-is the worst single draw from one long, continuously-growing exposure window. Direct hardware A/B
-instrumentation confirms **no leak**: current/resting internal-free bytes is bit-identical cycle-to-cycle
-in every run; only the monotonic register moves, and only downward. CAP-0002's candidate byte-recovery
-fix (route `METRICS`/`METRICSNET` through the allocation-free serial bypass) was tested directly on
-hardware and showed no confirmed benefit, and relocating it to PSRAM was rejected on an unresolved
-flash-cache-disabled safety question for too small a speculative gain. No first-party fix was found.
+**CAP-0015 (2026-08-14) implements the user's resolution and closes the plan.** The user chose to change
+what `assert_runtime_health` measures rather than revise the ADR-0011 floor: the gate now compares the
+PSRAM status line's live `internal_free_bytes` field against the floor instead of the monotonic
+`min_internal_free_bytes` register, mirroring exactly what the coordinator's own real admission gate
+re-probes. The 16,384-byte floor itself is unchanged; ADR-0011 was not touched. Rerunning the full
+Wi-Fi regression gate on this fix (`HOSTCTL_NET_SOAK_CYCLES=6`) passed all four stages clean —
+`discovery_debug`, `acceptance_1_cycle`, `acceptance_3_cycle`, and `acceptance_soak`. Decisively,
+`acceptance_3_cycle` reached `min_internal_free_bytes=15,156` — the plan's own original CAP-0001
+historical failure value — while `internal_free_bytes` held at 25,156 throughout, and the gate correctly
+passed on the live reading. See [CAP-0015](ble-phase1s-capacity-recovery-ledger.md#cap-0015--cap-0014s-methodology-question-resolved-gate-on-live-free-bytes-not-the-monotonic-minimum-full-wi-fi-regression-gate-passes-clean)
+for full evidence.
 
-The coordinator's actual BLE-admission gate (`floor_ok` in `src/firmware/net/runtime.rs`) never reads
-this monotonic register — it re-probes *current* free bytes at the post-quiescence moment, which
-CAP-0009 already showed clears the real 20,496-byte/4,112-contiguous-block requirement by roughly 3x
-margin in all 20 cycles. Whether `acceptance_3_cycle`/`acceptance_soak`'s use of the monotonic register
-as a hard floor check is the right test for this workload — as opposed to a floor revision, a change to
-what the test measures, or accepting the gate as documented and non-clean — is a decision for the user,
-not this investigation; per ADR-0011, any floor change requires explicit human acceptance and none was
-made here. Once the user decides a path forward and it is implemented and verified, rerun the full
-Wi-Fi regression gate on a fresh artifact; only then can this plan hand off to the parent plan for
-Phase 1S closure and Phase 2 reconsideration.
+This plan can now hand off to the parent plan for Phase 1S closure and Phase 2 reconsideration.

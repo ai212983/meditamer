@@ -1,6 +1,7 @@
 # BLE Foundation and Upload Transport Implementation Ledger
 
-- Status: Active
+- Status: Active — Phase 1S passed (P1S-A4 closed, E-0011); Phase 2 reconsideration can begin, its own
+  criteria not yet evaluated
 - Last-reviewed: 2026-08-14
 - Started: 2026-08-11
 - Plan: [BLE foundation and upload transport](ble-foundation-plan.md)
@@ -34,8 +35,8 @@ or explicit acceptance by named authority.
 | 1. Source audit/fixed cost | Passed | P0 | P1-A1–P1-A6 | E-0005–E-0006, E-0008–E-0010 | R-001–R-003, R-012, R-019 | Complete for commit `77569d3`; reopen on source/dependency change. |
 | 1R. Capacity reclamation | Conditional | Recoverable P1 shortfall | P1R-A1–P1R-A4 plus P1-A1–P1-A6 | — | R-002, R-003 | Only for a proved relocation path. |
 | 1D. Runtime/shutdown feasibility | Blocked | P1, directly or after P1R | P1D-A1–P1D-A5 | E-0009 | R-003–R-004, R-012, R-018–R-019 | Await revalidated exact artifact; baseline runner exists, forced-race/largest-block lanes remain. |
-| 1S. Exclusive radio handoff | In progress | P1; resident coexistence infeasible | P1S-A1–P1S-A5 | E-0010, F-0008, [CAP-0009](ble-phase1s-capacity-recovery-ledger.md#cap-0009--formal-20-cycle-gate-passed-clean-no-capacity-candidate-needed), [CAP-0013](ble-phase1s-capacity-recovery-ledger.md#cap-0013--wi-fi-regression-gate-rerun-cap-0005s-sd-blocker-is-gone-a-different-unrelated-internal-memory-floor-failure-now-blocks-a-clean-pass), [CAP-0014](ble-phase1s-capacity-recovery-ledger.md#cap-0014--cap-0013-root-caused-a-monotonic-since-boot-low-water-register-sampled-over-a-longer-teardown-free-session-not-a-leak) | R-003–R-004, R-012, R-018–R-019 | Capacity (P1S-A4) passed clean on exact commit `9606e152...`. The Wi-Fi regression gate's SD-poisoning blocker (`HCTLUPLD.TMP`, see F-0008 update) is now fixed and verified; `discovery_debug`/`acceptance_1_cycle` pass clean on the fixed artifact. `acceptance_3_cycle` still fails reproducibly (3/3) on an internal-memory-floor violation; CAP-0014 root-caused it as expected order-statistics behavior of a monotonic since-boot diagnostic register under a longer, continuous-session workload (not a leak, and the coordinator's real BLE-admission gate — re-probed live, not read from that register — already clears with ~3x margin per CAP-0009). No safe first-party fix was found; whether the test's floor check itself is measuring the right thing for this workload is referred to the user (ADR-0011 requires human acceptance for any floor change). P1S-A4 remains open pending that decision. |
-| 2. BLE architecture ADR | Blocked | P1D or P1S | P2-A1–P2-A5 | E-0007–E-0008 | R-005, R-013–R-014, R-017–R-018 | Await exact-artifact runtime feasibility. |
+| 1S. Exclusive radio handoff | Passed | P1; resident coexistence infeasible | P1S-A1–P1S-A5 | E-0010, E-0011, F-0008, [CAP-0009](ble-phase1s-capacity-recovery-ledger.md#cap-0009--formal-20-cycle-gate-passed-clean-no-capacity-candidate-needed), [CAP-0013](ble-phase1s-capacity-recovery-ledger.md#cap-0013--wi-fi-regression-gate-rerun-cap-0005s-sd-blocker-is-gone-a-different-unrelated-internal-memory-floor-failure-now-blocks-a-clean-pass), [CAP-0014](ble-phase1s-capacity-recovery-ledger.md#cap-0014--cap-0013-root-caused-a-monotonic-since-boot-low-water-register-sampled-over-a-longer-teardown-free-session-not-a-leak), [CAP-0015](ble-phase1s-capacity-recovery-ledger.md#cap-0015--cap-0014s-methodology-question-resolved-gate-on-live-free-bytes-not-the-monotonic-minimum-full-wi-fi-regression-gate-passes-clean) | R-003–R-004, R-012, R-018–R-019 | Capacity (P1S-A4) passed clean on exact commit `9606e152...` (CAP-0009: 20/20 handoff cycles, zero violations, CPU0/touch floors and zero UART-drop delta clear, 19,896-byte serving low-water). The Wi-Fi regression gate's SD-poisoning blocker (`HCTLUPLD.TMP`) was fixed and verified (F-0008 update, CAP-0011/CAP-0012); `acceptance_3_cycle` then failed on an internal-memory-floor violation that CAP-0014 root-caused as expected order-statistics behavior of a monotonic since-boot diagnostic register (not a leak; the coordinator's real BLE-admission gate re-probes live and already clears with ~3x margin per CAP-0009), and referred the test's own floor-check methodology to the user. **CAP-0015 (2026-08-14) resolved that referral**: the user chose to change what `wifi-acceptance`'s memory gate measures (live current free bytes, not the monotonic minimum) rather than revise the ADR-0011 floor, which stays unchanged. All four Wi-Fi regression gate stages now pass clean on commit `e5597e90...` (source-identical to `e0213a76...` in `src`/`packages`, differing only by this host-tooling-only fix) — including `acceptance_3_cycle` at the plan's own historical `min_internal_free_bytes=15,156` failure value, passing correctly on `internal_free_bytes=25,156`. P1S-A4 is closed. Phase 1S's required criteria all have exact device evidence; Phase 2 reconsideration can begin (see E-0011). |
+| 2. BLE architecture ADR | Blocked | P1D or P1S | P2-A1–P2-A5 | E-0007–E-0008, E-0011 | R-005, R-013–R-014, R-017–R-018 | P1S now satisfies the prerequisite (see E-0011); reconsideration of this phase can begin. P2-A1–P2-A5 have not themselves been evaluated — state remains Blocked pending that review. |
 | 3. Coordinator/update lease | Blocked | P2 | P3-A1–P3-A5 | — | R-002–R-003, R-007A, R-017 | Await accepted ADR. |
 | 4. Base diagnostic BLE | Blocked | P3 | P4-A1–P4-A5 | — | R-002–R-004, R-012, R-014 | Await coordinator proof. |
 | 5. Device/macOS proof | Blocked | P4 | P5-A1–P5-A5 | — | R-002, R-003, R-004, R-005, R-006, R-007A, R-014, R-017 | First physical BLE phase. |
@@ -506,6 +507,60 @@ whether it blocks.
 - Gate disposition: **Phase 1 passes at durable source/build scope; Phase 1S remains In progress at
   the runtime capacity gate; Phase 2 remains Blocked.**
 
+### E-0011: Phase 1S device gate closed — Wi-Fi regression gate passes clean end to end
+
+- Date: 2026-08-14
+- Evidence kind: device runs, full detail in the [Phase 1S capacity recovery ledger](ble-phase1s-capacity-recovery-ledger.md),
+  entries CAP-0009 and CAP-0013–CAP-0015. This entry summarizes and closes P1S-A4 at this ledger's
+  scope; it does not restate the underlying evidence.
+- Chain since E-0010: CAP-0009 ran the formal 20-cycle `hostctl test ble-phase1s` gate on exact commit
+  `9606e152e816215449486f286cb400bc52d08bab` (post F-0008 credentials-retry fix) and passed clean —
+  zero violations across 20 handoff/restore/upload cycles, off-state 59,608/31,672 bytes bit-identical
+  all 20 cycles, serving low-water 19,896 bytes (+3,512 over the 16,384 floor), CPU0 stack minimum
+  16,696 (floor 8,192), touch-core stack minimum 3,300 (floor 1,024), zero UART overflow. Rerunning the
+  separate Wi-Fi regression gate (CAP-0010, CAP-0013) surfaced two further, unrelated issues: the
+  `HCTLUPLD.TMP` per-directory SD poisoning bug (CAP-0005), root-caused and fixed at commit
+  `e0213a76cb80be5b0821e53720b9eafdf24f714f` and hardware-verified (CAP-0011/CAP-0012); and an
+  `acceptance_3_cycle` internal-memory-floor failure that CAP-0014 root-caused as expected
+  order-statistics behavior of the `min_internal_free_bytes` monotonic since-boot register under
+  `wifi-acceptance`'s longer, teardown-free load pattern — not a leak, and not a risk to the
+  coordinator's real BLE-admission gate, which re-probes live free bytes and already clears with ~3x
+  margin (CAP-0009). CAP-0014 referred the resulting test-methodology question — what
+  `assert_runtime_health` should compare against the floor — to the user, per ADR-0011's
+  human-acceptance requirement for any floor-adjacent decision.
+- Resolution: the user chose to change what the test measures rather than revise the ADR-0011 floor.
+  **CAP-0015** (2026-08-14) changed `tools/hostctl/src/workflows/wifi/acceptance/runtime_core/start.rs`
+  so `assert_runtime_health`'s memory gate compares the PSRAM status line's live `internal_free_bytes`
+  against the floor instead of the monotonic `min_internal_free_bytes` register — mirroring exactly
+  what the coordinator's own `settled_off_resource_snapshot` admission gate re-probes at the moment of
+  need. The floor itself (16,384 bytes) and ADR-0011 are unchanged. Fix commit
+  `e5597e90385dd40ada3aa2ca6a0ae6f483672bf2`, host-tooling only — `git diff
+  e0213a76...e5597e90 -- src/ packages/` is empty, so the firmware exercised is source-identical to the
+  CAP-0011/CAP-0012/CAP-0013/CAP-0014 artifact.
+- Result: rerunning the full Wi-Fi regression gate on this fix
+  (`HOSTCTL_NET_SOAK_CYCLES=6 scripts/tests/hw/test_wifi_regression_gate.sh`, board
+  `/dev/cu.usbserial-2110`) passed all four stages clean — `discovery_debug` (72,217ms, 8/8 ready
+  rounds, zero blackout events), `acceptance_1_cycle` (30,105ms), `acceptance_3_cycle` (55,697ms), and
+  `acceptance_soak` at 6 cycles (48,293ms) — `final_status: "passed"`, `panic_detected: false`,
+  `unexpected_reboot_detected: false`. Decisively, `acceptance_3_cycle` reached
+  `min_internal_free_bytes=15,156` — the plan's own original CAP-0001 historical failure figure — while
+  `internal_free_bytes` (live) held at 25,156 throughout all three acceptance stages, and the gate
+  correctly passed on the live reading rather than reproducing the historical failure. Full evidence:
+  [CAP-0015](ble-phase1s-capacity-recovery-ledger.md#cap-0015--cap-0014s-methodology-question-resolved-gate-on-live-free-bytes-not-the-monotonic-minimum-full-wi-fi-regression-gate-passes-clean).
+- Effect: **P1S-A4 is closed.** Combined with P1S-A1–P1S-A3/P1S-A5's already-passing source/host
+  evidence and CAP-0009's device exercise of handoff/restore/acquire/close cycles, ownership, and
+  update-admission precedence, Phase 1S's required criteria (P1S-A1–P1S-A5) all have exact evidence.
+  One honest caveat: CAP-0009's 20-cycle capacity gate and CAP-0015's Wi-Fi regression gate ran on two
+  closely related but not bit-identical artifacts (`9606e152...` and `e5597e90...` respectively,
+  differing by the CAP-0011 FAT chain-free fix in `packages/sdcard` plus this entry's host-tooling
+  change) — confirmed by diff to touch no Wi-Fi/BLE/memory runtime path, so there is no plausible
+  mechanism for the two results to diverge, but the two gates have not been re-run together on one
+  literal binary. Per the [Phase 1S capacity recovery plan](ble-phase1s-capacity-recovery.md)'s own
+  Acceptance section (which lists successful Wi-Fi regression and 20-cycle handoff gates as separate
+  items, not a single-artifact requirement), this satisfies the plan's stated acceptance bar. Phase 2
+  reconsideration can begin per the phase-status table; Phase 2's own P2-A1–P2-A5 criteria have not been
+  evaluated and its state remains Blocked pending that review.
+
 ## Transition history — append only
 
 | ID | Date | Target | From | To | Reason | Authority | Evidence |
@@ -525,6 +580,7 @@ whether it blocks.
 | H-0013 | 2026-08-11 | Phase 1D | Not started | Blocked | Await durable Phase-1 source/build evidence. | Plan | E-0008 |
 | H-0014 | 2026-08-14 | Phase 1 | Needs revalidation | Passed | Selective Phase 1S import creates one durable exact source/build identity and passes the complete software baseline. | User direction and source/build evidence | E-0010 |
 | H-0015 | 2026-08-14 | Phase 1S | Not started | In progress | Both Wi-Fi and BLE are required; exclusive handoff is imported while its 1,228-byte runtime floor deficit remains binding. | User direction and retained device evidence | E-0010, F-0006 |
+| H-0016 | 2026-08-14 | Phase 1S | In progress | Passed | P1S-A4 closed: formal 20-cycle `ble-phase1s` gate (CAP-0009) and the full Wi-Fi regression gate (CAP-0015, all four stages) both pass clean; CAP-0014's referred test-methodology question resolved by gating on live free bytes instead of the monotonic since-boot minimum, without changing the ADR-0011 floor. | User direction and device evidence | E-0011, CAP-0009, CAP-0013–CAP-0015 |
 
 ## Deviations and failures — append only
 
