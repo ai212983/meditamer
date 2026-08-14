@@ -304,7 +304,6 @@ async fn run_network_epoch(
     pending_rejection: &mut Option<(u32, RejectReason)>,
 ) -> Result<EpochResult, &'static str> {
     println!("upload_http: wifi_backend name={}", wifi::backend_name());
-    let runtime_config = wifi::current_runtime_config();
     let (mut controller, sta_device) =
         match wifi::initialize_runtime_sta(wifi_peripheral.reborrow()) {
             Ok(parts) => parts,
@@ -331,6 +330,13 @@ async fn run_network_epoch(
 
     let mut current_restore_epoch = restore_epoch;
     let (epoch, service_error) = loop {
+        // Re-read live config on every iteration, not only once at epoch entry.
+        // A retry within this epoch (finish_product_quiescence() returning false)
+        // recreates the connection task below; reusing a config snapshot captured
+        // before this iteration started would silently discard credentials/policy
+        // updates the previous connection attempt had already picked up live (see
+        // docs/plans/ble-phase1s-capacity-recovery-ledger.md CAP-0006).
+        let runtime_config = wifi::current_runtime_config();
         let service_result = {
             let connection = wifi::run_wifi_connection_task(
                 &mut controller,

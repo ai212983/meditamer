@@ -4,8 +4,10 @@
 - Last-reviewed: 2026-08-14
 - Started: 2026-08-11
 - Evidence: [BLE implementation ledger](ble-foundation-ledger.md)
-- Related: [Asset upload transport plan](asset-upload-transport.md), [A/B update
-  foundation](../architecture/0009-ab-firmware-update-foundation.md), [BLE service ADR](../architecture/0011-bounded-ble-service-foundation.md)
+- Related: [Phase 1S capacity recovery](ble-phase1s-capacity-recovery.md),
+  [Asset upload transport plan](asset-upload-transport.md), [A/B update
+  foundation](../architecture/0009-ab-firmware-update-foundation.md),
+  [BLE service ADR](../architecture/0011-bounded-ble-service-foundation.md)
 
 ## Objective and authority
 
