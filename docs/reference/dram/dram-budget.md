@@ -164,28 +164,33 @@ Dropping the knob without the hook recovers 13168 instead of 9912, but adds
 exactly one flash reference from `.rwtext` - the `semphr_*` constant above. The
 extra 3256 bytes are not worth that failure mode.
 
-### Internal heap moved out of `dram_seg` entirely (-59392)
+### Internal heap moved out of `dram_seg` entirely (-68736)
 
-`INTERNAL_HEAP_DRAM2_BYTES` in `src/firmware/psram/core.rs` is the whole
-internal-capability heap, 58 KB, living in `dram2_seg` via `.dram2_uninit`.
+`INTERNAL_HEAP_DRAM2_BYTES` in `src/firmware/psram/mod.rs` is the whole
+internal-capability heap, 68,736 bytes, living in `dram2_seg` via `.dram2_uninit`.
 Nothing is left in `dram_seg`, so all of it is stack now.
 
 Two things made that possible: the `dram2_seg` extension below, and moving
 `FRAMEBUFFER_BW_PREVIOUS` to PSRAM, which freed 45000 bytes of `dram2_seg`.
 
-Capacity went 64 KB to 58 KB, leaving about 9.6 KB of margin over the
-48520-byte measured peak. Constraints:
+The 2026-08-14 selective Phase 1S import expands the heap to the largest reviewed
+single-region layout. The ordinary release links `.data/.data.wifi/.bss/.stack/.dram2_uninit` at
+16,800/540/70,068/109,196/113,736 bytes. The BLE release links those sections at
+16,272/1,872/76,364/36,564/113,736 bytes. Constraints:
 
 - esp-alloc supports exactly three heap regions; this one plus PSRAM uses two.
   Do not spend the third on the PRO CPU ROM stack — that was measured at an
   11/40 boot panic rate, see
   [Reclaiming the ROM Stack](./dram-budget-rom-stack.md#measured-failure).
-- `.dram2_uninit` is 104392 of 113840 bytes. Growing
-  `INTERNAL_HEAP_DRAM2_BYTES` overflows `dram2_seg` at link time.
+- `.dram2_uninit` is 113,736 of 113,840 bytes: the 45,000-byte active panel framebuffer plus the
+  68,736-byte heap leave 104 bytes. Growing `INTERNAL_HEAP_DRAM2_BYTES` overflows `dram2_seg` at
+  link time.
 
-Watch `min_internal_free_bytes` in the serial telemetry. If it drops below about
-4 KB on real workloads, the heap needs to grow into the 9448 bytes still spare
-in `dram2_seg`.
+Watch `min_internal_free_bytes` and its allocation provenance in serial telemetry. The binding
+source-branch Phase 1S run reached 15,156 bytes against the 16,384-byte floor; this imported build
+does not create more `dram2_seg` capacity. Recovery therefore requires reducing applicable live
+internal ownership or an explicitly reviewed change to the floor's workload/failure model, followed
+by an exact-artifact device rerun.
 
 ### Previous framebuffer to PSRAM (frees 45000 in `dram2_seg`)
 

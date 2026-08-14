@@ -1,7 +1,7 @@
 # BLE Foundation and Upload Transport Implementation Ledger
 
 - Status: Active
-- Last-reviewed: 2026-08-11
+- Last-reviewed: 2026-08-14
 - Started: 2026-08-11
 - Plan: [BLE foundation and upload transport](ble-foundation-plan.md)
 - Related decisions: [A/B firmware-update foundation](../architecture/0009-ab-firmware-update-foundation.md),
@@ -31,10 +31,11 @@ or explicit acceptance by named authority.
 | Phase | State | Prerequisites | Required criteria | Gate evidence | Blocking risks | Next action |
 | --- | --- | --- | --- | --- | --- | --- |
 | 0. Planning baseline | Passed | — | P0-A1–P0-A4 | E-0001–E-0004 | — | Complete. |
-| 1. Source audit/fixed cost | Needs revalidation | P0 | P1-A1–P1-A6 | E-0005–E-0006, E-0008–E-0009 | R-001–R-003, R-012, R-019 | Establish durable identity and repeat locked gates. |
+| 1. Source audit/fixed cost | Passed | P0 | P1-A1–P1-A6 | E-0005–E-0006, E-0008–E-0010 | R-001–R-003, R-012, R-019 | Complete for commit `77569d3`; reopen on source/dependency change. |
 | 1R. Capacity reclamation | Conditional | Recoverable P1 shortfall | P1R-A1–P1R-A4 plus P1-A1–P1-A6 | — | R-002, R-003 | Only for a proved relocation path. |
 | 1D. Runtime/shutdown feasibility | Blocked | P1, directly or after P1R | P1D-A1–P1D-A5 | E-0009 | R-003–R-004, R-012, R-018–R-019 | Await revalidated exact artifact; baseline runner exists, forced-race/largest-block lanes remain. |
-| 2. BLE architecture ADR | Blocked | P1D | P2-A1–P2-A5 | E-0007–E-0008 | R-005, R-013–R-014, R-017–R-018 | Await exact-artifact runtime feasibility. |
+| 1S. Exclusive radio handoff | In progress | P1; resident coexistence infeasible | P1S-A1–P1S-A5 | E-0010 | R-003–R-004, R-012, R-018–R-019 | Recover or explicitly re-derive the 16,384-byte internal floor, then rerun exact device gates. |
+| 2. BLE architecture ADR | Blocked | P1D or P1S | P2-A1–P2-A5 | E-0007–E-0008 | R-005, R-013–R-014, R-017–R-018 | Await exact-artifact runtime feasibility. |
 | 3. Coordinator/update lease | Blocked | P2 | P3-A1–P3-A5 | — | R-002–R-003, R-007A, R-017 | Await accepted ADR. |
 | 4. Base diagnostic BLE | Blocked | P3 | P4-A1–P4-A5 | — | R-002–R-004, R-012, R-014 | Await coordinator proof. |
 | 5. Device/macOS proof | Blocked | P4 | P5-A1–P5-A5 | — | R-002, R-003, R-004, R-005, R-006, R-007A, R-014, R-017 | First physical BLE phase. |
@@ -462,6 +463,49 @@ whether it blocks.
 - Gate disposition: **Phase 1 Needs revalidation; Phase 1D and Phase 2 remain Blocked.** E-0009
   supersedes E-0008's next implementation action, not its durable-source failure or hardware boundary.
 
+### E-0010: Selective Phase 1S integration on the active Wi-Fi branch
+
+- Date/time and scope: 2026-08-14; selective import of the last code-bearing Phase 1S source
+  `69dd8499bc3823db04420596bf78749e22552ec6` into `fix/wifi_connectivity`. Experimental and
+  evidence-snapshot commits were not merged. The active branch's later non-cancellable SD DMA rule
+  was preserved while adding the required internal bounce sector for PSRAM-backed FAT state.
+- Evidence kind: committed source, host, build, and static analysis. No device or physical run.
+- Durable source identity: commit `77569d33d575a5ebb70a2edc45047ab351d7ce5c`. The locked patch set is
+  restartable `embassy-net` 0.9.1, allocator-provenance `esp-alloc` 0.10.0, bounded `esp-radio`
+  1.0.0-beta.0, and retained `esp-radio-rtos-driver` 0.3.0. The retained pre-integration safety
+  stash was not dropped.
+- Source result: the network supervisor owns restartable Wi-Fi epochs and exact request/boot/epoch
+  handoff acknowledgements. Acquire closes HTTP admission, drains or aborts SD/upload ownership,
+  fences callback/queue sources, settles allocator evidence, and exposes a bounded BLE controller/
+  host-only window. Release closes BLE, rejects ambiguous ownership, and restores Wi-Fi, DHCP,
+  listener policy, and upload service. Update admission outranks handoff.
+- Host/evidence result: the Phase 1S Serverless Workflow and `hostctl test ble-phase1s` retain
+  schema-versioned success/failure reports, exact artifact/feature identity, allocation-free serving
+  snapshots, allocator RX correlation, stack/UART/resource floors, and known/unknown ownership
+  branches. Hostctl passed 257 tests; BLE transport/handoff passed 32 tests; SD passed 19 tests.
+- Build/static result: the complete software baseline passed locked metadata, source/vendor guards,
+  all host tests and strict lints, default and BLE releases, minimal/slim/telemetry/all-feature builds,
+  strict firmware Clippy, image/stack ratchets, reachability, script-surface, rust-analyzer summary,
+  and code-analysis ratchets. BLE image is 1,739,296/1,900,544 bytes with 161,248 headroom; ELF
+  SHA-256 is `d9d60721605c46c14715ebbb013f4e4ec0686700f9537f3b887f134e38f0aded`.
+- Linked BLE sections: `.data` 16,272, `.data.wifi` 1,872, `.bss` 76,364, `.stack` 36,564, and
+  `.dram2_uninit` 113,736. The latter contains the 45,000-byte active panel framebuffer and
+  68,736-byte sole internal heap, leaving 104 bytes in `dram2_seg`.
+- Capacity boundary: the imported source branch's binding device evidence reached 15,156 internal
+  bytes against the unchanged 16,384-byte floor, a 1,228-byte deficit. This integration did not rerun
+  or supersede that device result and does not enable BLE by default. Both Wi-Fi and BLE remain product
+  requirements; the next candidate must recover applicable live internal memory or explicitly justify
+  a different floor from a reviewed workload/failure model before changing the threshold.
+
+| Criterion | Result | Observation | Remaining gate |
+| --- | --- | --- | --- |
+| P1-A1–P1-A6 | Pass | Durable exact source, locked patches, full builds, image budget, and guards pass. | Reopen on source, dependency, feature, or artifact change. |
+| P1S-A1–P1S-A3/P1S-A5 | Source/host pass | Handoff lifecycle, rollback, update priority, evidence workflow, and focused host tests are present and guarded. | Exact device exercise. |
+| P1S-A4 | Fail retained | Historical binding minimum is 15,156 versus 16,384; no new device run was made. | New memory or threshold premise plus complete Wi-Fi/20-cycle rerun. |
+
+- Gate disposition: **Phase 1 passes at durable source/build scope; Phase 1S remains In progress at
+  the runtime capacity gate; Phase 2 remains Blocked.**
+
 ## Transition history — append only
 
 | ID | Date | Target | From | To | Reason | Authority | Evidence |
@@ -479,6 +523,8 @@ whether it blocks.
 | H-0011 | 2026-08-11 | Phase 1 | Passed | Needs revalidation | Async-progress and durable-source gates were falsified. | Agentic review | E-0008 |
 | H-0012 | 2026-08-11 | Phase 2 | In progress | Blocked | Reopened Phase 1 and new runtime feasibility gate are prerequisites. | Plan | E-0008 |
 | H-0013 | 2026-08-11 | Phase 1D | Not started | Blocked | Await durable Phase-1 source/build evidence. | Plan | E-0008 |
+| H-0014 | 2026-08-14 | Phase 1 | Needs revalidation | Passed | Selective Phase 1S import creates one durable exact source/build identity and passes the complete software baseline. | User direction and source/build evidence | E-0010 |
+| H-0015 | 2026-08-14 | Phase 1S | Not started | In progress | Both Wi-Fi and BLE are required; exclusive handoff is imported while its 1,228-byte runtime floor deficit remains binding. | User direction and retained device evidence | E-0010, F-0006 |
 
 ## Deviations and failures — append only
 
@@ -489,6 +535,8 @@ whether it blocks.
 | F-0003 | 2026-08-11 | P1-A2 | The first bounded TX patch yielded to RTOS tasks but synchronously occupied the Embassy executor for up to 100 ms. | Replace with callback-woken async waits; reopen Phase 1. | Source correction and guards pass in E-0008; durable rebuild still required. | Mitigating |
 | F-0004 | 2026-08-11 | P1-A3 | Phase-1 artifacts are not reconstructible from the recorded HEAD/vendor digest because first-party inputs are dirty or untracked. | Preserve prior evidence; require an isolated commit or committed immutable source bundle. | Replacement P1 evidence required. | Open |
 | F-0005 | 2026-08-11 | P1D-A2/P1D-A4 | Static heap forecast is below the 16 KiB runtime floor before opaque controller allocations. | Insert Phase 1D before ADR acceptance. | Exact-artifact runtime measurement required. | Open |
+| F-0006 | 2026-08-14 | P1S-A4 | The imported source branch's binding Wi-Fi run reached 15,156 internal bytes against the unchanged 16,384-byte floor. The selective import adds no remaining `dram2_seg` capacity and does not itself rerun the device gate. | Keep BLE non-default and Phase 2 blocked; preserve both Wi-Fi and BLE requirements and the exact historical failure. | Recover applicable live internal ownership or approve a reviewed workload/failure-model change to the floor, then build/full-flash one exact artifact and rerun complete Wi-Fi plus 20 Phase 1S cycles. | Open |
+| F-0007 | 2026-08-14 | P1-A3 | Closure record for F-0004: the complete selective integration, exact vendor identities, guards, host workflow, and build configuration are committed together at `77569d33d575a5ebb70a2edc45047ab351d7ce5c`. | Reopen P1 on any source, patch digest, feature graph, or artifact-identity change. | E-0010 supersedes F-0004's open state only; its historical dirty-source observation remains. | Closed |
 
 ## Evidence entry template
 
@@ -526,8 +574,9 @@ was false. A retry always receives a new evidence ID.
 
 ## Next implementation step
 
-Include the callback fence, lifecycle baseline, host workflow, and async transport in one durable
-Phase-1 identity and repeat the locked gates. Flash and run the 20-cycle baseline only from that exact
-artifact. Then implement and run largest-internal-block telemetry plus forced cancellation at both TX
-waits and active/full-queue RX ingress. Do not accept ADR-0011, implement Phase 3, begin macOS product
-BLE, mutate SD, or enable BLE by default before both gates pass.
+Commit `77569d33d575a5ebb70a2edc45047ab351d7ce5c` closes the durable source/build-identity gap.
+Next, identify a safe source-level recovery of at least the observed 1,228-byte internal-floor deficit,
+or write and review a workload/failure-model basis for a different floor before changing it. Build and
+full-flash one clean labeled candidate, then run the complete Wi-Fi regression and exactly 20 Phase 1S
+handoff/BLE/restore cycles. Do not accept ADR-0011, implement Phase 3, begin macOS product BLE, mutate
+SD over BLE, or enable BLE by default until that exact-artifact runtime gate passes.

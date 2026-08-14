@@ -1,7 +1,7 @@
 # BLE Foundation and Upload Transport Plan
 
 - Status: Active
-- Last-reviewed: 2026-08-11
+- Last-reviewed: 2026-08-14
 - Started: 2026-08-11
 - Evidence: [BLE implementation ledger](ble-foundation-ledger.md)
 - Related: [Asset upload transport plan](asset-upload-transport.md), [A/B update
@@ -24,12 +24,23 @@ capacity is assigned. If that cost crosses the current limit but is recoverable 
 fonts/assets to SD, Phase 1R may do so without changing the partition map or reserve. SD-loaded WASM
 architecture remains separate.
 
+Both Wi-Fi and BLE are product requirements. Commit `77569d3` imports the exclusive radio-handoff
+implementation and its exact dependency/host evidence surface into the active branch: Wi-Fi remains
+the normal serving owner, a bounded lease can quiesce and release it for BLE, and restoration must
+recover DHCP/listener service before the lease closes. The import does not claim the runtime memory
+gate: the source branch's binding Wi-Fi run reached 15,156 internal bytes against the current 16,384
+floor. The next work is to recover applicable internal memory or re-derive that floor from an explicit
+failure model; it is not permission to drop either radio or silently lower the threshold.
+
 ## Confirmed baseline
 
 - Each A/B slot is 2,031,616 bytes and must retain 131,072 bytes; maximum image size is 1,900,544.
   The accepted Phase 6 image is 1,855,360 bytes, leaving 45,184 bytes beyond that reserve.
 - Phase 6 sections are `.data` 15,804, `.bss` 69,420, `.stack` 110,836, and `.dram2_uninit`
   104,392 bytes. Internal DRAM is binding and `.stack` is the `dram_seg` remainder.
+- The imported `ble-release` candidate is 1,739,296/1,900,544 bytes with 161,248 bytes image
+  headroom. Its sections are `.data` 16,272, `.data.wifi` 1,872, `.bss` 76,364, `.stack` 36,564,
+  and `.dram2_uninit` 113,736. This is build evidence, not a device memory-floor pass.
 - Enabling `esp-radio/ble` enables `esp-hal/__bluetooth`. On ESP32, `esp-hal` 1.1.1 then sets
   `RESERVE_DRAM=0x10000`; against Phase 6 this reduces the pre-BLE-static stack ceiling to about
   45,300 bytes.
@@ -166,11 +177,34 @@ not product advertising, macOS interoperability, power acceptance, SD mutation, 
 - P1D-A5: record the opaque allocation plateau and whether deterministic shutdown is feasible. Stop on
   any floor breach, growth, late callback, unacknowledged shutdown, reset, or artifact mismatch.
 
+### Phase 1S: Exclusive Wi-Fi/BLE radio-handoff feasibility
+
+Use this branch when resident Wi-Fi plus BLE cannot preserve the internal-memory floor. Both
+capabilities remain in each candidate image, but only one controller owns the shared radio at a time.
+
+- P1S-A1: the network owner is restartable from the original Wi-Fi token and static stack resources;
+  no runner, socket, callback, or queue owner escapes its epoch.
+- P1S-A2: acquire closes HTTP admission, drains or aborts upload/SD work, drops the network runner,
+  fences callbacks, and acknowledges `OffConfirmed` only after resource and allocator settlement.
+  Ambiguous ownership fault-latches until reboot.
+- P1S-A3: a bounded BLE controller/host-only window starts only from that exact off lease, closes with
+  balanced operations and zero live/unattributed owners, then restores Wi-Fi, DHCP, listener policy,
+  and upload service for the same boot/epoch.
+- P1S-A4: the exact clean `ble-release` artifact passes 20 handoff/restore/upload cycles, the complete
+  Wi-Fi regression gate, CPU0/touch floors, zero UART-drop delta, and internal free >=16,384. The
+  source-branch 15,156 result remains the binding failure until a new architectural or threshold
+  premise is implemented and remeasured.
+- P1S-A5: update admission outranks handoff, never flashes through ambiguous ownership, and closes BLE
+  before restoration or flash preparation. Evidence is schema-versioned and written on success and
+  failure.
+
+Phase 2 may proceed after either resident Phase 1D or exclusive-handoff Phase 1S passes.
+
 ## Stage B: Minimal permanent BLE foundation
 
 ### Phase 2: BLE architecture and resource ADR
 
-Accept and link an ADR only after Phase 1D passes. It ratifies coordinator/task ownership,
+Accept and link an ADR only after Phase 1D or Phase 1S passes. It ratifies coordinator/task ownership,
 time-bounded availability, coex-enabled serialized traffic, diagnostic GATT, resource/power budgets,
 macOS-first acceptance, diagnostic advertising/privacy identity, and a successor/amendment contract
 for ADR-0009's update lease.
@@ -332,9 +366,10 @@ Every `Pass` maps each required criterion to append-only evidence. A changed dep
 criterion, or release artifact reopens affected gates. Missing numeric limits cannot be waived by
 recording a measurement. Host evidence cannot satisfy device/physical criteria. Failed runs remain.
 
-The checked callback fence, restartable baseline probe, exact-artifact host workflow, and evidence
-analyzer now exist. Next: place those inputs and the async transport in one durable Phase-1 identity
-and repeat its locked gates. Then flash only that exact artifact and run the 20-cycle baseline. Add the
-remaining largest-internal-block measurement and forced TX-wait/RX-callback race lanes before claiming
-Phase 1D. Do not accept ADR-0011, implement Phase 3, begin macOS product service, mutate SD, or enable
-BLE by default before both gates pass.
+Commit `77569d3` is the durable source/build identity for the restartable network owner, exclusive
+handoff, allocator provenance, bounded BLE transport, and Phase 1S workflow. Next, identify a safe
+source-level recovery of at least the observed 1,228-byte floor deficit, or write and review a
+workload/failure-model justification for a different floor before changing it. Build and full-flash
+one new labeled artifact, then run the complete Wi-Fi regression and 20-cycle Phase 1S workflow.
+Do not accept ADR-0011, implement Phase 3, begin macOS product service, mutate SD over BLE, or enable
+BLE by default until the exact-artifact runtime gate passes.
