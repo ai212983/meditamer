@@ -18,10 +18,10 @@ BLE phase evidence remains in the parent ledger.
 
 | Work item | State | Evidence | Next action |
 | --- | --- | --- | --- |
-| Capacity model | Unblocked (F-0008 fixed) | CAP-0001–CAP-0008 | CAP-0008 consolidated six independent early-load device readings (24,748–25,156 bytes, all positive margin against the corrected 20,496-byte gate) but found no sustained/repeated-cycle or contiguity-probed evidence yet. Recommends running the formal 20-cycle gate before picking a Step 2 candidate. |
-| Recovery candidate | Pending | — | Awaiting the formal 20-cycle gate result (CAP-0008's recommendation) before selecting a candidate per plan Step 2 — or select now if the gate is deferred. |
-| Implementation | Blocked | — | Await the selected candidate. |
-| Device validation | Blocked | — | Await an exact candidate artifact. |
+| Capacity model | **Passed** | CAP-0001–CAP-0009 | CAP-0009: formal 20-cycle `hostctl test ble-phase1s` gate passed clean (`gate_passed: true`, zero violations) on the exact fixed commit `9606e152...`. Off-state 59,608/31,672 bytes (identical, zero drift, all 20 cycles); serving low-water 19,896 bytes, clearing the ADR floor by 3,512. No capacity candidate was needed. |
+| Recovery candidate | **Not needed** | CAP-0009 | The formal gate passed without any capacity-specific code change; none of CAP-0002's ranked candidates were implemented. |
+| Implementation | **N/A** | CAP-0009 | No capacity implementation required; the only code change this plan produced was the F-0008 credentials-retry fix (CAP-0007), unrelated to byte recovery. |
+| Device validation | **Passed (capacity)** | CAP-0009 | 20/20 cycles clean. Remaining: the separate [Wi-Fi regression gate](../guides/wifi-regression-gate.md), not yet run on this exact artifact — required by the plan's Acceptance section before Phase 1S can be declared fully complete. |
 
 ## Evidence entries — append only
 
@@ -613,6 +613,68 @@ now less urgently-needed cushion) but running the plan's own formal Step 3 valid
 repeated-cycle, low-water-tracked, contiguity-probed measurement — the kind of evidence CAP-0002's Gap
 noted was missing entirely. That result should decide whether any capacity candidate is still needed at
 all, and if so, which one.
+
+### CAP-0009 — Formal 20-cycle gate: passed clean. No capacity candidate needed.
+
+- Date: 2026-08-14
+- Command: `HOSTCTL_PORT=/dev/cu.usbserial-2110 cargo run --manifest-path tools/hostctl/Cargo.toml --
+  test ble-phase1s --artifacts logs/ble_phase1s_gate_20260814 --board-id cap-recovery-dev-01 --cycles 20
+  --output logs/ble_phase1s_gate_20260814/report.json`, run against a clean, committed exact artifact —
+  full flash of `MEDITAMER_FIRMWARE_BUILD_ID=cap-gate-001` (`ble-release`/`ble-foundation`) built from
+  commit `9606e152e816215449486f286cb400bc52d08bab` (the CAP-0006/CAP-0007 fix, source-clean at build
+  time — `git_status_begin`/`git_status_end` empty in the artifact's own recorded metadata). ELF SHA-256
+  `dfe62434c45578070a9919ae64fa7365108ee9387b1ef16b779b110f7823c261`. Full report:
+  `logs/ble_phase1s_gate_20260814/report.json`; raw run log: `logs/ble_phase1s_gate_20260814/gate_run.log`.
+- This is the formal `hostctl` workflow the plan's Step 3 and the parent ledger's P1S-A4/A5 criteria
+  call for — schema-versioned, artifact-identity-checked, 20 full acquire/BLE-window/release cycles each
+  with a real upload before and after, not an ad hoc reproduction.
+
+**Result: `gate_passed: true`, `violations: []`, `completed_cycles: 20`, `completed_ble_cycles: 20`.**
+
+| Metric | Value | Requirement | Margin |
+| --- | ---: | ---: | ---: |
+| Off-state internal free (all 20 cycles, identical) | 59,608 | >=20,496 (`REQUIRED_OFF_FREE_BYTES`) | +39,112 |
+| Off-state largest block above reserve (all 20, identical) | 31,672 | >=4,112 (`REQUIRED_BLE_ALLOCATION_BYTES`) | +27,560 |
+| `minimum_serving_internal_free_bytes` (Wi-Fi active, lowest of 20) | 19,896 | >=16,384 (ADR-0011 hard floor) | +3,512 |
+| `minimum_ble_active_internal_free_bytes` | 43,996 | >=16,384 | +27,612 |
+| Post-warmup free drift | 0 | <=1,024, non-monotonic | 0 (perfectly stable) |
+| Post-warmup largest-block drift | 0 | <=1,024, non-monotonic | 0 |
+| CPU0 stack headroom (min of 20) | 16,696 | >=8,192 (>=12,288 target) | clears target too |
+| Touch-core stack headroom (min of 20) | 3,300 | >=1,024 | +2,276 |
+| UART overflow during gate | 0 | 0 | exact |
+
+- The off-state reading (59,608 / 31,672) is bit-for-bit identical across all 20 cycles — no
+  cycle-to-cycle drift, no fragmentation accumulation, confirming CAP-0003/CAP-0007's single-sample idle
+  readings were representative, not lucky.
+- `minimum_serving_internal_free_bytes: 19,896` is the low-water for the whole gate, and it clears the
+  historical 15,156-byte failure by 4,740 bytes and the ADR's 16,384-byte hard floor by 3,512. It
+  carries its own provenance: `minimum_serving_internal_alloc_wifi_rx_matched: true`,
+  `..._charge_bytes: 1700`, `..._correlation_stable: true` — the low-water is attributed to a single
+  ~1,700-byte vendor Wi-Fi RX packet allocation, matching CAP-0002's owner-map hypothesis and the
+  `INTERNAL_HEAP_DRAM2_BYTES` doc comment's own historical per-packet estimate almost exactly.
+- This 19,896-byte reading is the aggregate ADR floor (16,384), not the stricter BLE-start gate
+  (20,496) — that stricter gate applies only at the off/pre-BLE-start moment, which every one of the 20
+  cycles cleared at 59,608. The two floors protect different moments and this result satisfies both
+  where each applies.
+
+Result and effect on the capacity model: **the plan's core acceptance bar for Phase 1S capacity is met
+on the exact current commit, with the credentials-retry fix and zero capacity-specific code changes.**
+None of CAP-0002's ranked candidates (serial-dispatch bypass, PSRAM relocation, new RX ownership
+mechanism, floor revision) were implemented or needed. The historical 15,156-byte failure that opened
+this entire plan does not reproduce on this source tree; CAP-0002's Gap (no local evidence ever
+captured 15,156) turns out to have been the right thing to flag skeptically, and CAP-0008's early-load
+sampling correctly predicted the direction of this result, if not its exact margin.
+
+**What is not yet covered by this entry:** the plan's acceptance list also names the separate
+[Wi-Fi regression gate](../guides/wifi-regression-gate.md) (`scripts/tests/hw/test_wifi_regression_gate.sh`)
+as a required, independent check on the exact artifact — not run in this session. The `HCTLUPLD.TMP`
+per-directory poisoning (CAP-0005) and the AP-session-timeout observation (CAP-0007) remain open,
+unrelated to capacity, and did not block or affect this gate's pass.
+
+Next action: run the Wi-Fi regression gate on this same exact artifact
+(`logs/ble_phase1s_gate_20260814`, commit `9606e152...`) to complete the plan's full Step 3 checklist.
+Once that passes, the parent ledger's P1S-A4 criterion can close and Phase 2 reconsideration can begin,
+per the plan's Acceptance section.
 
 ## Entry requirements
 

@@ -1,6 +1,6 @@
 # Phase 1S Capacity Recovery Plan
 
-- Status: Active
+- Status: Capacity passed; Wi-Fi regression gate remaining
 - Last-reviewed: 2026-08-14
 - Started: 2026-08-14
 - Parent: [BLE foundation and upload transport plan](ble-foundation-plan.md)
@@ -44,6 +44,18 @@ the remaining capacity work and its validation.
   largest block — about 3x the corrected 20,496-byte target. The historical 15,156-byte low-water was
   not reproduced under this light load; it plausibly needs genuine concurrent upload/SD activity at
   acquire time. See [CAP-0003](ble-phase1s-capacity-recovery-ledger.md#cap-0003--first-device-read-on-the-exact-current-commit-one-manual-radio-handoff-cycle).
+- **Resolved.** Investigating under load surfaced a real but unrelated bug (F-0008: a stale
+  credentials snapshot reused on radio-handoff retry, causing a bounded ~130s Wi-Fi outage — not a
+  hang — after an aborted mid-write handoff). That bug is fixed and device-verified (commit
+  `9606e152e816215449486f286cb400bc52d08bab`). The formal 20-cycle gate
+  (`hostctl test ble-phase1s --cycles 20`) then passed clean on that exact commit with **zero
+  capacity-specific code changes**: off-state 59,608/31,672 bytes (identical across all 20 cycles),
+  serving low-water 19,896 bytes (clears the 16,384-byte floor by 3,512 bytes), zero drift, zero UART
+  overflow. The historical 15,156-byte failure does not reproduce on this source tree. No CAP-0002
+  recovery candidate was needed. See
+  [CAP-0009](ble-phase1s-capacity-recovery-ledger.md#cap-0009--formal-20-cycle-gate-passed-clean-no-capacity-candidate-needed).
+  Remaining before this plan's Acceptance section is fully satisfied: the separate
+  [Wi-Fi regression gate](../guides/wifi-regression-gate.md) on this same exact artifact.
 
 Applicable internal memory means memory with the capabilities required by its owner. Aggregate free
 bytes and largest-contiguous-block measurements are both relevant.
@@ -143,5 +155,8 @@ device validation after its ADR decision is accepted.
 
 ## Immediate next step
 
-Complete Step 1 from the evidence already imported, then select the first recovery candidate. This
-keeps the next firmware change grounded in a named owner and a quantified capacity expectation.
+Capacity work is done: Steps 1–3 completed without needing a recovery candidate (CAP-0001–CAP-0009).
+The one remaining item before this plan's Acceptance section is fully satisfied is running the
+[Wi-Fi regression gate](../guides/wifi-regression-gate.md) on the same exact artifact
+(`logs/ble_phase1s_gate_20260814`, commit `9606e152e816215449486f286cb400bc52d08bab`). Once that
+passes, hand off to the parent plan for Phase 1S closure and Phase 2 reconsideration.
