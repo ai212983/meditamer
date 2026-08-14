@@ -28,5 +28,5 @@ pub(super) async fn write_metrics_imu_line(uart: &mut SerialUart) {
         metrics.recoveries,
         metrics.action_coalesced,
     );
-    write_line(uart, line).await;
+    write_line(uart, &line).await;
 }

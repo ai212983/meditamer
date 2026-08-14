@@ -1,7 +1,6 @@
 use core::fmt::Write;
 
 use embassy_time::{Duration, Timer};
-use esp_hal::uart::Config as UartConfig;
 
 use super::task_state::SerialTaskState;
 use crate::firmware::{
@@ -101,6 +100,10 @@ impl FirmwareFrameReader {
 }
 
 pub(super) async fn begin_stream(uart: &mut SerialUart, state: &mut SerialTaskState, baud: u32) {
+    if !state.firmware_update_hardware_lease_active() || !firmware_update::transport_quiet() {
+        let _ = uart_write_all(uart, b"FWSTREAM ERR reason=not_prepared\r\n").await;
+        return;
+    }
     if baud != STREAM_BAUD {
         let _ = uart_write_all(uart, b"FWSTREAM ERR reason=baud\r\n").await;
         return;
@@ -114,15 +117,15 @@ pub(super) async fn begin_stream(uart: &mut SerialUart, state: &mut SerialTaskSt
                 STREAM_BAUD, VERSION, STREAM_CHUNK_MAX, erased,
             );
             let _ = uart_write_all(uart, line.as_bytes()).await;
-            let _ = uart.flush_async().await;
+            let _ = uart.flush();
             Timer::after(Duration::from_millis(BAUD_SWITCH_DELAY_MS)).await;
             if uart
-                .apply_config(&UartConfig::default().with_baudrate(STREAM_BAUD))
+                .apply_config(&super::super::serial_uart::config(STREAM_BAUD))
                 .is_ok()
             {
                 state.begin_firmware_stream();
             } else {
-                let _ = uart.apply_config(&UartConfig::default().with_baudrate(UART_BAUD));
+                let _ = uart.apply_config(&super::super::serial_uart::config(UART_BAUD));
             }
         }
         Err(error) => {
@@ -153,9 +156,9 @@ pub(super) async fn handle_frame(
                     let _ = write!(&mut line, "FWFRAME OK written={written}\r\n");
                     let _ = uart_write_all(uart, line.as_bytes()).await;
                     if complete {
-                        let _ = uart.flush_async().await;
+                        let _ = uart.flush();
                         Timer::after(Duration::from_millis(BAUD_SWITCH_DELAY_MS)).await;
-                        let _ = uart.apply_config(&UartConfig::default().with_baudrate(UART_BAUD));
+                        let _ = uart.apply_config(&super::super::serial_uart::config(UART_BAUD));
                         state.end_firmware_stream();
                     }
                 }

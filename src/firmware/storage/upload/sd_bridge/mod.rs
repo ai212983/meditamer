@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     mutex::{Mutex, MutexGuard},
@@ -23,12 +23,33 @@ pub(crate) use error::{
 
 const SD_UPLOAD_RESPONSE_TIMEOUT_MS: u64 = 10_000;
 static SD_UPLOAD_ROUNDTRIP_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+static SD_UPLOAD_ROUNDTRIPS_ACTIVE: AtomicU16 = AtomicU16::new(0);
 static NEXT_SD_UPLOAD_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
+
+pub(crate) fn active_roundtrips() -> u16 {
+    SD_UPLOAD_ROUNDTRIPS_ACTIVE.load(Ordering::Acquire)
+}
+
+struct ActiveRoundtripGuard;
+
+impl ActiveRoundtripGuard {
+    fn enter() -> Self {
+        SD_UPLOAD_ROUNDTRIPS_ACTIVE.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for ActiveRoundtripGuard {
+    fn drop(&mut self) {
+        SD_UPLOAD_ROUNDTRIPS_ACTIVE.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub(crate) struct SdUploadChunkInFlight {
     pub(crate) copy_ms: u32,
     request_id: u32,
     started_at: Instant,
+    _active: ActiveRoundtripGuard,
     _lock: MutexGuard<'static, CriticalSectionRawMutex, ()>,
 }
 
@@ -55,6 +76,7 @@ pub(crate) async fn sd_upload_chunk_start(
         ));
     }
     let lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    let active_roundtrip = ActiveRoundtripGuard::enter();
     drain_stale_sd_upload_results();
     let copy_started_at = Instant::now();
     {
@@ -79,6 +101,7 @@ pub(crate) async fn sd_upload_chunk_start(
         copy_ms,
         request_id,
         started_at,
+        _active: active_roundtrip,
         _lock: lock,
     })
 }
@@ -88,6 +111,7 @@ pub(crate) async fn sd_upload_chunk_finish(
 ) -> Result<SdUploadChunkFinish, SdUploadRoundtripError> {
     let started_at = inflight.started_at;
     let request_id = inflight.request_id;
+    let _active = inflight._active;
     let _lock = inflight._lock;
     let result = match receive_sd_upload_result_with_timeout(request_id, started_at).await {
         Some(result) => result,
@@ -167,6 +191,7 @@ pub(crate) async fn sd_upload_roundtrip(
     command: SdUploadCommand,
 ) -> Result<SdUploadResult, SdUploadRoundtripError> {
     let _lock = SD_UPLOAD_ROUNDTRIP_LOCK.lock().await;
+    let _active_roundtrip = ActiveRoundtripGuard::enter();
     sd_upload_roundtrip_raw_locked(command).await
 }
 
@@ -224,13 +249,11 @@ async fn receive_sd_upload_result_with_timeout(
             }
             continue;
         }
-
         let remaining_ms =
             SD_UPLOAD_RESPONSE_TIMEOUT_MS.saturating_sub(started_at.elapsed().as_millis());
         if remaining_ms == 0 {
             return None;
         }
-
         match with_timeout(
             Duration::from_millis(remaining_ms),
             SD_UPLOAD_RESULTS.receive(),

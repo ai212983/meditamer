@@ -49,6 +49,11 @@ impl SerialLineReader {
         self.overflowed = true;
         LineReadEvent::Overflow
     }
+
+    pub(super) fn discard_until_line_end(&mut self) {
+        self.line_len = 0;
+        self.overflowed = true;
+    }
 }
 
 #[cfg(all(test, not(target_os = "none")))]
@@ -79,6 +84,20 @@ mod tests {
         match reader.push_byte(b'\r') {
             LineReadEvent::Complete(bytes) => assert_eq!(bytes, b"a"),
             _ => panic!("expected complete line after overflow reset"),
+        }
+    }
+
+    #[test]
+    fn rx_error_discards_the_partial_line_until_newline() {
+        let mut reader = SerialLineReader::new();
+        assert!(matches!(reader.push_byte(b'A'), LineReadEvent::None));
+        reader.discard_until_line_end();
+        assert!(matches!(reader.push_byte(b'B'), LineReadEvent::None));
+        assert!(matches!(reader.push_byte(b'\n'), LineReadEvent::None));
+        assert!(matches!(reader.push_byte(b'C'), LineReadEvent::None));
+        match reader.push_byte(b'\n') {
+            LineReadEvent::Complete(bytes) => assert_eq!(bytes, b"C"),
+            _ => panic!("expected a fresh complete line after RX recovery"),
         }
     }
 }

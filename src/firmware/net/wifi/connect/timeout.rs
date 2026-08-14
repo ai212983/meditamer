@@ -1,6 +1,6 @@
 use super::*;
 pub(super) async fn handle_connect_timeout(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     connect_started_at: Instant,
 ) {

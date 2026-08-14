@@ -15,6 +15,5 @@ embassy-time = "0.5.1"
 embassy-embedded-hal = "0.6.0"
 embassy-futures = "0.1.2"
 embedded-hal-async = "1.0.0"
-esp-hal = { version = "1.1.1", features = ["esp32", "unstable"] }
-esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
+esp-hal = { version = "=1.1.1", features = ["esp32", "unstable"] }
 embedded-hal = "1.0.0"

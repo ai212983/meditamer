@@ -6,11 +6,11 @@ use embassy_time::{Duration, Instant};
 use super::listener_gate::{dhcp_ipv4_status, elapsed_ms_u32};
 use super::mem_diag::log_http_mem_diag;
 use super::{
-    HttpBuffer, HttpServerLoopState, HTTP_CHUNK_BUF_FALLBACK, HTTP_HEADER_MAX,
-    HTTP_RW_BUF_FALLBACK, HTTP_SOCKET_TIMEOUT_SECS, UPLOAD_HTTP_PORT,
+    ActiveConnectionGuard, HttpBuffer, HttpServerLoopState, HTTP_CHUNK_BUF_FALLBACK,
+    HTTP_HEADER_MAX, HTTP_RW_BUF_FALLBACK, HTTP_SOCKET_TIMEOUT_SECS, UPLOAD_HTTP_PORT,
 };
 pub(super) async fn serve_connection_cycle(
-    stack: Stack<'static>,
+    stack: Stack<'_>,
     state: &mut HttpServerLoopState,
     local_ipv4: [u8; 4],
     rx_buffer: &mut HttpBuffer<HTTP_RW_BUF_FALLBACK>,
@@ -45,6 +45,7 @@ pub(super) async fn serve_connection_cycle(
     if !accept_connection(&mut socket, &stack, state).await {
         return;
     }
+    let _active_connection = ActiveConnectionGuard::enter();
 
     let mut last_route = None;
     let mut header_timeout_ms = super::connection::HTTP_HEADER_READ_TIMEOUT_MS;
@@ -96,7 +97,7 @@ pub(super) async fn serve_connection_cycle(
 
 async fn accept_connection(
     socket: &mut TcpSocket<'_>,
-    stack: &Stack<'static>,
+    stack: &Stack<'_>,
     state: &mut HttpServerLoopState,
 ) -> bool {
     const ACCEPT_POLL_MS: u64 = 500;
@@ -112,6 +113,13 @@ async fn accept_connection(
                     "upload_http: accept paused while transfers are disabled; re-arm later"
                 );
             }
+            socket.abort();
+            return false;
+        }
+        if !service_mode::radio_handoff_admission_open() {
+            observability::record_net_pipeline_accept_wait(elapsed_ms_u32(accept_started_at));
+            state.reset_all();
+            observability::set_upload_http_listener(false, None);
             socket.abort();
             return false;
         }

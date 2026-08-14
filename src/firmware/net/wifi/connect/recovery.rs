@@ -24,10 +24,7 @@ const WIFI_SOFTWARE_RESET_ON_ZERO_DISCOVERY_HARD_GUARD: bool = parse_nonzero_fla
     },
 );
 
-pub(super) async fn disconnect_with_timeout(
-    controller: &mut WifiController<'static>,
-    context: &str,
-) {
+pub(super) async fn disconnect_with_timeout(controller: &mut WifiController<'_>, context: &str) {
     log_radio_mem_diag_with_trigger("recover_disconnect_before", context);
     match with_timeout(
         Duration::from_millis(WIFI_DRIVER_CONTROL_TIMEOUT_MS),
@@ -51,7 +48,7 @@ pub(super) async fn disconnect_with_timeout(
 }
 
 pub(super) async fn disconnect_and_stop_with_timeout(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     context: &str,
 ) {
     disconnect_with_timeout(controller, context).await;
@@ -82,7 +79,7 @@ pub(super) async fn disconnect_and_stop_with_timeout(
 }
 
 pub(super) async fn disconnect_and_force_deep_reinit_with_timeout(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     context: &str,
 ) {
     disconnect_and_stop_with_timeout(controller, context).await;

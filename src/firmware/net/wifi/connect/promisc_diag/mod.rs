@@ -151,7 +151,7 @@ async fn run_promisc_diag(label: &'static str, software_reset_on_zero: bool) -> 
 }
 
 pub(super) async fn maybe_handle_post_start_promisc_diag(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
 ) -> bool {
     if !WIFI_POST_START_PROMISC_DIAG {

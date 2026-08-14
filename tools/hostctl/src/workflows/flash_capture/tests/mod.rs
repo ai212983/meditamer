@@ -128,6 +128,7 @@ fn explicit_app_image_is_archived_with_hash_and_metadata() {
         profile: "release",
         skip_update_check: true,
         include_bootloader: true,
+        built_in_workflow: false,
     })
     .expect("archive");
 
@@ -141,6 +142,8 @@ fn explicit_app_image_is_archived_with_hash_and_metadata() {
     assert!(hashes.ends_with("  partition-table.bin\n"));
     let metadata = fs::read_to_string(&outputs.build_metadata).expect("metadata");
     assert!(metadata.contains("profile=release"));
+    assert!(metadata.contains("image_source=explicit"));
+    assert!(metadata.contains("requested_features=unverified"));
     assert!(metadata.contains("git_status_begin"));
 }
 
@@ -160,6 +163,7 @@ fn explicit_app_only_archive_does_not_require_bootloader_artifacts() {
         profile: "release",
         skip_update_check: true,
         include_bootloader: false,
+        built_in_workflow: false,
     })
     .expect("app-only archive");
 

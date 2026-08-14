@@ -5,6 +5,7 @@ use esp_println::println;
 use super::super::super::super::observability;
 use super::super::super::super::types::SD_PATH_MAX;
 use super::helpers::target_path;
+use crate::firmware::service_mode;
 
 mod body;
 mod fairness;
@@ -72,6 +73,12 @@ pub(super) async fn handle_connection(
     let header_result = request::read_header(socket, header_buf).await;
     socket.set_timeout(Some(Duration::from_secs(super::HTTP_SOCKET_TIMEOUT_SECS)));
     let (filled, header_end) = header_result?;
+    // Admission can close while a keep-alive socket is waiting for its next
+    // header. Do not let that already accepted socket start a new route after
+    // the exclusive-radio grace period has begun.
+    if !service_mode::radio_handoff_admission_open() {
+        return Err("radio handoff admission closed");
+    }
     let header = core::str::from_utf8(&header_buf[..header_end]).map_err(|_| "header utf8")?;
     let connection_close_requested = request::connection_close_requested(header);
     let (method, target) = super::helpers::parse_request_line(header).ok_or("bad request line")?;

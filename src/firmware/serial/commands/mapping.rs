@@ -139,15 +139,22 @@ pub(in crate::firmware::serial) fn serial_command_event_and_responses(
         | SerialCommand::Scheduler { .. }
         | SerialCommand::MetricsNet
         | SerialCommand::TelemetryStatus
-        | SerialCommand::TelemetrySet { .. } => {
-            unreachable!("metrics command is handled inline")
+        | SerialCommand::TelemetrySet { .. }
+        | SerialCommand::StackStatus
+        | SerialCommand::AllocatorStatus => {
+            unreachable!("diagnostic command is handled inline")
         }
-        SerialCommand::AllocatorStatus => unreachable!("allocator command is handled inline"),
         SerialCommand::AllocatorAllocProbe { .. } => {
             unreachable!("allocator allocation probe command is handled inline")
         }
         #[cfg(feature = "ble-foundation")]
-        SerialCommand::BleProbeStart | SerialCommand::BleProbeStatus => {
+        SerialCommand::BleProbeStart
+        | SerialCommand::BleProbeStatus
+        | SerialCommand::BlePhase1sStart { .. }
+        | SerialCommand::BlePhase1sStatus
+        | SerialCommand::RadioHandoffAcquire { .. }
+        | SerialCommand::RadioHandoffRelease { .. }
+        | SerialCommand::RadioHandoffStatus => {
             unreachable!("BLE probe command is handled inline")
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),

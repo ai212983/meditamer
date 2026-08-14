@@ -7,7 +7,7 @@ pub(super) enum PreparePreconditions {
 }
 
 pub(super) async fn prepare_preconditions(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
 ) -> PreparePreconditions {
     apply_pending_runtime_policy_updates(&mut state.runtime_policy);

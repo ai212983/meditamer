@@ -19,6 +19,7 @@ pub(super) struct ArchiveFirmwareArtifactsOptions<'a> {
     pub(super) profile: &'a str,
     pub(super) skip_update_check: bool,
     pub(super) include_bootloader: bool,
+    pub(super) built_in_workflow: bool,
 }
 
 pub fn validate_post_command_options(opts: &FlashCaptureOptions) -> Result<()> {
@@ -43,6 +44,7 @@ pub(super) fn archive_firmware_artifacts(opts: ArchiveFirmwareArtifactsOptions<'
         profile,
         skip_update_check,
         include_bootloader,
+        built_in_workflow,
     } = opts;
     if !image_path.is_file() {
         bail!("firmware image does not exist: {}", image_path.display());
@@ -98,7 +100,24 @@ pub(super) fn archive_firmware_artifacts(opts: ArchiveFirmwareArtifactsOptions<'
         .unwrap_or_else(|error| format!("unavailable: {error}"));
     let git_status = command_stdout(repo_dir, "git", &["status", "--porcelain=v1"])
         .unwrap_or_else(|error| format!("unavailable: {error}"));
-    let features = env::var("CARGO_FEATURES").unwrap_or_default();
+    let (requested_features, no_default_features) = if built_in_workflow && profile == "ble-release"
+    {
+        // The canonical build script rejects every other BLE release feature
+        // configuration, so these fields describe the command that produced
+        // the archived ELF rather than ambient host metadata.
+        ("ble-foundation".to_owned(), "false".to_owned())
+    } else if built_in_workflow {
+        (
+            env::var("CARGO_FEATURES").unwrap_or_default(),
+            if env::var("CARGO_NO_DEFAULT_FEATURES").as_deref() == Ok("1") {
+                "true".to_owned()
+            } else {
+                "false".to_owned()
+            },
+        )
+    } else {
+        ("unverified".to_owned(), "unverified".to_owned())
+    };
     let firmware_build_id =
         env::var("MEDITAMER_FIRMWARE_BUILD_ID").unwrap_or_else(|_| "unlabeled".to_owned());
     let firmware_public_key =
@@ -106,7 +125,8 @@ pub(super) fn archive_firmware_artifacts(opts: ArchiveFirmwareArtifactsOptions<'
     fs::write(
         &outputs.build_metadata,
         format!(
-            "profile={profile}\nfeatures={features}\nfirmware_build_id={firmware_build_id}\nfirmware_public_key_hex={firmware_public_key}\nsource_image={}\ngit_head={}\ngit_status_begin\n{}\ngit_status_end\n",
+            "profile={profile}\nimage_source={}\nrequested_features={requested_features}\nno_default_features={no_default_features}\nfirmware_build_id={firmware_build_id}\nfirmware_public_key_hex={firmware_public_key}\nsource_image={}\ngit_head={}\ngit_status_begin\n{}\ngit_status_end\n",
+            if built_in_workflow { "build" } else { "explicit" },
             image_path.display(),
             git_head.trim(),
             git_status.trim_end()

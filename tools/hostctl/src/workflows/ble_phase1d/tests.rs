@@ -77,6 +77,16 @@ fn workflow_yaml_parses_and_keeps_the_evidence_gate() {
 }
 
 fn write_artifacts(temp: &TempDir, dirty: &str) {
+    write_artifacts_with_provenance(temp, dirty, "build", "ble-foundation", "false");
+}
+
+fn write_artifacts_with_provenance(
+    temp: &TempDir,
+    dirty: &str,
+    image_source: &str,
+    requested_features: &str,
+    no_default_features: &str,
+) {
     let elf = temp.path().join("firmware.elf");
     let app = temp.path().join("app.bin");
     fs::write(&elf, b"elf").expect("elf");
@@ -93,7 +103,7 @@ fn write_artifacts(temp: &TempDir, dirty: &str) {
     fs::write(
         temp.path().join("build-metadata.txt"),
         format!(
-            "profile=ble-release\nfeatures=ble-foundation\nfirmware_build_id=ble-p1d-test\ngit_head=0123456789abcdef0123456789abcdef01234567\ngit_status_begin\n{dirty}\ngit_status_end\n"
+            "profile=ble-release\nimage_source={image_source}\nrequested_features={requested_features}\nno_default_features={no_default_features}\nfirmware_build_id=ble-p1d-test\ngit_head=0123456789abcdef0123456789abcdef01234567\ngit_status_begin\n{dirty}\ngit_status_end\n"
         ),
     )
     .expect("metadata");
@@ -113,4 +123,29 @@ fn artifact_identity_rejects_dirty_source() {
     write_artifacts(&temp, " M src/firmware/ble/mod.rs\n");
     let error = validate_artifacts(temp.path()).expect_err("dirty source must fail");
     assert!(error.to_string().contains("dirty"));
+}
+
+#[test]
+fn artifact_identity_rejects_extra_telemetry_features() {
+    let temp = TempDir::new().expect("tempdir");
+    write_artifacts_with_provenance(
+        &temp,
+        "",
+        "build",
+        "ble-foundation,telemetry-defmt",
+        "false",
+    );
+    let error = validate_artifacts(temp.path()).expect_err("extra features must fail");
+    assert!(error.to_string().contains("canonical"));
+}
+
+#[test]
+fn artifact_identity_rejects_no_default_or_explicit_images() {
+    let no_default = TempDir::new().expect("tempdir");
+    write_artifacts_with_provenance(&no_default, "", "build", "ble-foundation", "true");
+    assert!(validate_artifacts(no_default.path()).is_err());
+
+    let explicit = TempDir::new().expect("tempdir");
+    write_artifacts_with_provenance(&explicit, "", "explicit", "ble-foundation", "false");
+    assert!(validate_artifacts(explicit.path()).is_err());
 }

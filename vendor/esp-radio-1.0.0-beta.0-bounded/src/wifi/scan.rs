@@ -8,9 +8,7 @@ use procmacros::BuilderLite;
 use crate::{
     sys::include,
     wifi::{
-        Ssid,
-        WifiController,
-        WifiError,
+        Ssid, WifiController, WifiError,
         ap::{AccessPointInfo, convert_ap_info},
         esp_wifi_result,
     },

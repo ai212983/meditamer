@@ -514,8 +514,6 @@ dependencies = [
 [[package]]
 name = "embassy-net"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "347bc855bdbdf50ed9c5a1d80e8204badb0ba149b8732dde38e1e9708ed9d313"
 dependencies = [
  "document-features",
  "embassy-net-driver",
@@ -739,8 +737,6 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 [[package]]
 name = "esp-alloc"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46ced060d4085858283df950b80a4da2348e1707d7d07b1e966308582dae79f5"
 dependencies = [
  "allocator-api2",
  "cfg-if",
@@ -1541,6 +1537,7 @@ dependencies = [
 name = "meditamer"
 version = "0.1.0"
 dependencies = [
+ "bt-hci",
  "critical-section",
  "defmt",
  "ed25519-dalek",
@@ -1561,6 +1558,7 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "esp-radio",
+ "esp-radio-rtos-driver",
  "esp-rtos",
  "esp-storage",
  "esp-sync",
@@ -1922,7 +1920,6 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "esp-hal",
- "esp-println",
 ]
 
 [[package]]

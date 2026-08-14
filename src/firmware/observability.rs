@@ -15,6 +15,7 @@ pub(crate) use counters::{
 };
 pub(crate) use recorders::*;
 pub(crate) use snapshot::snapshot;
+pub(crate) use types::Snapshot;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use types::{
     NetPipelineGate, SdUploadRoundtripPhase, UploadHttpPhaseMetrics, WifiScanPhase,

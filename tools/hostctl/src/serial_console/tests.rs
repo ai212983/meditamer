@@ -17,6 +17,7 @@ struct MockState {
     dtr: Vec<bool>,
     rts: Vec<bool>,
     timeout: Duration,
+    fail_writes: bool,
 }
 
 #[derive(Clone, Default)]
@@ -35,6 +36,11 @@ impl MockPort {
         drop(state);
         self
     }
+
+    fn failing_writes(self) -> Self {
+        self.state.lock().expect("lock").fail_writes = true;
+        self
+    }
 }
 
 impl Read for MockPort {
@@ -51,13 +57,71 @@ impl Read for MockPort {
 
 impl Write for MockPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.state.lock().expect("lock").writes.push(buf.to_vec());
+        let mut state = self.state.lock().expect("lock");
+        if state.fail_writes {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed"));
+        }
+        state.writes.push(buf.to_vec());
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+#[test]
+fn serial_write_errors_do_not_disclose_command_payloads() -> Result<()> {
+    let port = MockPort::new().failing_writes();
+    let mut console = SerialConsole::from_port_for_tests(Box::new(port), None)?;
+    let secret = "NETCFG SET {\"password\":\"do-not-log\"}";
+    let error = console.send_line(secret).expect_err("write must fail");
+    let detail = error.to_string();
+    assert!(detail.contains("failed to write serial line"));
+    assert!(!detail.contains("do-not-log"));
+    assert!(!detail.contains("NETCFG SET"));
+    Ok(())
+}
+
+#[test]
+fn paced_serial_line_stays_below_the_device_fifo_and_preserves_bytes() -> Result<()> {
+    let port = MockPort::new();
+    let state = port.state.clone();
+    let mut console = SerialConsole::from_port_for_tests(Box::new(port), None)?;
+    let command = format!("NETCFG SET {{\"ssid\":\"{}\"}}", "x".repeat(300));
+    console.send_line_paced(&command, 32, Duration::ZERO)?;
+
+    let state = state.lock().expect("lock");
+    assert!(state.writes.iter().all(|chunk| chunk.len() <= 32));
+    let written = state.writes.concat();
+    assert_eq!(written, format!("{command}\r\n").as_bytes());
+    Ok(())
+}
+
+#[test]
+fn paced_serial_line_rejects_a_zero_chunk_size() -> Result<()> {
+    let port = MockPort::new();
+    let mut console = SerialConsole::from_port_for_tests(Box::new(port), None)?;
+    let error = console
+        .send_line_paced("PING", 0, Duration::ZERO)
+        .expect_err("zero chunk size must fail");
+    assert_eq!(error.to_string(), "paced serial chunk size must be nonzero");
+    Ok(())
+}
+
+#[test]
+fn paced_serial_write_errors_do_not_disclose_command_payloads() -> Result<()> {
+    let port = MockPort::new().failing_writes();
+    let mut console = SerialConsole::from_port_for_tests(Box::new(port), None)?;
+    let secret = "NETCFG SET {\"password\":\"do-not-log\"}";
+    let error = console
+        .send_line_paced(secret, 64, Duration::ZERO)
+        .expect_err("write must fail");
+    let detail = error.to_string();
+    assert!(detail.contains("failed to write paced serial line"));
+    assert!(!detail.contains("do-not-log"));
+    assert!(!detail.contains("NETCFG SET"));
+    Ok(())
 }
 
 impl SerialPort for MockPort {

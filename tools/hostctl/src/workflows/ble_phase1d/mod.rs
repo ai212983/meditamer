@@ -43,11 +43,11 @@ pub struct BlePhase1dOptions {
 }
 
 #[derive(Debug)]
-struct ArtifactIdentity {
-    build_id: String,
-    elf_sha256: String,
-    app_sha256: String,
-    git_head: String,
+pub(super) struct ArtifactIdentity {
+    pub(super) build_id: String,
+    pub(super) elf_sha256: String,
+    pub(super) app_sha256: String,
+    pub(super) git_head: String,
 }
 
 fn sha256(path: &Path) -> Result<String> {
@@ -62,7 +62,7 @@ fn metadata_value<'a>(metadata: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
-fn validate_artifacts(root: &Path) -> Result<ArtifactIdentity> {
+pub(super) fn validate_artifacts(root: &Path) -> Result<ArtifactIdentity> {
     let elf = root.join("firmware.elf");
     let app = root.join("app.bin");
     let metadata_path = root.join("build-metadata.txt");
@@ -76,12 +76,13 @@ fn validate_artifacts(root: &Path) -> Result<ArtifactIdentity> {
     if metadata_value(&metadata, "profile") != Some("ble-release") {
         bail!("artifact profile is not ble-release");
     }
-    let features = metadata_value(&metadata, "features").unwrap_or_default();
-    if !features
-        .split([',', ' '])
-        .any(|feature| feature == "ble-foundation")
+    if metadata_value(&metadata, "image_source") != Some("build") {
+        bail!("Phase 1S requires an image built in the flash-capture workflow");
+    }
+    if metadata_value(&metadata, "requested_features") != Some("ble-foundation")
+        || metadata_value(&metadata, "no_default_features") != Some("false")
     {
-        bail!("artifact feature union does not contain ble-foundation");
+        bail!("artifact must contain the canonical default-plus-ble-foundation feature set");
     }
     let build_id = metadata_value(&metadata, "firmware_build_id")
         .filter(|value| !value.is_empty() && *value != "unlabeled")
@@ -116,7 +117,7 @@ fn validate_artifacts(root: &Path) -> Result<ArtifactIdentity> {
     })
 }
 
-fn wait_network_ready(console: &mut SerialConsole) -> Result<String> {
+pub(super) fn wait_network_ready(console: &mut SerialConsole) -> Result<String> {
     for _ in 0..60 {
         if let Some(status) = query_net_status(console)? {
             if is_ready(&status, true) {
@@ -146,7 +147,7 @@ fn check_health(ip: &str) -> Result<()> {
     Ok(())
 }
 
-fn wait_running_identity(console: &mut SerialConsole, build_id: &str) -> Result<()> {
+pub(super) fn wait_running_identity(console: &mut SerialConsole, build_id: &str) -> Result<()> {
     let pong = Regex::new(r"^PONG$")?;
     let status = Regex::new(
         r"^BLEPROBE state=([a-z_]+) cycle=[0-9]+ failure=[a-z_]+ build_id=([A-Za-z0-9._-]+) cycles=([0-9]+) coex=(true|false)$",

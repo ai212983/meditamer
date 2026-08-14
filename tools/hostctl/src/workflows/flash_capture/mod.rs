@@ -166,6 +166,7 @@ pub(super) struct FlashCaptureRuntime<'a> {
     boot_window: Duration,
     skip_update_check: bool,
     image_path: Option<PathBuf>,
+    image_built_in_workflow: bool,
     idf_env: Option<IdfEnv>,
     flash_result: Option<FlashResult>,
     capture_bytes: usize,

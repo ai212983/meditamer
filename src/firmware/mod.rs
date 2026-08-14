@@ -16,6 +16,7 @@ pub(crate) mod psram;
 pub(crate) mod scheduling;
 pub(crate) mod self_test;
 mod serial;
+mod serial_uart;
 pub(crate) mod service_mode;
 mod storage;
 mod system;
@@ -25,3 +26,18 @@ pub(crate) mod ui;
 pub(crate) mod update;
 
 pub use system::run;
+
+pub(crate) fn reset_pending_update_or_halt() -> ! {
+    let pending = update::status().is_ok_and(|status| {
+        status.image_state == Some(esp_bootloader_esp_idf::ota::OtaImageState::PendingVerify)
+    });
+    if pending {
+        esp_println::println!(
+            "runtime: startup allocation failed during pending verification; rebooting for rollback"
+        );
+        esp_hal::system::software_reset();
+    }
+    loop {
+        core::hint::spin_loop();
+    }
+}

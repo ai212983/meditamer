@@ -19,7 +19,6 @@ use super::SD_BOOT_POWER_OFF_GRACE_MS;
 use super::SD_IDLE_POWER_OFF_MS;
 #[cfg(feature = "asset-upload-http")]
 use super::SD_UPLOAD_SESSION_IDLE_ABORT_MS;
-extern crate alloc;
 
 #[cfg(feature = "asset-upload-http")]
 use embassy_futures::select::{select3, Either3};
@@ -48,24 +47,34 @@ struct SdTaskRuntime {
     powered: bool,
     upload_mounted: bool,
     upload_session: Option<SdUploadSession>,
-    // Held for the whole task, so as a plain field it would sit in this task's
-    // Embassy pool — which lives in `.bss` in `dram_seg` and therefore comes
-    // straight out of the CPU0 stack. On the heap it lands in `dram2_seg`
-    // instead. See docs/reference/dram/dram-budget.md.
-    fat_engine: alloc::boxed::Box<FatEngine>,
+    // Persistent FAT interpreter state has no ISR/DMA ownership. Keep it in
+    // external PSRAM so dynamic Wi-Fi RX buffers retain the internal reserve.
+    // SdCardProbe owns the internal DMA bounce sector used for all reads and
+    // writes. See docs/reference/dram/dram-budget.md.
+    fat_engine: crate::firmware::psram::ExternalValue<FatEngine>,
     consecutive_failures: u8,
     backoff_until: Option<Instant>,
 }
 
 impl SdTaskRuntime {
     async fn initialize(sd_probe: SdProbeDriver) -> Self {
+        let fat_engine = FatEngine::new();
+        // The value is materialized before it is copied into PSRAM. Capture
+        // that transient frame so the runtime CPU0 floor covers construction.
+        crate::firmware::observability::record_stack_headroom();
         let mut runtime = Self {
             sd_probe,
             boot_started_at: Instant::now(),
             powered: false,
             upload_mounted: false,
             upload_session: None,
-            fat_engine: alloc::boxed::Box::new(FatEngine::new()),
+            fat_engine: match crate::firmware::psram::ExternalValue::try_new(fat_engine) {
+                Ok(engine) => engine,
+                Err(_) => {
+                    esp_println::println!("sdtask: external FAT engine allocation failed");
+                    crate::firmware::reset_pending_update_or_halt();
+                }
+            },
             consecutive_failures: 0,
             backoff_until: None,
         };
@@ -114,6 +123,7 @@ impl SdTaskRuntime {
             &mut self.fat_engine,
         )
         .await;
+        super::super::upload::set_sd_upload_session_active(self.upload_session.is_some());
         if !result.ok {
             esp_println::println!(
                 "sdtask: autonomous_upload_abort_failed code={:?}",
@@ -190,8 +200,9 @@ impl SdTaskRuntime {
         &mut self,
         request: crate::firmware::types::WifiConfigRequest,
     ) {
+        let request_id = request.request_id();
         if !service_mode::upload_transfers_enabled() {
-            publish_wifi_config_response(disabled_wifi_config_response());
+            publish_wifi_config_response(disabled_wifi_config_response(request_id));
             return;
         }
         if let Err(code) = ensure_upload_storage_ready(
@@ -205,7 +216,7 @@ impl SdTaskRuntime {
             self.upload_session = None;
             self.upload_mounted = false;
             self.fat_engine.invalidate();
-            publish_wifi_config_response(wifi_config_error_response(code));
+            publish_wifi_config_response(wifi_config_error_response(request_id, code));
             return;
         }
         let response = process_wifi_config_request(
@@ -222,8 +233,9 @@ impl SdTaskRuntime {
 
     #[cfg(feature = "asset-upload-http")]
     pub(super) async fn process_upload_request(&mut self, request: SdUploadRequest) {
+        let request_id = request.id;
         if !service_mode::upload_transfers_enabled() {
-            publish_upload_result(disabled_upload_result(request.id));
+            publish_upload_result(disabled_upload_result(request_id));
             return;
         }
         if let Err(code) = ensure_upload_storage_ready(
@@ -237,7 +249,7 @@ impl SdTaskRuntime {
             self.upload_session = None;
             self.upload_mounted = false;
             self.fat_engine.invalidate();
-            publish_upload_result(upload_storage_error_result(request.id, code));
+            publish_upload_result(upload_storage_error_result(request_id, code));
             return;
         }
         let result = process_upload_request(
@@ -249,6 +261,7 @@ impl SdTaskRuntime {
             &mut self.fat_engine,
         )
         .await;
+        super::super::upload::set_sd_upload_session_active(self.upload_session.is_some());
         publish_upload_result(result);
     }
 
@@ -351,6 +364,8 @@ fn upload_storage_error_result(request_id: u32, code: SdUploadResultCode) -> SdU
 #[embassy_executor::task]
 pub(crate) async fn sd_task(sd_probe: SdProbeDriver) {
     let mut runtime = SdTaskRuntime::initialize(sd_probe).await;
+    #[cfg(feature = "asset-upload-http")]
+    super::super::upload::set_sd_upload_session_active(false);
 
     #[cfg(feature = "asset-upload-http")]
     if crate::firmware::storage::transfer_buffers::lock_upload_chunk_buffer()

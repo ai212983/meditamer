@@ -356,10 +356,9 @@ pub(crate) fn write_chunk(offset: u32, bytes: &[u8]) -> Result<u32, UpdateError>
                 .saturating_sub(started_us),
         );
     }
-    // Serial commands are handled in a boxed future and the global allocator can place that
-    // future in external PSRAM. The ROM flash routine disables the cache and therefore cannot
-    // safely consume its input directly from that future. Coalesce accepted wire chunks and copy
-    // each batch to aligned internal stack RAM before entering the flash driver.
+    // Text update commands now use a placement-guaranteed internal future, while the binary stream
+    // borrows its input from the serial task frame. Keep the flash batch in aligned internal stack
+    // RAM so every cache-disabled ROM write has one explicit, source-independent input boundary.
     let mut batch_written = 0usize;
     while batch_written < flash_len {
         let absolute_offset = flash_offset + batch_written as u32;

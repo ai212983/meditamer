@@ -1,5 +1,17 @@
 #![no_std]
 
+// The reusable SD package is deliberately UART-neutral. The owning firmware
+// reports correlated SD results; package-local prose must not bypass its UART0
+// reservation from the SD task/core.
+extern crate self as esp_println;
+
+#[macro_export]
+macro_rules! println {
+    ($($argument:tt)*) => {{
+        let _ = ::core::format_args!($($argument)*);
+    }};
+}
+
 #[cfg(any(target_os = "none", feature = "host-tests"))]
 pub mod fat;
 #[cfg(target_os = "none")]

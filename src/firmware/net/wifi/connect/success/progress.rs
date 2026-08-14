@@ -1,8 +1,8 @@
 use super::*;
 
 pub(super) async fn handle_connected_progress(
-    controller: &mut WifiController<'static>,
-    stack: &Stack<'static>,
+    controller: &mut WifiController<'_>,
+    stack: &Stack<'_>,
     state: &mut WifiTaskState,
     dhcp_lease_observed: &mut bool,
     dhcp_wait_started_at: Instant,

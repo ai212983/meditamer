@@ -8,8 +8,8 @@
       "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the plan's closeout limit (docs/plans/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
     },
     "documented_leaf_commands": {
-      "count": 15,
-      "source": "tools/hostctl/src/main.rs: enum Commands (7 variants, minus the Test and Artifacts containers) + enum TestSubcommand (8 variants) + enum ArtifactsSubcommand (2 variants)",
+      "count": 16,
+      "source": "tools/hostctl/src/main.rs: enum Commands (7 variants, minus the Test and Artifacts containers) + enum TestSubcommand (9 variants) + enum ArtifactsSubcommand (2 variants)",
       "change_log": [
         {
           "date": "2026-08-13",
@@ -18,6 +18,10 @@
         {
           "date": "2026-08-13",
           "change": "docs/archive/host-tooling/log-and-artifact-pruning.md Phase 0/1: added the `Artifacts` container variant with `artifacts inventory` and `artifacts prune` leaves (tools/hostctl/src/main.rs). count 13 -> 15; check_script_surface.py's leaf counter generalized to sum every container's nested subcommand enum instead of hardcoding Test alone."
+        },
+        {
+          "date": "2026-08-14",
+          "change": "Phase 1S selective integration: added the `test ble-phase1s` leaf for the exclusive Wi-Fi/BLE handoff evidence workflow. count 15 -> 16."
         }
       ]
     }
@@ -99,6 +103,13 @@
       "owner": "Firmware + Host Tooling",
       "caller": "lefthook.yml pre-commit hook; docs_ci.yml; aggregate baseline quality lane",
       "reason": "Markdown-specific length advisory, separate policy from the Rust LOC advisory"
+    },
+    {
+      "path": "scripts/ci/check_network_owner_source.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "aggregate baseline source lane",
+      "reason": "guards the exclusive Wi-Fi/BLE handoff, allocator provenance, and cross-owner resource-release invariants"
     },
     {
       "path": "scripts/ci/check_orphan_modules.py",

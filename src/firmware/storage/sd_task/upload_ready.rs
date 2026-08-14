@@ -32,8 +32,9 @@ pub(super) fn disabled_upload_result(request_id: u32) -> SdUploadResult {
 }
 
 #[cfg(feature = "asset-upload-http")]
-pub(super) fn disabled_wifi_config_response() -> WifiConfigResponse {
+pub(super) fn disabled_wifi_config_response(request_id: u32) -> WifiConfigResponse {
     WifiConfigResponse {
+        request_id,
         ok: false,
         code: WifiConfigResultCode::Busy,
         credentials: None,
@@ -41,13 +42,17 @@ pub(super) fn disabled_wifi_config_response() -> WifiConfigResponse {
 }
 
 #[cfg(feature = "asset-upload-http")]
-pub(super) fn wifi_config_error_response(code: SdUploadResultCode) -> WifiConfigResponse {
+pub(super) fn wifi_config_error_response(
+    request_id: u32,
+    code: SdUploadResultCode,
+) -> WifiConfigResponse {
     let mapped = match code {
         SdUploadResultCode::PowerOnFailed => WifiConfigResultCode::PowerOnFailed,
         SdUploadResultCode::InitFailed => WifiConfigResultCode::InitFailed,
         _ => WifiConfigResultCode::OperationFailed,
     };
     WifiConfigResponse {
+        request_id,
         ok: false,
         code: mapped,
         credentials: None,

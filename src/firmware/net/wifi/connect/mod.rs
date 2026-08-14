@@ -47,14 +47,16 @@ pub(super) use timing::{
 };
 
 pub(super) async fn run_wifi_connection_task(
-    mut controller: WifiController<'static>,
+    controller: &mut WifiController<'_>,
     _credentials: Option<WifiCredentials>,
-    stack: Stack<'static>,
+    initial_policy: WifiRuntimePolicy,
+    stack: Stack<'_>,
 ) {
     install_wifi_event_logger();
     observability::set_wifi_link_connected(false);
     let started_at = Instant::now();
     let mut state = WifiTaskState::new(_credentials, started_at);
+    state.runtime_policy = initial_policy.sanitized();
     publish_config(state.credentials, state.runtime_policy);
     publish_state(
         state.net_state,
@@ -69,11 +71,12 @@ pub(super) async fn run_wifi_connection_task(
     }
 
     loop {
-        let active = match prepare_connection_attempt(&mut controller, &mut state).await {
+        acknowledge_control_quiescence().await;
+        let active = match prepare_connection_attempt(controller, &mut state).await {
             ConnectionAttempt::Continue => continue,
             ConnectionAttempt::Proceed(active) => active,
         };
-        perform_connect_attempt(&mut controller, &stack, &mut state).await;
+        perform_connect_attempt(controller, &stack, &mut state).await;
         state.credentials = Some(active);
     }
 }
@@ -106,7 +109,7 @@ const WIFI_C_LIKE_DISCOVERY_START: bool =
         None => option_env!("WIFI_C_LIKE_DISCOVERY_START"),
     });
 
-pub(super) fn maybe_reapply_sta_protocol_after_start(controller: &mut WifiController<'static>) {
+pub(super) fn maybe_reapply_sta_protocol_after_start(controller: &mut WifiController<'_>) {
     if !WIFI_REAPPLY_PROTOCOL_AFTER_START {
         return;
     }

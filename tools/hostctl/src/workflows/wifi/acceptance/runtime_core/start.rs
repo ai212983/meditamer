@@ -166,26 +166,37 @@ impl WifiAcceptanceRuntime<'_> {
             .console
             .command_wait_regex("PSRAM", &memory_re, Duration::from_secs(5))?
             .ok_or_else(|| anyhow!("missing PSRAM allocator response"))?;
-        let min_internal =
-            metric_u32(&memory_line, "min_internal_free_bytes").ok_or_else(|| {
-                anyhow!("PSRAM status missing min_internal_free_bytes: {memory_line}")
-            })?;
+        let memory = parse_serving_allocator_status(&memory_line)?;
         let memory_floor =
             env_utils::parse_env_u32("HOSTCTL_NET_MIN_INTERNAL_FREE_BYTES", 16 * 1024)?;
-        if min_internal < memory_floor {
+        if memory.minimum_internal < memory_floor {
             return Err(anyhow!(
-                "internal memory gate failed: min_internal_free_bytes={} floor={}",
-                min_internal,
-                memory_floor
+                "internal memory gate failed: min_internal_free_bytes={} floor={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_wifi_rx_matched={}",
+                memory.minimum_internal,
+                memory_floor,
+                memory.minimum_alloc_charge,
+                memory.minimum_alloc_internal_required,
+                memory.minimum_alloc_charge_overflow,
+                memory.minimum_alloc_post_free,
+                memory.minimum_alloc_wifi_rx_matched,
             ));
         }
 
         self.logger.info(format!(
-            "runtime_health_gate: active_gap_max_ms={} main_stack_headroom={} touch_core_stack_headroom={} min_internal_free_bytes={}",
+            "runtime_health_gate: active_gap_max_ms={} main_stack_headroom={} touch_core_stack_headroom={} internal_free_bytes={} min_internal_free_bytes={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_wifi_rx_matched={} internal_probe_block_bytes={} internal_probe_reserve_bytes={} probe_stable={}",
             active_gap,
             main_stack_headroom,
             touch_stack_headroom,
-            min_internal
+            memory.current_internal,
+            memory.minimum_internal,
+            memory.minimum_alloc_charge,
+            memory.minimum_alloc_internal_required,
+            memory.minimum_alloc_charge_overflow,
+            memory.minimum_alloc_post_free,
+            memory.minimum_alloc_wifi_rx_matched,
+            memory.probe_block,
+            memory.probe_reserve,
+            memory.probe_stable,
         ));
         Ok(())
     }
@@ -254,8 +265,139 @@ impl WifiAcceptanceRuntime<'_> {
     }
 }
 
+pub(super) struct ServingAllocatorStatus {
+    current_internal: u32,
+    minimum_internal: u32,
+    minimum_alloc_charge: u32,
+    minimum_alloc_internal_required: bool,
+    minimum_alloc_charge_overflow: bool,
+    minimum_alloc_post_free: u32,
+    minimum_alloc_correlation_stable: bool,
+    minimum_alloc_wifi_rx_matched: bool,
+    minimum_alloc_released: bool,
+    probe_performed: bool,
+    probe_block: u32,
+    probe_reserve: u32,
+    probe_before: u32,
+    probe_after: u32,
+    probe_stable: bool,
+}
+
+pub(super) fn parse_serving_allocator_status(line: &str) -> Result<ServingAllocatorStatus> {
+    let required_u32 =
+        |key| metric_u32(line, key).ok_or_else(|| anyhow!("PSRAM status missing {key}: {line}"));
+    let current_internal = required_u32("internal_free_bytes")?;
+    let minimum_internal = required_u32("min_internal_free_bytes")?;
+    let minimum_alloc_charge = required_u32("min_internal_alloc_charge_bytes")?;
+    let minimum_alloc_internal_required = metric_bool(line, "min_internal_alloc_internal_required")
+        .ok_or_else(|| {
+            anyhow!("PSRAM status missing min_internal_alloc_internal_required: {line}")
+        })?;
+    let minimum_alloc_charge_overflow = metric_bool(line, "min_internal_alloc_charge_overflow")
+        .ok_or_else(|| {
+            anyhow!("PSRAM status missing min_internal_alloc_charge_overflow: {line}")
+        })?;
+    let minimum_alloc_post_free = required_u32("min_internal_alloc_post_free_bytes")?;
+    let minimum_alloc_correlation_stable =
+        metric_bool(line, "min_internal_alloc_correlation_stable").ok_or_else(|| {
+            anyhow!("PSRAM status missing min_internal_alloc_correlation_stable: {line}")
+        })?;
+    let minimum_alloc_wifi_rx_matched = metric_bool(line, "min_internal_alloc_wifi_rx_matched")
+        .ok_or_else(|| {
+            anyhow!("PSRAM status missing min_internal_alloc_wifi_rx_matched: {line}")
+        })?;
+    let minimum_alloc_released = metric_bool(line, "min_internal_alloc_released")
+        .ok_or_else(|| anyhow!("PSRAM status missing min_internal_alloc_released: {line}"))?;
+    let probe_performed = metric_bool(line, "internal_probe_performed")
+        .ok_or_else(|| anyhow!("PSRAM status missing internal_probe_performed: {line}"))?;
+    let probe_block = required_u32("internal_probe_block_bytes")?;
+    let probe_reserve = required_u32("internal_probe_reserve_bytes")?;
+    let probe_before = required_u32("internal_probe_free_before_bytes")?;
+    let probe_after = required_u32("internal_probe_free_after_bytes")?;
+    let probe_stable = metric_bool(line, "internal_probe_stable")
+        .ok_or_else(|| anyhow!("PSRAM status missing internal_probe_stable: {line}"))?;
+    let status = ServingAllocatorStatus {
+        current_internal,
+        minimum_internal,
+        minimum_alloc_charge,
+        minimum_alloc_internal_required,
+        minimum_alloc_charge_overflow,
+        minimum_alloc_post_free,
+        minimum_alloc_correlation_stable,
+        minimum_alloc_wifi_rx_matched,
+        minimum_alloc_released,
+        probe_performed,
+        probe_block,
+        probe_reserve,
+        probe_before,
+        probe_after,
+        probe_stable,
+    };
+    validate_serving_allocator_snapshot(&status)?;
+    Ok(status)
+}
+
+fn validate_serving_allocator_snapshot(status: &ServingAllocatorStatus) -> Result<()> {
+    const INTERNAL_RESERVE_BYTES: u32 = 16 * 1024;
+    if !status.minimum_alloc_correlation_stable || !status.minimum_alloc_released {
+        return Err(anyhow!(
+            "allocator correlation gate failed: current={} minimum={} charge={} internal_required={} charge_overflow={} post_free={} correlation_stable={} wifi_rx_matched={} released={}",
+            status.current_internal,
+            status.minimum_internal,
+            status.minimum_alloc_charge,
+            status.minimum_alloc_internal_required,
+            status.minimum_alloc_charge_overflow,
+            status.minimum_alloc_post_free,
+            status.minimum_alloc_correlation_stable,
+            status.minimum_alloc_wifi_rx_matched,
+            status.minimum_alloc_released
+        ));
+    }
+    if status.minimum_alloc_charge == 0
+        || status.minimum_alloc_charge_overflow
+        || status.minimum_alloc_post_free != status.minimum_internal
+        || status.probe_performed
+        || status.probe_block != 0
+        || status.probe_reserve != INTERNAL_RESERVE_BYTES
+        || status.probe_before != status.probe_after
+        || status.probe_before != status.current_internal
+        || status.minimum_internal > status.current_internal
+        || !status.probe_stable
+    {
+        return Err(anyhow!(
+            "serving allocator status lacked coherent low-water provenance or an allocation-free snapshot: current={} minimum={} charge={} internal_required={} charge_overflow={} post_free={} correlation_stable={} wifi_rx_matched={} released={} performed={} block={} reserve={} before={} after={} stable={}",
+            status.current_internal,
+            status.minimum_internal,
+            status.minimum_alloc_charge,
+            status.minimum_alloc_internal_required,
+            status.minimum_alloc_charge_overflow,
+            status.minimum_alloc_post_free,
+            status.minimum_alloc_correlation_stable,
+            status.minimum_alloc_wifi_rx_matched,
+            status.minimum_alloc_released,
+            status.probe_performed,
+            status.probe_block,
+            status.probe_reserve,
+            status.probe_before,
+            status.probe_after,
+            status.probe_stable
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn metric_u32(line: &str, key: &str) -> Option<u32> {
     line.split_whitespace()
         .find_map(|token| token.strip_prefix(&format!("{key}=")))
         .and_then(|value| value.parse::<u32>().ok())
+}
+
+pub(super) fn metric_bool(line: &str, key: &str) -> Option<bool> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| match value {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        })
 }

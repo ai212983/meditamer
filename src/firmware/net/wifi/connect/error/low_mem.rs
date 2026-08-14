@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn recover_connect_err_low_internal_mem(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     disconnect_reason: u8,
     internal_free_bytes: usize,

@@ -1,7 +1,7 @@
 use super::*;
 pub(super) async fn perform_connect_attempt(
-    controller: &mut WifiController<'static>,
-    stack: &Stack<'static>,
+    controller: &mut WifiController<'_>,
+    stack: &Stack<'_>,
     state: &mut WifiTaskState,
 ) {
     let connect_started_at = Instant::now();

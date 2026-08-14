@@ -34,9 +34,10 @@ pub(crate) fn backend_name() -> &'static str {
 }
 
 pub(crate) fn wifi_runtime_config(country_us_override: bool) -> WifiDriverConfig {
-    // Instrumented debug code needs a deeper queue to sustain the accepted
-    // throughput floor. Optimized release code drains two slots fast enough,
-    // and the smaller bound preserves the internal-memory reserve.
+    // Keep the calibrated product queue shape and vendor AMPDU receive default.
+    // E-0037's single BLE-release-only AMPDU-off falsification still reached a
+    // 13,376-byte serving low-water in the binding ten-cycle soak, so the
+    // experiment is closed as insufficient and must not remain in production.
     let rx_queue_size = if cfg!(debug_assertions) { 4 } else { 2 };
     let config = WifiDriverConfig::default().with_rx_queue_size(rx_queue_size);
     if country_us_override {
@@ -46,10 +47,10 @@ pub(crate) fn wifi_runtime_config(country_us_override: bool) -> WifiDriverConfig
     }
 }
 
-pub(crate) fn initialize_runtime_sta(
-    wifi: esp_hal::peripherals::WIFI<'static>,
+pub(crate) fn initialize_runtime_sta<'d>(
+    wifi: esp_hal::peripherals::WIFI<'d>,
     country_us_override: bool,
-) -> Result<(WifiController<'static>, WifiDevice), &'static str> {
+) -> Result<(WifiController<'d>, WifiDevice), &'static str> {
     let sta = Interface::station();
     match WifiController::new(wifi, wifi_runtime_config(country_us_override)) {
         Ok(controller) => {
@@ -59,7 +60,11 @@ pub(crate) fn initialize_runtime_sta(
         Err(err) => {
             WIFI_STARTED.store(false, Ordering::Release);
             esp_println::println!("asset-upload-http: wifi init err={:?}", err);
-            Err("asset-upload-http: wifi init failed")
+            if matches!(err, WifiError::CleanupFailed) {
+                Err("asset-upload-http: wifi ownership unknown")
+            } else {
+                Err("asset-upload-http: wifi init failed")
+            }
         }
     }
 }
@@ -212,6 +217,22 @@ pub(crate) async fn wifi_stop_async(controller: &mut WifiController<'_>) -> Resu
         }
         _ => Err(WifiError::Failed),
     }
+}
+
+pub(crate) fn wifi_shutdown_source(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    controller.shutdown_source()
+}
+
+pub(crate) fn wifi_finalize_shutdown(controller: &mut WifiController<'_>) -> Result<(), WifiError> {
+    controller.finalize_shutdown()
+}
+
+pub(crate) fn wifi_callback_stats() -> esp_radio::wifi::WifiCallbackStats {
+    esp_radio::wifi::wifi_callback_stats()
+}
+
+pub(crate) fn wifi_rx_buffer_stats() -> esp_radio::wifi::WifiRxBufferStats {
+    esp_radio::wifi::wifi_rx_buffer_stats()
 }
 
 pub(crate) async fn wifi_connect_async(

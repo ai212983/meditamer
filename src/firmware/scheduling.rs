@@ -46,12 +46,20 @@ impl SchedulerProfile {
 
     const fn priority(self, class: TaskClass) -> u8 {
         match (self, class) {
+            (Self::Interactive | Self::Upload, TaskClass::Serial) => 3,
             (Self::Interactive | Self::Upload, TaskClass::TouchAcquisition) => 3,
             (Self::Interactive | Self::Upload, TaskClass::TouchPipeline) => 2,
             (Self::Interactive, TaskClass::Sd) => 1,
+            // Display is the sole APP_EVENTS consumer. Keep it level with the
+            // supervised network epoch so an always-ready runner cannot starve
+            // state-command acknowledgements after HTTP accept is armed.
             (
                 Self::Upload,
-                TaskClass::Network | TaskClass::Http | TaskClass::Sd | TaskClass::Wifi,
+                TaskClass::Network
+                | TaskClass::Http
+                | TaskClass::Sd
+                | TaskClass::Wifi
+                | TaskClass::Display,
             ) => 1,
             (Self::Diagnostics, TaskClass::Serial) => 3,
             (Self::Diagnostics, TaskClass::Diagnostics | TaskClass::FirmwareHealth) => 2,
@@ -223,7 +231,12 @@ mod tests {
             profile.priority(TaskClass::Wifi),
             profile.priority(TaskClass::Sd)
         );
-        assert!(profile.priority(TaskClass::Sd) > profile.priority(TaskClass::Serial));
+        assert_eq!(
+            profile.priority(TaskClass::Display),
+            profile.priority(TaskClass::Network)
+        );
+        assert!(profile.priority(TaskClass::Serial) > profile.priority(TaskClass::Display));
+        assert_eq!(profile.priority(TaskClass::Serial), 3);
     }
 
     #[test]

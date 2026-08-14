@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn recover_dhcp_no_ipv4_stall(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     stall_elapsed_ms: u32,
     trigger: &'static str,

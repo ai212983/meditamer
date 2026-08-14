@@ -9,11 +9,8 @@ use crate::{
     hal::{interrupt::Priority, peripherals::BT},
     interrupt_dispatch::Handler,
     sys::include::{
-        esp_bt_controller_config_t,
-        esp_bt_mode_t,
-        esp_bt_mode_t_ESP_BT_MODE_BLE,
-        esp_bt_mode_t_ESP_BT_MODE_BTDM,
-        esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT,
+        esp_bt_controller_config_t, esp_bt_mode_t, esp_bt_mode_t_ESP_BT_MODE_BLE,
+        esp_bt_mode_t_ESP_BT_MODE_BTDM, esp_bt_mode_t_ESP_BT_MODE_CLASSIC_BT,
         esp_bt_mode_t_ESP_BT_MODE_IDLE,
     },
 };
@@ -226,7 +223,7 @@ const SOC_MEM_BT_MISC_START: u32 = 0x3ffbdb28;
 const SOC_MEM_BT_MISC_END: u32 = 0x3ffbdb5c;
 
 const SOC_MEM_BT_EM_BREDR_REAL_END: u32 = 0x3ffb6388; //  (SOC_MEM_BT_EM_BREDR_NO_SYNC_END + CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN_EFF
-// * SOC_MEM_BT_EM_PER_SYNC_SIZE);
+                                                      // * SOC_MEM_BT_EM_PER_SYNC_SIZE);
 
 static BTDM_DRAM_AVAILABLE_REGION: [btdm_dram_available_region_t; 7] = [
     // following is .data

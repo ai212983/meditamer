@@ -346,7 +346,7 @@ impl TxPower {
 pub enum CcaMode {
     /// Disabled
     #[default]
-    Disabled          = 0,
+    Disabled = 0,
     /// Hardware Triggered
     HardwareTriggered = 1,
     /// Software Triggered (experimental)
@@ -617,7 +617,11 @@ pub(crate) unsafe extern "C" fn interrupt_set(
 ) -> i32 {
     trace!(
         "interrupt_set {} {} {} {} {}",
-        cpu_no, intr_source, handler as usize, arg as u32, ret_handle as usize,
+        cpu_no,
+        intr_source,
+        handler as usize,
+        arg as u32,
+        ret_handle as usize,
     );
 
     unsafe {
@@ -638,7 +642,9 @@ pub(crate) unsafe extern "C" fn interrupt_handler_set(
 ) {
     trace!(
         "interrupt_handler_set {} {:?} {:?}",
-        interrupt_no, func, arg
+        interrupt_no,
+        func,
+        arg
     );
 
     match interrupt_no {

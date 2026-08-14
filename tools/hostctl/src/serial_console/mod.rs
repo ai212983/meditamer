@@ -97,7 +97,30 @@ impl SerialConsole {
     pub fn send_line(&mut self, line: &str) -> Result<()> {
         self.port
             .write_all(line.as_bytes())
-            .with_context(|| format!("failed to write serial payload: {line}"))?;
+            .context("failed to write serial line")?;
+        self.port.write_all(b"\r\n")?;
+        self.port.flush()?;
+        Ok(())
+    }
+
+    pub fn send_line_paced(
+        &mut self,
+        line: &str,
+        chunk_bytes: usize,
+        chunk_settle: Duration,
+    ) -> Result<()> {
+        if chunk_bytes == 0 {
+            return Err(anyhow!("paced serial chunk size must be nonzero"));
+        }
+        for chunk in line.as_bytes().chunks(chunk_bytes) {
+            self.port
+                .write_all(chunk)
+                .context("failed to write paced serial line")?;
+            self.port.flush()?;
+            if !chunk_settle.is_zero() {
+                std::thread::sleep(chunk_settle);
+            }
+        }
         self.port.write_all(b"\r\n")?;
         self.port.flush()?;
         Ok(())

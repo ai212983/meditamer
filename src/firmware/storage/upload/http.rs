@@ -5,6 +5,7 @@
 //! [`listener_gate`] the DHCP/link gating they share, and [`mem_diag`] the
 //! shared memory logging. The buffers and loop state live here.
 
+use core::sync::atomic::{AtomicU16, Ordering};
 use embassy_time::Instant;
 
 mod connection;
@@ -37,6 +38,27 @@ pub(super) const HTTP_CHUNK_BUF_FALLBACK: usize = 1024;
 const HTTP_CHUNK_BUF_TARGET: usize = SD_UPLOAD_CHUNK_MAX;
 pub const HTTP_SOCKET_TIMEOUT_SECS: u64 = 60;
 pub(super) const DHCP_POLL_MS: u64 = 250;
+
+static ACTIVE_CONNECTIONS: AtomicU16 = AtomicU16::new(0);
+
+pub(in crate::firmware::storage::upload) fn active_connections() -> u16 {
+    ACTIVE_CONNECTIONS.load(Ordering::Acquire)
+}
+
+pub(super) struct ActiveConnectionGuard;
+
+impl ActiveConnectionGuard {
+    pub(super) fn enter() -> Self {
+        ACTIVE_CONNECTIONS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub(super) enum HttpBuffer<const N: usize> {
     Psram(psram::LargeByteBuffer),

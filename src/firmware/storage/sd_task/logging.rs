@@ -47,7 +47,8 @@ pub(super) fn publish_upload_result(mut result: SdUploadResult) {
 pub(super) fn publish_wifi_config_response(response: WifiConfigResponse) {
     if WIFI_CONFIG_RESPONSES.try_send(response).is_err() {
         esp_println::println!(
-            "sdtask: wifi_config_resp_drop ok={} code={} has_credentials={}",
+            "sdtask: wifi_config_resp_drop id={} ok={} code={} has_credentials={}",
+            response.request_id,
             response.ok as u8,
             wifi_config_result_code_label(response.code),
             response.credentials.is_some() as u8

@@ -135,9 +135,9 @@ pub(crate) fn apply_runtime_setup_overrides_and_log() {
     maybe_log_runtime_setup_driver_state(country_us_override_enabled(), storage_mode, storage_rc);
 }
 
-pub(crate) fn initialize_runtime_sta(
-    wifi: esp_hal::peripherals::WIFI<'static>,
-) -> Result<(WifiController<'static>, WifiDevice), &'static str> {
+pub(crate) fn initialize_runtime_sta<'d>(
+    wifi: esp_hal::peripherals::WIFI<'d>,
+) -> Result<(WifiController<'d>, WifiDevice), &'static str> {
     if wifi_setup_reinit_diag_enabled() || wifi_precreate_timer_task_diag_enabled() {
         println!("upload_http: legacy wifi reinit/timer diagnostics unavailable on esp-radio 1.0");
     }

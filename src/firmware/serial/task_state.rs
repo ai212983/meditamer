@@ -64,6 +64,10 @@ impl SerialTaskState {
         core::mem::take(&mut self.firmware_update_clients_suspended)
     }
 
+    pub(super) fn firmware_update_hardware_lease_active(&self) -> bool {
+        self.firmware_update_clients_suspended
+    }
+
     pub(super) fn next_sd_request_id(&mut self) -> u32 {
         let request_id = self.next_sd_request_id;
         self.next_sd_request_id = self.next_sd_request_id.wrapping_add(1);

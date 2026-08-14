@@ -83,6 +83,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         boot_window,
         skip_update_check,
         image_path: None,
+        image_built_in_workflow: false,
         idf_env: None,
         flash_result: None,
         capture_bytes: 0,
@@ -155,6 +156,7 @@ impl FlashCaptureRuntime<'_> {
             )?,
             other => bail!("unsupported image source `{other}`"),
         };
+        self.image_built_in_workflow = source == "build";
         self.image_path = Some(image_path);
         Ok(())
     }
@@ -202,6 +204,7 @@ impl FlashCaptureRuntime<'_> {
             profile: &self.opts.profile,
             skip_update_check: self.skip_update_check,
             include_bootloader,
+            built_in_workflow: self.image_built_in_workflow,
         })
     }
 

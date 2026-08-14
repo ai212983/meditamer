@@ -25,7 +25,7 @@ pub(in crate::firmware::net::wifi::connect) struct ErrorRecoveryObservation {
 }
 
 pub(in crate::firmware::net::wifi::connect) async fn handle_error_recovery_paths(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     observation: ErrorRecoveryObservation,
 ) {

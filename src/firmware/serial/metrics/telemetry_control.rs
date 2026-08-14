@@ -17,7 +17,7 @@ pub(super) async fn write_telemetry_status_line(uart: &mut SerialUart) {
         on_off(mask, observability::LOG_DOMAIN_HTTP),
         on_off(mask, observability::LOG_DOMAIN_SD),
     );
-    write_line(uart, line).await;
+    write_line(uart, &line).await;
 }
 
 pub(super) async fn run_telemetry_set_command(
@@ -49,5 +49,5 @@ pub(super) async fn run_telemetry_set_command(
         on_off(mask, observability::LOG_DOMAIN_HTTP),
         on_off(mask, observability::LOG_DOMAIN_SD),
     );
-    write_line(uart, line).await;
+    write_line(uart, &line).await;
 }

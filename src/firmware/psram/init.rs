@@ -1,10 +1,10 @@
 use core::sync::atomic::Ordering;
 
+use super::provenance::seed_internal_low_water;
 use super::{
     allocator_status, current_allocator_state, update_allocator_state, AllocatorState,
     LARGE_ALLOC_EXTERNAL_OK, LARGE_ALLOC_FAIL, LARGE_ALLOC_INTERNAL_OK,
-    LAST_LOGGED_PEAK_USED_BYTES, MIN_FREE_BYTES, MIN_FREE_EXTERNAL_BYTES, MIN_FREE_INTERNAL_BYTES,
-    PEAK_USED_BYTES,
+    LAST_LOGGED_PEAK_USED_BYTES, MIN_FREE_BYTES, MIN_FREE_EXTERNAL_BYTES, PEAK_USED_BYTES,
 };
 use super::{AllocatorStatus, INTERNAL_HEAP_DRAM2_BYTES};
 
@@ -36,7 +36,9 @@ pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> All
     PEAK_USED_BYTES.store(0, Ordering::Relaxed);
     LAST_LOGGED_PEAK_USED_BYTES.store(0, Ordering::Relaxed);
     MIN_FREE_BYTES.store(usize::MAX, Ordering::Relaxed);
-    MIN_FREE_INTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
+    seed_internal_low_water(
+        esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into()),
+    );
     MIN_FREE_EXTERNAL_BYTES.store(usize::MAX, Ordering::Relaxed);
     LARGE_ALLOC_EXTERNAL_OK.store(0, Ordering::Relaxed);
     LARGE_ALLOC_INTERNAL_OK.store(0, Ordering::Relaxed);

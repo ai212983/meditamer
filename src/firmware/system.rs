@@ -16,15 +16,13 @@ use esp_hal::{
     },
     time::{Duration as HalDuration, Rate},
     timer::timg::TimerGroup,
-    uart::{Config as UartConfig, Uart},
+    uart::Uart,
     Blocking,
 };
 
 use super::config::UART_BAUD;
 #[cfg(feature = "asset-upload-http")]
 use super::net;
-#[cfg(feature = "asset-upload-http")]
-use super::storage;
 use super::types::{DisplayContext, PanelPinHold};
 use super::{
     app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
@@ -34,7 +32,7 @@ use sdcard::probe;
 use static_cell::StaticCell;
 
 mod tasks;
-use tasks::{board_runtime_task, BoardRuntimeResources};
+use tasks::{board_runtime_task, external_board_runtime_resources, BoardRuntimeResources};
 
 #[cfg(feature = "asset-upload-http")]
 use crate::firmware::scheduling::{spawn as spawn_task, TaskClass};
@@ -72,7 +70,11 @@ pub fn run() -> ! {
     esp_rtos::start(timg0.timer0, software_interrupts.software_interrupt0);
     observability::log_stack_headroom("boot_after_rtos_start");
 
-    let uart_cfg = UartConfig::default().with_baudrate(UART_BAUD);
+    // Serial commands are a control-plane input. Wake the reader while half of
+    // the ESP32's 128-byte FIFO is still available instead of using the
+    // driver's 120-byte default, which leaves too little scheduling headroom
+    // under Wi-Fi and SD load.
+    let uart_cfg = super::serial_uart::config(UART_BAUD);
     let uart = Uart::new(peripherals.UART0, uart_cfg)
         .expect("failed to init UART0")
         .with_rx(peripherals.GPIO3)
@@ -81,11 +83,13 @@ pub fn run() -> ! {
 
     super::flash::initialize(peripherals.FLASH);
     let mut app_state_store = AppStateStore::new();
+    #[allow(unused_mut)]
     let mut persisted_state = app_state_store.load_state().unwrap_or_default();
     if let Err(error) = super::update::initialize_boot_state() {
         esp_println::println!("FIRMWARE_BOOT status=error reason={}", error.label());
         halt_forever();
     }
+    #[allow(unused_mut)]
     let mut initial_snapshot = AppStateSnapshot::from_persisted_sanitized(persisted_state);
 
     #[cfg(not(feature = "asset-upload-http"))]
@@ -124,19 +128,7 @@ pub fn run() -> ! {
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
     #[cfg(feature = "asset-upload-http")]
-    let upload_http_runtime = match net::setup(peripherals.WIFI) {
-        Ok(runtime) => Some(runtime),
-        Err(reason) => {
-            esp_println::println!("{}", reason);
-            if initial_snapshot.services.upload_enabled {
-                initial_snapshot.services.upload_enabled = false;
-                persisted_state.services.upload_enabled = false;
-                app_state_store.save_state(persisted_state);
-                publish_app_state_snapshot(initial_snapshot);
-            }
-            None
-        }
-    };
+    let network_resources = net::stack_resources();
 
     // GPIO36 is the board's shared active-low WAKE-button/touch-interrupt line.
     // ESP32 input-only GPIOs have no internal pull resistor; the board provides
@@ -260,29 +252,12 @@ pub fn run() -> ! {
         let boot_scan_only_diag_active = false;
 
         #[cfg(feature = "asset-upload-http")]
-        if let Some(upload_http_runtime) = upload_http_runtime {
+        if !boot_scan_only_diag_active {
             spawn_task(
                 spawner,
                 TaskClass::Wifi,
-                net::wifi_connection_task(
-                    upload_http_runtime.wifi_controller,
-                    upload_http_runtime.initial_credentials,
-                    upload_http_runtime.stack,
-                )
-                .unwrap(),
+                net::network_owner_task(peripherals.WIFI, network_resources).unwrap(),
             );
-            if !boot_scan_only_diag_active {
-                spawn_task(
-                    spawner,
-                    TaskClass::Network,
-                    net::net_task(upload_http_runtime.net_runner).unwrap(),
-                );
-                spawn_task(
-                    spawner,
-                    TaskClass::Http,
-                    storage::upload::http_server_task(upload_http_runtime.stack).unwrap(),
-                );
-            }
         }
 
         if boot_scan_only_diag_active {
@@ -292,7 +267,7 @@ pub fn run() -> ! {
             spawner.spawn(
                 board_runtime_task(
                     spawner,
-                    BoardRuntimeResources {
+                    external_board_runtime_resources(BoardRuntimeResources {
                         display_context,
                         touch_driver,
                         imu_driver,
@@ -301,7 +276,7 @@ pub fn run() -> ! {
                         uart,
                         cpu_control: peripherals.CPU_CTRL,
                         software_interrupt1: software_interrupts.software_interrupt1,
-                    },
+                    }),
                 )
                 .unwrap(),
             );

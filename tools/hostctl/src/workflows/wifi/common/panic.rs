@@ -3,6 +3,7 @@ pub enum PanicClass {
     PanicStack,
     PanicAssert,
     PanicGuru,
+    PanicWatchdog,
     PanicOther,
     UnexpectedReboot,
 }
@@ -13,6 +14,7 @@ impl PanicClass {
             Self::PanicStack => "runtime_panic_stack",
             Self::PanicAssert => "runtime_panic_assert",
             Self::PanicGuru => "runtime_panic_guru",
+            Self::PanicWatchdog => "runtime_panic_watchdog",
             Self::PanicOther => "runtime_panic_other",
             Self::UnexpectedReboot => "runtime_unexpected_reboot",
         }
@@ -72,6 +74,12 @@ fn classify_panic_line(line: &str) -> Option<PanicClass> {
     if lower.contains("guru meditation") {
         return Some(PanicClass::PanicGuru);
     }
+    if lower.contains("task watchdog got triggered")
+        || lower.contains("interrupt wdt timeout")
+        || lower.contains("interrupt watchdog timeout")
+    {
+        return Some(PanicClass::PanicWatchdog);
+    }
     if lower.contains("stack overflow") || lower.contains("stack smashing") {
         return Some(PanicClass::PanicStack);
     }
@@ -107,6 +115,17 @@ mod tests {
     fn detects_stack_signature() {
         let signal = detect_panic_signal("fatal: stack overflow in task", 9).expect("must detect");
         assert_eq!(signal.class, PanicClass::PanicStack);
+    }
+
+    #[test]
+    fn detects_task_and_interrupt_watchdogs() {
+        for line in [
+            "E task_wdt: Task watchdog got triggered. The following tasks did not reset",
+            "Interrupt wdt timeout on CPU0",
+        ] {
+            let signal = detect_panic_signal(line, 11).expect("must detect watchdog");
+            assert_eq!(signal.class, PanicClass::PanicWatchdog);
+        }
     }
 
     #[test]

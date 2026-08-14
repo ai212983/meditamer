@@ -7,11 +7,18 @@
 //! and [`status`] reports usage and high-water marks.
 
 mod buffer;
+mod external_value;
 mod init;
+mod internal_value;
+mod provenance;
 mod status;
 
 pub(crate) use buffer::alloc_large_byte_buffer;
+pub(crate) use external_value::ExternalValue;
 pub(crate) use init::init_allocator;
+pub(crate) use internal_value::InternalValue;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) use status::probe_internal_block_above_reserve;
 pub(crate) use status::{
     allocator_memory_snapshot, allocator_status, log_allocator_high_water, log_allocator_status,
 };
@@ -48,17 +55,32 @@ pub(crate) struct AllocatorMemorySnapshot {
     pub(crate) free_external_bytes: usize,
     pub(crate) min_free_bytes: usize,
     pub(crate) min_free_internal_bytes: usize,
+    pub(crate) min_internal_alloc_charge_bytes: usize,
+    pub(crate) min_internal_alloc_internal_required: bool,
+    pub(crate) min_internal_alloc_charge_overflow: bool,
+    pub(crate) min_internal_alloc_post_free_bytes: usize,
+    pub(crate) min_internal_alloc_correlation_stable: bool,
+    pub(crate) min_internal_alloc_wifi_rx_matched: bool,
+    pub(crate) min_internal_alloc_released: bool,
     pub(crate) min_free_external_bytes: usize,
     pub(crate) large_alloc_external_ok: usize,
     pub(crate) large_alloc_internal_ok: usize,
     pub(crate) large_alloc_fail: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InternalBlockProbe {
+    pub(crate) free_before_bytes: usize,
+    pub(crate) block_bytes: usize,
+    pub(crate) reserve_bytes: usize,
+    pub(crate) free_after_bytes: usize,
+    pub(crate) stable: bool,
+}
+
 static ALLOCATOR_STATE: AtomicU8 = AtomicU8::new(initial_allocator_state());
 static PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LAST_LOGGED_PEAK_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static MIN_FREE_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
-static MIN_FREE_INTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static MIN_FREE_EXTERNAL_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LARGE_ALLOC_EXTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
 static LARGE_ALLOC_INTERNAL_OK: AtomicUsize = AtomicUsize::new(0);
@@ -71,10 +93,15 @@ static LARGE_ALLOC_FAIL: AtomicUsize = AtomicUsize::new(0);
 /// free capacity by comparison. It also holds the 45000 byte `FRAMEBUFFER_BW`,
 /// so growing this past the remainder of its 113840 bytes fails at link time.
 ///
+/// The 64 KiB baseline left 3,304 bytes unused in `dram2_seg`. Exact Phase 1S
+/// evidence correlated two live vendor RX packets with a 3,400-byte heap
+/// excursion and a 13,508-byte low-water, so 3,200 bytes of that tail belongs
+/// to the sole internal-capability heap while retaining a small link-time tail.
+///
 /// Do not add a second internal region in the reclaimed PRO CPU ROM stack: that
 /// was measured at an 11/40 boot panic rate. See
 /// docs/reference/dram/dram-budget-rom-stack.md.
-const INTERNAL_HEAP_DRAM2_BYTES: usize = 58 * 1024;
+const INTERNAL_HEAP_DRAM2_BYTES: usize = 64 * 1024 + 3_200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BufferPlacement {

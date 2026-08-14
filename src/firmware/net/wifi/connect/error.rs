@@ -8,7 +8,7 @@ use low_mem::recover_connect_err_low_internal_mem;
 const CONNECT_ERR_LOW_INTERNAL_FREE_BYTES: usize = 2_048;
 
 pub(super) async fn handle_connect_error(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     err: WifiError,
     connect_started_at: Instant,

@@ -3,7 +3,7 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 
 #[cfg(target_os = "macos")]
-pub(super) fn ensure_host_wifi_association(expected_ssid: &str) -> Result<()> {
+pub(crate) fn ensure_host_wifi_association(expected_ssid: &str) -> Result<()> {
     let ports_out = Command::new("networksetup")
         .arg("-listallhardwareports")
         .output()
@@ -65,6 +65,6 @@ pub(super) fn ensure_host_wifi_association(expected_ssid: &str) -> Result<()> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn ensure_host_wifi_association(_expected_ssid: &str) -> Result<()> {
+pub(crate) fn ensure_host_wifi_association(_expected_ssid: &str) -> Result<()> {
     Ok(())
 }

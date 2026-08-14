@@ -72,9 +72,24 @@ fn parses_psram_allocator_status_command() {
 }
 
 #[test]
+fn parses_phase1s_allocator_status_alias() {
+    let cmd = parse_serial_command(b"ALLOCSTATUS");
+    assert!(matches!(cmd, Some(SerialCommand::AllocatorStatus)));
+}
+
+#[test]
 fn parses_ping_command() {
     let cmd = parse_serial_command(b"PING");
     assert!(matches!(cmd, Some(SerialCommand::Ping)));
+}
+
+#[test]
+fn parses_stack_status_without_arguments() {
+    assert!(matches!(
+        parse_serial_command(b"STACKSTATUS"),
+        Some(SerialCommand::StackStatus)
+    ));
+    assert!(parse_serial_command(b"STACKSTATUS 1").is_none());
 }
 
 #[test]

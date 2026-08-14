@@ -14,6 +14,7 @@ use logging::Logger;
 
 use workflows::artifacts::{run_artifacts_inventory, run_artifacts_prune, ArtifactsPruneOptions};
 use workflows::ble_phase1d::BlePhase1dOptions;
+use workflows::ble_phase1s::BlePhase1sOptions;
 use workflows::firmware_update::{
     firmware_public_key_hex, run_firmware_update, FirmwareUpdateOptions,
 };
@@ -161,6 +162,7 @@ struct TestArgs {
 #[derive(Debug, Subcommand)]
 enum TestSubcommand {
     BlePhase1d(BlePhase1dArgs),
+    BlePhase1s(BlePhase1sArgs),
     WifiAcceptance(WifiAcceptanceArgs),
     WifiDiscoveryDebug(WifiDiscoveryDebugArgs),
     RuntimeModesSmoke(RuntimeModesArgs),
@@ -176,6 +178,18 @@ struct BlePhase1dArgs {
     artifacts: PathBuf,
     #[arg(long)]
     board_id: String,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct BlePhase1sArgs {
+    #[arg(long)]
+    artifacts: PathBuf,
+    #[arg(long)]
+    board_id: String,
+    #[arg(long, default_value_t = 20)]
+    cycles: u32,
     #[arg(long)]
     output: Option<PathBuf>,
 }
@@ -331,6 +345,15 @@ fn run(cli: Cli) -> Result<()> {
                 BlePhase1dOptions {
                     artifacts: test_args.artifacts,
                     board_id: test_args.board_id,
+                    output_path: test_args.output,
+                },
+            ),
+            TestSubcommand::BlePhase1s(test_args) => workflows::ble_phase1s::run_ble_phase1s(
+                &mut logger,
+                BlePhase1sOptions {
+                    artifacts: test_args.artifacts,
+                    board_id: test_args.board_id,
+                    cycles: test_args.cycles,
                     output_path: test_args.output,
                 },
             ),

@@ -7,7 +7,7 @@ use super::listener_gate::{dhcp_ipv4_status, elapsed_ms_u32, net_pipeline_gate_r
 use super::mem_diag::log_http_mem_diag;
 use super::socket_cycle::serve_connection_cycle;
 use super::{HttpServerBuffers, HttpServerLoopState, DHCP_POLL_MS, UPLOAD_HTTP_PORT};
-pub(in crate::firmware::storage::upload) async fn run_http_server(stack: Stack<'static>) {
+pub(in crate::firmware::storage::upload) async fn run_http_server(stack: Stack<'_>) {
     let mut buffers = HttpServerBuffers::new();
     let mut state = HttpServerLoopState::new();
     observability::set_upload_http_listener(false, None);
@@ -44,6 +44,12 @@ pub(in crate::firmware::storage::upload) async fn run_http_server(stack: Stack<'
 
 async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
     let app_snapshot = crate::firmware::app_state::read_app_state_snapshot();
+    if !service_mode::radio_handoff_admission_open() {
+        state.reset_all();
+        observability::set_upload_http_listener(false, None);
+        Timer::after(Duration::from_millis(50)).await;
+        return false;
+    }
     if !service_mode::upload_transfers_enabled() {
         let listener_enabled = service_mode::upload_http_listener_enabled();
         let listener_seq = service_mode::upload_http_listener_set_seq();
@@ -118,10 +124,7 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
     true
 }
 
-async fn gate_dhcp_ipv4(
-    stack: &Stack<'static>,
-    state: &mut HttpServerLoopState,
-) -> Option<[u8; 4]> {
+async fn gate_dhcp_ipv4(stack: &Stack<'_>, state: &mut HttpServerLoopState) -> Option<[u8; 4]> {
     // Gate HTTP on active link + DHCP lease to avoid advertising an unusable listener.
     let local_ipv4 = match dhcp_ipv4_status(stack) {
         Ok(ipv4) => ipv4,

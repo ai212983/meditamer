@@ -5,26 +5,30 @@ use crate::firmware::{
     },
     observability, psram, service_mode,
     types::{
-        NetControlCommand, WifiCredentials, WifiRuntimePolicy, WIFI_PASSWORD_MAX, WIFI_SSID_MAX,
+        NetConfigSet, NetControlCommand, WifiCredentials, WifiRuntimePolicy, WIFI_PASSWORD_MAX,
+        WIFI_SSID_MAX,
     },
 };
 use core::{
+    cell::RefCell,
     fmt::Write as _,
     sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
 };
+use critical_section::Mutex;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_println::println;
 mod backend;
 mod runtime_init;
 pub(crate) use backend::{
-    backend_name, wifi_active_scan_config, wifi_channel_active_scan_config,
+    backend_name, wifi_active_scan_config, wifi_callback_stats, wifi_channel_active_scan_config,
     wifi_client_mode_config, wifi_connect_async, wifi_directed_active_scan_config,
-    wifi_disconnect_async, wifi_error_is_no_mem, wifi_is_connected, wifi_is_started,
-    wifi_passive_scan_config, wifi_power_save_none, wifi_raw_broad_scan_config, wifi_rssi,
-    wifi_scan_with_config_async, wifi_set_config, wifi_set_mode, wifi_set_power_saving,
-    wifi_set_protocol, wifi_sta_mode, wifi_standard_bgn_protocols, wifi_start_async,
-    wifi_stop_async, ScanConfig, WifiController, WifiDevice,
+    wifi_disconnect_async, wifi_error_is_no_mem, wifi_finalize_shutdown, wifi_is_connected,
+    wifi_is_started, wifi_passive_scan_config, wifi_power_save_none, wifi_raw_broad_scan_config,
+    wifi_rssi, wifi_rx_buffer_stats, wifi_scan_with_config_async, wifi_set_config, wifi_set_mode,
+    wifi_set_power_saving, wifi_set_protocol, wifi_shutdown_source, wifi_sta_mode,
+    wifi_standard_bgn_protocols, wifi_start_async, wifi_stop_async, ScanConfig, WifiController,
+    WifiDevice,
 };
 use backend::{AccessPointInfo, AuthMethod, ModeConfig};
 pub(crate) use runtime_init::{apply_runtime_setup_overrides_and_log, initialize_runtime_sta};
@@ -140,8 +144,12 @@ const WIFI_START_READINESS_PROBE_STEPS_MS: [u64; 3] = [0, 200, 800];
 const WIFI_POST_DISCONNECT_SETTLE_MS: u64 = 1_200;
 
 static WIFI_EVENT_LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
+static WIFI_CONTROL_QUIESCE_REQUESTED: AtomicBool = AtomicBool::new(false);
+static WIFI_CONTROL_QUIESCED: AtomicBool = AtomicBool::new(false);
 static WIFI_LAST_DISCONNECT_REASON: AtomicU8 = AtomicU8::new(0);
 static WIFI_DISCONNECTED_EVENT: AtomicBool = AtomicBool::new(false);
+static CURRENT_RUNTIME_CONFIG: Mutex<RefCell<Option<NetConfigSet>>> =
+    Mutex::new(RefCell::new(None));
 static WIFI_LAST_STA_START_AT_MS: AtomicU32 = AtomicU32::new(0);
 static WIFI_LAST_STA_STOP_AT_MS: AtomicU32 = AtomicU32::new(0);
 static WIFI_LAST_SCAN_DONE_AT_MS: AtomicU32 = AtomicU32::new(0);
@@ -232,18 +240,60 @@ use helpers::{
 use policy::effective_dhcp_timeout_ms;
 use scan::scan_target_candidates;
 use scan_candidates::rotate_to_next_candidate;
-use state::{NetFailureClass, NetState, NetStatusSnapshot, RecoveryLadderStep};
+pub(crate) use state::NetStatusSnapshot;
+use state::{NetFailureClass, NetState, RecoveryLadderStep};
 use status::{
     net_config_snapshot as diag_net_config_snapshot, publish_config, publish_state,
     read_status_fields,
 };
 
 pub(super) async fn run_wifi_connection_task(
-    controller: WifiController<'static>,
+    controller: &mut WifiController<'_>,
     credentials: Option<WifiCredentials>,
-    stack: Stack<'static>,
+    initial_policy: WifiRuntimePolicy,
+    stack: Stack<'_>,
 ) {
-    run_wifi_connection_task_inner(controller, credentials, stack).await;
+    run_wifi_connection_task_inner(controller, credentials, initial_policy, stack).await;
+}
+
+pub(crate) fn remember_runtime_config(config: NetConfigSet) {
+    critical_section::with(|cs| *CURRENT_RUNTIME_CONFIG.borrow_ref_mut(cs) = Some(config));
+}
+
+pub(crate) fn current_runtime_config() -> NetConfigSet {
+    critical_section::with(|cs| {
+        CURRENT_RUNTIME_CONFIG
+            .borrow_ref(cs)
+            .unwrap_or(NetConfigSet {
+                credentials: compiled_wifi_credentials(),
+                policy: WifiRuntimePolicy::defaults(),
+            })
+    })
+}
+
+pub(crate) fn request_control_quiescence() {
+    WIFI_CONTROL_QUIESCED.store(false, Ordering::Release);
+    WIFI_CONTROL_QUIESCE_REQUESTED.store(true, Ordering::Release);
+}
+
+pub(crate) fn cancel_control_quiescence() {
+    WIFI_CONTROL_QUIESCE_REQUESTED.store(false, Ordering::Release);
+    WIFI_CONTROL_QUIESCED.store(false, Ordering::Release);
+}
+
+pub(crate) fn control_quiesced() -> bool {
+    WIFI_CONTROL_QUIESCED.load(Ordering::Acquire)
+}
+
+pub(super) async fn acknowledge_control_quiescence() {
+    if !WIFI_CONTROL_QUIESCE_REQUESTED.load(Ordering::Acquire) {
+        return;
+    }
+    WIFI_CONTROL_QUIESCED.store(true, Ordering::Release);
+    while WIFI_CONTROL_QUIESCE_REQUESTED.load(Ordering::Acquire) {
+        Timer::after(Duration::from_millis(10)).await;
+    }
+    WIFI_CONTROL_QUIESCED.store(false, Ordering::Release);
 }
 
 pub(super) fn compiled_wifi_credentials() -> Option<WifiCredentials> {

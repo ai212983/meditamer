@@ -9,7 +9,7 @@ use scan::prepare_scan_candidates;
 use start::prepare_budget_and_start;
 
 pub(super) async fn prepare_connection_attempt(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
 ) -> ConnectionAttempt {
     let active = match prepare_preconditions(controller, state).await {

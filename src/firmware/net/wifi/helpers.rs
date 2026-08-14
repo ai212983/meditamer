@@ -70,13 +70,13 @@ pub(super) fn log_radio_mem_diag_with_trigger(stage: &str, trigger: &str) {
     );
 }
 
-pub(super) fn stack_ipv4_lease(stack: &Stack<'static>) -> Option<[u8; 4]> {
+pub(super) fn stack_ipv4_lease(stack: &Stack<'_>) -> Option<[u8; 4]> {
     stack
         .config_v4()
         .map(|cfg| cfg.address.address().octets())
         .filter(|ip| *ip != [0, 0, 0, 0])
 }
 
-pub(super) fn has_ipv4_lease(stack: &Stack<'static>) -> bool {
+pub(super) fn has_ipv4_lease(stack: &Stack<'_>) -> bool {
     stack_ipv4_lease(stack).is_some()
 }

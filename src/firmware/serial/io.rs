@@ -11,6 +11,8 @@ use crate::firmware::{
 
 #[cfg(feature = "asset-upload-http")]
 mod netcfg;
+#[cfg(feature = "asset-upload-http")]
+mod netcfg_persistence;
 mod sdwait;
 mod state_ack;
 mod ui_cycle_ack;
@@ -55,11 +57,26 @@ pub(super) async fn write_tap_trace_sample(uart: &mut SerialUart, sample: TapTra
 }
 
 pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
+    const INTERNAL_PROBE_RESERVE_BYTES: usize = 16 * 1024;
+    const ALLOCATOR_STATUS_CAPACITY: usize = 960;
+    const ALLOCATOR_STATUS_TARGET_MAX_BYTES: usize = 916;
+    const _: () = assert!(ALLOCATOR_STATUS_TARGET_MAX_BYTES < ALLOCATOR_STATUS_CAPACITY);
     let snapshot = psram::allocator_memory_snapshot();
-    let mut line = heapless::String::<448>::new();
-    let _ = write!(
+    // Wi-Fi RX remains concurrent with serving-state diagnostics. Do not hold a
+    // deliberate trial allocation that can combine with real RX demand and make
+    // the diagnostic itself violate the lifetime floor. The binding 4,112-byte
+    // probe is performed only by the source-quiescent OffConfirmed owner gate.
+    let probe = crate::firmware::psram::InternalBlockProbe {
+        free_before_bytes: snapshot.free_internal_bytes,
+        block_bytes: 0,
+        reserve_bytes: INTERNAL_PROBE_RESERVE_BYTES,
+        free_after_bytes: snapshot.free_internal_bytes,
+        stable: true,
+    };
+    let mut line = heapless::String::<ALLOCATOR_STATUS_CAPACITY>::new();
+    if write!(
         &mut line,
-        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}\r\n",
+        "PSRAM feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_correlation_stable={} min_internal_alloc_wifi_rx_matched={} min_internal_alloc_released={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={} internal_probe_performed=false internal_probe_block_bytes={} internal_probe_reserve_bytes={} internal_probe_free_before_bytes={} internal_probe_free_after_bytes={} internal_probe_stable={}\r\n",
         snapshot.feature_enabled,
         snapshot.state,
         snapshot.total_bytes,
@@ -70,11 +87,28 @@ pub(super) async fn write_allocator_status_line(uart: &mut SerialUart) {
         snapshot.free_external_bytes,
         snapshot.min_free_bytes,
         snapshot.min_free_internal_bytes,
+        snapshot.min_internal_alloc_charge_bytes,
+        snapshot.min_internal_alloc_internal_required,
+        snapshot.min_internal_alloc_charge_overflow,
+        snapshot.min_internal_alloc_post_free_bytes,
+        snapshot.min_internal_alloc_correlation_stable,
+        snapshot.min_internal_alloc_wifi_rx_matched,
+        snapshot.min_internal_alloc_released,
         snapshot.min_free_external_bytes,
         snapshot.large_alloc_external_ok,
         snapshot.large_alloc_internal_ok,
-        snapshot.large_alloc_fail
-    );
+        snapshot.large_alloc_fail,
+        probe.block_bytes,
+        probe.reserve_bytes,
+        probe.free_before_bytes,
+        probe.free_after_bytes,
+        probe.stable,
+    )
+    .is_err()
+    {
+        line.clear();
+        let _ = line.push_str("PSRAM ERR reason=response_overflow\r\n");
+    }
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 

@@ -42,6 +42,46 @@ fn parses_bounded_ble_probe_commands() {
     assert!(!parse_ble_probe_status_command(b"BLEPROBE STOP"));
 }
 
+#[cfg(feature = "ble-foundation")]
+#[test]
+fn parses_only_epoch_matched_phase1s_ble_windows() {
+    assert_eq!(
+        parse_ble_phase1s_start_command(b"BLEP1S START 17 4"),
+        Some((17, 4))
+    );
+    assert!(parse_ble_phase1s_status_command(b" blep1s status\r\n"));
+    assert!(parse_ble_phase1s_start_command(b"BLEP1S START 0 4").is_none());
+    assert!(parse_ble_phase1s_start_command(b"BLEP1S START 17 0").is_none());
+    assert!(parse_ble_phase1s_start_command(b"BLEP1S START 17 4 trailing").is_none());
+    assert!(!parse_ble_phase1s_status_command(b"BLEP1S START"));
+}
+
+#[cfg(feature = "ble-foundation")]
+#[test]
+fn parses_epoch_matched_radio_handoff_commands() {
+    assert!(matches!(
+        parse_radio_handoff_command(b" RADIOHANDOFF STATUS\r\n"),
+        Some(RadioHandoffCommand::Status)
+    ));
+    assert!(matches!(
+        parse_radio_handoff_command(b"RADIOHANDOFF ACQUIRE 17 4"),
+        Some(RadioHandoffCommand::Acquire {
+            boot_generation: 17,
+            epoch: 4
+        })
+    ));
+    assert!(matches!(
+        parse_radio_handoff_command(b"RADIOHANDOFF RELEASE 17 4"),
+        Some(RadioHandoffCommand::Release {
+            boot_generation: 17,
+            epoch: 4
+        })
+    ));
+    assert!(parse_radio_handoff_command(b"RADIOHANDOFF ACQUIRE 0 4").is_none());
+    assert!(parse_radio_handoff_command(b"RADIOHANDOFF RELEASE 17 0").is_none());
+    assert!(parse_radio_handoff_command(b"RADIOHANDOFF ACQUIRE 17 4 extra").is_none());
+}
+
 #[test]
 fn parses_state_set_forms() {
     assert!(matches!(

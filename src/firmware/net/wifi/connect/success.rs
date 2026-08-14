@@ -37,7 +37,7 @@ fn note_listener_timeout_guard(
 }
 
 pub(super) async fn recover_listener_timeout(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     current_internal_free: u32,
 ) {
@@ -78,14 +78,15 @@ pub(super) async fn recover_listener_timeout(
 }
 
 pub(super) async fn handle_connect_success(
-    controller: &mut WifiController<'static>,
-    stack: &Stack<'static>,
+    controller: &mut WifiController<'_>,
+    stack: &Stack<'_>,
     state: &mut WifiTaskState,
 ) {
     let mut dhcp_lease_observed = has_ipv4_lease(stack);
     let dhcp_wait_started_at = Instant::now();
     let mut listener_wait_started_at = None;
     loop {
+        acknowledge_control_quiescence().await;
         if !service_mode::upload_enabled() {
             observability::set_wifi_link_connected(false);
             observability::set_upload_http_listener(false, None);

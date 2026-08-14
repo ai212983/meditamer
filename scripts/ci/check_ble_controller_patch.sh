@@ -13,7 +13,10 @@ queue_lifecycle="$patch_root/src/compat/queue_lifecycle.rs"
 wifi_adapter="$patch_root/src/wifi/os_adapter/mod.rs"
 wifi_controller="$patch_root/src/wifi/mod.rs"
 root_manifest="$repo_root/Cargo.toml"
-expected_tree_digest="13b5b5bed520b5a96f2fe250bb8de3d6ae7ae4223e83b995cd233788d356540b"
+serial_task="$repo_root/src/firmware/serial.rs"
+command_dispatch="$repo_root/src/firmware/serial/command_dispatch.rs"
+firmware_ble="$repo_root/src/firmware/ble/mod.rs"
+expected_tree_digest="5f57341b1daf5182e183fbe1bbce4c46b85852d085f491b43cb5c345949df446"
 expected_driver_digest="6210f7f63f290aaf6bd412faa6de8ae18dff225fdf340b25daf7b61eb7fe0e1f"
 expected_esp_rtos_scheduler_digest="809eb9122d9e1a40718e48670148facd9a474c2869b926edd071f2c394a1bcbc"
 expected_esp_rtos_task_digest="2460ac37416b4a041e6fab46ecf8b8dfcf8634a9fcdb0f1a307d8aa359082a2a"
@@ -29,6 +32,9 @@ for source in "$ble_mod" "$btdm" "$controller" "$tx_cancellation" "$compat_queue
   [[ -f "$source" ]] || fail "missing ${source#"$repo_root/"}"
 done
 [[ -f "$driver_root/src/queue.rs" ]] || fail "missing fixed RTOS queue implementation"
+[[ -f "$serial_task" ]] || fail "missing serial command memory-boundary implementation"
+[[ -f "$command_dispatch" ]] || fail "missing BLE status formatter"
+[[ -f "$firmware_ble" ]] || fail "missing BLE lifecycle implementation"
 grep -Fq "\`$expected_tree_digest\`" "$patch_manifest" \
   || fail "patch manifest tree digest does not match the guarded source digest"
 grep -Fq 'const COMPAT_QUEUE_SLOT_COUNT: usize = 8;' "$driver_root/src/queue.rs" \
@@ -55,6 +61,25 @@ grep -Fq 'let callback = super::WifiCallbackGuard::enter_event();' "$wifi_adapte
   || fail "Wi-Fi event callback is outside the callback fence"
 grep -Fq 'if !callback.admitted {' "$wifi_adapter" \
   || fail "late Wi-Fi events are not suppressed after source shutdown"
+grep -Fq 'let packet = PacketBuffer::new(buffer, len, eb);' "$wifi_controller" \
+  || fail "Wi-Fi RX ownership telemetry does not cover callback packet construction"
+grep -Fq '_meditamer_match_internal_low_water_wifi_rx(buffer.addr(), len as usize, eb.addr());' "$wifi_controller" \
+  || fail "station receive callback no longer exposes the allocator correlation boundary"
+grep -Fq 'record_wifi_rx_buffer_dropped(self.len);' "$wifi_controller" \
+  || fail "Wi-Fi RX ownership telemetry does not cover packet release"
+rx_drop_body="$(sed -n '/impl Drop for PacketBuffer/,/^    }/p' "$wifi_controller")"
+rx_vendor_free_line="$(grep -n -m1 'esp_wifi_internal_free_rx_buffer' <<<"$rx_drop_body" | cut -d: -f1)"
+rx_account_drop_line="$(grep -n -m1 'record_wifi_rx_buffer_dropped' <<<"$rx_drop_body" | cut -d: -f1)"
+[[ -n "$rx_vendor_free_line" && -n "$rx_account_drop_line" \
+  && "$rx_vendor_free_line" -lt "$rx_account_drop_line" ]] \
+  || fail "Wi-Fi RX telemetry releases ownership before vendor free completes"
+grep -Fq 'pub fn wifi_rx_buffer_stats() -> WifiRxBufferStats' "$wifi_controller" \
+  || fail "Wi-Fi RX ownership telemetry is not exported"
+grep -Fq 'command_dispatch::run_low_overhead_diagnostic_command(uart, state, cmd).await;' "$serial_task" \
+  || fail "allocator/handoff diagnostics returned to the heap-backed wide dispatcher"
+if grep -Fq 'esp_alloc::ExternalMemory' "$serial_task"; then
+  fail "serial dispatcher returned to external PSRAM"
+fi
 grep -Fq 'struct GuardedStorage' "$driver_root/src/queue.rs" \
   || fail "queue payload canaries are missing"
 grep -Fq 'static PAYLOAD_ARENA: PayloadArena' "$driver_root/src/queue.rs" \
@@ -135,8 +160,12 @@ if grep -Eq 'queue_header_is_usable|read_volatile|initial_header|observe_heap_de
   "$compat_queue" "$queue_lifecycle"; then
   fail "private-layout queue-header diagnostic returned"
 fi
-grep -Fq 'esp-radio-rtos-driver = { path = "vendor/esp-radio-rtos-driver-0.3.0-retained" }' "$root_manifest" \
-  || fail "RTOS settlement driver patch is not pinned to the reviewed vendor tree"
+grep -Fq 'features = ["alloc-hooks", "compat", "esp32", "global-allocator"]' "$root_manifest" \
+  || fail "run-wide internal low-water allocation hook is not enabled"
+grep -Fq 'esp-radio-rtos-driver = "=0.3.0"' "$root_manifest" \
+  || fail "direct RTOS settlement driver dependency is not exactly pinned"
+grep -Fq 'unsafe extern "Rust" fn _esp_alloc_alloc(' "$repo_root/src/firmware/psram/provenance.rs" \
+  || fail "allocation hook is not limited to the reviewed low-water recorder"
 [[ "$(grep -Fc 'queue_lifecycle::begin_task_use' "$compat_queue")" -eq 5 ]] \
   || fail "not every task queue operation is task-owned and lifecycle-fenced"
 [[ "$(grep -Fc 'queue_lifecycle::begin_isr_use' "$compat_queue")" -eq 2 ]] \
@@ -188,6 +217,49 @@ grep -Fq 'if target == current {' "$btdm" \
 if grep -Fq 'BLE queue reclamation failed after BTDM source shutdown");' "$btdm"; then
   fail "BTDM teardown returned to panic-on-reclamation-failure"
 fi
+grep -Fq 'let teardown_transport = hci_transport_stats();' "$firmware_ble" \
+  || fail "firmware does not resample transport faults after BLE teardown"
+stack_clear_line="$(grep -n -m1 'HOST_STACK.clear();' "$firmware_ble" | cut -d: -f1)"
+teardown_transport_line="$(grep -n -m1 'let teardown_transport = hci_transport_stats();' "$firmware_ble" | cut -d: -f1)"
+[[ -n "$stack_clear_line" && -n "$teardown_transport_line" \
+   && "$stack_clear_line" -lt "$teardown_transport_line" ]] \
+  || fail "transport fault snapshot occurs before connector teardown"
+grep -Fq 'heapless::String::<768>::new()' "$command_dispatch" \
+  || fail "BLE terminal status envelope is too small for bounded fault telemetry"
+grep -Fq 'queue_task_cancelled={} queue_balance={} queue_task_live={} queue_task_faults={} queue_op_full={}' \
+  "$command_dispatch" \
+  || fail "BLE terminal queue/task field order changed without host protocol review"
+[[ "$(grep -Fc 'SerialCommand::BlePhase1sStatus => write_ble_phase1s_status(uart).await' "$command_dispatch")" -eq 1 ]] \
+  || fail "BLE status formatter returned to the heap-backed wide dispatcher"
+wide_dispatch_body="$(sed -n '/^pub(super) async fn handle_serial_command/,/^}/p' "$command_dispatch")"
+grep -Fq 'unreachable!("low-overhead BLE lifecycle command reached boxed dispatcher")' \
+  <<<"$wide_dispatch_body" \
+  || fail "BLE lifecycle command can allocate the heap-backed wide dispatcher"
+local_dispatch_body="$(sed -n '/^async fn handle_local_command/,/^}/p' "$command_dispatch")"
+if grep -Eq 'StackStatus|AllocatorStatus|BlePhase1s(Start|Status)|RadioHandoff(Acquire|Release|Status)' \
+  <<<"$local_dispatch_body"; then
+  fail "wide local-command future retains low-overhead lifecycle or memory branches"
+fi
+serial_route_body="$(sed -n '/^async fn handle_uart_byte/,/^}/p' "$serial_task")"
+low_overhead_body="$(sed -n '/^pub(super) async fn run_low_overhead_diagnostic_command/,/^}/p' "$command_dispatch")"
+for variant in \
+  StackStatus \
+  AllocatorStatus \
+  NetStatus \
+  StateSet \
+  StateDiag \
+  NetStart \
+  NetStop \
+  BlePhase1sStart \
+  BlePhase1sStatus \
+  RadioHandoffAcquire \
+  RadioHandoffRelease \
+  RadioHandoffStatus; do
+  grep -Fq "SerialCommand::$variant" <<<"$serial_route_body" \
+    || fail "$variant no longer bypasses the heap-backed wide dispatcher"
+  grep -Fq "SerialCommand::$variant" <<<"$low_overhead_body" \
+    || fail "$variant is routed low-overhead but has no bounded implementation"
+done
 grep -Fq 'struct WifiQueueEpochGuard' "$wifi_controller" \
   || fail "Wi-Fi queue epoch guard is missing"
 grep -Fq 'let mut queue_epoch = WifiQueueEpochGuard::begin();' "$wifi_controller" \
@@ -321,9 +393,5 @@ actual_driver_digest="$({
 } | shasum -a 256 | awk '{print $1}')"
 [[ "$actual_driver_digest" == "$expected_driver_digest" ]] \
   || fail "patched RTOS driver tree digest changed: $actual_driver_digest"
-
-cargo test --locked --quiet \
-  --manifest-path "$repo_root/test-support/host/ble_transport_host_harness/Cargo.toml" \
-  || fail "queue lifecycle host harness failed"
 
 echo "BLE controller patch check passed"

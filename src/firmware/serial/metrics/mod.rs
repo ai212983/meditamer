@@ -7,7 +7,7 @@ mod imu;
 mod net;
 mod telemetry_control;
 
-async fn write_line<const N: usize>(uart: &mut SerialUart, line: heapless::String<N>) {
+async fn write_line<const N: usize>(uart: &mut SerialUart, line: &heapless::String<N>) {
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 

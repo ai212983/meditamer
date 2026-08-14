@@ -1,6 +1,5 @@
 use super::super::counters::*;
 use super::log_filter::log_filter_enabled;
-
 static STACK_HEADROOM_MIN_BYTES: core::sync::atomic::AtomicU32 =
     core::sync::atomic::AtomicU32::new(u32::MAX);
 static TOUCH_CORE_STACK_GUARD: core::sync::atomic::AtomicUsize =
@@ -31,18 +30,7 @@ pub(crate) fn record_stack_headroom() {
         let sp = current_sp();
         let guard = core::ptr::addr_of!(__stack_chk_guard) as usize;
         let headroom = sp.saturating_sub(guard).min(u32::MAX as usize) as u32;
-        let mut minimum = STACK_HEADROOM_MIN_BYTES.load(core::sync::atomic::Ordering::Relaxed);
-        while headroom < minimum {
-            match STACK_HEADROOM_MIN_BYTES.compare_exchange_weak(
-                minimum,
-                headroom,
-                core::sync::atomic::Ordering::Relaxed,
-                core::sync::atomic::Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(next) => minimum = next,
-            }
-        }
+        let _ = install_minimum(&STACK_HEADROOM_MIN_BYTES, headroom);
     }
 }
 
@@ -53,7 +41,6 @@ pub(crate) fn log_stack_headroom(tag: &str) {
     {
         return;
     }
-
     #[cfg(target_arch = "xtensa")]
     {
         unsafe extern "C" {
@@ -70,9 +57,15 @@ pub(crate) fn log_stack_headroom(tag: &str) {
         let total_bytes = stack_start.saturating_sub(stack_end);
         let used_bytes = stack_start.saturating_sub(sp);
         let headroom_bytes = sp.saturating_sub(guard);
-        record_stack_headroom();
+        let installed = install_minimum(
+            &STACK_HEADROOM_MIN_BYTES,
+            headroom_bytes.min(u32::MAX as usize) as u32,
+        );
 
-        if headroom_bytes <= 4 * 1024 {
+        // This hook sits on every FAT I/O boundary. Repeating an unchanged
+        // low-water line can overrun UART evidence and mask command replies;
+        // the METRICS command remains the authoritative minimum report.
+        if installed && headroom_bytes <= 4 * 1024 {
             esp_println::println!(
                 "stack_diag: tag={} sp=0x{:08x} guard=0x{:08x} headroom={} used={} total={}",
                 tag,
@@ -108,21 +101,9 @@ pub(crate) fn record_touch_core_stack_headroom() {
 
         let sp = current_sp();
         let headroom = sp.saturating_sub(guard).min(u32::MAX as usize) as u32;
-        let mut minimum =
-            TOUCH_CORE_STACK_HEADROOM_MIN_BYTES.load(core::sync::atomic::Ordering::Relaxed);
-        while headroom < minimum {
-            match TOUCH_CORE_STACK_HEADROOM_MIN_BYTES.compare_exchange_weak(
-                minimum,
-                headroom,
-                core::sync::atomic::Ordering::Relaxed,
-                core::sync::atomic::Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(next) => minimum = next,
-            }
-        }
+        let installed = install_minimum(&TOUCH_CORE_STACK_HEADROOM_MIN_BYTES, headroom);
 
-        if headroom <= 512 {
+        if installed && headroom <= 512 {
             esp_println::println!(
                 "touch_core_stack_diag: sp=0x{:08x} guard=0x{:08x} headroom={} used={} total={}",
                 sp as u32,
@@ -133,6 +114,22 @@ pub(crate) fn record_touch_core_stack_headroom() {
             );
         }
     }
+}
+
+fn install_minimum(minimum: &core::sync::atomic::AtomicU32, value: u32) -> bool {
+    let mut observed = minimum.load(core::sync::atomic::Ordering::Relaxed);
+    while value < observed {
+        match minimum.compare_exchange_weak(
+            observed,
+            value,
+            core::sync::atomic::Ordering::Relaxed,
+            core::sync::atomic::Ordering::Relaxed,
+        ) {
+            Ok(_) => return true,
+            Err(next) => observed = next,
+        }
+    }
+    false
 }
 
 pub(crate) fn minimum_stack_headroom_bytes() -> u32 {

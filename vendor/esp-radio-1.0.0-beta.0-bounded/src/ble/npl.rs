@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::{
     mem::transmute,
-    ptr::{NonNull, addr_of, addr_of_mut},
+    ptr::{addr_of, addr_of_mut, NonNull},
 };
 
 use esp_hal::time::Instant;
@@ -9,7 +9,7 @@ use esp_phy::PhyInitGuard;
 
 use super::*;
 use crate::{
-    compat::{self, OSI_FUNCS_TIME_BLOCKING, common::str_from_c, queue},
+    compat::{self, common::str_from_c, queue, OSI_FUNCS_TIME_BLOCKING},
     sys::{c_types::*, include::*},
     time::{blob_ticks_to_micros, blob_ticks_to_millis, millis_to_blob_ticks},
 };
@@ -401,7 +401,13 @@ unsafe extern "C" fn task_create(
     let name_str = unsafe { str_from_c(name) };
     trace!(
         "task_create {:?} {} {} {:?} {} {:?} {}",
-        task_func, name_str, stack_depth, param, prio, task_handle, core_id,
+        task_func,
+        name_str,
+        stack_depth,
+        param,
+        prio,
+        task_handle,
+        core_id,
     );
 
     unsafe {
@@ -1002,7 +1008,10 @@ unsafe extern "C" fn ble_npl_callout_init(
 ) -> i32 {
     trace!(
         "ble_npl_callout_init {:?} {:?} {:?} {:?}",
-        callout, eventq, func, args
+        callout,
+        eventq,
+        func,
+        args
     );
 
     if unsafe { (*callout).dummy } == 0 {

@@ -10,7 +10,7 @@ Status: repository-owned Phase 1 candidate
 - License: MIT OR Apache-2.0
 - Repository ownership authorized: 2026-08-11
 - Patched crate-tree SHA-256 (excluding this manifest):
-  `13b5b5bed520b5a96f2fe250bb8de3d6ae7ae4223e83b995cd233788d356540b`
+  `5f57341b1daf5182e183fbe1bbce4c46b85852d085f491b43cb5c345949df446`
 
 The packaged source was copied without modification before applying the changes documented below.
 Changing the base version, checksum, feature union, capacity, timeout, or overflow policy reopens
@@ -38,7 +38,11 @@ The accepted patch changes the ESP32 BTDM HCI transport and its connector error 
   window can correlate internal-heap low water with vendor-owned dynamic packet buffers without
   changing queue capacity;
 - retain at most one station receive callback packet after callback entry and before queueing,
-  rejecting and returning a contending vendor buffer before `PacketBuffer` construction;
+  rejecting and returning a contending vendor buffer before `PacketBuffer` construction; a product
+  allocator hook separately records any vendor buffer already allocated before callback entry;
+- report the station callback's opaque handle and complete payload range to an allocation-free
+  product correlation hook after the callback fence and before retained-owner admission; this is
+  diagnostic-only and does not alter packet admission, queueing, or release;
 - propagate bounded transport failures through `BleConnectorError`; and
 - reset queues and counters at controller initialization and teardown; and
 - normalize one upstream edition-sensitive `let` chain without changing its read behavior so the
@@ -51,8 +55,8 @@ has disabled and quiesced its callbacks. BLE initialization opens such an epoch 
 must retire every epoch queue, return with zero HCI callbacks in flight, and reclaim every slot.
 Unretired queues, operations in flight, lower-owner rejection, canary damage, or pool exhaustion are
 hard failures. The earlier queue-lifetime diagnostic allocation hooks, private-layout header probe,
-and deliberate leak are removed. Fixed queue payload uses a static first-fit arena; operations use
-bounded per-queue raw-lock
+and deliberate leak are removed. The product's separate allocator low-water hook is acceptance
+telemetry and does not inspect queue layout or alter queue lifetime. Fixed queue payload uses a static first-fit arena; operations use bounded per-queue raw-lock
 copies and timer-sleeping task waits rather than the upstream reentrant compat-semaphore/wait-queue
 path. ISR operations never enter the task scheduler, and task/ISR nested-use rejection is counted.
 

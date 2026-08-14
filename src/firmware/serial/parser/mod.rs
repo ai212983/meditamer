@@ -26,12 +26,43 @@ fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
         return Some(SerialCommand::UiCycleStep);
     }
     #[cfg(feature = "ble-foundation")]
+    if let Some((boot_generation, epoch)) = basic::parse_ble_phase1s_start_command(line) {
+        return Some(SerialCommand::BlePhase1sStart {
+            boot_generation,
+            epoch,
+        });
+    }
+    #[cfg(feature = "ble-foundation")]
+    if basic::parse_ble_phase1s_status_command(line) {
+        return Some(SerialCommand::BlePhase1sStatus);
+    }
+    #[cfg(feature = "ble-foundation")]
     if basic::parse_ble_probe_start_command(line) {
         return Some(SerialCommand::BleProbeStart);
     }
     #[cfg(feature = "ble-foundation")]
     if basic::parse_ble_probe_status_command(line) {
         return Some(SerialCommand::BleProbeStatus);
+    }
+    #[cfg(feature = "ble-foundation")]
+    if let Some(command) = basic::parse_radio_handoff_command(line) {
+        return Some(match command {
+            basic::RadioHandoffCommand::Acquire {
+                boot_generation,
+                epoch,
+            } => SerialCommand::RadioHandoffAcquire {
+                boot_generation,
+                epoch,
+            },
+            basic::RadioHandoffCommand::Release {
+                boot_generation,
+                epoch,
+            } => SerialCommand::RadioHandoffRelease {
+                boot_generation,
+                epoch,
+            },
+            basic::RadioHandoffCommand::Status => SerialCommand::RadioHandoffStatus,
+        });
     }
     if basic::parse_repaint_command(line) {
         return Some(SerialCommand::Repaint);
@@ -53,6 +84,9 @@ fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
     }
     if basic::parse_metrics_command(line) {
         return Some(SerialCommand::Metrics);
+    }
+    if line == b"STACKSTATUS" {
+        return Some(SerialCommand::StackStatus);
     }
     if basic::parse_ping_command(line) {
         return Some(SerialCommand::Ping);

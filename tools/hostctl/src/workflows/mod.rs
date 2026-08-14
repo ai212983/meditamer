@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod ble_phase1d;
+pub mod ble_phase1s;
 pub mod common;
 pub mod firmware_update;
 pub mod flash_capture;

@@ -7,7 +7,7 @@ mod stage;
 use stage::{run_scan_stage, ScanStage, ScanStageContext};
 
 pub(super) async fn scan_target_candidates(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     target_ssid: &str,
     runtime_policy: WifiRuntimePolicy,
     force_full_channel_probe: bool,

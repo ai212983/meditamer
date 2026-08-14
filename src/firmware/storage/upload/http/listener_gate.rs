@@ -3,7 +3,7 @@ use embassy_net::Stack;
 use embassy_time::Instant;
 
 pub(super) fn dhcp_ipv4_status(
-    stack: &Stack<'static>,
+    stack: &Stack<'_>,
 ) -> Result<[u8; 4], observability::NetPipelineGate> {
     // Use Wi-Fi task connectivity + non-zero DHCP lease as the listener gate.
     // `stack.is_link_up()` can transiently lag reconnect state and block listener

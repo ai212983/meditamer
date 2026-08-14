@@ -39,6 +39,7 @@ pub(in crate::firmware::serial) enum SerialCommand {
     TelemetrySet {
         operation: TelemetrySetOperation,
     },
+    StackStatus,
     AllocatorStatus,
     AllocatorAllocProbe {
         bytes: u32,
@@ -47,6 +48,25 @@ pub(in crate::firmware::serial) enum SerialCommand {
     BleProbeStart,
     #[cfg(feature = "ble-foundation")]
     BleProbeStatus,
+    #[cfg(feature = "ble-foundation")]
+    BlePhase1sStart {
+        boot_generation: u32,
+        epoch: u32,
+    },
+    #[cfg(feature = "ble-foundation")]
+    BlePhase1sStatus,
+    #[cfg(feature = "ble-foundation")]
+    RadioHandoffAcquire {
+        boot_generation: u32,
+        epoch: u32,
+    },
+    #[cfg(feature = "ble-foundation")]
+    RadioHandoffRelease {
+        boot_generation: u32,
+        epoch: u32,
+    },
+    #[cfg(feature = "ble-foundation")]
+    RadioHandoffStatus,
     Probe,
     RwVerify {
         lba: u32,

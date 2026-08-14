@@ -49,20 +49,11 @@ pub(crate) async fn write_touch_trace_sample(uart: &mut SerialUart, sample: Touc
     let _ = uart_write_all(uart, line.as_bytes()).await;
 }
 
-pub(crate) async fn uart_write_all(uart: &mut SerialUart, mut bytes: &[u8]) -> bool {
-    const TX_POLL_SLICE_BYTES: usize = 32;
-
-    while !bytes.is_empty() {
-        let slice_len = bytes.len().min(TX_POLL_SLICE_BYTES);
-        match uart.write_async(&bytes[..slice_len]).await {
-            Ok(0) => return false,
-            Ok(written) => {
-                bytes = &bytes[written..];
-                embassy_futures::yield_now().await;
-            }
-            Err(_) => return false,
-        }
-    }
+pub(crate) async fn uart_write_all(_uart: &mut SerialUart, bytes: &[u8]) -> bool {
+    // UART0 is also the diagnostic sink. Reserve its interrupt-enabled ROM
+    // writer for this complete response; competing diagnostics drop and count
+    // instead of interleaving or masking radio interrupts.
+    crate::write_uart_response(bytes).await;
     true
 }
 

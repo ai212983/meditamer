@@ -85,7 +85,23 @@ run_cargo_build() {
     elif [[ "$mode" == "ble-release" ]]; then
         cmd+=(--profile ble-release)
     fi
-    apply_profile_args "$profile"
+    if [[ "$mode" == "ble-release" ]]; then
+        if [[ "$profile" != "default" ]]; then
+            echo "ble-release accepts only the default product profile" >&2
+            exit 2
+        fi
+        if [[ "${CARGO_NO_DEFAULT_FEATURES:-0}" == "1" ]]; then
+            echo "ble-release evidence requires the default product features" >&2
+            exit 2
+        fi
+        if [[ -n "${CARGO_FEATURES:-}" && "${CARGO_FEATURES}" != "ble-foundation" ]]; then
+            echo "ble-release accepts only CARGO_FEATURES=ble-foundation" >&2
+            exit 2
+        fi
+        PROFILE_ARGS=(--features ble-foundation)
+    else
+        apply_profile_args "$profile"
+    fi
     cmd+=("${PROFILE_ARGS[@]}")
     if [[ "${CARGO_LOCKED:-1}" != "0" ]]; then
         cmd+=(--locked)

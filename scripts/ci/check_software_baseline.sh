@@ -41,6 +41,7 @@ run_source() {
     run git diff --check
     run "$repo_root/scripts/ci/check_secrets.sh"
     run "$repo_root/scripts/ci/check_ble_controller_patch.sh"
+    run "$repo_root/scripts/ci/check_network_owner_source.sh"
 }
 
 run_host_tests() {

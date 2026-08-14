@@ -1,3 +1,4 @@
+use core::pin::Pin;
 use esp_hal::{
     gpio::Input, interrupt::software::SoftwareInterrupt, peripherals::CPU_CTRL, system::Stack,
 };
@@ -7,6 +8,7 @@ use crate::firmware::{
     display::display_task,
     imu, observability,
     power::battery_task,
+    psram,
     self_test::diagnostics_task,
     serial::serial_task,
     storage, touch,
@@ -39,7 +41,23 @@ pub(super) struct BoardRuntimeResources {
 #[embassy_executor::task]
 pub(super) async fn board_runtime_task(
     spawner: embassy_executor::Spawner,
-    resources: BoardRuntimeResources,
+    resources: psram::ExternalValue<BoardRuntimeResources>,
+) {
+    // This is a one-shot startup owner. Keep only a pointer in the permanent
+    // Embassy task pool; its large future state is transient PSRAM storage and
+    // is released after the child tasks own their individual resources.
+    let mut future = external_value(run_board_runtime(spawner, resources));
+    observability::record_stack_headroom();
+    // The external allocation is stable until `future` is dropped after this
+    // await, so pinning the pointee through its owning wrapper is sound.
+    let future = unsafe { Pin::new_unchecked(&mut *future) };
+    future.await;
+    observability::record_stack_headroom();
+}
+
+async fn run_board_runtime(
+    spawner: embassy_executor::Spawner,
+    resources: psram::ExternalValue<BoardRuntimeResources>,
 ) {
     let BoardRuntimeResources {
         mut display_context,
@@ -50,7 +68,7 @@ pub(super) async fn board_runtime_task(
         uart,
         cpu_control,
         software_interrupt1,
-    } = resources;
+    } = resources.into_inner();
 
     if display_context.inkplate.init_core().await.is_err() {
         halt_forever();
@@ -114,6 +132,24 @@ pub(super) async fn board_runtime_task(
     );
 }
 
+pub(super) fn external_board_runtime_resources(
+    resources: BoardRuntimeResources,
+) -> psram::ExternalValue<BoardRuntimeResources> {
+    external_value(resources)
+}
+
+fn external_value<T>(value: T) -> psram::ExternalValue<T> {
+    // Sample while the by-value argument is live: this captures the transient
+    // CPU0 stack cost of materializing a large startup future before PSRAM owns it.
+    observability::record_stack_headroom();
+    match psram::ExternalValue::try_new(value) {
+        Ok(value) => value,
+        Err(_) => {
+            esp_println::println!("runtime: external startup allocation failed");
+            super::super::reset_pending_update_or_halt();
+        }
+    }
+}
 fn start_touch_core(
     cpu_control: CPU_CTRL<'static>,
     software_interrupt1: SoftwareInterrupt<'static, 1>,

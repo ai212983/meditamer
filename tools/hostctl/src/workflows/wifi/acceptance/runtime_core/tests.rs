@@ -2,7 +2,7 @@ use super::health::{
     format_health_status_error, is_ready_without_listener, should_force_recover_before_start,
     should_retry_wait_ready_after_recover,
 };
-use super::start::metric_u32;
+use super::start::{metric_bool, metric_u32, parse_serving_allocator_status};
 use crate::workflows::wifi::common::NetStatus;
 use reqwest::StatusCode;
 
@@ -101,4 +101,53 @@ fn runtime_health_metric_parser_reads_exact_keys() {
 
     let memory = "PSRAM min_internal_free_bytes=16968";
     assert_eq!(metric_u32(memory, "min_internal_free_bytes"), Some(16_968));
+
+    let probe = "PSRAM internal_probe_stable=true";
+    assert_eq!(metric_bool(probe, "internal_probe_stable"), Some(true));
+    assert_eq!(metric_bool(probe, "missing"), None);
+}
+
+#[test]
+fn runtime_health_requires_an_allocation_free_serving_snapshot() {
+    let canonical = "PSRAM internal_free_bytes=17000 min_internal_free_bytes=16384 min_internal_alloc_charge_bytes=1700 min_internal_alloc_internal_required=true min_internal_alloc_charge_overflow=false min_internal_alloc_post_free_bytes=16384 min_internal_alloc_correlation_stable=true min_internal_alloc_wifi_rx_matched=true min_internal_alloc_released=true internal_probe_performed=false internal_probe_block_bytes=0 internal_probe_reserve_bytes=16384 internal_probe_free_before_bytes=17000 internal_probe_free_after_bytes=17000 internal_probe_stable=true";
+    parse_serving_allocator_status(canonical).expect("canonical allocation-free snapshot");
+
+    for invalid in [
+        canonical.replace(
+            "min_internal_alloc_charge_bytes=1700",
+            "min_internal_alloc_charge_bytes=0",
+        ),
+        canonical.replace(
+            "min_internal_alloc_internal_required=true",
+            "min_internal_alloc_internal_required=invalid",
+        ),
+        canonical.replace(
+            "min_internal_alloc_charge_overflow=false",
+            "min_internal_alloc_charge_overflow=true",
+        ),
+        canonical.replace(
+            "min_internal_alloc_correlation_stable=true",
+            "min_internal_alloc_correlation_stable=false",
+        ),
+        canonical.replace(
+            "min_internal_alloc_released=true",
+            "min_internal_alloc_released=false",
+        ),
+        canonical.replace(
+            "min_internal_alloc_post_free_bytes=16384",
+            "min_internal_alloc_post_free_bytes=16392",
+        ),
+        canonical.replace("performed=false", "performed=true"),
+        canonical.replace("block_bytes=0", "block_bytes=4112"),
+        canonical.replace("reserve_bytes=16384", "reserve_bytes=8192"),
+        canonical.replace("after_bytes=17000", "after_bytes=16992"),
+        canonical.replace("before_bytes=17000", "before_bytes=16992"),
+        canonical.replace(
+            "min_internal_free_bytes=16384",
+            "min_internal_free_bytes=18000",
+        ),
+        canonical.replace("stable=true", "stable=false"),
+    ] {
+        assert!(parse_serving_allocator_status(&invalid).is_err());
+    }
 }

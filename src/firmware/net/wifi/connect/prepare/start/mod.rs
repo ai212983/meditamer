@@ -7,7 +7,7 @@ use config::{ensure_station_config_applied, should_use_c_like_discovery_start};
 use sequence::{handle_status_err, run_start_driver};
 
 pub(super) async fn prepare_budget_and_start(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     active: WifiCredentials,
 ) -> bool {

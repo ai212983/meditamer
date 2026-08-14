@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run_start_driver(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     c_like_discovery_start: bool,
 ) -> bool {
@@ -61,7 +61,7 @@ pub(super) async fn run_start_driver(
 }
 
 async fn handle_start_err(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     err: WifiError,
 ) -> bool {
@@ -134,10 +134,7 @@ async fn handle_start_err(
     true
 }
 
-async fn run_post_start_diagnostics(
-    controller: &mut WifiController<'static>,
-    state: &WifiTaskState,
-) {
+async fn run_post_start_diagnostics(controller: &mut WifiController<'_>, state: &WifiTaskState) {
     if WIFI_START_READINESS_PROBE {
         for step_ms in WIFI_START_READINESS_PROBE_STEPS_MS {
             if step_ms > 0 {
@@ -213,7 +210,7 @@ async fn run_post_start_diagnostics(
 }
 
 pub(super) async fn handle_status_err(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     err: WifiError,
 ) -> bool {

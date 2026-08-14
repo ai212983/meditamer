@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-use host_wifi::ensure_host_wifi_association;
+pub(crate) use host_wifi::ensure_host_wifi_association;
 
 #[derive(Clone, Debug)]
 pub struct WifiAcceptanceOptions {

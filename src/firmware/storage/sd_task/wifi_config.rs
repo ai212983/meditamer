@@ -15,16 +15,17 @@ pub(super) async fn process_wifi_config_request(
     upload_mounted: &mut bool,
     fat_engine: &mut FatEngine,
 ) -> WifiConfigResponse {
+    let request_id = request.request_id();
     if session.is_some() {
-        return wifi_config_response(false, WifiConfigResultCode::Busy, None);
+        return wifi_config_response(request_id, false, WifiConfigResultCode::Busy, None);
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
-        return wifi_config_response(false, map_upload_ready_error(code), None);
+        return wifi_config_response(request_id, false, map_upload_ready_error(code), None);
     }
 
     match request {
-        WifiConfigRequest::Load => {
+        WifiConfigRequest::Load { .. } => {
             let mut raw = [0u8; WIFI_CONFIG_FILE_MAX];
             let (path, path_len) = fat_path(WIFI_CONFIG_PATH);
             let result = super::engine_driver::run_fat_request(
@@ -42,20 +43,31 @@ pub(super) async fn process_wifi_config_request(
             .await;
             match result {
                 FatResult::Read { bytes } => match parse_wifi_config_file(&raw[..bytes as usize]) {
-                    Ok(credentials) => {
-                        wifi_config_response(true, WifiConfigResultCode::Ok, Some(credentials))
-                    }
-                    Err(_) => wifi_config_response(false, WifiConfigResultCode::InvalidData, None),
+                    Ok(credentials) => wifi_config_response(
+                        request_id,
+                        true,
+                        WifiConfigResultCode::Ok,
+                        Some(credentials),
+                    ),
+                    Err(_) => wifi_config_response(
+                        request_id,
+                        false,
+                        WifiConfigResultCode::InvalidData,
+                        None,
+                    ),
                 },
                 FatResult::Error(FatEngineError::Fat(SdFatError::NotFound)) => {
-                    wifi_config_response(false, WifiConfigResultCode::NotFound, None)
+                    wifi_config_response(request_id, false, WifiConfigResultCode::NotFound, None)
                 }
-                result => {
-                    wifi_config_response(false, map_fat_result_to_wifi_config_code(&result), None)
-                }
+                result => wifi_config_response(
+                    request_id,
+                    false,
+                    map_fat_result_to_wifi_config_code(&result),
+                    None,
+                ),
             }
         }
-        WifiConfigRequest::Store { credentials } => {
+        WifiConfigRequest::Store { credentials, .. } => {
             let (dir, dir_len) = fat_path(WIFI_CONFIG_DIR);
             let mut no_output = [];
             let mkdir = super::engine_driver::run_fat_request(
@@ -74,6 +86,7 @@ pub(super) async fn process_wifi_config_request(
                 | FatResult::Error(FatEngineError::Fat(SdFatError::AlreadyExists)) => {}
                 result => {
                     return wifi_config_response(
+                        request_id,
                         false,
                         map_fat_result_to_wifi_config_code(&result),
                         None,
@@ -85,7 +98,12 @@ pub(super) async fn process_wifi_config_request(
             let encoded_len = match encode_wifi_config_file(credentials, &mut encoded) {
                 Ok(len) => len,
                 Err(_) => {
-                    return wifi_config_response(false, WifiConfigResultCode::InvalidData, None);
+                    return wifi_config_response(
+                        request_id,
+                        false,
+                        WifiConfigResultCode::InvalidData,
+                        None,
+                    );
                 }
             };
 
@@ -104,10 +122,15 @@ pub(super) async fn process_wifi_config_request(
             )
             .await;
             match result {
-                FatResult::Done => wifi_config_response(true, WifiConfigResultCode::Ok, None),
-                result => {
-                    wifi_config_response(false, map_fat_result_to_wifi_config_code(&result), None)
+                FatResult::Done => {
+                    wifi_config_response(request_id, true, WifiConfigResultCode::Ok, None)
                 }
+                result => wifi_config_response(
+                    request_id,
+                    false,
+                    map_fat_result_to_wifi_config_code(&result),
+                    None,
+                ),
             }
         }
     }
@@ -144,11 +167,13 @@ fn fat_path(value: &str) -> ([u8; sdcard::SD_PATH_MAX], u8) {
 
 #[inline(never)]
 fn wifi_config_response(
+    request_id: u32,
     ok: bool,
     code: WifiConfigResultCode,
     credentials: Option<WifiCredentials>,
 ) -> WifiConfigResponse {
     WifiConfigResponse {
+        request_id,
         ok,
         code,
         credentials,

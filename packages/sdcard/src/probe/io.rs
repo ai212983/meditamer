@@ -14,9 +14,14 @@ where
             return Ok(());
         }
         let high_capacity = self.high_capacity.ok_or(SdProbeError::NotInitialized)?;
-        self.read_data_sector_512_into(lba, high_capacity, out)
+        // Retire the old tag before DMA mutates the shared frame so a failed
+        // cache miss cannot expose partial data as the previous LBA.
+        self.cached_sector_lba = None;
+        // FAT state may live in PSRAM, which is not a valid ESP32 SPI DMA
+        // target. Always transfer through the probe-owned internal frame.
+        self.read_data_sector_512_into_cached(lba, high_capacity)
             .await?;
-        self.cached_sector[..SD_SECTOR_SIZE].copy_from_slice(out);
+        out.copy_from_slice(&self.cached_sector[..SD_SECTOR_SIZE]);
         self.cached_sector_lba = Some(lba);
         Ok(())
     }
@@ -201,6 +206,48 @@ where
         out.fill(0xFF);
         self.transfer_init_bounded(out).await?;
         // Discard data CRC16.
+        let _ = self.transfer_byte(0xFF).await?;
+        let _ = self.transfer_byte(0xFF).await?;
+        self.end_transaction().await;
+        Ok(())
+    }
+
+    async fn read_data_sector_512_into_cached(
+        &mut self,
+        lba: u32,
+        high_capacity: bool,
+    ) -> Result<(), SdProbeError> {
+        let arg = if high_capacity {
+            lba
+        } else {
+            lba.saturating_mul(SD_SECTOR_SIZE as u32)
+        };
+        let cmd17_r1 = self
+            .send_command_hold_cs(SD_CMD17, arg, 0xFF, &mut [])
+            .await?;
+        if cmd17_r1 != 0x00 {
+            self.end_transaction().await;
+            return Err(SdProbeError::Cmd17Unexpected(cmd17_r1));
+        }
+
+        let token = match self.wait_data_token(SD_CMD17).await {
+            Ok(token) => token,
+            Err(err) => {
+                self.end_transaction().await;
+                return Err(err);
+            }
+        };
+        if token != 0xFE {
+            self.end_transaction().await;
+            return Err(SdProbeError::DataTokenUnexpected(SD_CMD17, token));
+        }
+
+        self.cached_sector[..SD_SECTOR_SIZE].fill(0xFF);
+        self.check_init_deadline()?;
+        self.spi
+            .transfer_in_place_to_completion(&mut self.cached_sector[..SD_SECTOR_SIZE])
+            .await?;
+        self.check_init_deadline()?;
         let _ = self.transfer_byte(0xFF).await?;
         let _ = self.transfer_byte(0xFF).await?;
         self.end_transaction().await;

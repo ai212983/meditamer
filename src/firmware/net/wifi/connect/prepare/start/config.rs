@@ -9,7 +9,7 @@ pub(super) fn should_use_c_like_discovery_start(state: &WifiTaskState) -> bool {
 }
 
 fn apply_station_config(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     active: WifiCredentials,
 ) -> Result<(), &'static str> {
@@ -38,7 +38,7 @@ fn apply_station_config(
 }
 
 pub(super) async fn ensure_station_config_applied(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     active: WifiCredentials,
 ) -> bool {

@@ -1,7 +1,7 @@
 use super::super::*;
 
 pub(super) async fn handle_discovery_reason_paths(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     disconnect_reason: u8,
     discovery_reason: bool,

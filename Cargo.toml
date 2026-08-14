@@ -23,6 +23,8 @@ opt-level = 3
 [profile.ble-release]
 inherits = "release"
 opt-level = "s"
+lto = "fat"
+codegen-units = 1
 
 [profile.ble-release.package.esp-radio]
 opt-level = 3
@@ -45,11 +47,16 @@ default = [
     "asset-upload-http",
     "asset-upload-http-pipeline",
 ]
-telemetry-defmt = ["dep:defmt", "esp-println/defmt-espflash"]
+telemetry-defmt = [
+    "dep:defmt",
+    "esp-println-upstream/critical-section",
+    "esp-println-upstream/defmt-espflash",
+]
 ui-provider-fixture = []
 wifi-debug-slim-app = ["asset-upload-http"]
 ble-foundation = [
     "asset-upload-http",
+    "dep:bt-hci",
     "dep:embassy-sync-07",
     "dep:trouble-host",
     "esp-radio/ble",
@@ -67,12 +74,13 @@ wifi-backend-esp-radio = ["dep:esp-radio"]
 
 [dependencies]
 critical-section = "1.2.0"
-esp-hal = { version = "1.1.1", features = ["esp32", "unstable"] }
+esp-hal = { version = "=1.1.1", features = ["esp32", "unstable"] }
 esp-sync = "0.2.1"
 esp-rtos = { version = "0.3.0", features = ["esp32", "embassy"] }
+esp-radio-rtos-driver = "=0.3.0"
 esp32 = "0.40.2"
-esp-alloc = { version = "0.10.0", default-features = false, features = ["compat", "esp32", "global-allocator"] }
-esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
+esp-alloc = { version = "=0.10.0", default-features = false, features = ["alloc-hooks", "compat", "esp32", "global-allocator"] }
+esp-println-upstream = { package = "esp-println", version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
 esp-backtrace = { version = "0.19.0", default-features = false, features = ["esp32", "panic-handler", "println"] }
 defmt = { version = "1.1.1", optional = true }
 esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.2.0", default-features = false }
@@ -81,8 +89,9 @@ embassy-time = "0.5.1"
 embassy-sync = "0.8.0"
 embassy-sync-07 = { package = "embassy-sync", version = "=0.7.2", optional = true }
 embassy-futures = "0.1.2"
+bt-hci = { version = "=0.8.1", optional = true }
 embassy-embedded-hal = "0.6.0"
-embassy-net = { version = "0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embassy-net = { version = "=0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
 embedded-hal-async = "1.0.0"
 embedded-io-async = { version = "0.7.0", optional = true }
 enumset = { version = "1.1.14", default-features = false }
@@ -104,5 +113,7 @@ sdcard = { path = "packages/sdcard" }
 event_config_compiler = { path = "tools/event_config_compiler" }
 
 [patch.crates-io]
+embassy-net = { path = "vendor/embassy-net-0.9.1-restartable" }
+esp-alloc = { path = "vendor/esp-alloc-0.10.0-provenance" }
 esp-radio = { path = "vendor/esp-radio-1.0.0-beta.0-bounded" }
 esp-radio-rtos-driver = { path = "vendor/esp-radio-rtos-driver-0.3.0-retained" }

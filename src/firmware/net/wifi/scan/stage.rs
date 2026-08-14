@@ -21,8 +21,8 @@ impl ScanStage {
     }
 }
 
-pub(super) struct ScanStageContext<'a> {
-    pub(super) controller: &'a mut WifiController<'static>,
+pub(super) struct ScanStageContext<'a, 'd> {
+    pub(super) controller: &'a mut WifiController<'d>,
     pub(super) runtime_policy: WifiRuntimePolicy,
     pub(super) target_ssid: &'a str,
     pub(super) candidates: &'a mut heapless::Vec<TargetApCandidate, WIFI_AP_CANDIDATE_MAX>,
@@ -32,7 +32,7 @@ pub(super) struct ScanStageContext<'a> {
 
 pub(super) async fn run_scan_stage(
     stage: ScanStage,
-    context: &mut ScanStageContext<'_>,
+    context: &mut ScanStageContext<'_, '_>,
     timeout: Duration,
 ) -> Option<ScanOutcome> {
     let timeout_ms = timeout.as_millis();

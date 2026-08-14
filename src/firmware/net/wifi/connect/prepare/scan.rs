@@ -1,7 +1,7 @@
 use super::*;
 
 async fn handle_preconnect_zero_discovery(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
 ) {
     state.discovery_sweep_exhausted_streak =
@@ -138,7 +138,7 @@ async fn handle_preconnect_zero_discovery(
 }
 
 pub(super) async fn prepare_scan_candidates(
-    controller: &mut WifiController<'static>,
+    controller: &mut WifiController<'_>,
     state: &mut WifiTaskState,
     active: WifiCredentials,
 ) -> bool {

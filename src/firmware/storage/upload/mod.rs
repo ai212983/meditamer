@@ -7,9 +7,38 @@
 mod http;
 mod sd_bridge;
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_net::Stack;
 
-#[embassy_executor::task]
-pub(crate) async fn http_server_task(stack: Stack<'static>) {
+static SD_UPLOAD_SESSION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) async fn run_http_server(stack: Stack<'_>) {
     http::run_http_server(stack).await;
+}
+
+pub(crate) fn active_http_connections() -> u16 {
+    http::active_connections()
+}
+
+pub(crate) fn active_sd_roundtrips() -> u16 {
+    sd_bridge::active_roundtrips()
+}
+
+pub(crate) fn sd_upload_session_active() -> bool {
+    SD_UPLOAD_SESSION_ACTIVE.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_sd_upload_session_active(active: bool) {
+    SD_UPLOAD_SESSION_ACTIVE.store(active, Ordering::Release);
+}
+
+pub(crate) async fn abort_sd_upload() -> bool {
+    use crate::firmware::types::SdUploadResultCode;
+    matches!(
+        sd_bridge::sd_upload_roundtrip(crate::firmware::types::SdUploadCommand::Abort).await,
+        Ok(_)
+            | Err(sd_bridge::SdUploadRoundtripError::Device(
+                SdUploadResultCode::SessionNotActive
+            ))
+    )
 }

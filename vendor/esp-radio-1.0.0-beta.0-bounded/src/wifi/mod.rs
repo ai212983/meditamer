@@ -1180,6 +1180,15 @@ unsafe extern "C" fn recv_cb_sta(
     eb: *mut c_types::c_void,
 ) -> esp_err_t {
     let callback = WifiCallbackGuard::enter();
+    unsafe extern "C" {
+        fn _meditamer_match_internal_low_water_wifi_rx(buffer: usize, len: usize, eb: usize);
+    }
+    // Correlate before the retained-callback token rejects a concurrent frame,
+    // but after the callback guard fences teardown. This hook is atomic-only
+    // and cannot change admission, ownership, or vendor buffer lifetime.
+    unsafe {
+        _meditamer_match_internal_low_water_wifi_rx(buffer.addr(), len as usize, eb.addr());
+    }
     if WIFI_RX_STA_CALLBACK_OWNED
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()

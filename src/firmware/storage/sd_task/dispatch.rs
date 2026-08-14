@@ -153,7 +153,6 @@ async fn run_request_with_retries(
         if !retryable {
             break;
         }
-
         if attempts < SD_RETRY_MAX_ATTEMPTS {
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
