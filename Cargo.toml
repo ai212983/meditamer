@@ -42,6 +42,13 @@ opt-level = 2
 [profile.dev.package.esp-radio]
 opt-level = 3
 
+# Keep the retained radio IPC implementation within the vendor task stacks.
+# Min-size optimization (`z`) makes its task-context wait loop exceed the
+# debug stack cushion and overwrite the adjacent RTOS wait-queue control word.
+[profile.dev.package.esp-radio-rtos-driver]
+opt-level = "s"
+codegen-units = 1
+
 [features]
 default = [
     "asset-upload-http",

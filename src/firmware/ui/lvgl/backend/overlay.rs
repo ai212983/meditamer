@@ -3,6 +3,21 @@
 use super::*;
 
 impl Backend {
+    fn active_surface_owns_screen_exclusively(&self) -> bool {
+        self.shell.active().surface == self.surfaces.ambient_view
+    }
+
+    pub(super) fn sync_overlay_visibility_for_active_surface(&self) {
+        let exclusive = self.active_surface_owns_screen_exclusively();
+        for overlay in &self.overlays {
+            if exclusive && !overlay.is_modal() {
+                overlay.hide();
+            } else {
+                overlay.show();
+            }
+        }
+    }
+
     pub(super) fn drain_navigation(&mut self) {
         self.retry_overlay_cleanup();
         self.retry_blocked_cleanup();
@@ -475,12 +490,15 @@ impl Backend {
         &mut self,
         candidates: &mut Vec<ActiveOverlay, LIVE_OVERLAY_CAPACITY>,
     ) {
+        let exclusive = self.active_surface_owns_screen_exclusively();
         while !candidates.is_empty() {
             let candidate = candidates.remove(0);
             if candidate.is_modal() {
                 set_system_layer_capture(true);
             }
-            candidate.show();
+            if !exclusive || candidate.is_modal() {
+                candidate.show();
+            }
             if let Err(candidate) = self.overlays.push(candidate) {
                 self.destroy_uncommitted_overlay(candidate);
                 self.navigation_faulted = true;
@@ -521,13 +539,18 @@ impl Backend {
     }
 
     pub(super) fn restore_overlay_departures(&mut self, tokens: &[SurfaceInstanceToken]) {
+        let exclusive = self.active_surface_owns_screen_exclusively();
         for token in tokens {
             if let Some(overlay) = self
                 .overlays
                 .iter()
                 .find(|overlay| overlay.token() == *token)
             {
-                overlay.show();
+                if exclusive && !overlay.is_modal() {
+                    overlay.hide();
+                } else {
+                    overlay.show();
+                }
                 if overlay.enable().is_err() {
                     self.navigation_faulted = true;
                     self.composition_faulted = true;

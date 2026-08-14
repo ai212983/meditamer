@@ -39,34 +39,9 @@ pub(in crate::firmware::ui) unsafe fn create(
         return None;
     }
 
-    let title = unsafe { lv::lv_label_create(screen) };
-    if title.is_null() {
+    if !unsafe { create_ambient_content(screen) } {
         unsafe { lv::lv_obj_delete(screen) };
         return None;
-    }
-    unsafe {
-        lv::lv_label_set_text(title, c"Meditamer".as_ptr());
-        lv::lv_obj_set_style_text_font(
-            title,
-            ptr::addr_of!(lv::lv_font_montserrat_24),
-            STYLE_DEFAULT,
-        );
-        lv::lv_obj_set_pos(title, 234, 260);
-    }
-
-    let status = unsafe { lv::lv_label_create(screen) };
-    if status.is_null() {
-        unsafe { lv::lv_obj_delete(screen) };
-        return None;
-    }
-    unsafe {
-        lv::lv_label_set_text(status, c"Ready".as_ptr());
-        lv::lv_obj_set_style_text_font(
-            status,
-            ptr::addr_of!(lv::lv_font_montserrat_18),
-            STYLE_DEFAULT,
-        );
-        lv::lv_obj_set_pos(status, 274, 306);
     }
 
     let hint = unsafe { lv::lv_label_create(screen) };
@@ -96,6 +71,38 @@ pub(in crate::firmware::ui) unsafe fn create(
         }
     }
     Some(HomeScreen { root: screen })
+}
+
+pub(in crate::firmware::ui) unsafe fn create_ambient_content(screen: *mut lv::lv_obj_t) -> bool {
+    let title = unsafe { lv::lv_label_create(screen) };
+    if title.is_null() {
+        return false;
+    }
+    unsafe {
+        lv::lv_label_set_text(title, c"Meditamer".as_ptr());
+        lv::lv_obj_set_style_text_font(
+            title,
+            ptr::addr_of!(lv::lv_font_montserrat_24),
+            STYLE_DEFAULT,
+        );
+        lv::lv_obj_set_pos(title, 234, 260);
+    }
+
+    let status = unsafe { lv::lv_label_create(screen) };
+    if status.is_null() {
+        return false;
+    }
+    unsafe {
+        lv::lv_label_set_text(status, c"Ready".as_ptr());
+        lv::lv_obj_set_style_text_font(
+            status,
+            ptr::addr_of!(lv::lv_font_montserrat_18),
+            STYLE_DEFAULT,
+        );
+        lv::lv_obj_set_pos(status, 274, 306);
+    }
+
+    true
 }
 
 unsafe fn create_top_test_button(

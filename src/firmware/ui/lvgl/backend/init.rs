@@ -23,7 +23,7 @@ impl Backend {
             home: home_surface,
             launcher: launcher_surface,
             diagnostics: diagnostics_surface,
-            ambient_picker: SurfaceRef::new(base_owner, AMBIENT_PICKER_SURFACE_ID.0),
+            ambient_view: SurfaceRef::new(base_owner, AMBIENT_VIEW_SURFACE_ID.0),
             overlay_settings: SurfaceRef::new(base_owner, OVERLAY_SETTINGS_SURFACE_ID.0),
             navigation_cue: SurfaceRef::new(base_owner, NAVIGATION_CUE_SURFACE_ID.0),
             sticky_status: SurfaceRef::new(base_owner, STICKY_STATUS_SURFACE_ID.0),
@@ -185,6 +185,7 @@ impl Backend {
                     .last()
                     .expect("the committed overlay remains runtime-owned")
                     .show();
+                self.sync_overlay_visibility_for_active_surface();
                 Ok(())
             }
             Ok(OverlayAdmission::Active(_) | OverlayAdmission::Queued(_)) | Err(_) => {
@@ -289,7 +290,7 @@ fn build_compiled_catalogue(surfaces: SurfaceRefs) -> Result<DefaultCatalogue, I
             id: EntryId::new(BASE_NAMESPACE, 3),
             label: c"Ambient view",
             glyph: GlyphRef(3),
-            surface: Some(surfaces.ambient_picker),
+            surface: Some(surfaces.ambient_view),
             capabilities: SurfaceCapabilities::LAUNCHABLE,
             default_rank: 1,
             pin: None,

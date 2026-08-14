@@ -26,7 +26,7 @@ use crate::firmware::ui::overlay::base_overlays::{
 };
 #[cfg(feature = "ui-provider-fixture")]
 use crate::firmware::ui::screen::provider_fixture;
-use crate::firmware::ui::screen::{ambient_picker, gesture_test, home, launcher, overlay_settings};
+use crate::firmware::ui::screen::{ambient_view, gesture_test, home, launcher, overlay_settings};
 #[cfg(feature = "ui-provider-fixture")]
 use crate::firmware::ui::shell::model::{PendingProviderRemoval, ProviderRuntimeAudit};
 use crate::firmware::{
@@ -69,7 +69,7 @@ const DIAGNOSTICS_SURFACE_ID: SurfaceId = SurfaceId(3);
 const NAVIGATION_CUE_SURFACE_ID: SurfaceId = SurfaceId(4);
 const STICKY_STATUS_SURFACE_ID: SurfaceId = SurfaceId(5);
 const CONFIRM_SURFACE_ID: SurfaceId = SurfaceId(6);
-const AMBIENT_PICKER_SURFACE_ID: SurfaceId = SurfaceId(7);
+const AMBIENT_VIEW_SURFACE_ID: SurfaceId = SurfaceId(7);
 const OVERLAY_SETTINGS_SURFACE_ID: SurfaceId = SurfaceId(8);
 const BASE_NAMESPACE: u16 = 1;
 const HOME_ENTRY_ID: EntryId = EntryId::new(BASE_NAMESPACE, 1);
@@ -118,7 +118,7 @@ const BASE_SURFACES: [SurfaceSpec; 8] = [
         RefreshHint::Content,
     ),
     SurfaceSpec::new(
-        AMBIENT_PICKER_SURFACE_ID.0,
+        AMBIENT_VIEW_SURFACE_ID.0,
         SurfaceRole::SystemRoot,
         SurfaceCapabilities::LAUNCHABLE,
         RefreshHint::Boundary,
@@ -179,7 +179,7 @@ struct SurfaceRefs {
     home: SurfaceRef,
     launcher: SurfaceRef,
     diagnostics: SurfaceRef,
-    ambient_picker: SurfaceRef,
+    ambient_view: SurfaceRef,
     overlay_settings: SurfaceRef,
     navigation_cue: SurfaceRef,
     sticky_status: SurfaceRef,
@@ -194,7 +194,7 @@ enum SurfaceModel {
     Home(home::HomeScreen),
     Launcher(launcher::LauncherScreen),
     Diagnostics(gesture_test::GestureTestScreen),
-    AmbientPicker(ambient_picker::AmbientPickerScreen),
+    AmbientView(ambient_view::AmbientViewScreen),
     OverlaySettings(overlay_settings::OverlaySettingsScreen),
     #[cfg(feature = "ui-provider-fixture")]
     ProviderFixture(provider_fixture::ProviderFixtureScreen),
@@ -253,21 +253,6 @@ impl ActiveSurface {
                     CatalogueAction::Unavailable(_) => None,
                 };
             }
-        } else if frame.surface == surfaces.ambient_picker {
-            for (index, entry) in catalogue
-                .view(CatalogueViewKind::AmbientPicker)
-                .entries()
-                .iter()
-                .enumerate()
-            {
-                if matches!(entry.action(), CatalogueAction::Enter(_)) {
-                    actions[index] = Some(intent_bridge::ScreenAction::Configure(
-                        crate::firmware::ui::shell::settings::UiSettingsIntent::SelectAmbient(
-                            entry.id,
-                        ),
-                    ));
-                }
-            }
         } else if frame.surface == surfaces.overlay_settings {
             for (index, entry) in catalogue
                 .view(CatalogueViewKind::OverlaySettings)
@@ -308,9 +293,8 @@ impl ActiveSurface {
                 launcher::create(catalogue, settings, user_data).map(SurfaceModel::Launcher)
             } else if frame.surface == surfaces.diagnostics {
                 gesture_test::create(user_data).map(SurfaceModel::Diagnostics)
-            } else if frame.surface == surfaces.ambient_picker {
-                ambient_picker::create(catalogue, settings, user_data)
-                    .map(SurfaceModel::AmbientPicker)
+            } else if frame.surface == surfaces.ambient_view {
+                ambient_view::create(user_data).map(SurfaceModel::AmbientView)
             } else if frame.surface == surfaces.overlay_settings {
                 overlay_settings::create(catalogue, settings, user_data)
                     .map(SurfaceModel::OverlaySettings)
@@ -355,7 +339,7 @@ impl ActiveSurface {
             SurfaceModel::Home(screen) => screen.root(),
             SurfaceModel::Launcher(screen) => screen.root(),
             SurfaceModel::Diagnostics(screen) => screen.root(),
-            SurfaceModel::AmbientPicker(screen) => screen.root(),
+            SurfaceModel::AmbientView(screen) => screen.root(),
             SurfaceModel::OverlaySettings(screen) => screen.root(),
             #[cfg(feature = "ui-provider-fixture")]
             SurfaceModel::ProviderFixture(screen) => screen.root(),
@@ -395,7 +379,7 @@ impl ActiveSurface {
             SurfaceModel::Diagnostics(screen) => unsafe { screen.show_gesture(event, true) },
             SurfaceModel::Home(_)
             | SurfaceModel::Launcher(_)
-            | SurfaceModel::AmbientPicker(_)
+            | SurfaceModel::AmbientView(_)
             | SurfaceModel::OverlaySettings(_) => false,
             #[cfg(feature = "ui-provider-fixture")]
             SurfaceModel::ProviderFixture(_) => false,
@@ -485,8 +469,8 @@ impl Backend {
             Some("launcher")
         } else if surface == self.surfaces.diagnostics {
             Some("diagnostics")
-        } else if surface == self.surfaces.ambient_picker {
-            Some("ambient_picker")
+        } else if surface == self.surfaces.ambient_view {
+            Some("ambient_view")
         } else if surface == self.surfaces.overlay_settings {
             Some("overlay_settings")
         } else if cfg!(feature = "ui-provider-fixture") && {
