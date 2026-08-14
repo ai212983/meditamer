@@ -1,11 +1,15 @@
 # ADR-0008: App catalogue and launcher
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
 - Amended: 2026-08-09
+- Amended: 2026-08-14 — accepted after the compiled catalogue, shared filtered views, stable
+  ordering, and launcher presenters were implemented and evidenced in E-0013 of the
+  [archived ledger](../archive/refactors/ui-app-structure-rework-ledger.md). The loader-dependent
+  external catalogue remains conditional.
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0007](0007-ui-and-application-structure.md),
-  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
+  [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md)
 
 ## Context
@@ -162,5 +166,5 @@ change residency and expose provider code to the shell.
 ## Validation
 
 Implementation order and gates are defined in the
-[plan](../plans/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
-[ledger](../plans/ui-app-structure-rework-ledger.md).
+[plan](../archive/refactors/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
+[ledger](../archive/refactors/ui-app-structure-rework-ledger.md).

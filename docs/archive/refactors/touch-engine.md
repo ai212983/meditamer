@@ -1,8 +1,13 @@
 # Touch Engine Plan
 
-- Status: Needs-triage
-- Last-reviewed: 2026-08-10
-- Note: ADR-0001 (Accepted) covers fully async touch acquisition, which suggests this landed.
+- Status: Superseded
+- Last-reviewed: 2026-08-14
+- Closeout: The core normalization/classification, async acquisition and pipeline, trace logging,
+  and host replay phases landed. The LVGL cutover removed the wizard and its calibration phase, so
+  wizard-based validation is no longer applicable. The still-real `release_no_swipe` and long-swipe
+  fragmentation capture-to-replay work moved to
+  `docs/plans/touch-capture-replay-reliability.md`; this archived plan must not be revived to restore
+  the wizard.
 
 ## Objective
 

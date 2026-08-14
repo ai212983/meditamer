@@ -1,8 +1,8 @@
 # Statig Event Engine Migration Plan (Handoff)
 
-- Status: Needs-triage
-- Last-reviewed: 2026-08-10
-- Note: reference/event-engine-guide.md treats this as migration history, which suggests the migration landed.
+- Status: Done
+- Last-reviewed: 2026-08-14
+- Closeout: The Statig migration is complete. Ongoing validation of event-engine behavior on physical hardware is tracked by `docs/reference/hardware-test-matrix.md` and does not keep this migration plan open.
 
 
 ## Goal

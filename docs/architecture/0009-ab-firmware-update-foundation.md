@@ -4,8 +4,8 @@
 - Author: Codex
 - Date: 2026-08-10
 - Amended: 2026-08-13 — reference path maintenance only
-- References: [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
-  [implementation ledger](../plans/ui-app-structure-rework-ledger.md),
+- References: [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
+  [implementation ledger](../archive/refactors/ui-app-structure-rework-ledger.md),
   [DRAM budget](../reference/dram/dram-budget.md),
   [build and flash guide](../guides/build-and-flash.md)
 

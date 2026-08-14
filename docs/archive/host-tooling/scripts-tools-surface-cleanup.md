@@ -4,7 +4,7 @@
 - Last-reviewed: 2026-08-13
 - Owner: Firmware + Host Tooling
 - Scope: `scripts/`, top-level `tools/`, host test support, and their direct callers, hooks, CI, and current docs
-- Evidence: [script inventory](../../scripts/README.md), [tool inventory](../../tools/README.md),
+- Evidence: [script inventory](../../../scripts/README.md), [tool inventory](../../../tools/README.md),
   [implementation ledger](scripts-tools-surface-cleanup-ledger.md)
 
 ## Objective

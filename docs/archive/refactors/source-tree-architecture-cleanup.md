@@ -1,10 +1,12 @@
 # Source Tree Architecture Cleanup Plan
 
 - Status: Done
-- Last-reviewed: 2026-08-13
+- Last-reviewed: 2026-08-14
 - Completed: 2026-08-13
+- Archived: 2026-08-14
 - Owner: Firmware
 - Scope: Structural cleanup of first-party modules under `src/`; extraction and redesign use follow-ups
+- Follow-ups: `docs/plans/source-tree-architecture-followups.md` (live triage inventory)
 - Predecessor: [Completed source-tree reorganization](../archive/refactors/source-tree-reorganization.md)
 - Related decisions: [Stepped FAT engine](../architecture/0004-dma-stepped-fat-engine.md), [UI structure](../architecture/0007-ui-and-application-structure.md), [A/B update foundation](../architecture/0009-ab-firmware-update-foundation.md), [durable UI settings](../architecture/0010-durable-ui-settings.md), [BLE service foundation](../architecture/0011-bounded-ble-service-foundation.md)
 
@@ -275,7 +277,7 @@ the long lifecycle gate.
 
 1. S5 passed its 15/15 SD baseline and two-cycle UI lifecycle revalidation on one release artifact.
 2. Final integration passed `scripts/ci/check_software_baseline.sh all`, live-reference validation, enforced include usage, and orphan-module reachability.
-3. [Cold-boot validation](cold-boot-validation.md) records 5/5 reset cycles while retaining the true power-rail limitation explicitly.
+3. [Cold-boot validation](../archive/hardware/cold-boot-validation.md) records 5/5 reset cycles while retaining the true power-rail limitation explicitly.
 4. `firmware_health_task` has a distinct `TaskClass::FirmwareHealth` slot. The supported firmware
    matrix, expected `.data` delta, identified-device boot, scheduler-profile cycle, and UI smoke passed.
 

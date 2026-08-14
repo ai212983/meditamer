@@ -30,7 +30,7 @@ Four test-only Cargo packages that used to live here (`app_state_store_host_harn
 `ble_transport_host_harness/`, `event_engine_host_harness/`,
 `ui_shell_host_harness/`) moved to
 [`../test-support/host/`](../test-support/README.md) in Phase 2 of the
-[scripts and tools surface cleanup](../docs/plans/scripts-tools-surface-cleanup.md)
+[scripts and tools surface cleanup](../docs/archive/host-tooling/scripts-tools-surface-cleanup.md)
 (change set C-203 through C-206) — they reuse firmware source on the host and
 carry no production dependency or operator runbook, unlike everything else in
 this table.
@@ -68,10 +68,10 @@ literal full-path reference is not evidence that a scenario is unused.
 
 ## Audit result
 
-Phase 1 of the [scripts and tools surface cleanup](../docs/plans/scripts-tools-surface-cleanup.md)
+Phase 1 of the [scripts and tools surface cleanup](../docs/archive/host-tooling/scripts-tools-surface-cleanup.md)
 removed the two retirement-candidate top-level tools (`esp_idf_wifi_control/`
 and `esp_idf_wifi_control_rust/`) and the orphaned `wifi-chaos.sw.yaml`
-scenario file; see `docs/plans/scripts-tools-surface-cleanup-ledger.md` change
+scenario file; see `docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md` change
 set C-107 through C-109 for the record. The scene-maker and scene-viewer pair
 are still deliberately tested and documented, but they are standalone asset
 experiments rather than part of the current firmware path.

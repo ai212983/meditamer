@@ -10,5 +10,5 @@ Current decisions and execution state live in:
 
 - `docs/architecture/0007-ui-and-application-structure.md`
 - `docs/architecture/0008-app-catalogue-and-launcher.md`
-- `docs/development/ui-app-structure-rework-plan.md`
-- `docs/development/ui-app-structure-rework-ledger.md`
+- `docs/archive/refactors/ui-app-structure-rework-plan.md`
+- `docs/archive/refactors/ui-app-structure-rework-ledger.md`

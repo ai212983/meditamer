@@ -4,8 +4,8 @@
 firmware source on the host — they are never a production build dependency
 and carry no operator runbook. They are relocated out of `tools/` (which
 mixes them with production tooling) by the
-[scripts and tools surface cleanup](../docs/plans/scripts-tools-surface-cleanup.md);
-see `docs/plans/scripts-tools-surface-cleanup-ledger.md` change set C-203
+[scripts and tools surface cleanup](../docs/archive/host-tooling/scripts-tools-surface-cleanup.md);
+see `docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md` change set C-203
 through C-207 for the record.
 
 Each package keeps its own independent `Cargo.toml`/`Cargo.lock` (native host

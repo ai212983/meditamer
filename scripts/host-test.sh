@@ -5,7 +5,7 @@
 # `scripts/ci/coverage_host.sh` consume it directly rather than hardcoding
 # suite lists of their own. Each suite's invocation mechanics below are a
 # direct port of the wrapper it replaces (see
-# docs/plans/scripts-tools-surface-cleanup-ledger.md change set C-201/C-202).
+# docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md change set C-201/C-202).
 
 set -euo pipefail
 

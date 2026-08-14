@@ -3,7 +3,7 @@
 # Captures raw/decoded touch traces (--mode touch, default) or serial
 # tap/event-engine traces (--mode tap) via a passive monitor attach. Merged
 # from the former standalone tap_capture.sh by
-# docs/plans/scripts-tools-surface-cleanup-ledger.md change set C-403/C-404 --
+# docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md change set C-403/C-404 --
 # the two were identical except for the default output filename and the
 # touch-specific trace/event line-format hints below.
 

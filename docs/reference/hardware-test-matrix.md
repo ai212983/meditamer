@@ -6,7 +6,7 @@ This checklist is the Phase 6 validation gate for the current `esp-hal` firmware
 
 - Board: Inkplate 4 TEMPERA (ESP32)
 - MCU module: ESP32-WROVER-E ([CNX Software, 2023-10-04](https://www.cnx-software.com/2023/10/04/inkplate-4-tempera-epaper-display-supports-esphome-arduino-and-micropython/))
-- Port: `scripts/hostctl.sh` invocations use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/cold-boot scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
+- Port: `scripts/hostctl.sh` invocations use `HOSTCTL_PORT=/dev/cu.usbserial-540`; espflash-based soak/reset-cycle scripts use `ESPFLASH_PORT=/dev/cu.usbserial-540`
 - Firmware: current `debug` build from `scripts/device/flash.sh debug` (wrapper over `hostctl flash-capture`)
 - Boot-capture artifacts: `logs/.../flash.log`, `capture.log`, `summary.txt` from the most recent flash-capture run
 
@@ -169,7 +169,10 @@ Pass criteria:
 
 Repeat the cadence check with `40/80` and `100/125` configurations before changing defaults.
 
-## 3. Cold Boot Cycles (Manual)
+## 3. Reset-Button Boot Cycles (Manual)
+
+This helper validates the ESP32 reset-button boot path. It does not cut the board's internal
+battery-backed power rail, so it is not evidence of a true power-rail cold boot.
 
 Procedure:
 
@@ -189,10 +192,8 @@ scripts/device/cold_boot_matrix.sh 20
 ```
 
 2. For each prompted cycle:
-- physically disconnect power
-- wait ~5 seconds
 - press Enter to arm capture
-- reconnect power immediately after pressing Enter
+- press and release the reset button when prompted
 
 Pass criteria:
 

@@ -1,11 +1,23 @@
 # 2026-03-20 Asset Upload Transport Plan
 
-- Status: Proposed
-- Last-reviewed: 2026-08-10
-- Open question: Which transport is primary. Wi-Fi is **still a candidate**
-  alongside BLE — the sections below argue against it, but that argument has
-  not been ratified. Wi-Fi is now working, which strengthens its case on
-  reliability while leaving the iPhone and firmware-size objections intact.
+- Status: Deferred — BLE-primary transport is blocked by the Phase 1S runtime-capacity gate
+- Last-reviewed: 2026-08-14
+- Current disposition: Wi-Fi STA + HTTP remains the implemented and supported upload transport.
+  BLE remains a product-direction candidate, but BLE upload work cannot begin until the
+  [BLE foundation plan](ble-foundation-plan.md) passes its current-hardware runtime gate.
+
+## Current state and reopening direction
+
+- The transport-independent SD/FAT upload authority and integrity boundaries remain useful and
+  stay separate from HTTP framing.
+- The active branch contains the exclusive Wi-Fi/BLE handoff implementation, but the binding
+  source-branch Wi-Fi run reached 15,156 bytes of internal free memory against the unchanged
+  16,384-byte floor. The active branch still needs an exact-artifact device rerun.
+- Do not remove Wi-Fi, reduce the floor, repeat closed radio-buffer experiments, or begin a GATT
+  uploader from this document.
+- Reopen this transport decision only after the BLE foundation proves applicable internal-memory
+  recovery or a vendor-supported bounded RX-allocation path. Hardware with more applicable internal
+  RAM, or a separately accepted iPhone-compatible transport, may also supersede this proposal.
 
 ## Problem
 
@@ -151,7 +163,10 @@ This plan does not require:
 - browser-first upload support
 - Bluetooth Classic as a product dependency
 
-## Migration Direction
+## Historical Proposed Migration Direction
+
+The sequence below is not currently executable. It is retained so a future reopening can evaluate
+the original proposal without treating it as accepted work.
 
 1. Freeze expansion of the Wi-Fi upload path as the default long-term solution.
 2. Define the upload session protocol independent of transport.

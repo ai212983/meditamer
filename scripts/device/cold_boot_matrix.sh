@@ -92,7 +92,7 @@ has_readable_serial() {
     LC_ALL=C grep -aEq '[A-Za-z]{3,}' "$log_file"
 }
 
-# The device isn't power-cycled (see cold-boot-validation.md), so the port
+# The device isn't power-cycled (see docs/archive/hardware/cold-boot-validation.md), so the port
 # keeps streaming pre-existing debug telemetry right up to the moment reset
 # is pressed. Gating on "any readable byte" is satisfied by that leftover
 # chatter before the reset even happens, which starts the marker-collection

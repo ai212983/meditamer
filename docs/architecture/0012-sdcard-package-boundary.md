@@ -3,7 +3,7 @@
 - Status: Accepted
 - Author: Claude/Sonnet5
 - Date: 2026-08-13
-- References: [Source tree architecture cleanup](../plans/source-tree-architecture-cleanup.md) S6,
+- References: [Source tree architecture cleanup](../archive/refactors/source-tree-architecture-cleanup.md) S6,
   [Stepped FAT engine](0004-dma-stepped-fat-engine.md)
 
 ## Context

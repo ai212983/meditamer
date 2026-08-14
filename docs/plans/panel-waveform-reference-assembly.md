@@ -1,7 +1,7 @@
 # Panel Waveform Reference-Assembly Investigation Plan
 
 - Status: Active
-- Last-reviewed: 2026-08-10
+- Last-reviewed: 2026-08-14
 
 ## Goal
 
@@ -19,6 +19,19 @@ The reference implementation is an implementation baseline, not an electrical
 specification for the ED038TH2 panel. It cannot establish undocumented minimum
 timings by itself.
 
+## Current state and next direction
+
+- Phase 0 is complete: synthetic, acquisition-pipeline, and physical-touch comparisons narrowed the
+  unresolved discriminator to the physical GPIO36/report-read history before a later waveform.
+- Production currently uses a 48-cycle CL-high hold. The 6/9/12/24-cycle values remain explicit
+  diagnostic overrides; recent exact artifacts report the 48-cycle production value.
+- Release builds pin timing-critical scan routines to `.rwtext`, keep waveform LUTs in internal data
+  memory, and verify an inlined CCOUNT hold. Those guards preserve placement but do not explain which
+  complete reference-loop timing or ordering difference is causal.
+- The next work is Phase 1 only: regenerate and retain the official reference ELF/map/disassembly,
+  then annotate one complete row. Do not resume hold-count bisection or change production timing
+  before that comparison identifies one controlled dimension.
+
 ## Current Evidence
 
 - The relevant reference path is `EPDDriver::partialUpdate()` in
@@ -35,6 +48,8 @@ timings by itself.
   equivalent.
 - Hardware tests found a clean result with the 12-cycle hold and corruption
   with the 9-cycle and 6-cycle holds in the current build lineage.
+- The current production recovery baseline is 48 cycles. Source history also records a clean
+  24-cycle result, but neither 12 nor 24 is promoted as the current production requirement.
 - Changing the CL-high hold also changes the complete source-clock period and
   data-settling window. Those results do not prove that CL-high width alone is
   the failing parameter.
@@ -61,7 +76,8 @@ timings by itself.
 - Change one timing or ordering property per diagnostic build.
 - Do not infer a panel timing requirement from a passing delay value.
 - Do not resume blind delay-count bisection.
-- Keep the known-clean 12-cycle build available as the recovery baseline.
+- Keep the current 48-cycle production build available as the recovery baseline; retain the
+  shorter-hold artifacts only as controlled historical evidence.
 - Preserve the gesture-event guard and touch-release fixes while investigating
   the display waveform.
 - Do not copy the entire reference driver. Reproduce only behavior supported by
@@ -287,6 +303,14 @@ Exit criteria:
 - The final deterministic pulse/row implementation and its placement checks.
 - A short conclusion stating what was reproduced, what margin remains, and
   which panel requirements remain unknown.
+
+## Immediate next action
+
+1. Reproduce the official TEMPERA partial-update build at 240 MHz and record the exact board package,
+   compiler, flags, ELF, map, and disassembly.
+2. Annotate one complete reference row from first pulse through row termination.
+3. Extract the equivalent production Rust row from the guarded 48-cycle build.
+4. Classify each ordering, placement, and timing difference before authorizing one diagnostic slice.
 
 ## Stop Conditions
 

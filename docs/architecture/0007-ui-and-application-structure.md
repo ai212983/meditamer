@@ -3,15 +3,19 @@
 - Status: Accepted
 - Date: 2026-08-07
 - Amended: 2026-08-13
-- Reconciled: 2026-08-13 — every phase in the [execution ledger](../plans/ui-app-structure-rework-ledger.md)
-  is Complete/Done with device evidence (E-0002 through E-0018) and the shell (`src/firmware/ui/shell/`)
-  is live in the running firmware; this status change records that the decision is proven, not new. It
-  unblocks [source-tree-architecture-cleanup.md](../plans/source-tree-architecture-cleanup.md) S5, which
+- Amended: 2026-08-14 — corrected the closeout wording to preserve the conditional Phase 7 and 8 outcomes.
+- Reconciled: 2026-08-14 — the base-resident path through Phase 6, including Phases 5A and 5B, is
+  complete with evidence E-0002 through E-0018 in the
+  [execution ledger](../archive/refactors/ui-app-structure-rework-ledger.md), and the shell
+  (`src/firmware/ui/shell/`) is live in the running firmware. Phase 7 is parked by the ADR-0009
+  capacity gate and Phase 8 remains unplanned; neither conditional branch is claimed as completed.
+  This status records that the shell decision is proven, not new. It
+  unblocks [source-tree-architecture-cleanup.md](../archive/refactors/source-tree-architecture-cleanup.md) S5, which
   finishes the file-layout side of the "Module boundary" section below (moving `screen`/`overlay`/
   `widget`/`theme` content out of `ui/lvgl`) — a structural move, not a further semantic decision.
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
-  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
+  [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md),
   [DRAM budget](../reference/dram/dram-budget.md)
 
@@ -198,5 +202,5 @@ failure may silently drop navigation or leave a partially entered surface.
 ## Validation
 
 Implementation order and gates are defined in the
-[plan](../plans/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
-[ledger](../plans/ui-app-structure-rework-ledger.md).
+[plan](../archive/refactors/ui-app-structure-rework-plan.md); run-specific evidence is recorded in the
+[ledger](../archive/refactors/ui-app-structure-rework-ledger.md).

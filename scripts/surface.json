@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "generated": "docs/plans/scripts-tools-surface-cleanup-ledger.md change set C-406",
+  "generated": "docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md change set C-406",
   "baselines": {
     "public_executable_paths": {
       "count": 13,
       "ceiling": 15,
-      "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the plan's closeout limit (docs/plans/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
+      "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the archived plan's closeout limit (docs/archive/host-tooling/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
     },
     "documented_leaf_commands": {
       "count": 16,
@@ -206,8 +206,8 @@
       "path": "scripts/device/cold_boot_matrix.sh",
       "role": "public",
       "owner": "Firmware + Host Tooling",
-      "caller": "docs/reference/hardware-test-matrix.md; docs/guides/troubleshooting.md; docs/plans/cold-boot-validation.md",
-      "reason": "human-assisted true-power-cycle matrix; requires physical power-cycling no automated lane can perform"
+      "caller": "docs/reference/hardware-test-matrix.md; docs/guides/troubleshooting.md; docs/archive/hardware/cold-boot-validation.md",
+      "reason": "human-assisted reset-button boot-path matrix; requires a physical reset press no automated lane can perform"
     },
     {
       "path": "scripts/device/flash.sh",
@@ -332,7 +332,7 @@
       "path": "scripts/touch/touch_capture.sh",
       "role": "public",
       "owner": "Firmware + Host Tooling",
-      "caller": "tools/touch_replay README; docs/reference/event-engine-guide.md; docs/plans/statig-event-engine.md",
+      "caller": "tools/touch_replay README; docs/reference/event-engine-guide.md; docs/archive/refactors/statig-event-engine.md",
       "reason": "captures raw/decoded touch traces (--mode touch) or tap/event-engine traces (--mode tap) via passive monitor attach"
     },
     {

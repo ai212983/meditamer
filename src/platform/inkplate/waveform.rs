@@ -4,9 +4,9 @@ use super::{
 };
 
 // Direct consecutive GPIO writes make CL too narrow at the firmware's 240 MHz
-// CPU clock. Hardware validation found that holding it high for 24 CPU cycles
-// prevents horizontal-band corruption while preserving fast partial updates;
-// shorter holds remain opt-in hardware experiments.
+// CPU clock. Production retains a conservative 48-cycle hold while the
+// reference-assembly investigation determines which complete-loop interval is
+// causal. The shorter values remain opt-in, one-variable hardware experiments.
 pub(crate) const PANEL_CL_HIGH_HOLD_CYCLES: u32 =
     if option_env!("MEDITAMER_PANEL_CL_HIGH_HOLD_6").is_some() {
         6

@@ -4,7 +4,7 @@
 - Last-reviewed: 2026-08-13
 - Owner: Firmware + Host Tooling
 - Plan: [Scripts and tools surface cleanup](scripts-tools-surface-cleanup.md)
-- Inventories: [scripts](../../scripts/README.md), [tools](../../tools/README.md)
+- Inventories: [scripts](../../../scripts/README.md), [tools](../../../tools/README.md)
 
 This is the execution record for the cleanup plan. It records phase state,
 fixed path changes, counts, validation, failures, and evidence. It does not make
@@ -55,12 +55,12 @@ hostctl CLI leaf commands closed at 13 (corrected from an initial miscount of
 | Top-level tool directories | 12 | 12 (confirmed by `find tools -mindepth 1 -maxdepth 1 -type d`) |
 | Test-support packages | 0 | 0 (`test-support/` does not exist) |
 | Maintained tool/support surfaces | 12 | 12 |
-| Public executable paths | Pending | 21 — the 20 `Current manual` rows plus `device/repaint.sh` (`Unindexed`, live but undocumented) in [scripts/README.md](../../scripts/README.md). `Automated` (23 tagged + 12 `tests/host/*` untagged = 35), `Support` (5), and `Legacy candidate` (6) rows are CI/hook/library surface, not public entry points; 20+1+35+5+6 = 67, reconciling with the script count. |
+| Public executable paths | Pending | 21 — the 20 `Current manual` rows plus `device/repaint.sh` (`Unindexed`, live but undocumented) in [scripts/README.md](../../../scripts/README.md). `Automated` (23 tagged + 12 `tests/host/*` untagged = 35), `Support` (5), and `Legacy candidate` (6) rows are CI/hook/library surface, not public entry points; 20+1+35+5+6 = 67, reconciling with the script count. |
 | Documented leaf commands | Pending | 13 hostctl CLI leaf contracts that must survive wrapper consolidation unchanged: top-level `flash-capture`, `firmware-key`, `firmware-update`, `repaint`, `upload` (5, excluding the `test` container itself), and `test` subcommands `ble-phase1d`, `wifi-acceptance`, `wifi-discovery-debug`, `runtime-modes-smoke`, `sdcard-hw`, `sdcard-burst-regression`, `troubleshoot`, `ui-lifecycle` (8) (`tools/hostctl/src/main.rs:38-190`). Corrected from an initial miscount of 14 (arithmetic error: 5+8=13, not 14) when this baseline was encoded into the Phase 4 `check_script_surface.py` ratchet. |
 
 E-0001 is this table plus the two current inventories
-([scripts/README.md](../../scripts/README.md),
-[tools/README.md](../../tools/README.md)), which already carry per-entry
+([scripts/README.md](../../../scripts/README.md),
+[tools/README.md](../../../tools/README.md)), which already carry per-entry
 caller/evidence for every script and tool. Argument/environment/port/artifact
 detail for entry points a given phase changes is captured in that phase's own
 acceptance work (e.g. Phase 3 records every `flash.sh` profile/port/mode

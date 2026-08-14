@@ -1,6 +1,6 @@
 # Reliability Issues (Current)
 
-As of: 2026-08-13
+As of: 2026-08-14
 
 Primary audience: LLM agents and automated workflow runners.
 Secondary audience: human developers.
@@ -26,8 +26,8 @@ It is ordered by operational impact.
     `/dev/cu.usbserial-2110`): **5/5 reset cycles passed** — `BOOT_RESET reason=`,
     `touch: ready phase=`, `LVGL init=ready`, and `RUNTIME_READY app_state=ready display=ready` all
     present in every cycle; each log 99.99-100% printable ASCII (no binary/noise-only captures).
-    [Cold-boot validation](../plans/cold-boot-validation.md) records the hardware finding, exact
-    artifact identity, per-cycle hashes, and accepted-evidence decision.
+    [Cold-boot validation](../archive/hardware/cold-boot-validation.md) records the hardware finding,
+    exact artifact identity, per-cycle hashes, and accepted-evidence decision.
 - Mitigation path (done): the reset-button boot-path matrix is accepted as REL-001's evidence given
   the hardware constraint; 5/5 cycles passed and are archived.
 - Residual gap: a true power-rail cold boot (LED fully off / battery physically disconnected) has

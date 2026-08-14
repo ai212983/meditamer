@@ -41,11 +41,14 @@ Reset-cycle soak validation:
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/soak_boot.sh 10
 ```
 
-Manual physical cold-boot matrix helper:
+Manual reset-button boot-path matrix helper:
 
 ```bash
 ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/cold_boot_matrix.sh 20
 ```
+
+The helper does not disconnect the board's internal battery-backed power rail and therefore does
+not validate a true power-rail cold boot.
 
 Long refresh soak validation:
 
@@ -99,4 +102,3 @@ Optional soak env vars:
 ## Wokwi
 
 `wokwi.toml` points to the `xtensa-esp32-none-elf` debug binary.
-

@@ -66,7 +66,7 @@ human interaction.
 
 | Script | Status | Purpose and evidence |
 | --- | --- | --- |
-| [`device/cold_boot_matrix.sh`](device/cold_boot_matrix.sh) | Current manual | Human-assisted true-power-cycle matrix; current hardware matrix, troubleshooting guide, and cold-boot plan. |
+| [`device/cold_boot_matrix.sh`](device/cold_boot_matrix.sh) | Current manual | Human-assisted reset-button boot-path matrix; current hardware matrix, troubleshooting guide, and archived validation record. |
 | [`device/flash.sh`](device/flash.sh) | Current manual | Canonical flash-and-boot-capture wrapper; mandated by `AGENTS.md` and current guides. |
 | [`device/generate_firmware_signing_key.sh`](device/generate_firmware_signing_key.sh) | Current manual | Creates a protected signing seed and prints its public key through hostctl; current build/flash guide. |
 | [`device/monitor.sh`](device/monitor.sh) | Current manual | Passive serial monitor/capture helper; current guides and touch capture wrappers. |
@@ -98,7 +98,7 @@ lane in `ci/check_software_baseline.sh`. The eight per-harness/tool wrappers
 previously listed here (app-state, BLE transport, event-config, event-engine,
 hostctl, touch-core, touch-replay, UI-shell) were consolidated into
 `host-test.sh` by Phase 2 of the
-[scripts and tools surface cleanup](../docs/plans/scripts-tools-surface-cleanup.md)
+[scripts and tools surface cleanup](../docs/archive/host-tooling/scripts-tools-surface-cleanup.md)
 (change set C-201/C-202/C-208 through C-215); their suites are unchanged, just
 reachable via `scripts/host-test.sh test <suite>` instead of a dedicated
 script. The three self-tests below remain standalone since they test other
@@ -128,11 +128,11 @@ CI scripts directly, not a harness crate.
 
 ## Audit result
 
-Phase 1 of the [scripts and tools surface cleanup](../docs/plans/scripts-tools-surface-cleanup.md)
+Phase 1 of the [scripts and tools surface cleanup](../docs/archive/host-tooling/scripts-tools-surface-cleanup.md)
 removed the six closed Wi-Fi investigation scripts previously listed here (the
 two standalone ESP-IDF Wi-Fi comparator wrappers, their environment library,
 the Wi-Fi partition dumper, and the two MAC-window extractors); see
-`docs/plans/scripts-tools-surface-cleanup-ledger.md` change set C-101 through
+`docs/archive/host-tooling/scripts-tools-surface-cleanup-ledger.md` change set C-101 through
 C-106 for the record. `device/repaint.sh` (retirement candidate at that point,
 since no runbook referenced it) was resolved by Phase 3: removed in favor of
 direct `hostctl.sh repaint --command <cmd>`.

@@ -7,8 +7,8 @@
 - References: [ADR-0007](0007-ui-and-application-structure.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
   [ADR-0009](0009-ab-firmware-update-foundation.md),
-  [UI/app rework plan](../plans/ui-app-structure-rework-plan.md),
-  [implementation ledger](../plans/ui-app-structure-rework-ledger.md),
+  [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
+  [implementation ledger](../archive/refactors/ui-app-structure-rework-ledger.md),
   [DRAM budget](../reference/dram/dram-budget.md)
 
 ## Context

@@ -4,7 +4,7 @@
 
 This guide explains how to work with the current `statig`-based event engine implementation used by the firmware.
 
-Use this document for day-to-day changes (threshold tuning, state-machine updates, trace analysis), while `docs/plans/statig-event-engine.md` remains the migration history/roadmap.
+Use this document and the current source/configuration as the live authority for day-to-day changes (threshold tuning, state-machine updates, trace analysis). The completed migration history is archived in [`statig-event-engine.md`](../archive/refactors/statig-event-engine.md).
 
 ## Current Runtime Flow
 
