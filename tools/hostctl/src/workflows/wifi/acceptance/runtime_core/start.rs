@@ -169,11 +169,28 @@ impl WifiAcceptanceRuntime<'_> {
         let memory = parse_serving_allocator_status(&memory_line)?;
         let memory_floor =
             env_utils::parse_env_u32("HOSTCTL_NET_MIN_INTERNAL_FREE_BYTES", 16 * 1024)?;
-        if memory.minimum_internal < memory_floor {
+        // Gate on the live, current internal-free reading, not `minimum_internal`
+        // (`min_internal_free_bytes`): that field is a monotonic, boot-lifetime
+        // low-water register that only ever ratchets downward and is never reset
+        // except at boot (see `src/firmware/psram/` — `seed_internal_low_water`
+        // runs once, inside `init_allocator`'s one-shot init guard). It records the
+        // single worst instant since boot, not the current or at-time-of-need value,
+        // so a long-running, teardown-free session (like this workflow's 3+ cycles
+        // in one boot) trips it on pure order statistics with no leak involved — see
+        // CAP-0013/CAP-0014 in docs/plans/ble-phase1s-capacity-recovery-ledger.md.
+        // The product's own BLE-admission gate
+        // (`settled_off_resource_snapshot`/`finish_product_quiescence` in
+        // src/firmware/net/runtime.rs) never reads this register either — it
+        // re-probes current free bytes at the moment of need, which is what this
+        // check now mirrors. `minimum_internal` is retained below in the
+        // informational log line for visibility, just not used as the pass/fail
+        // criterion.
+        if memory.current_internal < memory_floor {
             return Err(anyhow!(
-                "internal memory gate failed: min_internal_free_bytes={} floor={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_wifi_rx_matched={}",
-                memory.minimum_internal,
+                "internal memory gate failed: internal_free_bytes={} floor={} min_internal_free_bytes={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_wifi_rx_matched={}",
+                memory.current_internal,
                 memory_floor,
+                memory.minimum_internal,
                 memory.minimum_alloc_charge,
                 memory.minimum_alloc_internal_required,
                 memory.minimum_alloc_charge_overflow,
