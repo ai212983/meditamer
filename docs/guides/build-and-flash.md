@@ -57,6 +57,10 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh debug
 - `/dev/cu.*` preferred over `/dev/tty.*`
 - artifact directory with `flash.log`, `capture.log`, and `summary.txt`
 
+These bundles accumulate under `logs/` across runs; see
+[Log and Artifact Cleanup](development-setup.md#log-and-artifact-cleanup) for the hostctl
+commands that inventory and thin them.
+
 Optional flash env vars consumed by the workflow:
 
 - `ESPFLASH_BAUD` (default `460800` for stub-assisted full flash)

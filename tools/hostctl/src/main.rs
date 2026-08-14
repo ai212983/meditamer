@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use logging::Logger;
 
+use workflows::artifacts::{run_artifacts_inventory, run_artifacts_prune, ArtifactsPruneOptions};
 use workflows::ble_phase1d::BlePhase1dOptions;
 use workflows::firmware_update::{
     firmware_public_key_hex, run_firmware_update, FirmwareUpdateOptions,
@@ -36,12 +37,43 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    Artifacts(ArtifactsArgs),
     FlashCapture(FlashCaptureArgs),
     FirmwareKey(FirmwareKeyArgs),
     FirmwareUpdate(FirmwareUpdateArgs),
     Repaint(RepaintArgs),
     Upload(UploadArgs),
     Test(TestArgs),
+}
+
+#[derive(Debug, Args)]
+struct ArtifactsArgs {
+    #[command(subcommand)]
+    command: ArtifactsSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ArtifactsSubcommand {
+    Inventory(ArtifactsInventoryArgs),
+    Prune(ArtifactsPruneArgs),
+}
+
+/// Read-only totals, classifier output, and retention state for `logs/`.
+#[derive(Debug, Args)]
+struct ArtifactsInventoryArgs {}
+
+/// Recognized flash-payload thinning. Defaults to a dry run; `--apply`
+/// removes eligible payloads and writes one timestamped prune report.
+/// `--runs` also expires whole run units and standalone logs past their
+/// outcome-based age.
+#[derive(Debug, Args)]
+struct ArtifactsPruneArgs {
+    #[arg(long)]
+    apply: bool,
+    #[arg(long)]
+    ignore_age: bool,
+    #[arg(long)]
+    runs: bool,
 }
 
 #[derive(Debug, Args)]
@@ -225,6 +257,17 @@ fn run(cli: Cli) -> Result<()> {
     let mut logger = Logger::from_env()?;
 
     match cli.command {
+        Commands::Artifacts(args) => match args.command {
+            ArtifactsSubcommand::Inventory(_) => run_artifacts_inventory(&mut logger),
+            ArtifactsSubcommand::Prune(prune_args) => run_artifacts_prune(
+                &mut logger,
+                ArtifactsPruneOptions {
+                    apply: prune_args.apply,
+                    ignore_age: prune_args.ignore_age,
+                    runs: prune_args.runs,
+                },
+            ),
+        },
         Commands::FlashCapture(args) => run_flash_capture(
             &mut logger,
             FlashCaptureOptions {

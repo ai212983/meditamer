@@ -13,9 +13,12 @@ Checks, all blocking:
      capacity can't be silently reused by a later unrelated addition. The
      count must also not exceed .ceiling.
   4. Documented leaf commands: the live count of hostctl CLI leaf commands,
-     read from tools/hostctl/src/main.rs's `Commands` and `TestSubcommand`
-     enums, must equal baselines.documented_leaf_commands.count exactly, and
-     that baseline must carry a non-empty change_log.
+     read from tools/hostctl/src/main.rs's `Commands` enum plus each
+     container variant's nested subcommand enum (see
+     CONTAINER_SUBCOMMAND_ENUMS below -- currently `Test`/`TestSubcommand`
+     and `Artifacts`/`ArtifactsSubcommand`), must equal
+     baselines.documented_leaf_commands.count exactly, and that baseline must
+     carry a non-empty change_log.
 
 Run on script changes, scripts/surface.json changes, and inventory/Markdown
 -only changes (this file's own drift is exactly what it exists to catch).
@@ -71,32 +74,53 @@ def tracked_scripts(repo_root: Path) -> set[str]:
     return paths
 
 
+# `Commands` variants that are containers dispatching to their own nested
+# subcommand enum, rather than leaf commands themselves. Each key's variant
+# name must match its value's enum name in tools/hostctl/src/main.rs.
+CONTAINER_SUBCOMMAND_ENUMS = {
+    "Test": "TestSubcommand",
+    "Artifacts": "ArtifactsSubcommand",
+}
+
+
 def count_hostctl_leaf_commands(repo_root: Path) -> int | None:
     main_rs = repo_root / "tools" / "hostctl" / "src" / "main.rs"
     if not main_rs.is_file():
         return None
     text = main_rs.read_text(encoding="utf-8")
 
-    def enum_variant_count(enum_name: str) -> int | None:
+    def enum_variant_names(enum_name: str) -> list[str] | None:
         match = re.search(rf"enum {enum_name} \{{(.*?)\n\}}", text, re.DOTALL)
         if not match:
             return None
         body = match.group(1)
         # One `Name(Args)` or bare `Name` variant per non-blank, non-comment line.
-        variants = [
-            line.strip()
-            for line in body.splitlines()
-            if line.strip() and not line.strip().startswith("//")
-        ]
-        return len(variants)
+        names = []
+        for line in body.splitlines():
+            line = line.strip()
+            if not line or line.startswith("//"):
+                continue
+            name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", line)
+            if not name_match:
+                return None
+            names.append(name_match.group(1))
+        return names
 
-    commands = enum_variant_count("Commands")
-    test_subcommands = enum_variant_count("TestSubcommand")
-    if commands is None or test_subcommands is None:
+    command_names = enum_variant_names("Commands")
+    if command_names is None:
         return None
-    # `Test` is a container variant inside `Commands`, dispatching to
-    # `TestSubcommand`'s own leaves -- it is not itself a leaf command.
-    return (commands - 1) + test_subcommands
+
+    total = 0
+    for name in command_names:
+        nested_enum = CONTAINER_SUBCOMMAND_ENUMS.get(name)
+        if nested_enum is None:
+            total += 1
+            continue
+        nested_names = enum_variant_names(nested_enum)
+        if nested_names is None:
+            return None
+        total += len(nested_names)
+    return total
 
 
 def main() -> int:

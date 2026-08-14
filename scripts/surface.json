@@ -8,12 +8,16 @@
       "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the plan's closeout limit (docs/plans/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
     },
     "documented_leaf_commands": {
-      "count": 13,
-      "source": "tools/hostctl/src/main.rs: enum Commands (6 variants, minus the Test container) + enum TestSubcommand (8 variants)",
+      "count": 15,
+      "source": "tools/hostctl/src/main.rs: enum Commands (7 variants, minus the Test and Artifacts containers) + enum TestSubcommand (8 variants) + enum ArtifactsSubcommand (2 variants)",
       "change_log": [
         {
           "date": "2026-08-13",
           "change": "Initial baseline recorded at plan closeout (Phase 4, C-406). No hostctl CLI leaf command changed during this cleanup; count corrects an earlier arithmetic error (14) made while drafting the Phase 0 baseline record."
+        },
+        {
+          "date": "2026-08-13",
+          "change": "docs/archive/host-tooling/log-and-artifact-pruning.md Phase 0/1: added the `Artifacts` container variant with `artifacts inventory` and `artifacts prune` leaves (tools/hostctl/src/main.rs). count 13 -> 15; check_script_surface.py's leaf counter generalized to sum every container's nested subcommand enum instead of hardcoding Test alone."
         }
       ]
     }

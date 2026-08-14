@@ -181,3 +181,43 @@ to reduce its line count.
   fail CI.
 - Prefer folder-based splits over flat suffix files. Example: prefer `src/firmware/event_engine/tap/hsm.rs` and `src/firmware/event_engine/tap/trace.rs` over `src/firmware/event_engine/tap_hsm.rs` and `src/firmware/event_engine/tap_trace.rs`.
 - Generated/build outputs are excluded from these reports (for example `target/**` and `**/out/**`).
+
+## Log and Artifact Cleanup
+
+`logs/` accumulates flash-capture bundles, hardware-test output, and standalone logs across every
+hostctl run. Thin recognized flash payloads -- and, opt-in, expire whole run units and standalone
+logs -- through the same hostctl entry point:
+
+```bash
+scripts/hostctl.sh artifacts inventory
+scripts/hostctl.sh artifacts prune [--apply] [--ignore-age] [--runs]
+```
+
+- `artifacts inventory` is read-only: totals, classifier output, retention state, and due reviews,
+  reconciled against `find`/`du` over `logs/`.
+- `artifacts prune` defaults to a dry run of recognized flash-payload thinning (`firmware.elf`,
+  `app.bin`, `bootloader.bin`, `partition-table.bin` inside a known flash-capture layout --
+  see [Flash](build-and-flash.md#flash) -- that are unretained and older than 7 days). `--apply`
+  removes them and writes one timestamped report under `logs/.prune-reports/`.
+- `--ignore-age` suppresses the age floor(s) below without changing retention behavior.
+- `--runs` also expires whole run units (30 days after a passed Wi-Fi-regression-gate outcome, 90
+  days after failed or inconclusive), standalone logs (30 days), and prior prune reports (90 days).
+  This removes whole directories, not just payload files -- a much larger and less reversible action
+  than plain payload thinning; review the dry-run candidate list closely before `--apply --runs`.
+
+Retain specific evidence past its default window with a `.retain.json` record (`<run-unit>/.retain.json`,
+or `<file>.retain.json` beside a standalone log):
+
+```json
+{
+  "scope": "reflash",
+  "reason": "Phase 6 physical acceptance candidate",
+  "owner": "firmware",
+  "review_after": "2026-09-15"
+}
+```
+
+`scope` is `evidence` (keeps the unit from whole-run expiry only), `reflash` (also keeps the
+application, bootloader, and partition images), or `debug` (also keeps the ELF). `review_after`
+is required; `artifacts inventory` reports records that are due for review. Full retention policy
+and historical rationale: [Log and artifact pruning plan](../archive/host-tooling/log-and-artifact-pruning.md).
