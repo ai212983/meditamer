@@ -22,7 +22,7 @@ pub(super) use state::{
     ZeroWriteState,
 };
 
-use super::super::{clusters_for_size, DirFound, SdFatError, SD_SECTOR_SIZE};
+use super::super::{DirFound, SdFatError};
 use super::{CommandStage, FatEngine, FatRequest, FatResult, FatStep};
 
 impl FatEngine {
@@ -135,11 +135,17 @@ impl FatEngine {
         self.mutation.data_len = len;
         if found.record.first_cluster >= 2 {
             let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-            let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
-            let expected = clusters_for_size(found.record.size as usize, cluster_size);
+            // See the comment in `free_remove_chain_or_delete`
+            // (rename_remove.rs): the existing entry's on-disk `size` cannot
+            // be trusted as a chain-length estimate here either -- this same
+            // branch runs when `UploadBegin` retargets a path that already
+            // has an allocated chain (e.g. re-attempting an upload after a
+            // prior attempt was aborted mid-write), and that prior chain can
+            // be far longer than its never-persisted `size` field implies.
+            // Bound by the volume's total cluster count instead.
             self.free.start(
                 found.record.first_cluster,
-                expected.saturating_add(32) as u32,
+                volume.total_clusters.saturating_add(2),
             );
             self.mutation.stage = MutationStage::WaitFree;
             self.stage = CommandStage::Free;

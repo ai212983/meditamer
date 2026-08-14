@@ -212,12 +212,19 @@ impl FatEngine {
             return self.begin_delete_entry();
         }
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
-        let max_steps = if found.record.is_dir() {
-            volume.total_clusters.saturating_add(2)
-        } else {
-            let cluster_size = SD_SECTOR_SIZE * volume.sectors_per_cluster as usize;
-            clusters_for_size(found.record.size as usize, cluster_size) as u32 + 32
-        };
+        // Bound the walk by the volume's total cluster count, not by a step
+        // budget derived from the directory entry's on-disk `size`. `size` is
+        // stale (typically still 0) for a file mid-upload: `UploadBegin`
+        // pre-allocates and links the entire expected-size chain up front but
+        // only persists `size` to the directory entry at `UploadCommit`. A
+        // size-derived budget can therefore be far smaller than the file's
+        // real (valid, non-corrupt) chain length, making `advance_free` bail
+        // out with a spurious `ClusterChainTooLong` on a chain that isn't
+        // actually too long. `total_clusters + 2` is a safe upper bound for
+        // any non-cyclic chain on this volume, for files and directories
+        // alike, and still catches genuine corruption (a cycle can't
+        // terminate within that many steps).
+        let max_steps = volume.total_clusters.saturating_add(2);
         self.free.start(found.record.first_cluster, max_steps);
         self.mutation.stage = MutationStage::WaitRemoveFree;
         self.stage = CommandStage::Free;
