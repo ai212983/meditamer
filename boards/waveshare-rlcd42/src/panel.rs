@@ -104,6 +104,18 @@ impl Dirty {
     }
 }
 
+/// The panel's two update modes. `0xB2` sets a frame rate for each, so the
+/// difference is observable on the TE pin rather than only in current draw.
+///
+/// u8g2's source is inconsistent about which command is which — one comment
+/// calls `0x38` low power — so the board measures it instead of trusting the
+/// annotation. See the ADR.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PowerMode {
+    High,
+    Low,
+}
+
 pub struct St7305<'d> {
     dirty: Dirty,
     /// Payload bytes sent by the most recent flush, so callers can see what a
@@ -212,9 +224,30 @@ impl<'d> St7305<'d> {
         self.command(0x29); // display on
     }
 
+    /// Select the panel's update mode. Takes effect from the next frame.
+    pub fn set_power_mode(&mut self, mode: PowerMode) {
+        self.command(match mode {
+            PowerMode::High => 0x38,
+            PowerMode::Low => 0x39,
+        });
+    }
+
     /// Payload bytes written by the most recent flush.
     pub fn last_flush_bytes(&self) -> usize {
         self.last_flush_bytes
+    }
+
+    /// Set one pixel, in logical coordinates, tracking exactly what changed.
+    ///
+    /// Prefer this to [`Self::framebuffer_mut`] when drawing a small region:
+    /// that one cannot know what the caller touched and so marks everything
+    /// dirty, which forces the next refresh to send the whole panel.
+    pub fn set_pixel(&mut self, x: usize, y: usize, on: bool) {
+        if x >= WIDTH || y >= HEIGHT {
+            return;
+        }
+        set_pixel(self.framebuffer, x, y, on);
+        self.dirty.add(HEIGHT - 1 - y, x);
     }
 
     /// Direct framebuffer access. The caller may write anywhere, so this

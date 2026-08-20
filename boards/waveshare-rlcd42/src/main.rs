@@ -17,7 +17,7 @@ mod ui;
 
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c, SoftwareTimeout};
 use esp_hal::time::Duration as HalDuration;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -174,6 +174,13 @@ fn main() -> ! {
     // An empty dirty box must not touch the panel; `last_flush_bytes` is left
     // at the previous value because no flush happened.
     assert!(idle_bytes == full_bytes);
+
+    // Before LVGL takes the panel: measure what the two power modes actually do.
+    // The TE pin pulses once per panel frame, so its frequency is the panel's
+    // real update rate -- which settles which of 0x38/0x39 is high power
+    // without a current meter, and shows how fast the glass can actually go.
+    let te = Input::new(peripherals.GPIO6, InputConfig::default());
+    benchmark_power_modes(&mut display, &te);
 
     // Hand the panel to LVGL. The display outlives the UI, so it is promoted to
     // 'static rather than borrowed across the executor.
@@ -523,6 +530,82 @@ async fn clock_task(i2c: SharedI2c) {
             console::println!("RTC_TICK utc={}", snapshot.utc_epoch_seconds);
         }
     }
+}
+
+/// Compare the panel's two power modes by what they actually do, rather than by
+/// what a comment claims.
+///
+/// Two independent measurements per mode. The TE pin pulses once per panel
+/// frame, giving the rate the glass updates at. Separately, a block is moved
+/// across the screen with a partial refresh each step, giving the rate the whole
+/// path sustains. A visibly faster block and a higher TE frequency are the same
+/// finding from two directions.
+fn benchmark_power_modes(display: &mut panel::St7305<'static>, te: &Input<'static>) {
+    use esp_hal::time::Instant;
+
+    const SAMPLE_MS: u64 = 1_000;
+    const SWEEP_MS: u64 = 3_000;
+    const BLOCK: usize = 24;
+
+    for mode in [panel::PowerMode::High, panel::PowerMode::Low] {
+        display.set_power_mode(mode);
+        esp_hal::delay::Delay::new().delay_millis(200);
+
+        // Count TE edges over a fixed window. Polling is crude but the rates in
+        // question are tens of hertz, far below the poll rate.
+        let started = Instant::now();
+        let mut edges: u32 = 0;
+        let mut previous = te.is_high();
+        while started.elapsed().as_millis() < SAMPLE_MS {
+            let current = te.is_high();
+            if current && !previous {
+                edges += 1;
+            }
+            previous = current;
+        }
+
+        // Then drive the panel as hard as the path allows: move a block one
+        // step per frame, refreshing only what changed.
+        let started = Instant::now();
+        let mut frames: u32 = 0;
+        let mut x = 0usize;
+        while started.elapsed().as_millis() < SWEEP_MS {
+            // Per-pixel writes so the dirty box stays tight: erasing the old
+            // block and drawing the new one together span far less than the
+            // panel, and a partial refresh then ships only that.
+            for row in 0..BLOCK {
+                for column in 0..BLOCK {
+                    display.set_pixel(x + column, 140 + row, false);
+                }
+            }
+            x = (x + 8) % (panel::WIDTH - BLOCK);
+            for row in 0..BLOCK {
+                for column in 0..BLOCK {
+                    display.set_pixel(x + column, 140 + row, true);
+                }
+            }
+            let _ = <panel::St7305 as Panel>::refresh(display, RefreshMode::Partial);
+            frames += 1;
+        }
+
+        console::println!(
+            "PANEL_MODE {:?} te_hz={} sweep_fps={} bytes_per_frame={}",
+            mode,
+            edges * 1000 / SAMPLE_MS as u32,
+            frames * 1000 / SWEEP_MS as u32,
+            panel::last_flush_bytes()
+        );
+    }
+
+    // Leave the panel in low power. Measured above: the glass refreshes at 1Hz
+    // there against 26Hz in high power, while the write path sustains 34fps in
+    // both -- so the mode governs how often the panel's own update circuitry
+    // runs, not how fast we can write to it. This screen changes every 30
+    // seconds, so 1Hz is still thirty times faster than anything asks for, and
+    // the only cost is up to a second before a write reaches the glass.
+    //
+    // Anything that animates should switch back to High for its duration.
+    display.set_power_mode(panel::PowerMode::Low);
 }
 
 /// A one-pixel frame, so the edges are visible without competing with the

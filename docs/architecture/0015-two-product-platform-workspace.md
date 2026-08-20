@@ -775,3 +775,35 @@ One thing worth noting about how it was caught: enabling `Partial` made an asser
 immediately — the bring-up test asserted the mode was *unsupported*, which had been true when
 written. A test that encodes today's limitation will fail the day the limitation lifts, which is the
 correct behaviour and the reason it was written as an assertion rather than a log line.
+
+## Measuring the panel's power modes without a meter (2026-08-20)
+
+The board's TE pin pulses once per panel frame, which makes the panel's own update rate observable.
+That settles a question left open earlier — u8g2's source annotates `0x38` as *low* power in one place
+and *high* in another, and the vendor init treats it as high — without any current measurement:
+
+| Mode | TE (panel frame rate) | Write path |
+| --- | --- | --- |
+| `0x38` High | **26 Hz** | 870 fps |
+| `0x39` Low | **1 Hz** | 870 fps |
+
+A 26x difference, so `0x38` is high power and the dissenting comment is simply wrong. The second
+column is the more useful finding: **the write path is unaffected by the mode.** Writing panel RAM is
+not gated by how often the glass refreshes, so the mode governs the panel's own update circuitry and
+nothing else.
+
+The board now idles in low power. This screen changes every thirty seconds, where 1 Hz is still
+thirty times faster than anything asks for, and the only cost is up to a second before a write
+reaches the glass. Anything that animates should switch to high for its duration. Everything
+measured earlier in this ADR ran in high power, because that is where the vendor init leaves it.
+
+The first attempt at the sweep measured 34 fps, which was the benchmark's own fault and exposed a
+real gap in the driver: `framebuffer_mut` cannot know what the caller touched, so it marks the whole
+panel dirty, and a 24x24 block was costing a full 15,000-byte frame. Adding `St7305::set_pixel`,
+which tracks precisely what changed, took the sweep to **870 fps at 144 bytes a frame** — 25x faster
+on 104x less data, and 1.15 ms per frame of which only 0.048 ms is SPI.
+
+Which leaves the path 33x faster than the glass it drives. The bottleneck is no longer software: it
+is 26 Hz of panel, and further optimisation of the write path buys nothing visible. It does still buy
+power, since the work not done is CPU that stays asleep — but the honest ceiling for anything
+animated on this board is 26 fps, and in low power, 1.
