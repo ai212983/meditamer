@@ -572,3 +572,39 @@ real handoff, a real refresh, or a real upload still works. The ESP-Prog ordered
 investigation is now on the critical path for ADR-0015 as well as ADR-0014.
 
 The device is left booting the factory updater — a safe recovery state, not a working product image.
+
+## The platform layer runs on a second chip (2026-08-20)
+
+`boards/waveshare-rlcd42` boots on the Waveshare ESP32-S3-RLCD-4.2 and exercises the platform
+crates. Captured over the S3's native USB-Serial-JTAG:
+
+```
+BOARD_BOOT board=waveshare-rlcd42 chip=esp32s3
+RTOS_STARTED core=0
+ARBITRATION initial=Unknown active=Active lease_ok=true lease_wrong_epoch=false busy=false idle=true
+SHELL provider_registered=true surface_resolved=true capacity=4x8
+PLATFORM_OK crates=console,shell,arbitration chip=esp32s3
+```
+
+Each field is an assertion; a failure would have panicked rather than printed. The arbiter reports
+`Unknown` before anything is published (never "free"), matches a lease exactly and rejects a wrong
+epoch, refuses exclusive ownership while the supervisor is resident, and grants it once everything is
+down. The shell registers a provider and resolves a surface. `console` carried the whole capture over
+a transport the Inkplate never uses.
+
+This is the first evidence the split achieves what it was for. The crates were written against an
+ESP32 (Xtensa LX6) and ran unmodified on an ESP32-S3 (LX7) with a different console transport — the
+portability claim, tested rather than asserted, and on the chip Medinote will actually use.
+
+It also answers ADR-0012's fifth gate, the one this ADR has invoked repeatedly to defer abstractions:
+a second consumer now exists and validates the boundary.
+
+**What it does not establish.** The board runs a bring-up binary, not a product: no panel driver, no
+Wi-Fi, no BLE, one executor. It proves the arbitration *model* behaves correctly in isolation; it
+does not prove the real handoff between the Wi-Fi supervisor and the BLE stack still works, because
+that integration exists only on the Inkplate — where ADR-0014's defect currently prevents reaching
+`RUNTIME_READY`. The two halves of that verification are split across two boards, and only the
+defect's resolution will let them meet.
+
+Working on the S3 while the probe is in transit is the right call regardless: on the Inkplate any
+change can produce a panic unrelated to it, which makes iteration there guesswork.
