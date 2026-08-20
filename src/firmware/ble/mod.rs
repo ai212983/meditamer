@@ -222,12 +222,9 @@ pub(crate) enum ProbeRequestError {
     UpdateReserved,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Phase1sOwnership {
-    KnownClosed,
-    Active,
-    Unknown,
-}
+/// BLE's hold on the radio. Defined by the arbiter so the supervisor can read
+/// it without depending on this module (ADR-0015).
+pub(crate) use arbitration::claim::Ownership as Phase1sOwnership;
 
 pub(crate) fn phase1d_status() -> Phase1dStatus {
     let callbacks = hci_callback_stats();
@@ -284,7 +281,7 @@ pub(crate) fn request_phase1s_probe(
     boot_generation: u32,
     epoch: u32,
 ) -> Result<(), ProbeRequestError> {
-    if !crate::firmware::net::exclusive_lease_matches(boot_generation, epoch) {
+    if !arbitration::claim::exclusive_lease_matches(boot_generation, epoch) {
         return Err(ProbeRequestError::ExclusiveLease);
     }
     if update_reserved() {
@@ -320,6 +317,7 @@ pub(crate) fn request_phase1s_probe(
         PHASE1S_TX_TIMEOUT.store(0, Ordering::Relaxed);
         PHASE1S_QUEUE_TASK_CANCELLED.store(0, Ordering::Relaxed);
         PHASE1D_STATE.store(ProbeState::Queued as u8, Ordering::Release);
+        publish_ble_ownership();
         Ok(())
     })?;
     PHASE1S_REQUEST.signal(ProbeRequest {
@@ -329,7 +327,14 @@ pub(crate) fn request_phase1s_probe(
     Ok(())
 }
 
-pub(crate) fn phase1s_ownership() -> Phase1sOwnership {
+/// Mirror this module's probe state into the arbitration claim. Called after
+/// every `PHASE1D_STATE` transition; the supervisor reads the claim rather than
+/// calling in here, which is what broke the `ble` <-> `net` cycle (ADR-0015).
+fn publish_ble_ownership() {
+    arbitration::claim::set_ble_ownership(phase1s_ownership());
+}
+
+fn phase1s_ownership() -> Phase1sOwnership {
     match ProbeState::from_raw(PHASE1D_STATE.load(Ordering::Acquire)) {
         ProbeState::Queued | ProbeState::Running => Phase1sOwnership::Active,
         ProbeState::OwnershipUnknown => Phase1sOwnership::Unknown,
@@ -358,12 +363,15 @@ pub(crate) async fn phase1_task(bluetooth: esp_hal::peripherals::BT<'static>) {
         if PHASE1S_CLOSE_REQUEST.try_take().is_some() || update_reserved() {
             PHASE1D_FAILURE.store(ProbeFailure::UpdateReserved as u8, Ordering::Relaxed);
             PHASE1D_STATE.store(ProbeState::Failed as u8, Ordering::Release);
+            publish_ble_ownership();
             continue;
         }
         PHASE1D_STATE.store(ProbeState::Running as u8, Ordering::Release);
+        publish_ble_ownership();
         let completion = run_phase1s_probe(&mut first_device, request).await;
         PHASE1D_FAILURE.store(completion.failure as u8, Ordering::Relaxed);
         PHASE1D_STATE.store(completion.state as u8, Ordering::Release);
+        publish_ble_ownership();
         console::println!(
             "BLE_PHASE1S state={} boot={} epoch={} failure={}",
             completion.state.label(),
@@ -448,7 +456,7 @@ async fn run_phase1s_cycle(
     let cycle = 1;
     let queue_task_cancelled_before =
         esp_radio::queue_lifecycle_stats().operation_cancelled_on_task_delete;
-    if !crate::firmware::net::exclusive_lease_matches(request.boot_generation, request.epoch) {
+    if !arbitration::claim::exclusive_lease_matches(request.boot_generation, request.epoch) {
         return Err(ProbeFailure::ExclusiveLease);
     }
     if update_reserved() {
@@ -651,20 +659,17 @@ fn log_phase1s_sample(stage: &'static str, request: ProbeRequest) -> SampleResul
     let heap = crate::firmware::psram::allocator_memory_snapshot();
     let main_stack = crate::firmware::observability::minimum_stack_headroom_bytes();
     let touch_stack = crate::firmware::observability::minimum_touch_core_stack_headroom_bytes();
-    let residency = crate::firmware::net::residency_snapshot();
-    let net = crate::firmware::net::wifi::net_status_snapshot();
+    let observed = arbitration::claim::observations();
     let callbacks = hci_callback_stats();
     let transport = hci_transport_stats();
     // The exact off lease is the supervisor's ownership proof. `radio_quiesced`
     // describes the connection task's intentional-dormant policy and is not
     // updated when the supervisor destroys a complete Wi-Fi epoch.
-    let exclusive_ok = crate::firmware::net::phase1s_exclusive_ownership_confirmed(
-        crate::firmware::net::exclusive_lease_matches(request.boot_generation, request.epoch),
-        residency.wifi_controller_task,
-        residency.net_runner_task,
-        net.link,
-        net.listener,
-    );
+    // One question, asked of the arbiter. This used to be assembled here from
+    // four separate reaches into the network supervisor, which is what made
+    // `ble` and `net` mutually dependent (ADR-0015).
+    let exclusive_ok =
+        arbitration::claim::exclusive_ownership_confirmed(request.boot_generation, request.epoch);
     let resource_ready =
         main_stack >= 8_192 && touch_stack >= 1_024 && heap.free_internal_bytes >= 16_384;
     console::println!(
@@ -672,11 +677,11 @@ fn log_phase1s_sample(stage: &'static str, request: ProbeRequest) -> SampleResul
         stage,
         request.boot_generation,
         request.epoch,
-        residency.wifi_controller_task,
-        residency.net_runner_task,
-        net.link,
-        net.radio_quiesced,
-        net.listener,
+        observed.wifi_controller_resident,
+        observed.net_runner_resident,
+        observed.wifi_link,
+        observed.radio_quiesced,
+        observed.service_listening,
         heap.free_internal_bytes,
         heap.min_free_internal_bytes,
         main_stack,

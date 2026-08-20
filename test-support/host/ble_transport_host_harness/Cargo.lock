@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "arbitration"
+version = "0.1.0"
+
+[[package]]
 name = "ble_transport_host_harness"
 version = "0.1.0"
+dependencies = [
+ "arbitration",
+]

@@ -486,3 +486,48 @@ What the attempt did land, which was the actual goal:
 So `render`'s three blockers are down to two, both in `backend.rs`: the closed `SurfaceModel` enum
 over Meditamer's screens, and LVGL draw-buffer sizing that wants geometry in `const` position from
 a board the platform layer must not name.
+
+## `platform/arbitration`: the cycle is broken (2026-08-20)
+
+The `ble` ↔ `net` cycle is gone. The census now reports six module cycles instead of seven, and the
+two modules reference each other nowhere.
+
+Reading the code rather than the import graph is what made it tractable. Both halves of the cycle
+turned out to be **the same question asked in opposite directions** — "do you hold the radio?" The
+BLE side assembled its answer from four separate reaches into the supervisor
+(`exclusive_lease_matches`, `residency_snapshot`, `wifi::net_status_snapshot`,
+`phase1s_exclusive_ownership_confirmed`); the supervisor asked BLE for `phase1s_ownership` and its
+three `Phase1sOwnership` variants. Neither needed the other's internals. Both needed an arbiter.
+
+`platform/arbitration` is that arbiter, and has no dependencies:
+
+- `handoff` — the pure state machine, moved from `net/handoff.rs` (804 lines, no `use` statements).
+  Four identifiers carried Meditamer's vocabulary into a model that never decided on them:
+  `http_connections`, `sd_roundtrips`, `sd_sessions` are carried payload and became
+  `service_connections`, `storage_roundtrips`, `storage_sessions`; `http_listener` does enter a
+  predicate and became `service_listening`; and `phase1s_exclusive_ownership_confirmed` lost a
+  project-phase name it had no business exporting.
+- `claim` — each claimant publishes its own state and reads the composite. The supervisor publishes
+  the exclusive lease, task residency, link, listener, and quiesce policy; BLE publishes its probe
+  ownership after every `PHASE1D_STATE` transition. `exclusive_ownership_confirmed(boot, epoch)` is
+  the single question that replaced BLE's four reaches.
+
+`Ownership` defaults to `Unknown`, so a supervisor that has heard nothing never concludes the radio
+is free.
+
+Two things worth recording. First, the compiler caught a genuine behavioural gap mid-refactor: the
+read path was rewired before the write path existed, which would have left `ble_ownership()`
+permanently `Unknown` — safe, but wrong. Dead-code errors on the old accessors are what surfaced it.
+Second, registering the crate as a host suite brought **15 handoff tests to life that had never
+run** — they were inside a crate with `[lib] test = false` — and they immediately failed on an
+incomplete rename in this very change.
+
+Five `#[path]` harnesses broke across this work and each was repaired by depending on the extracted
+crate instead of shadowing firmware source. That is the pattern to expect from every remaining
+extraction, and each repair leaves the harness simpler than it was.
+
+**This is not hardware-verified.** It changes radio-ownership arbitration, which is the machinery
+that decides when Wi-Fi may be torn down for BLE — precisely the area ADR-0014's unresolved
+scheduler defect lives next to. The gates prove it compiles and that the model's own tests pass; they
+do not prove a real handoff still works on the device. It should be exercised on hardware before
+being relied on.

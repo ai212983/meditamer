@@ -6,6 +6,7 @@ use super::helpers::{saturating_add_u32, update_max_u32};
 
 pub(crate) fn set_upload_http_listener(listening: bool, ip: Option<[u8; 4]>) {
     let previous = UPLOAD_HTTP_LISTENING.swap(listening, Ordering::Relaxed);
+    arbitration::claim::set_service_listening(listening);
     if listening && !previous {
         NET_PIPELINE_LISTENER_ON.fetch_add(1, Ordering::Relaxed);
     } else if !listening && previous {

@@ -37,6 +37,7 @@ pub(crate) fn record_wifi_connect_failure(reason: u8) {
 
 pub(crate) fn set_wifi_link_connected(connected: bool) {
     WIFI_LINK_CONNECTED.store(connected, Ordering::Relaxed);
+    arbitration::claim::set_wifi_link(connected);
     if !connected {
         WIFI_IPV4.store(0, Ordering::Relaxed);
     }

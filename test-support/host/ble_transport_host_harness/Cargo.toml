@@ -9,3 +9,6 @@ queue-host-harness = []
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+arbitration = { path = "../../../platform/arbitration" }

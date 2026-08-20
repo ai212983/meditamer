@@ -4,38 +4,38 @@
 //! operations happen only after the model returns an [`OwnerAction`].
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ResourceSnapshot {
-    pub(crate) internal_free_bytes: u32,
-    pub(crate) largest_block_above_reserve_bytes: u32,
-    pub(crate) probe_free_before_bytes: u32,
-    pub(crate) probe_free_after_bytes: u32,
-    pub(crate) probe_reserve_bytes: u32,
-    pub(crate) http_connections: u16,
-    pub(crate) sd_roundtrips: u16,
-    pub(crate) sd_sessions: u16,
-    pub(crate) radio_callbacks: u16,
-    pub(crate) radio_queues: u16,
-    pub(crate) radio_source_active: bool,
-    pub(crate) callback_admission_open: bool,
-    pub(crate) late_callbacks: u32,
-    pub(crate) queue_late_use: u32,
-    pub(crate) queue_unknown_use: u32,
-    pub(crate) queue_reclaim_failures: u32,
-    pub(crate) queue_corruption: u32,
-    pub(crate) queue_contention: u32,
-    pub(crate) stable: bool,
+pub struct ResourceSnapshot {
+    pub internal_free_bytes: u32,
+    pub largest_block_above_reserve_bytes: u32,
+    pub probe_free_before_bytes: u32,
+    pub probe_free_after_bytes: u32,
+    pub probe_reserve_bytes: u32,
+    pub service_connections: u16,
+    pub storage_roundtrips: u16,
+    pub storage_sessions: u16,
+    pub radio_callbacks: u16,
+    pub radio_queues: u16,
+    pub radio_source_active: bool,
+    pub callback_admission_open: bool,
+    pub late_callbacks: u32,
+    pub queue_late_use: u32,
+    pub queue_unknown_use: u32,
+    pub queue_reclaim_failures: u32,
+    pub queue_corruption: u32,
+    pub queue_contention: u32,
+    pub stable: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-pub(crate) enum NetworkOwnerCommand {
+pub enum NetworkOwnerCommand {
     AcquireExclusive { boot_generation: u32, epoch: u32 },
     ReleaseExclusive { boot_generation: u32, epoch: u32 },
     Status,
 }
 
 impl NetworkOwnerCommand {
-    pub(crate) const fn epoch(self) -> u32 {
+    pub const fn epoch(self) -> u32 {
         match self {
             Self::AcquireExclusive { epoch, .. } | Self::ReleaseExclusive { epoch, .. } => epoch,
             Self::Status => 0,
@@ -44,13 +44,13 @@ impl NetworkOwnerCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NetworkOwnerRequest {
-    pub(crate) request_id: u32,
-    pub(crate) command: NetworkOwnerCommand,
+pub struct NetworkOwnerRequest {
+    pub request_id: u32,
+    pub command: NetworkOwnerCommand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NetworkOwnerState {
+pub enum NetworkOwnerState {
     Restoring,
     Serving,
     Quiescing,
@@ -59,7 +59,7 @@ pub(crate) enum NetworkOwnerState {
 }
 
 impl NetworkOwnerState {
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Restoring => "restoring",
             Self::Serving => "serving",
@@ -71,7 +71,7 @@ impl NetworkOwnerState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RejectReason {
+pub enum RejectReason {
     Busy,
     StaleBoot,
     StaleEpoch,
@@ -83,7 +83,7 @@ pub(crate) enum RejectReason {
 }
 
 impl RejectReason {
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Busy => "busy",
             Self::StaleBoot => "stale_boot",
@@ -98,7 +98,7 @@ impl RejectReason {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NetworkOwnerAckKind {
+pub enum NetworkOwnerAckKind {
     Status,
     Quiesced,
     Restored,
@@ -107,48 +107,52 @@ pub(crate) enum NetworkOwnerAckKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NetworkOwnerAck {
-    pub(crate) request_id: u32,
-    pub(crate) boot_generation: u32,
-    pub(crate) epoch: u32,
-    pub(crate) state: NetworkOwnerState,
-    pub(crate) kind: NetworkOwnerAckKind,
-    pub(crate) resources: ResourceSnapshot,
+pub struct NetworkOwnerAck {
+    pub request_id: u32,
+    pub boot_generation: u32,
+    pub epoch: u32,
+    pub state: NetworkOwnerState,
+    pub kind: NetworkOwnerAckKind,
+    pub resources: ResourceSnapshot,
 }
 
 #[allow(dead_code)]
-pub(crate) const fn request_matches_ack(request_id: u32, ack: &NetworkOwnerAck) -> bool {
+pub const fn request_matches_ack(request_id: u32, ack: &NetworkOwnerAck) -> bool {
     request_id != 0 && ack.request_id == request_id
 }
 
 #[allow(dead_code)]
-pub(crate) const fn phase1s_exclusive_ownership_confirmed(
+pub const fn exclusive_ownership_confirmed(
     exact_lease: bool,
     wifi_controller_resident: bool,
     net_runner_resident: bool,
     wifi_link: bool,
-    http_listener: bool,
+    service_listening: bool,
 ) -> bool {
-    exact_lease && !wifi_controller_resident && !net_runner_resident && !wifi_link && !http_listener
+    exact_lease && !wifi_controller_resident && !net_runner_resident && !wifi_link && !service_listening
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OwnerAction {
+pub enum OwnerAction {
     None(NetworkOwnerAck),
     BeginQuiesce { epoch: u32 },
     BeginRestore { epoch: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DrainAction {
+pub enum DrainAction {
     Wait,
     DropServices,
     ForceAbort,
     RejectForUpdate,
 }
 
+/// A teardown stage was requested out of order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TeardownStage {
+pub struct OutOfOrder;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TeardownStage {
     ServicesDropped,
     ProductQuiesced,
     RunnerDropped,
@@ -160,18 +164,24 @@ pub(crate) enum TeardownStage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TeardownSequence {
+pub struct TeardownSequence {
     stage: TeardownStage,
 }
 
+impl Default for TeardownSequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TeardownSequence {
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             stage: TeardownStage::ServicesDropped,
         }
     }
 
-    pub(crate) fn advance(&mut self, next: TeardownStage) -> Result<(), ()> {
+    pub fn advance(&mut self, next: TeardownStage) -> Result<(), OutOfOrder> {
         let valid = matches!(
             (self.stage, next),
             (
@@ -191,18 +201,18 @@ impl TeardownSequence {
                 | (TeardownStage::QueuesReclaimed, TeardownStage::StackReset)
         );
         if !valid {
-            return Err(());
+            return Err(OutOfOrder);
         }
         self.stage = next;
         Ok(())
     }
 
-    pub(crate) const fn complete(self) -> bool {
+    pub const fn complete(self) -> bool {
         matches!(self.stage, TeardownStage::StackReset)
     }
 }
 
-pub(crate) const fn classify_drain(
+pub const fn classify_drain(
     update_reserved: bool,
     product_work_quiescent: bool,
     grace_expired: bool,
@@ -218,7 +228,7 @@ pub(crate) const fn classify_drain(
     }
 }
 
-pub(crate) const fn sd_barrier_complete(
+pub const fn sd_barrier_complete(
     barrier_acknowledged: bool,
     session_active: bool,
     product_work_quiescent: bool,
@@ -226,12 +236,12 @@ pub(crate) const fn sd_barrier_complete(
     barrier_acknowledged && !session_active && product_work_quiescent
 }
 
-pub(crate) const fn control_quiescence_complete(explicit_safe_point_ack: bool) -> bool {
+pub const fn control_quiescence_complete(explicit_safe_point_ack: bool) -> bool {
     explicit_safe_point_ack
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NetworkOwnerMachine {
+pub struct NetworkOwnerMachine {
     boot_generation: u32,
     state: NetworkOwnerState,
     active_epoch: u32,
@@ -242,7 +252,7 @@ pub(crate) struct NetworkOwnerMachine {
 }
 
 impl NetworkOwnerMachine {
-    pub(crate) const fn new(boot_generation: u32) -> Self {
+    pub const fn new(boot_generation: u32) -> Self {
         Self {
             boot_generation,
             state: NetworkOwnerState::Restoring,
@@ -256,9 +266,9 @@ impl NetworkOwnerMachine {
                 probe_free_before_bytes: 0,
                 probe_free_after_bytes: 0,
                 probe_reserve_bytes: 0,
-                http_connections: 0,
-                sd_roundtrips: 0,
-                sd_sessions: 0,
+                service_connections: 0,
+                storage_roundtrips: 0,
+                storage_sessions: 0,
                 radio_callbacks: 0,
                 radio_queues: 0,
                 radio_source_active: false,
@@ -274,20 +284,20 @@ impl NetworkOwnerMachine {
         }
     }
 
-    pub(crate) const fn boot_generation(&self) -> u32 {
+    pub const fn boot_generation(&self) -> u32 {
         self.boot_generation
     }
 
-    pub(crate) const fn state(&self) -> NetworkOwnerState {
+    pub const fn state(&self) -> NetworkOwnerState {
         self.state
     }
 
     #[cfg(test)]
-    pub(crate) fn command(&mut self, command: NetworkOwnerCommand) -> OwnerAction {
+    pub fn command(&mut self, command: NetworkOwnerCommand) -> OwnerAction {
         self.command_with_id(1, command)
     }
 
-    pub(crate) fn command_with_id(
+    pub fn command_with_id(
         &mut self,
         request_id: u32,
         command: NetworkOwnerCommand,
@@ -371,7 +381,7 @@ impl NetworkOwnerMachine {
         }
     }
 
-    pub(crate) fn quiesced(&mut self, epoch: u32, resources: ResourceSnapshot) -> NetworkOwnerAck {
+    pub fn quiesced(&mut self, epoch: u32, resources: ResourceSnapshot) -> NetworkOwnerAck {
         if self.state != NetworkOwnerState::Quiescing || epoch != self.active_epoch {
             return self.rejected(epoch, RejectReason::StaleEpoch);
         }
@@ -380,7 +390,7 @@ impl NetworkOwnerMachine {
         self.ack(NetworkOwnerAckKind::Quiesced)
     }
 
-    pub(crate) fn reject_quiesce(
+    pub fn reject_quiesce(
         &mut self,
         epoch: u32,
         reason: RejectReason,
@@ -395,11 +405,11 @@ impl NetworkOwnerMachine {
         ack
     }
 
-    pub(crate) fn begin_rollback(&mut self) {
+    pub fn begin_rollback(&mut self) {
         self.state = NetworkOwnerState::Restoring;
     }
 
-    pub(crate) fn restored(&mut self, epoch: u32, resources: ResourceSnapshot) -> NetworkOwnerAck {
+    pub fn restored(&mut self, epoch: u32, resources: ResourceSnapshot) -> NetworkOwnerAck {
         self.state = NetworkOwnerState::Serving;
         self.active_epoch = 0;
         self.resources = resources;
@@ -408,7 +418,7 @@ impl NetworkOwnerMachine {
         ack
     }
 
-    pub(crate) fn restore_failed(
+    pub fn restore_failed(
         &mut self,
         epoch: u32,
         resources: ResourceSnapshot,
@@ -424,7 +434,7 @@ impl NetworkOwnerMachine {
         ack
     }
 
-    pub(crate) fn fault(
+    pub fn fault(
         &mut self,
         epoch: u32,
         reason: RejectReason,
@@ -436,7 +446,7 @@ impl NetworkOwnerMachine {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn fault_for_request(
+    pub fn fault_for_request(
         &mut self,
         request_id: u32,
         epoch: u32,
@@ -504,7 +514,7 @@ mod tests {
 
     #[test]
     fn exclusive_ownership_uses_supervisor_facts_not_connection_policy_telemetry() {
-        assert!(phase1s_exclusive_ownership_confirmed(
+        assert!(exclusive_ownership_confirmed(
             true, false, false, false, false
         ));
         for rejected in [
@@ -514,7 +524,7 @@ mod tests {
             (true, false, false, true, false),
             (true, false, false, false, true),
         ] {
-            assert!(!phase1s_exclusive_ownership_confirmed(
+            assert!(!exclusive_ownership_confirmed(
                 rejected.0, rejected.1, rejected.2, rejected.3, rejected.4
             ));
         }
@@ -794,11 +804,11 @@ mod tests {
     #[test]
     fn teardown_effects_reject_skips_and_reordering() {
         let mut sequence = TeardownSequence::new();
-        assert_eq!(sequence.advance(TeardownStage::RunnerDropped), Err(()));
+        assert_eq!(sequence.advance(TeardownStage::RunnerDropped), Err(OutOfOrder));
         sequence
             .advance(TeardownStage::ProductQuiesced)
             .expect("quiesced");
-        assert_eq!(sequence.advance(TeardownStage::SourceDisabled), Err(()));
+        assert_eq!(sequence.advance(TeardownStage::SourceDisabled), Err(OutOfOrder));
         assert!(!sequence.complete());
     }
 }

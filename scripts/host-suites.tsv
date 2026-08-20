@@ -20,3 +20,4 @@ bundle	yes	yes	no	crate	packages/bundle/Cargo.toml	Shared signed-bundle-format h
 otadata	yes	yes	no	crate	packages/otadata/Cargo.toml	Host-testable ESP-IDF otadata record CRC tests (ADR-0014 Phase 5) and strict Clippy.
 shell	yes	yes	yes	crate	platform/shell/Cargo.toml	Application-shell crate tests (surface registry, navigator, catalogue, lifecycle), strict Clippy, and coverage (ADR-0015).
 render	yes	yes	no	crate-lvgl	platform/render/Cargo.toml	Rendering-support crate tests (grayscale dither, LVGL intent bridge) and strict Clippy (DEP_LV_CONFIG_PATH; ADR-0015).
+arbitration	yes	yes	yes	crate	platform/arbitration/Cargo.toml	Exclusive-radio arbitration: handoff state machine and claim registry, strict Clippy, and coverage (ADR-0015).

@@ -311,9 +311,9 @@ async fn handle_local_command(
 #[cfg(feature = "ble-foundation")]
 async fn run_radio_handoff_command(
     uart: &mut SerialUart,
-    command: net::handoff::NetworkOwnerCommand,
+    command: arbitration::handoff::NetworkOwnerCommand,
 ) {
-    let timeout = if matches!(command, net::handoff::NetworkOwnerCommand::Status) {
+    let timeout = if matches!(command, arbitration::handoff::NetworkOwnerCommand::Status) {
         embassy_time::Duration::from_secs(3)
     } else {
         embassy_time::Duration::from_secs(200)
@@ -337,11 +337,11 @@ async fn run_radio_handoff_command(
         return;
     };
     let (kind, reason) = match ack.kind {
-        net::handoff::NetworkOwnerAckKind::Status => ("status", "none"),
-        net::handoff::NetworkOwnerAckKind::Quiesced => ("quiesced", "none"),
-        net::handoff::NetworkOwnerAckKind::Restored => ("restored", "none"),
-        net::handoff::NetworkOwnerAckKind::Rejected(reason) => ("rejected", reason.label()),
-        net::handoff::NetworkOwnerAckKind::Faulted(reason) => ("faulted", reason.label()),
+        arbitration::handoff::NetworkOwnerAckKind::Status => ("status", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Quiesced => ("quiesced", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Restored => ("restored", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Rejected(reason) => ("rejected", reason.label()),
+        arbitration::handoff::NetworkOwnerAckKind::Faulted(reason) => ("faulted", reason.label()),
     };
     let mut line = heapless::String::<640>::new();
     let _ = write!(
@@ -357,9 +357,9 @@ async fn run_radio_handoff_command(
         ack.resources.probe_free_before_bytes,
         ack.resources.probe_free_after_bytes,
         ack.resources.probe_reserve_bytes,
-        ack.resources.http_connections,
-        ack.resources.sd_roundtrips,
-        ack.resources.sd_sessions,
+        ack.resources.service_connections,
+        ack.resources.storage_roundtrips,
+        ack.resources.storage_sessions,
         ack.resources.radio_callbacks,
         ack.resources.radio_queues,
         ack.resources.radio_source_active,
@@ -510,7 +510,7 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         } => {
             run_radio_handoff_command(
                 uart,
-                net::handoff::NetworkOwnerCommand::AcquireExclusive {
+                arbitration::handoff::NetworkOwnerCommand::AcquireExclusive {
                     boot_generation,
                     epoch,
                 },
@@ -524,7 +524,7 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         } => {
             run_radio_handoff_command(
                 uart,
-                net::handoff::NetworkOwnerCommand::ReleaseExclusive {
+                arbitration::handoff::NetworkOwnerCommand::ReleaseExclusive {
                     boot_generation,
                     epoch,
                 },
@@ -533,7 +533,7 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         }
         #[cfg(feature = "ble-foundation")]
         SerialCommand::RadioHandoffStatus => {
-            run_radio_handoff_command(uart, net::handoff::NetworkOwnerCommand::Status).await;
+            run_radio_handoff_command(uart, arbitration::handoff::NetworkOwnerCommand::Status).await;
         }
         _ => unreachable!("only low-overhead diagnostics bypass the boxed dispatcher"),
     }
