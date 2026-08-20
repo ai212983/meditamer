@@ -57,6 +57,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "board"
+version = "0.1.0"
+
+[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1531,6 +1535,7 @@ name = "waveshare-rlcd42"
 version = "0.1.0"
 dependencies = [
  "arbitration",
+ "board",
  "console",
  "embassy-executor",
  "embassy-time",

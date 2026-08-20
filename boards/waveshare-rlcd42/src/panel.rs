@@ -18,16 +18,26 @@
 //! The framebuffer is in page format — one byte holds eight vertically adjacent
 //! pixels, bit `y % 8` — because that is what the packing consumes directly.
 
+use board::{DirtyArea, Geometry, Panel, RefreshError, RefreshMode};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::Output;
 use esp_hal::spi::master::Spi;
 use esp_hal::Blocking;
 
-pub const WIDTH: usize = 300;
-pub const HEIGHT: usize = 400;
-/// Eight vertically adjacent pixels per byte.
-pub const PAGES: usize = HEIGHT / 8;
-pub const FRAMEBUFFER_BYTES: usize = WIDTH * PAGES;
+/// Logical surface, landscape. The panel is natively portrait; Waveshare's own
+/// stack draws in 400x300 and applies U8g2's `R1` rotation, and its LVGL port
+/// is initialised at 400x300 too, so landscape is the board's intended viewing
+/// orientation. Callers work in these coordinates and never see the native
+/// ones.
+pub const WIDTH: usize = 400;
+pub const HEIGHT: usize = 300;
+
+/// Native panel geometry, portrait. Private to the packing.
+const NATIVE_WIDTH: usize = 300;
+const NATIVE_HEIGHT: usize = 400;
+/// Eight vertically adjacent native pixels per byte.
+pub const PAGES: usize = NATIVE_HEIGHT / 8;
+pub const FRAMEBUFFER_BYTES: usize = NATIVE_WIDTH * PAGES;
 
 /// First column-group address; the panel's window commands are offsets from it.
 const COL_ADDR_BASE: u8 = 0x12;
@@ -46,6 +56,7 @@ const PACK: [[u8; 4]; 4] = [
 ];
 
 pub struct St7305<'d> {
+    framebuffer: &'d mut [u8; FRAMEBUFFER_BYTES],
     spi: Spi<'d, Blocking>,
     dc: Output<'d>,
     cs: Output<'d>,
@@ -55,12 +66,14 @@ pub struct St7305<'d> {
 
 impl<'d> St7305<'d> {
     pub fn new(
+        framebuffer: &'d mut [u8; FRAMEBUFFER_BYTES],
         spi: Spi<'d, Blocking>,
         dc: Output<'d>,
         cs: Output<'d>,
         reset: Output<'d>,
     ) -> Self {
         Self {
+            framebuffer,
             spi,
             dc,
             cs,
@@ -142,25 +155,33 @@ impl<'d> St7305<'d> {
         self.command(0x29); // display on
     }
 
-    /// Push a whole framebuffer. One tile row at a time: the column window is
+    pub fn framebuffer_mut(&mut self) -> &mut [u8; FRAMEBUFFER_BYTES] {
+        self.framebuffer
+    }
+
+    /// Push the whole framebuffer. One tile row at a time: the column window is
     /// constant, only the row window advances.
-    pub fn flush(&mut self, framebuffer: &[u8; FRAMEBUFFER_BYTES]) {
+    pub fn flush(&mut self) {
         // Whole-width window, computed the way the panel expects rather than
         // hardcoded, so the arithmetic is checkable against WIDTH.
         let addr_start = COL_ADDR_BASE;
-        let addr_end = COL_ADDR_BASE + ((WIDTH - 1) / COL_GROUP) as u8;
+        let addr_end = COL_ADDR_BASE + ((NATIVE_WIDTH - 1) / COL_GROUP) as u8;
         let groups = (addr_end - addr_start + 1) as usize;
         // Three bytes per column group per sub-row: 12 pixels / 4 per byte.
         let bytes_per_subrow = groups * 3;
 
-        let mut packed = [0u8; WIDTH];
+        let mut packed = [0u8; NATIVE_WIDTH];
+        // Copied out because `command_with` borrows self mutably while the
+        // framebuffer borrow would still be live.
+        let mut row_buffer = [0u8; NATIVE_WIDTH];
         for page in 0..PAGES {
-            let row = &framebuffer[page * WIDTH..(page + 1) * WIDTH];
+            row_buffer.copy_from_slice(&self.framebuffer[page * NATIVE_WIDTH..(page + 1) * NATIVE_WIDTH]);
+            let row = &row_buffer;
 
             for sub_row in 0..4 {
                 let shift = sub_row * 2;
                 let base = sub_row * bytes_per_subrow;
-                for (index, column) in (0..WIDTH).step_by(4).enumerate() {
+                for (index, column) in (0..NATIVE_WIDTH).step_by(4).enumerate() {
                     packed[base + index] = PACK[0][((row[column] >> shift) & 3) as usize]
                         | PACK[1][((row[column + 1] >> shift) & 3) as usize]
                         | PACK[2][((row[column + 2] >> shift) & 3) as usize]
@@ -178,16 +199,79 @@ impl<'d> St7305<'d> {
     }
 }
 
-/// Set or clear one pixel in a page-format framebuffer.
+/// Set or clear one pixel, in **logical** landscape coordinates.
+///
+/// Rotates 90 degrees clockwise into the panel's native portrait frame: a
+/// logical top-left pixel lands at native top-right, which is what turns the
+/// portrait glass into the landscape surface callers expect.
 pub fn set_pixel(framebuffer: &mut [u8; FRAMEBUFFER_BYTES], x: usize, y: usize, on: bool) {
     if x >= WIDTH || y >= HEIGHT {
         return;
     }
-    let index = (y / 8) * WIDTH + x;
-    let bit = 1u8 << (y % 8);
+    let native_x = HEIGHT - 1 - y;
+    let native_y = x;
+    let index = (native_y / 8) * NATIVE_WIDTH + native_x;
+    let bit = 1u8 << (native_y % 8);
     if on {
         framebuffer[index] |= bit;
     } else {
         framebuffer[index] &= !bit;
+    }
+}
+
+impl Panel for St7305<'_> {
+    fn geometry(&self) -> Geometry {
+        Geometry {
+            width: WIDTH as u16,
+            height: HEIGHT as u16,
+        }
+    }
+
+    /// Only whole-panel refresh so far. The ST7305 can window a partial update
+    /// — [`St7305::flush`] already writes one tile row at a time — but nothing
+    /// tracks the dirty region across blits yet, and claiming support the driver
+    /// does not have would be worse than admitting it.
+    fn supports(&self, mode: RefreshMode) -> bool {
+        matches!(mode, RefreshMode::Full)
+    }
+
+    unsafe fn blit_l8(&mut self, area: DirtyArea, pixels: *const u8) -> bool {
+        let width = area.x2 - area.x1 + 1;
+        let height = area.y2 - area.y1 + 1;
+        if width <= 0 || height <= 0 || pixels.is_null() {
+            return false;
+        }
+        let (Ok(width), Ok(height)) = (usize::try_from(width), usize::try_from(height)) else {
+            return false;
+        };
+        let Some(len) = width.checked_mul(height) else {
+            return false;
+        };
+        let source = unsafe { core::slice::from_raw_parts(pixels, len) };
+
+        for row in 0..height {
+            let y = area.y1 + row as i32;
+            if y < 0 || y as usize >= HEIGHT {
+                continue;
+            }
+            for column in 0..width {
+                let x = area.x1 + column as i32;
+                if x < 0 || x as usize >= WIDTH {
+                    continue;
+                }
+                // Same threshold as the Inkplate's blit: below mid-grey is ink.
+                let ink = source[row * width + column] < 128;
+                set_pixel(self.framebuffer, x as usize, y as usize, ink);
+            }
+        }
+        true
+    }
+
+    fn refresh(&mut self, mode: RefreshMode) -> Result<(), RefreshError> {
+        if !self.supports(mode) {
+            return Err(RefreshError::Unsupported(mode));
+        }
+        self.flush();
+        Ok(())
     }
 }

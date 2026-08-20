@@ -1,0 +1,14 @@
+[package]
+name = "board"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# The display seam between the UI layer and a panel (ADR-0015).
+#
+# Written only once two real panels existed to shape it: the Inkplate's 600x600
+# e-paper, packed column-major and bottom-up behind a TPS65185 with waveforms,
+# and the Waveshare board's 300x400 ST7305 reflective LCD, packed in pages over
+# SPI. An earlier attempt at this crate was deleted for being shaped by one
+# implementation and for selecting a board through mutually exclusive features;
+# it does neither now. It names no chip and no board, and has no dependencies.

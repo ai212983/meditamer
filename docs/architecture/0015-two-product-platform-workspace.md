@@ -608,3 +608,46 @@ defect's resolution will let them meet.
 
 Working on the S3 while the probe is in transit is the right call regardless: on the Inkplate any
 change can produce a panic unrelated to it, which makes iteration there guesswork.
+
+## platform/board, written against two panels (2026-08-20)
+
+The crate deleted earlier now exists, because the thing that was missing arrived: a second real
+display. It holds `Geometry`, `DirtyArea`, `RefreshMode`, and a `Panel` trait, names no chip and no
+board, and has no dependencies.
+
+The trait is narrow because only one thing survives both implementations — the *input*. LVGL hands
+over an 8-bit grayscale region plus the rectangle it covers, and the panel packs it however its
+hardware demands. The Inkplate packs column-major and bottom-up into 1bpp, then drives waveforms
+through a TPS65185; the ST7305 packs four-wide by two-tall blocks into descending twelve-pixel
+column groups over SPI. **Their framebuffer bytes are not interchangeable, so the trait never
+exposes one** — which is exactly the mistake a single-implementation design would have made, since
+either driver alone makes its own packing look like the natural one.
+
+`RefreshMode` exists for the same reason: e-paper distinguishes full from partial because the
+waveform is visibly different and much faster, while this LCD has one path today. `supports()` is
+therefore part of the contract rather than an afterthought, and the ST7305 answers `false` to
+`Partial` instead of quietly doing a full refresh.
+
+`DirtyArea` moved here from `render`. The panel is the more primitive layer: a board can be driven
+without a renderer, not the reverse.
+
+Hardware-verified on the Waveshare board, through `&mut dyn Panel` rather than the concrete driver.
+Two rounds were needed, and the second only happened because the first test pattern was too weak:
+
+- A border, a diagonal and some bands rendered "correctly" and hid a real defect. A symmetric border
+  says nothing about mirroring, and a corner-to-corner diagonal reads the same either way.
+- Replacing them with a large blocky **F** — asymmetric in both axes, and drawn through `blit_l8`
+  rather than around it — immediately showed the surface was rotated 90 degrees.
+
+The cause was in Waveshare's own configuration and easy to miss: the panel is natively portrait
+300x400, but their U8g2 default sets `rotation = U8G2_R1` and their LVGL port initialises at
+400x300. Landscape is the board's intended orientation, with the rotation applied in software. The
+driver now does the same, mapping logical landscape coordinates into the native portrait frame
+inside `set_pixel`, so callers never see native geometry and `geometry()` reports 400x300.
+
+The lesson generalises past this panel: **a test pattern that cannot fail informatively is not a
+test.** The first one passed while the display was wrong.
+
+Still owed: the Inkplate does not implement `Panel` yet. Retrofitting it is what finally unblocks
+`platform/render`'s `io.rs` and `backend.rs`, and it will be the trait's real trial — the design was
+read from both drivers, but has so far only been *compiled* against one.

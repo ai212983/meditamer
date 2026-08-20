@@ -21,6 +21,7 @@ members = [
     "packages/rtc",
     "packages/sdcard",
     "platform/arbitration",
+    "platform/board",
     "platform/console",
     "platform/render",
     "platform/shell",

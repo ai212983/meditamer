@@ -22,6 +22,7 @@ use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode as SpiMode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use board::{Panel, RefreshMode};
 use static_cell::StaticCell;
 
 use arbitration::claim::{self, Ownership};
@@ -67,7 +68,10 @@ fn main() -> ! {
     .with_sck(peripherals.GPIO11)
     .with_mosi(peripherals.GPIO12);
     let output = OutputConfig::default();
+    static FRAMEBUFFER: StaticCell<[u8; panel::FRAMEBUFFER_BYTES]> = StaticCell::new();
+    let framebuffer = FRAMEBUFFER.init([0u8; panel::FRAMEBUFFER_BYTES]);
     let mut display = panel::St7305::new(
+        framebuffer,
         spi,
         Output::new(peripherals.GPIO5, Level::Low, output),
         Output::new(peripherals.GPIO40, Level::High, output),
@@ -76,20 +80,88 @@ fn main() -> ! {
     display.init();
     console::println!("PANEL_INIT controller=st7305 {}x{}", panel::WIDTH, panel::HEIGHT);
 
-    static FRAMEBUFFER: StaticCell<[u8; panel::FRAMEBUFFER_BYTES]> = StaticCell::new();
-    let framebuffer = FRAMEBUFFER.init([0u8; panel::FRAMEBUFFER_BYTES]);
-    draw_test_pattern(framebuffer);
-    display.flush(framebuffer);
-    console::println!("PANEL_FLUSH bytes={} pattern=border+diagonal+bands", panel::FRAMEBUFFER_BYTES);
+    draw_border(display.framebuffer_mut());
+
+    let panel: &mut dyn Panel = &mut display;
+
+    // Draw a large blocky "F" through `blit_l8`, the trait's real entry point.
+    // An F has no symmetry in either axis, so a mirror, a flip and a transpose
+    // are each obvious at a glance -- which a border and a diagonal are not.
+    //
+    //   x=60  100        240
+    //   +-----+-----------+   y=60
+    //   |#####|###########|
+    //   |#####+-----------+   y=100
+    //   |#####|
+    //   |#####+--------+      y=180
+    //   |#####|########|
+    //   |#####+--------+      y=220   (mid bar ends at x=200)
+    //   |#####|
+    //   +-----+               y=340
+    //
+    // Uniform ink, so one buffer serves every rectangle.
+    static INK: StaticCell<[u8; 40 * 280]> = StaticCell::new();
+    let ink = INK.init([0x00u8; 40 * 280]);
+
+    let strokes = [
+        (60, 40, 100, 260),  // stem
+        (60, 40, 280, 80),   // top bar
+        (60, 130, 220, 170), // middle bar
+    ];
+    let mut all_ok = true;
+    for (x1, y1, x2, y2) in strokes {
+        let ok = unsafe {
+            panel.blit_l8(
+                board::DirtyArea {
+                    x1,
+                    y1,
+                    x2: x2 - 1,
+                    y2: y2 - 1,
+                },
+                ink.as_ptr(),
+            )
+        };
+        all_ok &= ok;
+    }
+
+    // A rectangle straddling the right edge must clip rather than overrun. If
+    // it renders on the left instead, the X axis is mirrored.
+    let clipped = unsafe {
+        panel.blit_l8(
+            board::DirtyArea {
+                x1: panel::WIDTH as i32 - 10,
+                y1: 270,
+                x2: panel::WIDTH as i32 + 29,
+                y2: 289,
+            },
+            ink.as_ptr(),
+        )
+    };
+
+    let geometry = panel.geometry();
+    let partial = panel.supports(RefreshMode::Partial);
+    let refreshed = panel.refresh(RefreshMode::Full).is_ok();
+    let rejected = panel.refresh(RefreshMode::Partial);
+    console::println!(
+        "PANEL_TRAIT {}x{} glyph=F strokes_ok={} clip_ok={} full_ok={} partial_supported={} rejected={:?}",
+        geometry.width,
+        geometry.height,
+        all_ok,
+        clipped,
+        refreshed,
+        partial,
+        rejected
+    );
+    assert!(all_ok && clipped && refreshed && !partial);
+    assert!(matches!(rejected, Err(board::RefreshError::Unsupported(_))));
     loop {
         esp_hal::delay::Delay::new().delay_millis(1000);
     }
 }
 
-/// A pattern whose correctness is checkable by eye: a one-pixel border proves
-/// the addressing reaches every edge, a diagonal proves x and y are not
-/// transposed, and widening bands prove row-window advance is monotonic.
-fn draw_test_pattern(framebuffer: &mut [u8; panel::FRAMEBUFFER_BYTES]) {
+/// A one-pixel frame, so the edges are visible without competing with the
+/// glyph the blit draws.
+fn draw_border(framebuffer: &mut [u8; panel::FRAMEBUFFER_BYTES]) {
     for x in 0..panel::WIDTH {
         panel::set_pixel(framebuffer, x, 0, true);
         panel::set_pixel(framebuffer, x, panel::HEIGHT - 1, true);
@@ -97,18 +169,6 @@ fn draw_test_pattern(framebuffer: &mut [u8; panel::FRAMEBUFFER_BYTES]) {
     for y in 0..panel::HEIGHT {
         panel::set_pixel(framebuffer, 0, y, true);
         panel::set_pixel(framebuffer, panel::WIDTH - 1, y, true);
-    }
-    for y in 0..panel::HEIGHT {
-        let x = y * panel::WIDTH / panel::HEIGHT;
-        panel::set_pixel(framebuffer, x, y, true);
-    }
-    for band in 0..8 {
-        let top = 40 + band * 40;
-        for y in top..(top + band + 1).min(panel::HEIGHT) {
-            for x in 20..60 {
-                panel::set_pixel(framebuffer, x, y, true);
-            }
-        }
     }
 }
 

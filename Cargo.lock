@@ -101,6 +101,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "board"
+version = "0.1.0"
+
+[[package]]
 name = "bt-hci"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

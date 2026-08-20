@@ -43,6 +43,7 @@ static_cell = "2.1.1"
 
 # The platform layer under test. None of these name a chip.
 arbitration = { path = "../../platform/arbitration" }
+board = { path = "../../platform/board" }
 console = { path = "../../platform/console" }
 shell = { path = "../../platform/shell" }
 
