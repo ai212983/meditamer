@@ -116,6 +116,31 @@ pub enum PowerMode {
     Low,
 }
 
+/// High-power frame rate, per FRCTRL (B2h) bit 4.
+///
+/// The two rates depend on OSCSET (D8h) parameter 1, which [`St7305::init`]
+/// sets to `0x80` (OSCSW=000). Waveshare's own init selects [`Self::Half`],
+/// which is why the panel arrives at 25.5Hz rather than its maximum.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HighPowerRate {
+    /// HFRA=0: 25.5 Hz with OSCSW=000.
+    Half,
+    /// HFRA=1: 51 Hz with OSCSW=000.
+    Full,
+}
+
+/// Low-power frame rate, per FRCTRL (B2h) bits 2:0.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum LowPowerRate {
+    Hz0_25 = 0,
+    Hz0_5 = 1,
+    Hz1 = 2,
+    Hz2 = 3,
+    Hz4 = 4,
+    Hz8 = 5,
+}
+
 pub struct St7305<'d> {
     dirty: Dirty,
     /// Payload bytes sent by the most recent flush, so callers can see what a
@@ -222,6 +247,18 @@ impl<'d> St7305<'d> {
         self.command_with(0xD0, &[0xFF]); // auto power-down off
         self.command(0x38); // high-power mode
         self.command(0x29); // display on
+    }
+
+    /// Set the frame rate for each power mode.
+    ///
+    /// Separate from [`Self::set_power_mode`], which only chooses between them.
+    /// The defaults come from the vendor init and are not the panel's limits.
+    pub fn set_frame_rates(&mut self, high: HighPowerRate, low: LowPowerRate) {
+        let hfra = match high {
+            HighPowerRate::Half => 0,
+            HighPowerRate::Full => 1u8,
+        };
+        self.command_with(0xB2, &[(hfra << 4) | (low as u8)]);
     }
 
     /// Select the panel's update mode. Takes effect from the next frame.

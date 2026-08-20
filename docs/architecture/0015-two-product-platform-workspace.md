@@ -807,3 +807,37 @@ Which leaves the path 33x faster than the glass it drives. The bottleneck is no 
 is 26 Hz of panel, and further optimisation of the write path buys nothing visible. It does still buy
 power, since the work not done is CPU that stays asleep — but the honest ceiling for anything
 animated on this board is 26 fps, and in low power, 1.
+
+## FRCTRL is self-refresh, not write latency (2026-08-20)
+
+The frame rate the ST7305's FRCTRL register sets is not a limit on how fast the display can change.
+It is the panel's *self-refresh* rate: how often it re-scans to maintain the image it already holds,
+closer to a DRAM refresh than to a monitor's frame rate. Writes are not gated by it.
+
+The datasheet decodes cleanly and the measurements match it exactly. FRCTRL (B2h) bit 4 selects the
+high-power rate and bits 2:0 the low-power one, with the high-power meaning depending on OSCSET
+(D8h) parameter 1 — `0x80` (OSCSW=000) giving 25.5 Hz or 51 Hz:
+
+| Setting | Datasheet | Measured (TE) |
+| --- | --- | --- |
+| HPM, HFRA=0 | 25.5 Hz | 26 Hz |
+| HPM, HFRA=1 | 51 Hz | 52 Hz |
+| LPM, LFRA=2 | 1 Hz | 1 Hz |
+| LPM, LFRA=5 | 8 Hz | 8 Hz |
+| LPM, LFRA=0 | 0.25 Hz | one pulse per 4s |
+
+Two earlier claims in this document were wrong, and both were corrected by measuring rather than
+reasoning. "26 Hz of panel" was never a ceiling — it is the rate the vendor init happens to select,
+and bit 4 doubles it. And the low-power rate carries no latency cost: a one-second clock put on the
+glass keeps ticking one second at a time while TE pulses every four, because a write refreshes the
+region it touches immediately.
+
+That clock is the useful technique here. A temperature reading steady to a tenth of a degree is
+indistinguishable from a frozen panel, so the display was being judged against something that could
+not fail visibly — the same weakness as the border-and-diagonal pattern earlier in this ADR. A
+ticking clock cannot hide a stalled refresh.
+
+The board therefore runs at both extremes: high power at its 51 Hz maximum, since that is what
+anything animated will want and it costs nothing while idle, and low power at its 0.25 Hz minimum,
+since the panel's refresh circuitry then runs four times less often than at the vendor's default with
+no downside at all.

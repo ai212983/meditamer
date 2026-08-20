@@ -94,6 +94,10 @@ pub unsafe fn init(width: i32, height: i32) -> *mut lv::lv_display_t {
 /// these are handles, published once at build time.
 static mut READING_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
 static mut STATUS_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
+/// Temporary: a seconds-resolution clock, so panel refresh latency is visible.
+/// A sensor reading that holds steady looks identical to a frozen panel; a
+/// ticking clock does not. Remove once the refresh rate is settled.
+static mut CLOCK_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
 
 /// Rewrite the reading, and mark the label dirty so the next `lv_timer_handler`
 /// redraws just that region rather than the whole screen.
@@ -101,6 +105,14 @@ pub unsafe fn set_reading(text: &core::ffi::CStr) {
     unsafe {
         if !READING_LABEL.is_null() {
             lv::lv_label_set_text(READING_LABEL, text.as_ptr());
+        }
+    }
+}
+
+pub unsafe fn set_clock(text: &core::ffi::CStr) {
+    unsafe {
+        if !CLOCK_LABEL.is_null() {
+            lv::lv_label_set_text(CLOCK_LABEL, text.as_ptr());
         }
     }
 }
@@ -151,5 +163,11 @@ pub unsafe fn build_screen(title: &core::ffi::CStr, subtitle: &core::ffi::CStr) 
         lv::lv_obj_set_style_text_font(status, &raw const lv::lv_font_montserrat_14, 0);
         lv::lv_obj_align(status, lv::lv_align_t_LV_ALIGN_CENTER, 0, 26);
         STATUS_LABEL = status;
+
+        let clock = lv::lv_label_create(screen);
+        lv::lv_label_set_text(clock, c"--:--:--".as_ptr());
+        lv::lv_obj_set_style_text_font(clock, &raw const lv::lv_font_montserrat_24, 0);
+        lv::lv_obj_align(clock, lv::lv_align_t_LV_ALIGN_BOTTOM_MID, 0, -12);
+        CLOCK_LABEL = clock;
     }
 }

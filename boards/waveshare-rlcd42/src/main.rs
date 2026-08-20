@@ -524,12 +524,48 @@ async fn clock_task(i2c: SharedI2c) {
         Err(error) => console::println!("RTC_READBACK error={:?}", error),
     }
 
+    // Temporary, at one-second resolution: a steady sensor reading is
+    // indistinguishable from a frozen panel, but a clock that skips four
+    // seconds at a time is not. This is how the panel's real refresh latency
+    // becomes visible. It costs a wakeup per second, so it comes out once the
+    // rate is settled.
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_secs(1));
     loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(5)).await;
+        ticker.next().await;
         if let Ok(snapshot) = clock.read_snapshot().await {
-            console::println!("RTC_TICK utc={}", snapshot.utc_epoch_seconds);
+            if snapshot.valid {
+                let mut text = [0u8; 16];
+                let len = format_clock(&mut text, snapshot.local_epoch_seconds);
+                if let Ok(c_text) = core::ffi::CStr::from_bytes_with_nul(&text[..len]) {
+                    unsafe { ui::set_clock(c_text) };
+                    UI_DIRTY.signal(());
+                }
+            }
         }
     }
+}
+
+/// `HH:MM:SS` from an epoch timestamp, NUL-terminated; returns the length
+/// including the NUL.
+fn format_clock(buffer: &mut [u8; 16], epoch_seconds: u32) -> usize {
+    let seconds_today = epoch_seconds % 86_400;
+    let parts = [
+        seconds_today / 3_600,
+        (seconds_today % 3_600) / 60,
+        seconds_today % 60,
+    ];
+    let mut at = 0;
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            buffer[at] = b':';
+            at += 1;
+        }
+        buffer[at] = b'0' + (part / 10) as u8;
+        buffer[at + 1] = b'0' + (part % 10) as u8;
+        at += 2;
+    }
+    buffer[at] = 0;
+    at + 1
 }
 
 /// Compare the panel's two power modes by what they actually do, rather than by
@@ -547,7 +583,19 @@ fn benchmark_power_modes(display: &mut panel::St7305<'static>, te: &Input<'stati
     const SWEEP_MS: u64 = 3_000;
     const BLOCK: usize = 24;
 
-    for mode in [panel::PowerMode::High, panel::PowerMode::Low] {
+    // Sweep the frame-rate settings too, not just the mode. FRCTRL's defaults
+    // are the vendor's choice, not the panel's ceiling: bit 4 doubles the
+    // high-power rate, and the low-power field reaches from 0.25Hz to 8Hz.
+    let cases = [
+        (panel::PowerMode::High, panel::HighPowerRate::Half, panel::LowPowerRate::Hz1),
+        (panel::PowerMode::High, panel::HighPowerRate::Full, panel::LowPowerRate::Hz1),
+        (panel::PowerMode::Low, panel::HighPowerRate::Full, panel::LowPowerRate::Hz1),
+        (panel::PowerMode::Low, panel::HighPowerRate::Full, panel::LowPowerRate::Hz8),
+        (panel::PowerMode::Low, panel::HighPowerRate::Full, panel::LowPowerRate::Hz0_25),
+    ];
+
+    for (mode, high_rate, low_rate) in cases {
+        display.set_frame_rates(high_rate, low_rate);
         display.set_power_mode(mode);
         esp_hal::delay::Delay::new().delay_millis(200);
 
@@ -589,8 +637,10 @@ fn benchmark_power_modes(display: &mut panel::St7305<'static>, te: &Input<'stati
         }
 
         console::println!(
-            "PANEL_MODE {:?} te_hz={} sweep_fps={} bytes_per_frame={}",
+            "PANEL_MODE {:?} hfra={:?} lfra={:?} te_hz={} sweep_fps={} bytes_per_frame={}",
             mode,
+            high_rate,
+            low_rate,
             edges * 1000 / SAMPLE_MS as u32,
             frames * 1000 / SWEEP_MS as u32,
             panel::last_flush_bytes()
@@ -605,6 +655,23 @@ fn benchmark_power_modes(display: &mut panel::St7305<'static>, te: &Input<'stati
     // the only cost is up to a second before a write reaches the glass.
     //
     // Anything that animates should switch back to High for its duration.
+    // Both fields away from the vendor defaults, in opposite directions.
+    //
+    // High power is raised to its maximum (51Hz measured, against the 25.5Hz
+    // the vendor init selects) because it costs nothing while the panel sits in
+    // low power, and it is the ceiling anything animated will want.
+    //
+    // Low power is dropped to its minimum, 0.25Hz -- and costs nothing to do so.
+    //
+    // FRCTRL sets the panel's *self-refresh* rate: how often it re-scans to
+    // maintain the image it is already holding, like a DRAM refresh. It does
+    // not gate writes. Measured with a one-second clock on the glass: TE pulses
+    // at 0.25Hz while the seconds still tick one by one, because writing a
+    // region updates that region there and then.
+    //
+    // So the low end is free. There is no latency penalty to trade against,
+    // which an earlier comment here wrongly assumed there was.
+    display.set_frame_rates(panel::HighPowerRate::Full, panel::LowPowerRate::Hz0_25);
     display.set_power_mode(panel::PowerMode::Low);
 }
 
