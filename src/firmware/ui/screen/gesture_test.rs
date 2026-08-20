@@ -4,7 +4,7 @@ use core::ptr;
 use heapless::String;
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 use crate::firmware::ui::lvgl::io::{
     LvglGestureDirection, LvglGestureEvent, LvglGestureKind, LvglGestureState,
 };

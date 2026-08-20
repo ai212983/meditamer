@@ -2,7 +2,7 @@ use core::ptr;
 
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 #[cfg(feature = "ui-provider-fixture")]
 use shell::types::ProviderToken;
 use shell::{

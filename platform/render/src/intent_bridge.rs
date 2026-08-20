@@ -24,20 +24,20 @@ use shell::{
 // The sticky refresh control remains live while origin + destination screens
 // and departing + promoted modals coexist during one atomic handoff.
 const CALLBACK_BINDING_CAPACITY: usize = 5;
-pub(in crate::firmware::ui) const SCREEN_NAVIGATION_CAPACITY: usize = CATALOGUE_CAPACITY + 2;
-pub(in crate::firmware::ui) const HOME_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY;
-pub(in crate::firmware::ui) const BACK_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY + 1;
+pub const SCREEN_NAVIGATION_CAPACITY: usize = CATALOGUE_CAPACITY + 2;
+pub const HOME_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY;
+pub const BACK_NAVIGATION_INDEX: usize = CATALOGUE_CAPACITY + 1;
 
 #[derive(Clone, Copy)]
-pub(in crate::firmware::ui) enum ScreenAction {
+pub enum ScreenAction {
     Navigate(NavIntent),
     Configure(UiSettingsIntent),
 }
 
-pub(in crate::firmware::ui) type CallbackRouteError = shell::callback_routes::CallbackRouteError;
+pub type CallbackRouteError = shell::callback_routes::CallbackRouteError;
 
 #[derive(Clone, Copy)]
-pub(in crate::firmware::ui) enum IntentBindings {
+pub enum IntentBindings {
     Screen {
         source: SurfaceInstanceToken,
         actions: [Option<ScreenAction>; SCREEN_NAVIGATION_CAPACITY],
@@ -92,17 +92,17 @@ impl IntentBindings {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(in crate::firmware::ui) struct CallbackLease {
+pub struct CallbackLease {
     route: CallbackRoute,
 }
 
 impl CallbackLease {
-    pub(in crate::firmware::ui) fn user_data(&self) -> *mut c_void {
+    pub fn user_data(&self) -> *mut c_void {
         core::ptr::without_provenance_mut(self.route.encoded() as usize)
     }
 }
 
-pub(in crate::firmware::ui) fn action_user_data(index: usize) -> *mut c_void {
+pub fn action_user_data(index: usize) -> *mut c_void {
     core::ptr::without_provenance_mut(index + 1)
 }
 
@@ -118,7 +118,7 @@ static CALLBACK_OVERFLOWED: AtomicBool = AtomicBool::new(false);
 static FULL_REPAINT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static AMBIENT_TAP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub(in crate::firmware::ui) fn claim(
+pub fn claim(
     bindings: IntentBindings,
 ) -> Result<CallbackLease, CallbackRouteError> {
     BINDINGS.lock(|routes| {
@@ -129,38 +129,38 @@ pub(in crate::firmware::ui) fn claim(
     })
 }
 
-pub(in crate::firmware::ui) fn enable(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
+pub fn enable(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
     BINDINGS.lock(|routes| routes.borrow_mut().enable(lease.route))
 }
 
-pub(in crate::firmware::ui) fn disable(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
+pub fn disable(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
     BINDINGS.lock(|routes| routes.borrow_mut().disable(lease.route))
 }
 
-pub(in crate::firmware::ui) fn release(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
+pub fn release(lease: &CallbackLease) -> Result<(), CallbackRouteError> {
     BINDINGS.lock(|routes| routes.borrow_mut().release(lease.route))
 }
 
-pub(in crate::firmware::ui) fn take_intent() -> Option<OwnedShellIntent> {
+pub fn take_intent() -> Option<OwnedShellIntent> {
     CALLBACK_INTENTS.lock(|intents| intents.borrow_mut().pop())
 }
 
-pub(in crate::firmware::ui) fn purge_instance(source: SurfaceInstanceToken) -> usize {
+pub fn purge_instance(source: SurfaceInstanceToken) -> usize {
     CALLBACK_INTENTS.lock(|intents| intents.borrow_mut().purge_instance(source))
 }
 
 #[cfg(feature = "ui-provider-fixture")]
-pub(in crate::firmware::ui) fn purge_provider(owner: ProviderToken) -> usize {
+pub fn purge_provider(owner: ProviderToken) -> usize {
     CALLBACK_INTENTS.lock(|intents| intents.borrow_mut().purge_provider(owner))
 }
 
 #[cfg(feature = "ui-provider-fixture")]
-pub(in crate::firmware::ui) fn queued_provider_action_count(owner: ProviderToken) -> usize {
+pub fn queued_provider_action_count(owner: ProviderToken) -> usize {
     CALLBACK_INTENTS.lock(|intents| intents.borrow().provider_reference_count(owner))
 }
 
 #[cfg(feature = "ui-provider-fixture")]
-pub(in crate::firmware::ui) fn references_provider(owner: ProviderToken) -> bool {
+pub fn references_provider(owner: ProviderToken) -> bool {
     CALLBACK_INTENTS.lock(|intents| intents.borrow().references_provider(owner))
         || BINDINGS.lock(|routes| {
             routes
@@ -169,22 +169,22 @@ pub(in crate::firmware::ui) fn references_provider(owner: ProviderToken) -> bool
         })
 }
 
-pub(in crate::firmware::ui) fn take_overflowed() -> bool {
+pub fn take_overflowed() -> bool {
     CALLBACK_OVERFLOWED.swap(false, Ordering::AcqRel)
 }
 
-pub(crate) fn take_full_repaint_request() -> bool {
+pub fn take_full_repaint_request() -> bool {
     FULL_REPAINT_REQUESTED.swap(false, Ordering::AcqRel)
 }
 
-pub(in crate::firmware::ui) fn mark_full_repaint_requested() {
+pub fn mark_full_repaint_requested() {
     FULL_REPAINT_REQUESTED.store(true, Ordering::Release);
 }
 
 /// Consumes a pending Ambient Home background tap, if any. The Ambient Home
 /// screen's own poll loop is responsible for discarding a stale flag left
 /// over from a screen that is no longer active.
-pub(in crate::firmware::ui) fn take_ambient_tap_requested() -> bool {
+pub fn take_ambient_tap_requested() -> bool {
     AMBIENT_TAP_REQUESTED.swap(false, Ordering::AcqRel)
 }
 
@@ -210,7 +210,13 @@ fn enqueue(
     });
 }
 
-pub(in crate::firmware::ui) unsafe extern "C" fn navigation_callback(event: *mut lv::lv_event_t) {
+/// LVGL event callback. Not called from Rust.
+///
+/// # Safety
+///
+/// Must be invoked only by LVGL, from the thread driving it, with a valid
+/// `event` pointer. It additionally requires the object's user data to be a navigation index published by [`action_user_data`].
+pub unsafe extern "C" fn navigation_callback(event: *mut lv::lv_event_t) {
     let target = unsafe { lv::lv_event_get_target_obj(event) };
     if target.is_null() {
         return;
@@ -240,7 +246,13 @@ pub(in crate::firmware::ui) unsafe extern "C" fn navigation_callback(event: *mut
     });
 }
 
-pub(in crate::firmware::ui) unsafe extern "C" fn show_confirm_callback(event: *mut lv::lv_event_t) {
+/// LVGL event callback. Not called from Rust.
+///
+/// # Safety
+///
+/// Must be invoked only by LVGL, from the thread driving it, with a valid
+/// `event` pointer. It additionally requires the event target to be an object this bridge installed the route on.
+pub unsafe extern "C" fn show_confirm_callback(event: *mut lv::lv_event_t) {
     enqueue(event, |bindings| match bindings {
         IntentBindings::Screen {
             source,
@@ -254,7 +266,13 @@ pub(in crate::firmware::ui) unsafe extern "C" fn show_confirm_callback(event: *m
     });
 }
 
-pub(in crate::firmware::ui) unsafe extern "C" fn dismiss_modal_callback(
+/// LVGL event callback. Not called from Rust.
+///
+/// # Safety
+///
+/// Must be invoked only by LVGL, from the thread driving it, with a valid
+/// `event` pointer. It additionally requires the event target to be an object this bridge installed the route on.
+pub unsafe extern "C" fn dismiss_modal_callback(
     event: *mut lv::lv_event_t,
 ) {
     enqueue(event, |bindings| match bindings {
@@ -263,7 +281,13 @@ pub(in crate::firmware::ui) unsafe extern "C" fn dismiss_modal_callback(
     });
 }
 
-pub(in crate::firmware::ui) unsafe extern "C" fn full_repaint_callback(event: *mut lv::lv_event_t) {
+/// LVGL event callback. Not called from Rust.
+///
+/// # Safety
+///
+/// Must be invoked only by LVGL, from the thread driving it, with a valid
+/// `event` pointer. It additionally requires the event target to be an object this bridge installed the route on.
+pub unsafe extern "C" fn full_repaint_callback(event: *mut lv::lv_event_t) {
     enqueue(event, |bindings| match bindings {
         IntentBindings::Refresh { request } => Some(OwnedShellIntent::Refresh(request)),
         IntentBindings::Screen { .. } | IntentBindings::Modal { .. } => None,
@@ -277,6 +301,12 @@ pub(in crate::firmware::ui) unsafe extern "C" fn full_repaint_callback(event: *m
 /// happened" idiom as [`mark_full_repaint_requested`]/
 /// [`take_full_repaint_request`], just set directly from the LVGL callback
 /// instead of via a routed intent.
-pub(in crate::firmware::ui) unsafe extern "C" fn ambient_tap_callback(_event: *mut lv::lv_event_t) {
+/// LVGL event callback. Not called from Rust.
+///
+/// # Safety
+///
+/// Must be invoked only by LVGL, from the thread driving it, with a valid
+/// `event` pointer. It additionally requires nothing of the event, which it ignores.
+pub unsafe extern "C" fn ambient_tap_callback(_event: *mut lv::lv_event_t) {
     AMBIENT_TAP_REQUESTED.store(true, Ordering::Release);
 }

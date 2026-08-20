@@ -1,13 +1,13 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DirtyArea {
-    pub(crate) x1: i32,
-    pub(crate) y1: i32,
-    pub(crate) x2: i32,
-    pub(crate) y2: i32,
+pub struct DirtyArea {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
 }
 
 impl DirtyArea {
-    pub(crate) fn union(self, other: Self) -> Self {
+    pub fn union(self, other: Self) -> Self {
         Self {
             x1: self.x1.min(other.x1),
             y1: self.y1.min(other.y1),

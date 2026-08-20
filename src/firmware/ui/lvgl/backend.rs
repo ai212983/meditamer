@@ -19,8 +19,9 @@ use embassy_time::Instant;
 use heapless::Vec;
 use lightvgl_sys as lv;
 
-use super::dither::DirtyArea;
-use super::{intent_bridge, io, HEIGHT, WIDTH};
+use render::dither::DirtyArea;
+use render::intent_bridge;
+use super::{io, HEIGHT, WIDTH};
 use crate::firmware::ui::overlay::base_overlays::{
     ActiveOverlay, BaseOverlayKind, OverlayEnterError,
 };

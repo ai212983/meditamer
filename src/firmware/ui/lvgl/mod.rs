@@ -1,12 +1,10 @@
 mod backend;
-mod dither;
-pub(in crate::firmware::ui) mod intent_bridge;
 pub(in crate::firmware::ui) mod io;
 
 pub(crate) use super::screen::ambient_view::AmbientHomeAction;
 pub(crate) use backend::{Backend, InitError, UiCycleStepError};
-pub(crate) use dither::DirtyArea;
-pub(crate) use intent_bridge::take_full_repaint_request;
+pub(crate) use render::dither::DirtyArea;
+pub(crate) use render::intent_bridge::take_full_repaint_request;
 pub(crate) use io::{take_gesture, LvglGestureEvent, LvglGestureKind, LvglGestureState};
 
 const WIDTH: i32 = 600;

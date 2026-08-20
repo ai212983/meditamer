@@ -3,7 +3,8 @@
 - Status: Accepted
 - Author: Claude/Opus5
 - Date: 2026-08-19
-- Amended: 2026-08-20 (Tier 1's scope, corrected by executing it — see "Tier 1 as built")
+- Amended: 2026-08-20 (Tier 1 and Tier 2 scope, and the migration order, all corrected by
+  executing them — see the dated sections after "Alternatives considered")
 - References: [Retain the `sdcard` package boundary](0012-sdcard-package-boundary.md),
   [UI shell and application structure](0007-ui-and-application-structure.md),
   [App catalogue and launcher](0008-app-catalogue-and-launcher.md),
@@ -383,3 +384,38 @@ Sequencing follows: extract the arbitration crate first, rerun the census to con
 
 The census script is worth keeping: rerunning it before each extraction is far cheaper than
 discovering an edge mid-move for a fifth time.
+
+## platform/render, as far as it goes (2026-08-20)
+
+Running the census at `ui`-submodule granularity before touching anything corrected the render
+estimate the same way the earlier ones were corrected — and this time the correction was found
+before the work rather than during it.
+
+`ui/lvgl` holds two more cycles: `lvgl` ↔ `screen` (8/6) and `lvgl` ↔ `overlay` (4/1). They
+decompose cleanly, because the product-to-lvgl direction is `intent_bridge` and `io`'s gesture
+types, which is product→platform and correct once lvgl moves. Only lvgl→screen/overlay is backwards.
+
+But the "2,448 clean lines" this document claimed for `ui/lvgl` was wrong twice over:
+
+- `backend/{cycle, frame, init, navigation, overlay}` open with `use super::*`. They are
+  impl-continuations of `backend.rs`, not independent modules, and inherit its closed `SurfaceModel`
+  enum over Meditamer's six screens.
+- `io.rs` is **board**-coupled, not product-coupled: it writes through `types::InkplateDriver`.
+  `lvgl/mod.rs` hardcodes `WIDTH`/`HEIGHT` at 600, and `dither.rs` does the same.
+
+So `platform/render` is seeded with what genuinely moves — `dither` (zero dependencies) and
+`intent_bridge` (core, embassy-sync, lightvgl-sys, and the `shell` crate), 453 lines. Seven product
+files under `screen/`, `overlay/`, and `widget/` now depend on it in the correct direction.
+
+**What blocks the rest is `platform/board`, not a registration design.** `backend.rs` needs the
+`SurfaceModel` inversion *and* board-independent geometry *and* a display trait to replace
+`InkplateDriver`; `io.rs` needs the last two. The ADR's migration order put `platform/board` third,
+after render. That is the wrong order: **board must come before render.** Two of render's three
+blockers are board concerns, and `dither`'s hardcoded 600x600 means even the part that did move is
+not yet neutral — it compiles for Medinote's 300x400 panel only by being wrong.
+
+Also fixed while here: `shell` was never registered in `scripts/host-suites.tsv`, so its 46
+newly-live tests were not gated by anything. Both new crates are registered now, and the host-tests
+lane covers 49 suites. `tools/touch_replay/tests/lvgl_dither.rs` existed only to `#[path]`-include
+`dither.rs` so its inline tests would run inside a `std` crate; the tests moved with the code and
+that shim is gone.

@@ -19,7 +19,7 @@ use core::ptr;
 use heapless::String;
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 use model::AmbientHomeConfig;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;

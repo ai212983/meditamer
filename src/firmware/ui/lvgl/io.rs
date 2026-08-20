@@ -5,7 +5,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex:
 use heapless::Deque;
 use lightvgl_sys as lv;
 
-use super::dither::{self, DirtyArea};
+use render::dither::{self, DirtyArea};
 use super::{HEIGHT, WIDTH};
 use crate::firmware::{
     touch::lvgl_multitouch::LvglContactBatch,

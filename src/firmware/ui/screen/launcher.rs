@@ -1,5 +1,5 @@
 use super::catalogue_presenter;
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 use shell::catalogue::{CatalogueViewKind, DefaultCatalogue};
 use shell::settings::UiSettings;
 

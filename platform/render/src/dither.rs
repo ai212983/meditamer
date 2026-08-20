@@ -5,13 +5,25 @@ mod tests;
 #[path = "dither/types.rs"]
 mod types;
 
-pub(crate) use types::DirtyArea;
+pub use types::DirtyArea;
 
+// TODO(ADR-0015): Inkplate geometry, still hardcoded. `platform/board` has to
+// carry this before Medinote's 300x400 panel can use this crate.
 const WIDTH: usize = 600;
 const HEIGHT: usize = 600;
 const ROW_BYTES: usize = WIDTH / 8;
 const FRAMEBUFFER_BYTES: usize = ROW_BYTES * HEIGHT;
-pub(crate) unsafe fn blit_l8(area: DirtyArea, pixels: *const u8, framebuffer: &mut [u8]) -> bool {
+/// Blit an LVGL L8 (8-bit grayscale) buffer into a 1bpp framebuffer.
+///
+/// Returns `false` without touching `framebuffer` when `area` is empty,
+/// `pixels` is null, or `framebuffer` is not exactly [`FRAMEBUFFER_BYTES`].
+///
+/// # Safety
+///
+/// `pixels` must point to at least `area` width x height readable bytes of L8
+/// data, laid out row-major with no padding, and must stay valid for the call.
+/// LVGL guarantees this for the buffer it hands to a flush callback.
+pub unsafe fn blit_l8(area: DirtyArea, pixels: *const u8, framebuffer: &mut [u8]) -> bool {
     let width = area.x2.saturating_sub(area.x1).saturating_add(1);
     let height = area.y2.saturating_sub(area.y1).saturating_add(1);
     if width <= 0 || height <= 0 || pixels.is_null() || framebuffer.len() != FRAMEBUFFER_BYTES {

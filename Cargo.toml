@@ -21,6 +21,7 @@ members = [
     "packages/rtc",
     "packages/sdcard",
     "platform/console",
+    "platform/render",
     "platform/shell",
 ]
 exclude = [
@@ -103,7 +104,7 @@ telemetry-defmt = [
     "dep:defmt",
     "console/telemetry-defmt",
 ]
-ui-provider-fixture = []
+ui-provider-fixture = ["render/ui-provider-fixture"]
 wifi-debug-slim-app = ["asset-upload-http"]
 ble-foundation = [
     "asset-upload-http",
@@ -167,6 +168,7 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 sha2 = { version = "0.10.9", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false }
 console = { path = "platform/console" }
+render = { path = "platform/render" }
 shell = { path = "platform/shell" }
 sdcard = { path = "packages/sdcard" }
 rtc = { path = "packages/rtc" }

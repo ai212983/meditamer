@@ -2,7 +2,7 @@ use core::ptr;
 
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;
