@@ -1190,6 +1190,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1376b15f3ff160e9b1e8ea564ce427f2f6fcf77528cc0a8bf405cb476f9cea7"
 
 [[package]]
+name = "rtc"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1539,10 +1546,12 @@ dependencies = [
  "console",
  "embassy-executor",
  "embassy-time",
+ "embedded-hal-async",
  "esp-backtrace",
  "esp-hal",
  "esp-println",
  "esp-rtos",
+ "rtc",
  "shell",
  "static_cell",
 ]

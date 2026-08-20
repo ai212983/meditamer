@@ -40,12 +40,16 @@ esp-println = { version = "0.17.0", default-features = false, features = [
 embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
 embassy-time = "0.5.1"
 static_cell = "2.1.1"
+embedded-hal-async = "1.0.0"
 
 # The platform layer under test. None of these name a chip.
 arbitration = { path = "../../platform/arbitration" }
 board = { path = "../../platform/board" }
 console = { path = "../../platform/console" }
 shell = { path = "../../platform/shell" }
+# Already shipping on the Inkplate; the S3 carries the same PCF85063A, so this
+# is the package's second board rather than a second driver.
+rtc = { path = "../../packages/rtc" }
 
 [patch.crates-io]
 esp-backtrace = { path = "../../vendor/esp-backtrace-0.19.0-window-spill-fix" }

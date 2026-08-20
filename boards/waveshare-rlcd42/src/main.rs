@@ -17,6 +17,8 @@ mod panel;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::i2c::master::{Config as I2cConfig, I2c, SoftwareTimeout};
+use esp_hal::time::Duration as HalDuration;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode as SpiMode;
@@ -154,8 +156,110 @@ fn main() -> ! {
     );
     assert!(all_ok && clipped && refreshed && !partial);
     assert!(matches!(rejected, Err(board::RefreshError::Unsupported(_))));
+
+    // A software timeout matters more than the frequency: without one, a device
+    // that never ACKs hangs the transaction forever, which reads on the console
+    // as the board simply stopping. Meditamer sets the same 40ms.
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        I2cConfig::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_software_timeout(SoftwareTimeout::Transaction(HalDuration::from_millis(40))),
+    )
+    .expect("i2c0")
+    .with_sda(peripherals.GPIO13)
+    .with_scl(peripherals.GPIO14)
+    .into_async();
+
+    // The RTC driver is embedded-hal-async, so the board needs a running
+    // executor rather than the blocking loop this used to end in.
+    static EXECUTOR: StaticCell<esp_rtos::embassy::Executor> = StaticCell::new();
+    let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
+    executor.run(|spawner| {
+        spawner.spawn(clock_task(i2c).unwrap());
+    });
+}
+
+/// Read the wall clock through `packages/rtc` -- the same PCF85063A driver the
+/// Inkplate runs, unchanged. Sets a known time first, because a board whose
+/// oscillator has never been started reports the clock as stopped and there
+/// would be nothing to read back.
+#[embassy_executor::task]
+async fn clock_task(i2c: I2c<'static, esp_hal::Async>) {
+    const KNOWN_EPOCH: u32 = 1_787_227_200; // 2026-08-20T12:00:00Z
+    const OFFSET_MINUTES: i16 = 120; // UTC+2
+
+    console::println!("RTC_TASK_START");
+
+    // Prove the bus before trusting the driver: a scan separates "nothing at
+    // 0x51" from "driver decoded something wrong".
+    let mut i2c = i2c;
+    let mut found = 0u32;
+    for address in 0x08u8..0x78 {
+        if embedded_hal_async::i2c::I2c::write(&mut i2c, address, &[])
+            .await
+            .is_ok()
+        {
+            console::println!("I2C_FOUND addr=0x{:02x}", address);
+            found += 1;
+        }
+    }
+    console::println!("I2C_SCAN devices={} expect_rtc_at=0x51", found);
+
+    let mut clock = rtc::driver::Pcf85063a::new(i2c);
+
+    match clock.read_snapshot().await {
+        Ok(snapshot) => console::println!(
+            "RTC_BEFORE valid={} reason={:?}",
+            snapshot.valid,
+            snapshot.reason
+        ),
+        Err(error) => console::println!("RTC_BEFORE error={:?}", error),
+    }
+
+    match clock.time_set(KNOWN_EPOCH, OFFSET_MINUTES).await {
+        Ok(outcome) => console::println!(
+            "RTC_SET utc={} offset={}",
+            outcome.utc_epoch_seconds,
+            outcome.offset_minutes
+        ),
+        Err(error) => {
+            console::println!("RTC_SET error={:?}", error);
+            return;
+        }
+    }
+
+    // Read back through the whole decode path: registers, BCD calendar, and the
+    // offset marker in the chip's one free RAM byte.
+    match clock.read_snapshot().await {
+        Ok(snapshot) => {
+            let drift = snapshot.utc_epoch_seconds.abs_diff(KNOWN_EPOCH);
+            let local_ok = snapshot.local_epoch_seconds
+                == snapshot.utc_epoch_seconds + (OFFSET_MINUTES as u32) * 60;
+            console::println!(
+                "RTC_READBACK valid={} utc={} local={} offset={} drift_s={}",
+                snapshot.valid,
+                snapshot.utc_epoch_seconds,
+                snapshot.local_epoch_seconds,
+                snapshot.offset_minutes,
+                drift
+            );
+            console::println!(
+                "RTC_OK valid={} offset_kept={} local_derived={} drift_ok={}",
+                snapshot.valid,
+                snapshot.offset_minutes == OFFSET_MINUTES,
+                local_ok,
+                drift <= 2
+            );
+        }
+        Err(error) => console::println!("RTC_READBACK error={:?}", error),
+    }
+
     loop {
-        esp_hal::delay::Delay::new().delay_millis(1000);
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(5)).await;
+        if let Ok(snapshot) = clock.read_snapshot().await {
+            console::println!("RTC_TICK utc={}", snapshot.utc_epoch_seconds);
+        }
     }
 }
 
