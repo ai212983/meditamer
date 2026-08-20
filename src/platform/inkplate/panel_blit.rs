@@ -1,18 +1,21 @@
+//! Packs an LVGL L8 buffer into the Inkplate panel's 1bpp framebuffer.
+//!
+//! This is board code, not rendering: the destination is column-major
+//! (`ROW_BYTES * x`), bottom-up, and packs eight rows per byte along Y, which
+//! is the ED038TH2 panel's layout rather than anything general. ADR-0015 moved
+//! it here after briefly filing it under `platform/render` on the strength of
+//! it having no imports -- which says nothing about coupling to a hardware
+//! memory format.
+
 #[cfg(test)]
-#[path = "dither/tests.rs"]
+#[path = "panel_blit/tests.rs"]
 mod tests;
 
-#[path = "dither/types.rs"]
-mod types;
+use render::DirtyArea;
 
-pub use types::DirtyArea;
+use super::{E_INK_HEIGHT as HEIGHT, E_INK_WIDTH as WIDTH, FRAMEBUFFER_BYTES};
 
-// TODO(ADR-0015): Inkplate geometry, still hardcoded. `platform/board` has to
-// carry this before Medinote's 300x400 panel can use this crate.
-const WIDTH: usize = 600;
-const HEIGHT: usize = 600;
 const ROW_BYTES: usize = WIDTH / 8;
-const FRAMEBUFFER_BYTES: usize = ROW_BYTES * HEIGHT;
 /// Blit an LVGL L8 (8-bit grayscale) buffer into a 1bpp framebuffer.
 ///
 /// Returns `false` without touching `framebuffer` when `area` is empty,

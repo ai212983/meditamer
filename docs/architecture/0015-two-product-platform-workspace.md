@@ -419,3 +419,38 @@ newly-live tests were not gated by anything. Both new crates are registered now,
 lane covers 49 suites. `tools/touch_replay/tests/lvgl_dither.rs` existed only to `#[path]`-include
 `dither.rs` so its inline tests would run inside a `std` crate; the tests moved with the code and
 that shim is gone.
+
+## Correction: `dither` was board code (2026-08-20)
+
+The commit that seeded `platform/render` described `dither` as product- and board-neutral. It is
+not, and this section corrects the record rather than quietly moving the file.
+
+`blit_l8` packs an LVGL L8 buffer into the destination column-major (`ROW_BYTES * x`), bottom-up,
+eight rows per byte along Y (`(HEIGHT - 1 - y) % 8`). That is the ED038TH2 panel's framebuffer
+layout, not a rendering algorithm; the only general thing in the module was a `luminance < 128`
+threshold. It now lives at `src/platform/inkplate/panel_blit.rs`, beside the panel constants it
+reads. `DirtyArea` — a plain rectangle with a `union` — was the genuinely neutral half and stays in
+`render::geometry`.
+
+**The reason it was misfiled is worth recording, because it is the same reason four earlier
+estimates in this document were wrong.** Each was made by asking what a module *imports*.
+`dither.rs` imported nothing at all, which is exactly why it looked like the safest thing to move.
+Import graphs capture structural coupling and are blind to semantic coupling: a hardcoded memory
+layout, a hardcoded 600x600, a threshold tuned for one panel's contrast. `scripts/module_census.py`
+has the same blind spot by construction, so it settles *whether* a boundary can be drawn, never
+*where* it should be.
+
+The practical rule: before moving code to `platform/`, read it for constants and layout assumptions,
+not just its `use` statements. A module with no imports deserves more suspicion, not less — it has
+nothing to declare its assumptions with.
+
+Splitting the crate also surfaced a real dependency error: `render` pulled `lightvgl-sys` for every
+consumer, so a host harness wanting only the rectangle type dragged all of LVGL in. `geometry` is
+plain arithmetic and is now reachable with `default-features = false`, behind an `lvgl` feature that
+gates `intent_bridge`.
+
+The five blit tests survive the round trip. They ran on host only because
+`tools/touch_replay/tests/` `#[path]`-included them; moving them into the firmware crate, which sets
+`[lib] test = false`, would have silently killed them again. `tools/touch_replay/tests/panel_blit.rs`
+re-hosts them and supplies the panel geometry, until `boards/inkplate-tempera` is a crate that can
+test itself.

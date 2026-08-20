@@ -19,7 +19,7 @@ use embassy_time::Instant;
 use heapless::Vec;
 use lightvgl_sys as lv;
 
-use render::dither::DirtyArea;
+use render::DirtyArea;
 use render::intent_bridge;
 use super::{io, HEIGHT, WIDTH};
 use crate::firmware::ui::overlay::base_overlays::{

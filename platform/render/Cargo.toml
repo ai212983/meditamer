@@ -6,18 +6,24 @@ rust-version = "1.95"
 
 # Product- and board-neutral rendering support (ADR-0015 Tier 1).
 #
-# Seeded with the two pieces of `firmware::ui::lvgl` that carry no product or
-# board coupling: grayscale dithering, and the LVGL callback/intent bridge that
-# turns C event callbacks into shell intents. The rest of `lvgl` cannot follow
-# yet -- `io.rs` writes through `InkplateDriver` and `backend.rs` owns a closed
-# enum over Meditamer's screens. Both need `platform/board` first.
+# Seeded with the one piece of `firmware::ui::lvgl` that carries no product or
+# board coupling: the LVGL callback/intent bridge. The rest of `lvgl` cannot
+# follow until `platform/board` exists -- `io.rs` writes through
+# `InkplateDriver` and `backend.rs` owns a closed enum over Meditamer's screens.
 
 [dependencies]
-embassy-sync = "0.8.0"
-lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
-shell = { path = "../shell" }
+embassy-sync = { version = "0.8.0", optional = true }
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = [
+    "library",
+    "raw-bindings",
+], optional = true }
+shell = { path = "../shell", optional = true }
 
 [features]
-# Forwarded from the product. `intent_bridge` gates the fixture callback
-# routes on it, so the flag has to exist on this side of the boundary too.
+default = ["lvgl"]
+# `geometry` is plain arithmetic and must stay reachable without dragging LVGL
+# in: board code and host harnesses want the rectangle type on its own.
+lvgl = ["dep:embassy-sync", "dep:lightvgl-sys", "dep:shell"]
+# Forwarded from the product. `intent_bridge` gates the fixture callback routes
+# on it, so the flag has to exist on this side of the boundary too.
 ui-provider-fixture = []

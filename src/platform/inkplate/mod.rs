@@ -1,4 +1,5 @@
 use core::sync::atomic::Ordering;
+pub(crate) mod panel_blit;
 
 use super::{
     gpio_fast::{

@@ -5,7 +5,8 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex:
 use heapless::Deque;
 use lightvgl_sys as lv;
 
-use render::dither::{self, DirtyArea};
+use render::DirtyArea;
+use crate::platform::inkplate::panel_blit;
 use super::{HEIGHT, WIDTH};
 use crate::firmware::{
     touch::lvgl_multitouch::LvglContactBatch,
@@ -150,7 +151,7 @@ pub(super) unsafe extern "C" fn flush_callback(
             x2: area.x2,
             y2: area.y2,
         };
-        let copied = unsafe { dither::blit_l8(area, pixels, (&mut *display).framebuffer_bw_mut()) };
+        let copied = unsafe { panel_blit::blit_l8(area, pixels, (&mut *display).framebuffer_bw_mut()) };
         if copied {
             record_dirty_area(area);
         }
