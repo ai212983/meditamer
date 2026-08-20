@@ -175,7 +175,17 @@ impl<'d> St7305<'d> {
         // framebuffer borrow would still be live.
         let mut row_buffer = [0u8; NATIVE_WIDTH];
         for page in 0..PAGES {
-            row_buffer.copy_from_slice(&self.framebuffer[page * NATIVE_WIDTH..(page + 1) * NATIVE_WIDTH]);
+            // The framebuffer's contract is "bit set = ink", matching the
+            // Inkplate and what `set_pixel` and `blit_l8` document. This panel
+            // renders a set bit as paper, so polarity is inverted here -- once,
+            // at the only place that packs -- rather than by making every
+            // caller reason backwards.
+            for (destination, source) in row_buffer
+                .iter_mut()
+                .zip(&self.framebuffer[page * NATIVE_WIDTH..(page + 1) * NATIVE_WIDTH])
+            {
+                *destination = !*source;
+            }
             let row = &row_buffer;
 
             for sub_row in 0..4 {

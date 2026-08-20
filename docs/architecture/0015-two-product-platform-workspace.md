@@ -651,3 +651,37 @@ test.** The first one passed while the display was wrong.
 Still owed: the Inkplate does not implement `Panel` yet. Retrofitting it is what finally unblocks
 `platform/render`'s `io.rs` and `backend.rs`, and it will be the trait's real trial — the design was
 read from both drivers, but has so far only been *compiled* against one.
+
+## An LVGL backend that is not the Inkplate's (2026-08-20)
+
+`boards/waveshare-rlcd42` now renders LVGL through `board::Panel`, hardware-verified: heading and
+caption at two font sizes plus a bordered box, composited in L8 and packed to 1bpp by the ST7305
+driver. LVGL to `blit_l8` to glass, with nothing product-specific in between.
+
+It was written fresh rather than retrofitted, and the difference is the point. The Inkplate's
+backend owns a closed `SurfaceModel` enum over six concrete Meditamer screens, which is what stops
+`firmware::ui::lvgl` moving into `platform/render`. Here the surface comes from the shell's registry
+— a provider registers, the backend resolves, and the screen is built from what came back — so
+nothing in the backend names a screen. If that shape holds, the Inkplate conforms to it rather than
+the reverse.
+
+The board's `lv_conf.h` is a useful artefact in itself: diffing it against `config/lvgl/lv_conf.h`
+isolates exactly what was Inkplate-specific rather than product-wide. Only three things were.
+`LV_COLOR_DEPTH 8` and the L8 draw-format set are shared, which is *why* `blit_l8` works as a common
+seam. The memory pool is not — the Inkplate routes LVGL's heap into PSRAM through a custom hook, and
+this board uses the builtin allocator over a smaller arena. `LV_DEF_REFR_PERIOD` differs because an
+LCD can refresh far faster than e-paper. And `LV_USE_GESTURE_RECOGNITION` is simply absent: this
+board has no touchscreen, which is the one part of the Inkplate's UI stack it cannot exercise.
+
+Two defects worth recording, both found by looking rather than by a gate:
+
+- **The panel was rendering inverted, white on black, and an earlier check had passed anyway.** The
+  F-glyph test asked about orientation and never about polarity, so an inverted display read as
+  "correct F". A test that constrains one property silently certifies the others. The framebuffer's
+  contract is "bit set is ink", matching the Inkplate; this panel renders a set bit as paper, so the
+  inversion now happens once at the only place that packs, rather than making every caller reason
+  backwards.
+- **LVGL needs the Xtensa sysroot on bindgen's include path**, or every stdint type fails to
+  resolve. `scripts/build/build.sh` already does this for esp32; the board needs its own because the
+  variable is target-suffixed — `BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf` is not
+  interchangeable with the esp32 spelling. Hence `boards/waveshare-rlcd42/build.sh`.

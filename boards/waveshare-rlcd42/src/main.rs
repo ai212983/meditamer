@@ -13,6 +13,7 @@
 #![no_main]
 
 mod panel;
+mod ui;
 
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
@@ -157,6 +158,14 @@ fn main() -> ! {
     assert!(all_ok && clipped && refreshed && !partial);
     assert!(matches!(rejected, Err(board::RefreshError::Unsupported(_))));
 
+    // Hand the panel to LVGL. The display outlives the UI, so it is promoted to
+    // 'static rather than borrowed across the executor.
+    static DISPLAY: StaticCell<panel::St7305<'static>> = StaticCell::new();
+    let display: &'static mut panel::St7305<'static> = DISPLAY.init(display);
+    unsafe { ui::set_active_panel(display) };
+    let lv_display = unsafe { ui::init(panel::WIDTH as i32, panel::HEIGHT as i32) };
+    console::println!("LVGL_INIT {}x{} color=L8", panel::WIDTH, panel::HEIGHT);
+
     // A software timeout matters more than the frequency: without one, a device
     // that never ACKs hangs the transaction forever, which reads on the console
     // as the board simply stopping. Meditamer sets the same 40ms.
@@ -177,7 +186,59 @@ fn main() -> ! {
     let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
     executor.run(|spawner| {
         spawner.spawn(clock_task(i2c).unwrap());
+        spawner.spawn(ui_task(lv_display).unwrap());
     });
+}
+
+/// Drive LVGL. The screen's content comes from a shell provider registration,
+/// so what reaches the glass is a surface the registry resolved rather than a
+/// layout hardcoded in the backend -- the property the Inkplate's closed
+/// `SurfaceModel` enum currently lacks.
+#[embassy_executor::task]
+async fn ui_task(display: *mut lightvgl_sys::lv_display_t) {
+    let mut registry: SurfaceRegistry<PROVIDER_CAPACITY, SURFACE_CAPACITY> = SurfaceRegistry::new();
+    let token = registry
+        .register_provider(
+            ProviderId(7),
+            &[SurfaceSpec::new(
+                1,
+                SurfaceRole::AppRoot,
+                SurfaceCapabilities::LAUNCHABLE,
+                RefreshHint::Content,
+            )],
+        )
+        .expect("ui provider");
+    let surface = SurfaceRef {
+        owner: token,
+        id: shell::types::SurfaceId(1),
+    };
+    let definition = registry.resolve(surface).expect("ui surface");
+
+    unsafe {
+        ui::build_screen(c"Medinote", c"platform/render prototype");
+    }
+    console::println!(
+        "UI_SURFACE role={:?} refresh_hint={:?} from=registry",
+        definition.role,
+        definition.refresh_hint
+    );
+
+    // LVGL needs its tick advanced and its timers run; there is no OS port.
+    let mut elapsed_ms: u32 = 0;
+    let mut frames: u32 = 0;
+    loop {
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+        elapsed_ms += 10;
+        unsafe {
+            lightvgl_sys::lv_tick_inc(10);
+            lightvgl_sys::lv_timer_handler();
+        }
+        if elapsed_ms % 5_000 == 0 {
+            frames += 1;
+            console::println!("UI_ALIVE seconds={} display_null={}", elapsed_ms / 1000, display.is_null());
+            let _ = frames;
+        }
+    }
 }
 
 /// Read the wall clock through `packages/rtc` -- the same PCF85063A driver the

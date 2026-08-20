@@ -8,7 +8,10 @@ target = "xtensa-esp32s3-none-elf"
 build-std = ["core", "alloc"]
 
 [env]
-# The repo root's `[env]` selects esp32-only linker hooks; Cargo merges `[env]`
-# from ancestor configs, so they have to be overridden rather than inherited.
+# The repo root's env selects esp32-only linker hooks, and Cargo merges `[env]`
+# from ancestor configs, so these have to be overridden rather than inherited.
 ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "false"
 ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "true"
+# lightvgl-sys resolves lv_conf.h through this. The board keeps its own rather
+# than inheriting config/lvgl, whose memory pool hooks into the Inkplate's PSRAM.
+DEP_LV_CONFIG_PATH = { value = "lvgl", relative = true }

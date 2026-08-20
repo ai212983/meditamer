@@ -47,6 +47,7 @@ arbitration = { path = "../../platform/arbitration" }
 board = { path = "../../platform/board" }
 console = { path = "../../platform/console" }
 shell = { path = "../../platform/shell" }
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
 # Already shipping on the Inkplate; the S3 carries the same PCF85063A, so this
 # is the package's second board rather than a second driver.
 rtc = { path = "../../packages/rtc" }
