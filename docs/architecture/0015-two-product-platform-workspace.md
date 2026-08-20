@@ -454,3 +454,35 @@ The five blit tests survive the round trip. They ran on host only because
 `[lib] test = false`, would have silently killed them again. `tools/touch_replay/tests/panel_blit.rs`
 re-hosts them and supplies the panel geometry, until `boards/inkplate-tempera` is a crate that can
 test itself.
+
+## `platform/board` does not exist, and should not yet (2026-08-20)
+
+Attempting it produced a better result than building it would have.
+
+The obvious shape — one `board` crate selecting a panel through mutually exclusive Cargo features
+(`inkplate-tempera`, `waveshare-rlcd42`) with a `compile_error!` guard — was written, and the
+all-features clippy gate rejected it immediately. That is not a gate misconfiguration to work
+around. Cargo features are additive by contract, `--all-features` is entitled to enable every one of
+them at once, and any crate whose correctness depends on exactly one of N features being active is
+mis-shaped. The repository's own gate proved it within one run.
+
+The right shape is the one this ADR's Decision already names: **per-board crates under `boards/`**,
+each exporting its own geometry, with the product depending on the one it targets. Nothing selects;
+the dependency graph does. That cannot be built usefully against one board, and a `Panel` trait
+written now would be shaped by the Inkplate alone — ADR-0012's fifth gate again, where a boundary
+earns its keep only when a second consumer validates it. Medinote's 300x400 panel is that consumer,
+and the crate should be created when it arrives.
+
+What the attempt did land, which was the actual goal:
+
+- **`ui/lvgl/io.rs` no longer names any board type.** It held `AtomicPtr<InkplateDriver>` purely to
+  reach `framebuffer_bw_mut()` in the flush path. It now tracks the framebuffer directly, as a thin
+  pointer plus length — `*mut dyn Trait` cannot live in an `AtomicPtr`, and this needs no trait at
+  all. `io::begin` takes `&mut [u8]`; its one caller passes `display.framebuffer_bw_mut()`.
+- **Panel geometry has one definition.** `ui/lvgl/mod.rs` restated `600` alongside
+  `platform::inkplate`'s `E_INK_WIDTH`/`E_INK_HEIGHT`; it now reads them from the driver that owns
+  them. When `boards/` exists, that import is the single line that moves.
+
+So `render`'s three blockers are down to two, both in `backend.rs`: the closed `SurfaceModel` enum
+over Meditamer's screens, and LVGL draw-buffer sizing that wants geometry in `const` position from
+a board the platform layer must not name.

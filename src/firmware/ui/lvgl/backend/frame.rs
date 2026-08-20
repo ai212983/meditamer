@@ -153,7 +153,7 @@ impl Backend {
         display: &mut InkplateDriver,
         update: impl FnOnce(&mut Self),
     ) -> Option<DirtyArea> {
-        io::begin(display);
+        io::begin(display.framebuffer_bw_mut());
         update(self);
         self.drain_navigation();
         if self.active_surface_is_renderable() {
