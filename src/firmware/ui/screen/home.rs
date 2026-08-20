@@ -3,7 +3,7 @@ use core::ptr;
 use lightvgl_sys as lv;
 
 use crate::firmware::ui::lvgl::intent_bridge;
-use crate::firmware::ui::widget::carousel;
+use crate::firmware::ui::widget::{ambient_content, carousel};
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;
@@ -39,7 +39,7 @@ pub(in crate::firmware::ui) unsafe fn create(
         return None;
     }
 
-    if !unsafe { create_ambient_content(screen) } {
+    if !unsafe { ambient_content::create(screen) } {
         unsafe { lv::lv_obj_delete(screen) };
         return None;
     }
@@ -71,38 +71,6 @@ pub(in crate::firmware::ui) unsafe fn create(
         }
     }
     Some(HomeScreen { root: screen })
-}
-
-pub(in crate::firmware::ui) unsafe fn create_ambient_content(screen: *mut lv::lv_obj_t) -> bool {
-    let title = unsafe { lv::lv_label_create(screen) };
-    if title.is_null() {
-        return false;
-    }
-    unsafe {
-        lv::lv_label_set_text(title, c"Meditamer".as_ptr());
-        lv::lv_obj_set_style_text_font(
-            title,
-            ptr::addr_of!(lv::lv_font_montserrat_24),
-            STYLE_DEFAULT,
-        );
-        lv::lv_obj_set_pos(title, 234, 260);
-    }
-
-    let status = unsafe { lv::lv_label_create(screen) };
-    if status.is_null() {
-        return false;
-    }
-    unsafe {
-        lv::lv_label_set_text(status, c"Ready".as_ptr());
-        lv::lv_obj_set_style_text_font(
-            status,
-            ptr::addr_of!(lv::lv_font_montserrat_18),
-            STYLE_DEFAULT,
-        );
-        lv::lv_obj_set_pos(status, 274, 306);
-    }
-
-    true
 }
 
 unsafe fn create_top_test_button(

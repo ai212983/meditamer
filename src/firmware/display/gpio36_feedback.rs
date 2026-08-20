@@ -9,7 +9,7 @@ pub(super) async fn handle_gpio36_action(
     match action {
         Gpio36Action::Touch => {}
         Gpio36Action::WakeButtonPressed => {
-            esp_println::println!("input: gpio36 source=wake_button state=pressed");
+            console::println!("input: gpio36 source=wake_button state=pressed");
             trigger_backlight_cycle(
                 &mut context.inkplate,
                 &mut state.backlight_cycle_start,
@@ -18,7 +18,7 @@ pub(super) async fn handle_gpio36_action(
             .await;
         }
         Gpio36Action::WakeButtonReleased => {
-            esp_println::println!("input: gpio36 source=wake_button state=released");
+            console::println!("input: gpio36 source=wake_button state=released");
         }
     }
 }

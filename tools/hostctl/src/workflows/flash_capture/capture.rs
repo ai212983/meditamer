@@ -47,6 +47,10 @@ pub(super) struct SummaryInputs<'a> {
     pub(super) capture_bytes: usize,
     pub(super) post_command: Option<&'a str>,
     pub(super) post_command_match: Option<&'a str>,
+    pub(super) time_sync_status: &'a str,
+    pub(super) time_sync_utc: Option<u32>,
+    pub(super) time_sync_offset_minutes: Option<i16>,
+    pub(super) time_sync_reason: Option<&'a str>,
 }
 
 pub(super) fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
@@ -60,6 +64,10 @@ pub(super) fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
         capture_bytes,
         post_command,
         post_command_match,
+        time_sync_status,
+        time_sync_utc,
+        time_sync_offset_minutes,
+        time_sync_reason,
     } = summary;
     let mut file = File::create(&outputs.summary)?;
     writeln!(file, "port={port}")?;
@@ -96,7 +104,25 @@ pub(super) fn write_summary(summary: SummaryInputs<'_>) -> Result<()> {
         "post_command_match={}",
         post_command_match.unwrap_or("n/a")
     )?;
+    writeln!(file, "time_sync={time_sync_status}")?;
+    writeln!(file, "time_sync_utc={}", display_opt(time_sync_utc))?;
+    writeln!(
+        file,
+        "time_sync_offset_min={}",
+        display_opt(time_sync_offset_minutes)
+    )?;
+    writeln!(
+        file,
+        "time_sync_reason={}",
+        time_sync_reason.unwrap_or("n/a")
+    )?;
     Ok(())
+}
+
+fn display_opt<T: std::fmt::Display>(value: Option<T>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn display_opt_path(path: Option<&PathBuf>) -> String {

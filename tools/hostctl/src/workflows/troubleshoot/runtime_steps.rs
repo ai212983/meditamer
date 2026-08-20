@@ -14,7 +14,7 @@ impl TroubleshootRuntime<'_> {
     pub(super) fn action_flash_firmware_once(&mut self) -> Result<()> {
         if !self.config.flash_first {
             self.logger
-                .info("Skipping flash step (HOSTCTL_TROUBLESHOOT_FLASH_FIRST=0)");
+                .info("Skipping flash step (flash-first is disabled)");
             self.flash_ok = true;
             return Ok(());
         }

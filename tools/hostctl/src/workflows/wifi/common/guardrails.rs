@@ -32,19 +32,16 @@ pub fn enforce_log_path_policy(log_path: &Path) -> Result<()> {
     enforce_log_path_policy_with_allow(log_path, allow_append)
 }
 
+// Policy floors are a safety property, not a tunable: always enforced.
 pub fn enforce_policy_floors(
     policy: NetPolicy,
     discovery_recover_settle_ms: Option<u32>,
 ) -> Result<()> {
-    let enforce = env_utils::parse_env_bool01("HOSTCTL_NET_ENFORCE_POLICY_FLOORS", true)?;
-    enforce_policy_floors_with_toggle(policy, discovery_recover_settle_ms, enforce)
+    enforce_policy_floors_impl(policy, discovery_recover_settle_ms)
 }
 
 pub fn acquire_port_lock(port: &str) -> Result<PortRunLock> {
-    let lock_path = std::env::var("HOSTCTL_NET_LOCK_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_lock_path(port));
+    let lock_path = default_lock_path(port);
     let wait_sec = env_utils::parse_env_f64("HOSTCTL_NET_LOCK_WAIT_SEC", 0.0)?.max(0.0);
     acquire_port_lock_with(port, lock_path, wait_sec)
 }
@@ -59,15 +56,10 @@ fn enforce_log_path_policy_with_allow(log_path: &Path, allow_append: bool) -> Re
     Ok(())
 }
 
-fn enforce_policy_floors_with_toggle(
+fn enforce_policy_floors_impl(
     policy: NetPolicy,
     discovery_recover_settle_ms: Option<u32>,
-    enforce: bool,
 ) -> Result<()> {
-    if !enforce {
-        return Ok(());
-    }
-
     let mut violations = Vec::new();
     if policy.scan_active_min_ms < SCAN_ACTIVE_MIN_FLOOR_MS {
         violations.push(format!(
@@ -173,8 +165,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        acquire_port_lock_with, enforce_log_path_policy_with_allow,
-        enforce_policy_floors_with_toggle,
+        acquire_port_lock_with, enforce_log_path_policy_with_allow, enforce_policy_floors_impl,
     };
     use crate::workflows::wifi::common::NetPolicy;
 
@@ -201,20 +192,16 @@ mod tests {
             scan_active_min_ms: 500,
             ..NetPolicy::default()
         };
-        let err =
-            enforce_policy_floors_with_toggle(policy, Some(2_000), true).expect_err("must fail");
+        let err = enforce_policy_floors_impl(policy, Some(2_000)).expect_err("must fail");
         let msg = err.to_string();
         assert!(msg.contains("scan_active_min_ms=500"));
         assert!(msg.contains("recover_settle_ms=2000"));
     }
 
     #[test]
-    fn policy_floor_checks_can_be_disabled() {
-        let policy = NetPolicy {
-            scan_passive_ms: 10,
-            ..NetPolicy::default()
-        };
-        enforce_policy_floors_with_toggle(policy, Some(1_000), false).expect("disabled");
+    fn policy_floor_checks_accept_values_at_floors() {
+        let policy = NetPolicy::default();
+        enforce_policy_floors_impl(policy, Some(6_000)).expect("defaults satisfy floors");
     }
 
     #[test]

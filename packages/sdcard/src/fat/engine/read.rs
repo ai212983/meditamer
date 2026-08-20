@@ -100,6 +100,57 @@ impl ReadState {
     }
 }
 
+/// Sequential, bounded-memory file read: unlike [`ReadState`], which
+/// requires the caller's output buffer to hold the whole file,
+/// [`StreamState`] hands back one [`crate::probe::SD_SECTOR_SIZE`]-byte
+/// chunk at a time in `workspace.sector`. The caller (factory updater, ADR-
+/// 0014 Phase 1) drains each chunk — e.g. into a running SHA-256 digest —
+/// between `advance()` calls, so a bundle far larger than any on-device
+/// buffer can still be read and hashed.
+pub(super) struct StreamState {
+    pub(super) cluster: u32,
+    pub(super) sector_offset: u8,
+    pub(super) visited: u32,
+    remaining: u32,
+    pub(super) written: u32,
+    pub(super) chunk_len: u16,
+    awaiting_sector: bool,
+}
+
+impl StreamState {
+    pub(super) const fn new() -> Self {
+        Self {
+            cluster: 0,
+            sector_offset: 0,
+            visited: 0,
+            remaining: 0,
+            written: 0,
+            chunk_len: 0,
+            awaiting_sector: false,
+        }
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.cluster = 0;
+        self.sector_offset = 0;
+        self.visited = 0;
+        self.remaining = 0;
+        self.written = 0;
+        self.chunk_len = 0;
+        self.awaiting_sector = false;
+    }
+
+    pub(super) fn start(&mut self, cluster: u32, size: u32) {
+        self.reset();
+        self.cluster = cluster;
+        self.remaining = size;
+    }
+
+    pub(super) fn label(&self) -> FatStageLabel {
+        FatStageLabel::StreamFile
+    }
+}
+
 impl FatEngine {
     pub(super) fn advance_list(&mut self) -> Result<FatStep, SdFatError> {
         let volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
@@ -190,6 +241,48 @@ impl FatEngine {
         }
         self.fat_read.start(self.read.cluster);
         self.fat_read_return = FatReadReturn::Read;
+        self.stage = CommandStage::ReadFat;
+        Ok(FatStep::Continue)
+    }
+
+    /// Advances one [`StreamState`] step. On every `Continue` returned after
+    /// the initial `Io` round-trip, `workspace.sector[..stream_chunk_len()]`
+    /// holds one freshly read, still-unconsumed chunk — read it before
+    /// calling `advance` again, which starts filling `sector` with the next
+    /// chunk (or, at a cluster boundary, first walks the FAT chain).
+    pub(super) fn advance_stream(&mut self) -> Result<FatStep, SdFatError> {
+        let volume: Fat32Volume = self.volume.ok_or(SdFatError::InvalidBootSector)?;
+        if self.stream.remaining == 0 {
+            return Ok(self.finish(FatResult::Streamed {
+                bytes: self.stream.written,
+            }));
+        }
+        if self.stream.visited > volume.total_clusters.saturating_add(2) {
+            return Err(SdFatError::ClusterChainTooLong);
+        }
+        if !self.stream.awaiting_sector {
+            let lba = cluster_to_lba(&volume, self.stream.cluster)?
+                .saturating_add(self.stream.sector_offset as u32);
+            self.stream.awaiting_sector = true;
+            return Ok(self.issue(FatIoAction::ReadSector {
+                lba,
+                buffer: FatBufferId::Sector,
+            }));
+        }
+        self.stream.awaiting_sector = false;
+        let consumed = cmp::min(self.stream.remaining, crate::probe::SD_SECTOR_SIZE as u32);
+        self.stream.chunk_len = consumed as u16;
+        self.stream.remaining -= consumed;
+        self.stream.written = self.stream.written.saturating_add(consumed);
+        self.stream.sector_offset = self.stream.sector_offset.saturating_add(1);
+        if self.stream.remaining == 0 {
+            return Ok(FatStep::Continue);
+        }
+        if self.stream.sector_offset < volume.sectors_per_cluster {
+            return Ok(FatStep::Continue);
+        }
+        self.fat_read.start(self.stream.cluster);
+        self.fat_read_return = FatReadReturn::Stream;
         self.stage = CommandStage::ReadFat;
         Ok(FatStep::Continue)
     }

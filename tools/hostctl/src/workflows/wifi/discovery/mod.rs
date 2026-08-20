@@ -60,14 +60,14 @@ pub fn run_wifi_discovery_debug(
     let ssid = std::env::var("HOSTCTL_NET_SSID")
         .context("HOSTCTL_NET_SSID must be set (wifi discovery debug)")?;
     let password = std::env::var("HOSTCTL_NET_PASSWORD").unwrap_or_default();
-    let policy_path = std::env::var("HOSTCTL_NET_POLICY_PATH")
-        .context("HOSTCTL_NET_POLICY_PATH must be set (wifi discovery debug)")?;
-    let profile_path = std::env::var("HOSTCTL_NET_DISCOVERY_PROFILE_PATH").unwrap_or_else(|_| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("scenarios/wifi-discovery-debug.default.toml")
-            .display()
-            .to_string()
-    });
+    let policy_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios/wifi-policy.default.json")
+        .display()
+        .to_string();
+    let profile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios/wifi-discovery-debug.default.toml")
+        .display()
+        .to_string();
 
     let log_path = opts.output_path.unwrap_or_else(|| {
         PathBuf::from(std::env::var("HOSTCTL_NET_LOG_PATH").unwrap_or_else(|_| {
@@ -78,13 +78,12 @@ pub fn run_wifi_discovery_debug(
         }))
     });
     let policy_raw = fs::read_to_string(&policy_path)
-        .with_context(|| format!("failed reading HOSTCTL_NET_POLICY_PATH: {policy_path}"))?;
+        .with_context(|| format!("failed reading wifi policy template: {policy_path}"))?;
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
-        .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
+        .context("invalid wifi policy template JSON")?;
 
-    let profile_raw = fs::read_to_string(&profile_path).with_context(|| {
-        format!("failed reading HOSTCTL_NET_DISCOVERY_PROFILE_PATH: {profile_path}")
-    })?;
+    let profile_raw = fs::read_to_string(&profile_path)
+        .with_context(|| format!("failed reading discovery profile: {profile_path}"))?;
     let profile = toml::from_str::<DiscoveryProfile>(&profile_raw)
         .context("invalid TOML discovery profile")?;
 

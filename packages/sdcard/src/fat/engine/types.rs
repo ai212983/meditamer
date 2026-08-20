@@ -60,6 +60,15 @@ pub enum FatRequest {
         output: FatPayloadId,
         output_capacity: u32,
     },
+    /// Like [`FatRequest::Read`], but for files that need not fit in any
+    /// single buffer: the caller drains one [`crate::probe::SD_SECTOR_SIZE`]
+    /// chunk at a time via [`super::FatEngine::stream_bytes_delivered`] /
+    /// `stream_chunk_len` instead of receiving the whole file at once. See
+    /// docs/plans/single-production-sd-recovery-updater.md (Phase 1).
+    Stream {
+        path: [u8; SD_PATH_MAX],
+        path_len: u8,
+    },
     Write {
         path: [u8; SD_PATH_MAX],
         path_len: u8,
@@ -118,6 +127,7 @@ impl FatRequest {
         match self {
             Self::List { path, path_len }
             | Self::Read { path, path_len, .. }
+            | Self::Stream { path, path_len }
             | Self::Write { path, path_len, .. }
             | Self::Stat { path, path_len }
             | Self::Mkdir { path, path_len }
@@ -164,6 +174,7 @@ pub enum FatResult {
     Done,
     Listed { count: u8 },
     Read { bytes: u32 },
+    Streamed { bytes: u32 },
     Stat(FatDirEntry),
     Error(FatEngineError),
 }
@@ -195,6 +206,7 @@ pub enum FatStageLabel {
     ReadFat,
     ListDirectory,
     ReadFile,
+    StreamFile,
     WriteFile,
     Allocate,
     FreeChain,

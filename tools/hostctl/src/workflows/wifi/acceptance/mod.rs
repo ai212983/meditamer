@@ -63,8 +63,10 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     let ssid = std::env::var("HOSTCTL_NET_SSID")
         .context("HOSTCTL_NET_SSID must be set (hard-cut net workflow)")?;
     let password = std::env::var("HOSTCTL_NET_PASSWORD").unwrap_or_default();
-    let policy_path = std::env::var("HOSTCTL_NET_POLICY_PATH")
-        .context("HOSTCTL_NET_POLICY_PATH must be set (hard-cut net workflow)")?;
+    let policy_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios/wifi-policy.default.json")
+        .display()
+        .to_string();
     let skip_host_wifi_check =
         env_utils::parse_env_bool01("HOSTCTL_NET_SKIP_HOST_WIFI_CHECK", false)?;
     if !skip_host_wifi_check {
@@ -80,9 +82,9 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     });
 
     let policy_raw = fs::read_to_string(&policy_path)
-        .with_context(|| format!("failed reading HOSTCTL_NET_POLICY_PATH: {policy_path}"))?;
+        .with_context(|| format!("failed reading wifi policy template: {policy_path}"))?;
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
-        .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
+        .context("invalid wifi policy template JSON")?;
     enforce_policy_floors(policy, None)?;
     enforce_log_path_policy(&log_path)?;
     ensure_parent_dir(&log_path)?;
@@ -92,11 +94,12 @@ pub fn run_wifi_acceptance(logger: &mut Logger, opts: WifiAcceptanceOptions) -> 
     preflight(&mut console)?;
 
     let cycles = env_utils::parse_env_u32("HOSTCTL_NET_CYCLES", 3)?.max(1);
-    let operation_retries = env_utils::parse_env_u32("HOSTCTL_NET_OPERATION_RETRIES", 3)?.max(1);
-    let req_read_body_reset_max_delta =
-        env_utils::parse_env_u32("HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA", 0)?;
-    let reuse_upload_client =
-        env_utils::parse_env_bool01("HOSTCTL_NET_REUSE_UPLOAD_CLIENT", false)?;
+    // Acceptance-internal knobs, formerly env-tunable; hard-coded (see
+    // docs/reference/tools/hostctl-env-audit.md category 3).
+    let operation_retries = 3u32;
+    let req_read_body_reset_max_delta = 0u32;
+    // Decided blackout-era A/B knob (HOSTCTL_NET_REUSE_UPLOAD_CLIENT): off.
+    let reuse_upload_client = false;
     let workflow = load_workflow(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/wifi-acceptance.sw.yaml"),
     )?;

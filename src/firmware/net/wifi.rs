@@ -9,6 +9,7 @@ use crate::firmware::{
         WIFI_SSID_MAX,
     },
 };
+use console::println;
 use core::{
     cell::RefCell,
     fmt::Write as _,
@@ -17,7 +18,6 @@ use core::{
 use critical_section::Mutex;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use esp_println::println;
 mod backend;
 mod runtime_init;
 pub(crate) use backend::{

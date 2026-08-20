@@ -15,7 +15,7 @@ pub(super) async fn handle_ui_cycle_step_event(
     } else {
         super::super::presentation::handle_ui_cycle_step(context, &mut state.presentation).await
     };
-    esp_println::println!(
+    console::println!(
         "UI_CYCLE_STEP request={} status={:?}",
         ack_request_id,
         status
@@ -28,7 +28,7 @@ pub(super) async fn handle_ui_cycle_step_event(
         .try_send(ack)
         .is_err()
     {
-        esp_println::println!(
+        console::println!(
             "UI_CYCLE_STEP request={} status=AckQueueFull",
             ack_request_id
         );

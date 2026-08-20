@@ -4,6 +4,8 @@
 - Date: 2026-08-07
 - Amended: 2026-08-13
 - Amended: 2026-08-14 — corrected the closeout wording to preserve the conditional Phase 7 and 8 outcomes.
+- Amended: 2026-08-17 — ADR-0013 distinguishes compiled-provider attachment from live surface
+  instances and removes external executable residency from the current catalogue model.
 - Reconciled: 2026-08-14 — the base-resident path through Phase 6, including Phases 5A and 5B, is
   complete with evidence E-0002 through E-0018 in the
   [execution ledger](../archive/refactors/ui-app-structure-rework-ledger.md), and the shell
@@ -15,6 +17,7 @@
   `widget`/`theme` content out of `ui/lvgl`) — a structural move, not a further semantic decision.
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
+  [ADR-0013](0013-compiled-only-ui-catalogue.md),
   [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md),
   [DRAM budget](../reference/dram/dram-budget.md)

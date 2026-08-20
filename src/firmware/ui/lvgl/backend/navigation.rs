@@ -10,7 +10,7 @@ impl Backend {
             || !self.overlay_cleanup_blocked.is_empty()
         {
             while self.shell.pop_intent().is_some() {}
-            esp_println::println!("UI_NAV state=rejected reason=cleanup_blocked");
+            console::println!("UI_NAV state=rejected reason=cleanup_blocked");
             return;
         }
 
@@ -30,7 +30,7 @@ impl Backend {
                 continue;
             }
             if self.shell.active_modal().is_some() {
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=rejected reason=modal_active source={:?} intent={:?}",
                     owned.source,
                     owned.intent,
@@ -41,7 +41,7 @@ impl Backend {
             let prepared = match self.shell.prepare_intent(owned.intent) {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    esp_println::println!(
+                    console::println!(
                         "UI_NAV state=rejected reason=prepare source={:?} intent={:?} error={:?}",
                         owned.source,
                         owned.intent,
@@ -54,7 +54,7 @@ impl Backend {
                 match self.stage_overlay_entries(prepared.composition_delta().enter_live()) {
                     Some(candidates) => candidates,
                     None => {
-                        esp_println::println!(
+                        console::println!(
                             "UI_NAV state=rejected reason=overlay_promotion_entry intent={:?}",
                             owned.intent
                         );
@@ -71,7 +71,7 @@ impl Backend {
                 self.destroy_uncommitted_overlays(&mut entering_overlays);
                 self.navigation_faulted = true;
                 self.composition_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=fault reason=overlay_runtime_misaligned intent={:?}",
                     owned.intent
                 );
@@ -86,7 +86,7 @@ impl Backend {
                         self.complete_overlay_departures(&departing_overlays);
                         self.activate_overlay_entries(&mut entering_overlays);
                         self.sync_overlay_visibility_for_active_surface();
-                        esp_println::println!(
+                        console::println!(
                             "UI_NAV state=committed from={:?} to={:?} role={:?} outcome={:?}",
                             origin.surface,
                             destination.surface,
@@ -98,7 +98,7 @@ impl Backend {
                         self.restore_overlay_departures(&departing_overlays);
                         self.destroy_uncommitted_overlays(&mut entering_overlays);
                         self.sync_overlay_visibility_for_active_surface();
-                        esp_println::println!(
+                        console::println!(
                             "UI_NAV state=rolled_back from={:?} attempted={:?} error={:?}",
                             origin.surface,
                             destination.surface,
@@ -114,7 +114,7 @@ impl Backend {
                 self.restore_overlay_departures(&departing_overlays);
                 self.destroy_uncommitted_overlays(&mut entering_overlays);
                 self.navigation_faulted = true;
-                esp_println::println!("UI_NAV state=fault reason=missing_active_instance");
+                console::println!("UI_NAV state=fault reason=missing_active_instance");
                 break;
             };
             let result = {
@@ -142,7 +142,7 @@ impl Backend {
                     self.complete_overlay_departures(&departing_overlays);
                     self.activate_overlay_entries(&mut entering_overlays);
                     self.sync_overlay_visibility_for_active_surface();
-                    esp_println::println!(
+                    console::println!(
                         "UI_NAV state=committed from={:?} to={:?} role={:?} outcome={:?} transition_us={} cleanup_blocked={}",
                         origin.surface,
                         destination.surface,
@@ -168,7 +168,7 @@ impl Backend {
                     self.cleanup_blocked = cleanup_blocked;
                     self.settle_rolled_back(active, cleanup_audit_failed, &reason);
                     self.sync_overlay_visibility_for_active_surface();
-                    esp_println::println!(
+                    console::println!(
                         "UI_NAV state=rolled_back from={:?} attempted={:?} reason={:?} transition_us={} cleanup_blocked={} navigation_faulted={}",
                         origin.surface,
                         destination.surface,
@@ -193,7 +193,7 @@ impl Backend {
                     self.cleanup_blocked = cleanup_blocked;
                     self.navigation_faulted = true;
                     self.sync_overlay_visibility_for_active_surface();
-                    esp_println::println!(
+                    console::println!(
                         "UI_NAV state=faulted_after_commit from={:?} to={:?} outcome={:?} reason={:?} transition_us={} cleanup_audit_failed={}",
                         origin.surface,
                         destination.surface,
@@ -246,23 +246,22 @@ impl Backend {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.active = Some(origin);
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=recovery_failed stage=prepare error={:?}",
                     error
                 );
                 return false;
             }
         };
-        let mut entering_overlays = match self
-            .stage_overlay_entries(prepared.composition_delta().enter_live())
-        {
-            Some(candidates) => candidates,
-            None => {
-                self.active = Some(origin);
-                esp_println::println!("UI_NAV state=recovery_failed stage=overlay_promotion_entry");
-                return false;
-            }
-        };
+        let mut entering_overlays =
+            match self.stage_overlay_entries(prepared.composition_delta().enter_live()) {
+                Some(candidates) => candidates,
+                None => {
+                    self.active = Some(origin);
+                    console::println!("UI_NAV state=recovery_failed stage=overlay_promotion_entry");
+                    return false;
+                }
+            };
         let mut departing_overlays = Vec::<SurfaceInstanceToken, LIVE_OVERLAY_CAPACITY>::new();
         for instance in prepared.composition_delta().leave_live() {
             departing_overlays
@@ -272,7 +271,7 @@ impl Backend {
         if !self.stage_overlay_departures(&departing_overlays) {
             self.destroy_uncommitted_overlays(&mut entering_overlays);
             self.active = Some(origin);
-            esp_println::println!("UI_NAV state=recovery_failed stage=overlay_runtime_misaligned");
+            console::println!("UI_NAV state=recovery_failed stage=overlay_runtime_misaligned");
             return false;
         }
         let destination = prepared.destination();
@@ -296,7 +295,7 @@ impl Backend {
                 self.activate_overlay_entries(&mut entering_overlays);
                 self.cleanup_blocked = None;
                 self.sync_overlay_visibility_for_active_surface();
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=recovered destination={:?} outcome={:?}",
                     destination.surface,
                     outcome
@@ -315,7 +314,7 @@ impl Backend {
                 self.active = Some(active);
                 self.cleanup_blocked = cleanup_blocked;
                 self.sync_overlay_visibility_for_active_surface();
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=recovery_failed stage=transition reason={:?} cleanup_blocked={} cleanup_audit_failed={}",
                     reason,
                     self.cleanup_blocked.is_some(),
@@ -336,7 +335,7 @@ impl Backend {
                 self.activate_overlay_entries(&mut entering_overlays);
                 self.cleanup_blocked = cleanup_blocked;
                 self.sync_overlay_visibility_for_active_surface();
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=recovery_cleanup_blocked outcome={:?} reason={:?} cleanup_audit_failed={}",
                     outcome,
                     reason,

@@ -7,6 +7,8 @@ mod network;
 mod state;
 #[path = "basic/telemetry.rs"]
 mod telemetry;
+#[path = "basic/time.rs"]
+mod time;
 
 #[cfg(feature = "ui-provider-fixture")]
 pub(super) use common::parse_ui_provider_fixture_step_command;
@@ -32,6 +34,7 @@ pub(super) use state::{
     parse_state_set_command,
 };
 pub(super) use telemetry::{parse_telemetry_set_command, parse_telemetry_status_command};
+pub(super) use time::{parse_timeget_command, parse_timeset_command};
 
 #[cfg(all(test, not(target_os = "none")))]
 #[path = "basic/tests.rs"]

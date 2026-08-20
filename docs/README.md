@@ -16,7 +16,9 @@ Five kinds of document, split by how they age. Put a new file where its
 ## Start here
 
 - New to the repo → [guides/development-setup.md](guides/development-setup.md)
+  (full workflow index: [guides/README.md](guides/README.md))
 - Building or flashing → [guides/build-and-flash.md](guides/build-and-flash.md)
+- Shipping a signed image → [guides/firmware-update.md](guides/firmware-update.md)
 - Something is broken → [guides/troubleshooting.md](guides/troubleshooting.md)
 - Adding a large static or buffer → [reference/dram/dram-budget.md](reference/dram/dram-budget.md) **first**
 - Changing Wi-Fi, network, or upload → [guides/wifi-regression-gate.md](guides/wifi-regression-gate.md)
@@ -33,6 +35,8 @@ Five kinds of document, split by how they age. Put a new file where its
 | [sensors.md](reference/hardware/inkplate/sensors.md) / [sound.md](reference/hardware/inkplate/sound.md) | Working with the IMU, ambient sensors, or buzzer |
 | [hardware-test-matrix.md](reference/hardware-test-matrix.md) | Claiming hardware coverage |
 | [reliability-issues.md](reference/reliability-issues.md) | Arguing about what is actually risky |
+| [display-refresh.md](reference/display-refresh.md) | Touching panel refresh modes or the panel-power lease |
+| [font-legibility.md](reference/font-legibility.md) | Changing UI fonts or the dither threshold |
 
 Datasheets live in [reference/hardware/inkplate/datasheets/](reference/hardware/inkplate/datasheets/).
 

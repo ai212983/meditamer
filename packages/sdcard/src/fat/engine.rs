@@ -19,7 +19,7 @@ use mount::MountStage;
 use mutate::{
     AllocationState, DataWriteState, FatWriteState, FreeState, MutationState, ZeroWriteState,
 };
-use read::{ListState, ReadState};
+use read::{ListState, ReadState, StreamState};
 use scan::{FatReadState, ResolveState, ScanState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +34,7 @@ enum FatReadReturn {
     Scan,
     List,
     Read,
+    Stream,
     DataWrite,
     UploadCursor,
     AppendTraverse,
@@ -66,6 +67,7 @@ enum CommandStage {
     Mutate,
     List,
     Read,
+    Stream,
 }
 
 #[derive(Clone, Copy)]
@@ -134,6 +136,7 @@ pub struct FatEngine {
     fat_read: FatReadState,
     list: ListState,
     read: ReadState,
+    stream: StreamState,
     mutation: MutationState,
     allocation: AllocationState,
     free: FreeState,
@@ -161,6 +164,7 @@ impl FatEngine {
             fat_read: FatReadState::new(),
             list: ListState::new(),
             read: ReadState::new(),
+            stream: StreamState::new(),
             mutation: MutationState::new(),
             allocation: AllocationState::new(),
             free: FreeState::new(),
@@ -197,6 +201,21 @@ impl FatEngine {
         self.list.count
     }
 
+    /// Total payload bytes delivered by the current [`FatRequest::Stream`]
+    /// operation so far. Monotonically increasing; the driver loop polls it
+    /// the same way it polls [`FatEngine::list_output_sequence`] to notice a
+    /// freshly delivered chunk.
+    pub fn stream_bytes_delivered(&self) -> u32 {
+        self.stream.written
+    }
+
+    /// Length of the most recently delivered chunk in
+    /// `workspace().sector`. Valid only immediately after
+    /// [`FatEngine::stream_bytes_delivered`] has just increased.
+    pub fn stream_chunk_len(&self) -> u16 {
+        self.stream.chunk_len
+    }
+
     pub fn stage_label(&self) -> FatStageLabel {
         match self.stage {
             CommandStage::Idle => FatStageLabel::Idle,
@@ -212,6 +231,7 @@ impl FatEngine {
             CommandStage::Mutate => self.mutation.label(),
             CommandStage::List => self.list.label(),
             CommandStage::Read => self.read.label(),
+            CommandStage::Stream => self.stream.label(),
         }
     }
 
@@ -227,6 +247,7 @@ impl FatEngine {
         self.fat_read.reset();
         self.list.reset();
         self.read.reset();
+        self.stream.reset();
         self.mutation.reset();
         self.allocation.reset();
         self.free.reset();
@@ -320,6 +341,7 @@ impl FatEngine {
             CommandStage::Mutate => self.advance_mutation(),
             CommandStage::List => self.advance_list(),
             CommandStage::Read => self.advance_read(),
+            CommandStage::Stream => self.advance_stream(),
         }
     }
 

@@ -6,7 +6,7 @@ use std::{
 use anyhow::{anyhow, Result};
 use reqwest::StatusCode;
 
-use crate::{env_utils, workflows::wifi::common::NetStatus};
+use crate::workflows::wifi::common::NetStatus;
 
 use super::super::{wait_ready::wait_ready, WifiAcceptanceRuntime};
 
@@ -17,20 +17,13 @@ impl WifiAcceptanceRuntime<'_> {
         mut listen_ms: u32,
         ip: &str,
     ) -> Result<(u32, u32, String)> {
-        if !env_utils::parse_env_bool01("HOSTCTL_NET_STARTUP_HEALTH_HYSTERESIS", true)? {
-            return Ok((connect_ms, listen_ms, ip.to_string()));
-        }
-        let required_streak =
-            env_utils::parse_env_u32("HOSTCTL_NET_STARTUP_HEALTH_SUCCESS_STREAK", 3)?.max(1);
-        let req_timeout_s =
-            env_utils::parse_env_f64("HOSTCTL_NET_STARTUP_HEALTH_REQ_TIMEOUT_SEC", 1.5)?
-                .clamp(0.2, 5.0);
-        let window_timeout_s =
-            env_utils::parse_env_f64("HOSTCTL_NET_STARTUP_HEALTH_HYSTERESIS_TIMEOUT_SEC", 20.0)?
-                .max(1.0);
-        let poll_ms = env_utils::parse_env_u64("HOSTCTL_NET_STARTUP_HEALTH_POLL_MS", 300)?.max(50);
-        let recover_retries =
-            env_utils::parse_env_u32("HOSTCTL_NET_STARTUP_HEALTH_RECOVER_RETRIES", 1)?;
+        // Hysteresis behavior is always on; its sub-knobs were env-tunable and are
+        // now hard-coded (hostctl-env-audit.md cat 3).
+        let required_streak = 3u32;
+        let req_timeout_s = 1.5f64.clamp(0.2, 5.0);
+        let window_timeout_s = 20.0f64.max(1.0);
+        let poll_ms = 300u64;
+        let recover_retries = 1u32;
 
         let mut recover_attempt = 0u32;
         let mut stabilized_ip = ip.to_string();

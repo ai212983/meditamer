@@ -43,6 +43,13 @@ pub(super) fn publish_result(
             let _ = serial_log::send(line);
             (SdResultCode::Ok, false)
         }
+        FatResult::Streamed { bytes } => {
+            // The serial FAT console never issues FatRequest::Stream (that's
+            // the factory updater's bounded-buffer bundle read, ADR-0014
+            // Phase 1); this arm exists only so the match stays exhaustive.
+            queue_sd_line!("sdfat[request]: stream_ok bytes={}", bytes);
+            (SdResultCode::Ok, false)
+        }
         FatResult::Stat(entry) => {
             let name =
                 core::str::from_utf8(&entry.name[..entry.name_len as usize]).unwrap_or("<invalid>");

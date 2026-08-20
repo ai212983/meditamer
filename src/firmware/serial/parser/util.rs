@@ -58,3 +58,14 @@ pub(super) fn parse_u64_ascii(bytes: &[u8], mut i: usize) -> Option<(u64, usize)
         Some((value, i))
     }
 }
+
+/// Like [`parse_u64_ascii`] but accepts an optional leading `-`.
+pub(super) fn parse_i64_ascii(bytes: &[u8], i: usize) -> Option<(i64, usize)> {
+    if bytes.get(i) == Some(&b'-') {
+        let (value, next) = parse_u64_ascii(bytes, i + 1)?;
+        Some((-i64::try_from(value).ok()?, next))
+    } else {
+        let (value, next) = parse_u64_ascii(bytes, i)?;
+        Some((i64::try_from(value).ok()?, next))
+    }
+}

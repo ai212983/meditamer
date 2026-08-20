@@ -7,24 +7,11 @@ use crate::firmware::types::{SD_PATH_MAX, SD_WRITE_MAX};
 #[derive(Clone, Copy)]
 pub(in crate::firmware::serial) enum SerialCommand {
     Ping,
-    FirmwareStatus,
-    FirmwarePrepare,
-    FirmwareBegin {
-        image_len: u32,
-        digest: [u8; 32],
-        signature: [u8; 64],
-    },
-    FirmwareChunk {
-        offset: u32,
-        bytes: [u8; crate::firmware::update::LEGACY_CHUNK_MAX],
-        len: u16,
-    },
-    FirmwareStream {
-        baud: u32,
-    },
-    FirmwareFinish,
-    FirmwareActivate,
-    FirmwareAbort,
+    /// Operator-triggered recovery request (ADR-0014 Phase 4): erase
+    /// `otadata` and reboot to the factory updater. Refused
+    /// (`UpdateError::Layout`) on a device still running the A/B layout,
+    /// which has no factory partition for the bootloader to fall back to.
+    FirmwareFactoryBoot,
     UiCycleStep,
     #[cfg(feature = "ui-provider-fixture")]
     UiProviderFixtureStep,
@@ -127,6 +114,11 @@ pub(in crate::firmware::serial) enum SerialCommand {
         kind: DiagKind,
         targets: DiagTargets,
     },
+    TimeSet {
+        utc_epoch_seconds: u32,
+        offset_minutes: i16,
+    },
+    TimeGet,
     #[cfg(feature = "asset-upload-http")]
     NetCfgSet {
         config: NetConfigSet,

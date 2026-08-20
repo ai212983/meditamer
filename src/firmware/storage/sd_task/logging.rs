@@ -12,7 +12,7 @@ use super::super::super::{
 
 pub(super) fn publish_result(result: SdResult) {
     if SD_RESULTS.try_send(result).is_err() {
-        esp_println::println!(
+        console::println!(
             "sdtask: result_drop id={} kind={} ok={} code={} attempts={} dur_ms={}",
             result.id,
             sd_kind_label(result.kind),
@@ -33,7 +33,7 @@ pub(super) fn publish_upload_result(mut result: SdUploadResult) {
             .wrapping_sub(result.chunk_handler_done_at_ms);
     }
     if SD_UPLOAD_RESULTS.try_send(result).is_err() {
-        esp_println::println!(
+        console::println!(
             "sdtask: upload_result_drop request_id={} ok={} code={} bytes_written={}",
             result.request_id,
             result.ok as u8,
@@ -46,7 +46,7 @@ pub(super) fn publish_upload_result(mut result: SdUploadResult) {
 #[cfg(feature = "asset-upload-http")]
 pub(super) fn publish_wifi_config_response(response: WifiConfigResponse) {
     if WIFI_CONFIG_RESPONSES.try_send(response).is_err() {
-        esp_println::println!(
+        console::println!(
             "sdtask: wifi_config_resp_drop id={} ok={} code={} has_credentials={}",
             response.request_id,
             response.ok as u8,

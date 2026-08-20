@@ -27,34 +27,31 @@ use crate::firmware::ui::overlay::base_overlays::{
 #[cfg(feature = "ui-provider-fixture")]
 use crate::firmware::ui::screen::provider_fixture;
 use crate::firmware::ui::screen::{ambient_view, gesture_test, home, launcher, overlay_settings};
-#[cfg(feature = "ui-provider-fixture")]
-use crate::firmware::ui::shell::model::{PendingProviderRemoval, ProviderRuntimeAudit};
 use crate::firmware::{
     observability,
     psram::{self, BufferPlacement},
     touch::lvgl_multitouch::{LvglContactBatch, LvglMultitouchFrame, LvglMultitouchTracker},
     touch::types::TouchEvent,
     types::InkplateDriver,
-    ui::shell::{
-        catalogue::{CatalogueAction, CatalogueViewKind, DefaultCatalogue, EntryId},
-        composition::CompositionPlanResult,
-        lifecycle::{
-            execute_transition, DestroyFailure, LifecycleEvent, RollbackReason, SurfaceRuntime,
-            TransitionResult,
-        },
-        model::{
-            DefaultShellModel, PreparedComposition, LIVE_OVERLAY_CAPACITY, MODAL_QUEUE_CAPACITY,
-        },
-        navigator::NavigationFrame,
-        settings::{PersistedUiSettings, UiSettings, UiSettingsPersistence},
-        timing::TimerServiceMetrics,
-        types::{
-            CompositionIntent, NavIntent, OverlayAdmission, OverlayDismissal, OverlayInput,
-            OverlayInstance, OverlayLifetime, OwnedCompositionIntent, OwnedNavIntent,
-            OwnedShellIntent, OwnedUiSettingsIntent, ProviderId, RefreshHint, RefreshIntent,
-            SurfaceCapabilities, SurfaceId, SurfaceInstanceToken, SurfaceRef, SurfaceRole,
-            SurfaceSpec,
-        },
+};
+#[cfg(feature = "ui-provider-fixture")]
+use shell::model::{PendingProviderRemoval, ProviderRuntimeAudit};
+use shell::{
+    catalogue::{CatalogueAction, CatalogueViewKind, DefaultCatalogue, EntryId},
+    composition::CompositionPlanResult,
+    lifecycle::{
+        execute_transition, DestroyFailure, LifecycleEvent, RollbackReason, SurfaceRuntime,
+        TransitionResult,
+    },
+    model::{DefaultShellModel, PreparedComposition, LIVE_OVERLAY_CAPACITY, MODAL_QUEUE_CAPACITY},
+    navigator::NavigationFrame,
+    settings::{PersistedUiSettings, UiSettings, UiSettingsPersistence},
+    timing::TimerServiceMetrics,
+    types::{
+        CompositionIntent, NavIntent, OverlayAdmission, OverlayDismissal, OverlayInput,
+        OverlayInstance, OverlayLifetime, OwnedCompositionIntent, OwnedNavIntent, OwnedShellIntent,
+        OwnedUiSettingsIntent, ProviderId, RefreshHint, RefreshIntent, SurfaceCapabilities,
+        SurfaceId, SurfaceInstanceToken, SurfaceRef, SurfaceRole, SurfaceSpec,
     },
 };
 
@@ -202,7 +199,7 @@ enum SurfaceModel {
 
 #[cfg(feature = "ui-provider-fixture")]
 enum ProviderFixtureState {
-    Registered(crate::firmware::ui::shell::types::ProviderToken),
+    Registered(shell::types::ProviderToken),
     Detaching(PendingProviderRemoval),
     Removed,
 }
@@ -262,9 +259,7 @@ impl ActiveSurface {
             {
                 if matches!(entry.action(), CatalogueAction::Enter(_)) {
                     actions[index] = Some(intent_bridge::ScreenAction::Configure(
-                        crate::firmware::ui::shell::settings::UiSettingsIntent::ToggleOverlay(
-                            entry.id,
-                        ),
+                        shell::settings::UiSettingsIntent::ToggleOverlay(entry.id),
                     ));
                 }
             }
@@ -383,6 +378,18 @@ impl ActiveSurface {
             | SurfaceModel::OverlaySettings(_) => false,
             #[cfg(feature = "ui-provider-fixture")]
             SurfaceModel::ProviderFixture(_) => false,
+        }
+    }
+
+    fn ambient_view_mut(&mut self) -> Option<&mut ambient_view::AmbientViewScreen> {
+        match &mut self.model {
+            SurfaceModel::AmbientView(screen) => Some(screen),
+            SurfaceModel::Home(_)
+            | SurfaceModel::Launcher(_)
+            | SurfaceModel::Diagnostics(_)
+            | SurfaceModel::OverlaySettings(_) => None,
+            #[cfg(feature = "ui-provider-fixture")]
+            SurfaceModel::ProviderFixture(_) => None,
         }
     }
 }
@@ -510,7 +517,7 @@ impl Backend {
         let shell_aligned = self.active.as_ref().is_some_and(|instance| {
             instance.frame == self.shell.active() && instance.token == self.shell.active_instance()
         });
-        esp_println::println!(
+        console::println!(
             "LVGL_LIFECYCLE phase={} active={:?} shell_aligned={} transition_us={} lvgl_total={} lvgl_used={} lvgl_free={} lvgl_biggest_free={} lvgl_used_blocks={} lvgl_free_blocks={} lvgl_max_used={} lvgl_frag_pct={} integrity_ok={} heap_internal_free={} heap_internal_min={} heap_external_free={} heap_external_min={} heap_peak_used={} cpu0_stack_min={} timer_gap_max_us={} timer_runtime_max_us={} cleanup_blocked={} navigation_faulted={} composition_faulted={} lifecycle_audit_faulted={}",
             phase,
             active,
@@ -611,7 +618,7 @@ fn log_lifecycle_resources(phase: &str, transition_us: u64) {
     unsafe { lv::lv_mem_monitor(monitor.as_mut_ptr()) };
     let monitor = unsafe { monitor.assume_init() };
     let allocator = psram::allocator_memory_snapshot();
-    esp_println::println!(
+    console::println!(
         "LVGL_LIFECYCLE phase={} transition_us={} lvgl_total={} lvgl_used={} lvgl_free={} lvgl_biggest_free={} lvgl_used_blocks={} lvgl_free_blocks={} lvgl_max_used={} lvgl_frag_pct={} integrity_ok={} heap_internal_free={} heap_internal_min={} heap_external_free={} heap_external_min={} heap_peak_used={} cpu0_stack_min={}",
         phase,
         transition_us,

@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use regex::Regex;
 use serde_json::Value;
 
-use crate::{env_utils, logging::ensure_parent_dir, serial_console::AckStatus};
+use crate::{logging::ensure_parent_dir, serial_console::AckStatus};
 
 use super::super::{
     boot_gate::{run_boot_discovery_gate, BootDiscoveryGateConfig},
@@ -18,7 +18,7 @@ impl WifiAcceptanceRuntime<'_> {
     pub(super) fn handle_wait_runtime_ready(&mut self) -> Result<()> {
         let ready_marker = Regex::new(r"^RUNTIME_READY app_state=ready display=ready$")?;
         let ready_status = Regex::new(r"^SCHEDPROFILE .*runtime_ready=on$")?;
-        let timeout_ms = env_utils::parse_env_u32("HOSTCTL_NET_RUNTIME_READY_TIMEOUT_MS", 45_000)?;
+        let timeout_ms = 45_000u32;
         let deadline = Instant::now() + Duration::from_millis(timeout_ms.into());
         while Instant::now() < deadline {
             if self
@@ -42,20 +42,12 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     pub(super) fn handle_boot_discovery_gate(&mut self) -> Result<()> {
-        if !env_utils::parse_env_bool01("HOSTCTL_NET_REQUIRE_BOOT_DISCOVERY_GATE", true)? {
-            return Ok(());
-        }
+        // Gate-internal kit, formerly env-tunable (hostctl-env-audit.md cat 3).
         let cfg = BootDiscoveryGateConfig {
-            max_boot_uptime_ms: env_utils::parse_env_u32(
-                "HOSTCTL_NET_BOOT_DISCOVERY_MAX_UPTIME_MS",
-                30_000,
-            )?,
-            timeout_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_TIMEOUT_MS", 180_000)?,
-            settle_ms: env_utils::parse_env_u32("HOSTCTL_NET_BOOT_DISCOVERY_SETTLE_MS", 6_000)?,
-            allow_ready_only_fallback: env_utils::parse_env_bool01(
-                "HOSTCTL_NET_BOOT_DISCOVERY_READY_ONLY_FALLBACK",
-                false,
-            )?,
+            max_boot_uptime_ms: 30_000,
+            timeout_ms: 180_000,
+            settle_ms: 6_000,
+            allow_ready_only_fallback: false,
         };
         run_boot_discovery_gate(
             self.logger,
@@ -117,7 +109,7 @@ impl WifiAcceptanceRuntime<'_> {
             .ok_or_else(|| anyhow!("missing METRICS TOUCH_SCHED response"))?;
         let active_gap = metric_u32(&touch_line, "active_gap_max_ms")
             .ok_or_else(|| anyhow!("touch metrics missing active_gap_max_ms: {touch_line}"))?;
-        let active_limit = env_utils::parse_env_u32("HOSTCTL_TOUCH_ACTIVE_GAP_MAX_MS", 16)?;
+        let active_limit = 16u32;
         if active_gap > active_limit {
             return Err(anyhow!(
                 "touch scheduling gate failed: active_gap_max_ms={} limit={}",
@@ -133,8 +125,7 @@ impl WifiAcceptanceRuntime<'_> {
             .ok_or_else(|| anyhow!("missing main stack headroom response"))?;
         let main_stack_headroom = metric_u32(&main_stack_line, "headroom")
             .ok_or_else(|| anyhow!("main stack response missing headroom: {main_stack_line}"))?;
-        let main_stack_floor =
-            env_utils::parse_env_u32("HOSTCTL_MAIN_STACK_HEADROOM_MIN_BYTES", 8 * 1024)?;
+        let main_stack_floor = 8 * 1024u32;
         if main_stack_headroom < main_stack_floor {
             return Err(anyhow!(
                 "main stack gate failed: headroom={} floor={}",
@@ -151,8 +142,7 @@ impl WifiAcceptanceRuntime<'_> {
         let touch_stack_headroom = metric_u32(&touch_stack_line, "headroom").ok_or_else(|| {
             anyhow!("touch-core stack response missing headroom: {touch_stack_line}")
         })?;
-        let touch_stack_floor =
-            env_utils::parse_env_u32("HOSTCTL_TOUCH_CORE_STACK_HEADROOM_MIN_BYTES", 1024)?;
+        let touch_stack_floor = 1024u32;
         if touch_stack_headroom < touch_stack_floor {
             return Err(anyhow!(
                 "touch-core stack gate failed: headroom={} floor={}",
@@ -167,8 +157,7 @@ impl WifiAcceptanceRuntime<'_> {
             .command_wait_regex("PSRAM", &memory_re, Duration::from_secs(5))?
             .ok_or_else(|| anyhow!("missing PSRAM allocator response"))?;
         let memory = parse_serving_allocator_status(&memory_line)?;
-        let memory_floor =
-            env_utils::parse_env_u32("HOSTCTL_NET_MIN_INTERNAL_FREE_BYTES", 16 * 1024)?;
+        let memory_floor = 16 * 1024u32;
         // Gate on the live, current internal-free reading, not `minimum_internal`
         // (`min_internal_free_bytes`): that field is a monotonic, boot-lifetime
         // low-water register that only ever ratchets downward and is never reset
@@ -219,9 +208,6 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     fn ensure_operating_upload_mode(&mut self) -> Result<()> {
-        if !env_utils::parse_env_bool01("HOSTCTL_NET_ENSURE_OPERATING_MODE", true)? {
-            return Ok(());
-        }
         self.send_state_command_with_ack("STATE SET upload=on")?;
         self.send_state_command_with_ack("STATE DIAG kind=NONE targets=NONE")?;
         let state_re = Regex::new(r"^STATE phase=").expect("state regex");

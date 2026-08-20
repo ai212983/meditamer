@@ -7,10 +7,10 @@ use core::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex::Mutex};
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::shell::settings::UiSettingsIntent;
+use shell::settings::UiSettingsIntent;
 #[cfg(feature = "ui-provider-fixture")]
-use crate::firmware::ui::shell::types::ProviderToken;
-use crate::firmware::ui::shell::{
+use shell::types::ProviderToken;
+use shell::{
     callback_action_queue::CallbackActionQueue,
     callback_routes::{CallbackRoute, CallbackRouteTable},
     catalogue::CATALOGUE_CAPACITY,
@@ -34,8 +34,7 @@ pub(in crate::firmware::ui) enum ScreenAction {
     Configure(UiSettingsIntent),
 }
 
-pub(in crate::firmware::ui) type CallbackRouteError =
-    crate::firmware::ui::shell::callback_routes::CallbackRouteError;
+pub(in crate::firmware::ui) type CallbackRouteError = shell::callback_routes::CallbackRouteError;
 
 #[derive(Clone, Copy)]
 pub(in crate::firmware::ui) enum IntentBindings {
@@ -117,6 +116,7 @@ static CALLBACK_INTENTS: Mutex<
 > = Mutex::new(RefCell::new(CallbackActionQueue::new()));
 static CALLBACK_OVERFLOWED: AtomicBool = AtomicBool::new(false);
 static FULL_REPAINT_REQUESTED: AtomicBool = AtomicBool::new(false);
+static AMBIENT_TAP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub(in crate::firmware::ui) fn claim(
     bindings: IntentBindings,
@@ -179,6 +179,13 @@ pub(crate) fn take_full_repaint_request() -> bool {
 
 pub(in crate::firmware::ui) fn mark_full_repaint_requested() {
     FULL_REPAINT_REQUESTED.store(true, Ordering::Release);
+}
+
+/// Consumes a pending Ambient Home background tap, if any. The Ambient Home
+/// screen's own poll loop is responsible for discarding a stale flag left
+/// over from a screen that is no longer active.
+pub(in crate::firmware::ui) fn take_ambient_tap_requested() -> bool {
+    AMBIENT_TAP_REQUESTED.swap(false, Ordering::AcqRel)
 }
 
 fn enqueue(
@@ -261,4 +268,15 @@ pub(in crate::firmware::ui) unsafe extern "C" fn full_repaint_callback(event: *m
         IntentBindings::Refresh { request } => Some(OwnedShellIntent::Refresh(request)),
         IntentBindings::Screen { .. } | IntentBindings::Modal { .. } => None,
     });
+}
+
+/// Ambient Home's background-tap signal. Unlike the callbacks above, this
+/// carries no per-instance payload and needs no shell-level navigation or
+/// overlay side effect, so it bypasses the `IntentBindings`/route/queue
+/// machinery entirely and just flags an atomic -- the same "flag it
+/// happened" idiom as [`mark_full_repaint_requested`]/
+/// [`take_full_repaint_request`], just set directly from the LVGL callback
+/// instead of via a routed intent.
+pub(in crate::firmware::ui) unsafe extern "C" fn ambient_tap_callback(_event: *mut lv::lv_event_t) {
+    AMBIENT_TAP_REQUESTED.store(true, Ordering::Release);
 }

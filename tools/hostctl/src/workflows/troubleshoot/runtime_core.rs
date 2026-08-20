@@ -178,7 +178,7 @@ impl<'a> TroubleshootRuntime<'a> {
             "Wi-Fi DHCP hint: associated-without-IPv4 stall detected. Prioritize DHCP lease reacquire diagnostics before auth/scan tuning.",
         );
         self.logger.warn(
-            "Use HOSTCTL_NET_POLICY_PATH (dhcp_timeout_ms / pinned_dhcp_timeout_ms) to bound stall windows per environment.",
+            "Edit wifi-policy.default.json (dhcp_timeout_ms / pinned_dhcp_timeout_ms) to bound stall windows per environment.",
         );
         self.logger.warn(
             "If listener is up but health fails, compare ARP/route interface and run interface-pinned /health probes from host.",

@@ -71,7 +71,7 @@ impl SdTaskRuntime {
             fat_engine: match crate::firmware::psram::ExternalValue::try_new(fat_engine) {
                 Ok(engine) => engine,
                 Err(_) => {
-                    esp_println::println!("sdtask: external FAT engine allocation failed");
+                    console::println!("sdtask: external FAT engine allocation failed");
                     crate::firmware::reset_pending_update_or_halt();
                 }
             },
@@ -108,7 +108,7 @@ impl SdTaskRuntime {
             UploadAbortReason::ModeOff => observability::record_sd_upload_session_mode_off_abort(),
             UploadAbortReason::Idle { idle_ms } => {
                 observability::record_sd_upload_session_timeout_abort();
-                esp_println::println!(
+                console::println!(
                     "sdtask: upload_session_idle_abort idle_ms={} threshold_ms={}",
                     idle_ms,
                     SD_UPLOAD_SESSION_IDLE_ABORT_MS
@@ -125,7 +125,7 @@ impl SdTaskRuntime {
         .await;
         super::super::upload::set_sd_upload_session_active(self.upload_session.is_some());
         if !result.ok {
-            esp_println::println!(
+            console::println!(
                 "sdtask: autonomous_upload_abort_failed code={:?}",
                 result.code
             );
@@ -300,7 +300,7 @@ impl SdTaskRuntime {
             return;
         }
         if self.powered && !request_sd_power(SdPowerRequest::Off).await {
-            esp_println::println!("sdtask: idle_power_off_failed");
+            console::println!("sdtask: idle_power_off_failed");
         }
         self.reset_storage_state();
     }
@@ -326,7 +326,7 @@ impl SdTaskRuntime {
         let backoff_ms = failure_backoff_ms(self.consecutive_failures);
         self.backoff_until = Some(Instant::now() + Duration::from_millis(backoff_ms));
         if self.powered && !request_sd_power(SdPowerRequest::Off).await {
-            esp_println::println!("sdtask: fail_power_off_failed");
+            console::println!("sdtask: fail_power_off_failed");
         }
         self.reset_storage_state();
     }
@@ -372,7 +372,7 @@ pub(crate) async fn sd_task(sd_probe: SdProbeDriver) {
         .await
         .is_err()
     {
-        esp_println::println!("sdtask: upload_chunk_buffer_prewarm_failed");
+        console::println!("sdtask: upload_chunk_buffer_prewarm_failed");
     }
 
     loop {

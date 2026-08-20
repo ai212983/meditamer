@@ -24,13 +24,13 @@ impl Backend {
         #[cfg(feature = "ui-provider-fixture")]
         self.try_finalize_provider_fixture_removal();
         if intent_bridge::take_overflowed() {
-            esp_println::println!("UI_NAV state=rejected reason=callback_queue_full");
+            console::println!("UI_NAV state=rejected reason=callback_queue_full");
         }
         while let Some(action) = intent_bridge::take_intent() {
             match action {
                 OwnedShellIntent::Navigate(intent) => {
                     if let Err(error) = self.shell.queue_intent(intent) {
-                        esp_println::println!(
+                        console::println!(
                             "UI_NAV state=rejected reason=shell_queue error={:?}",
                             error
                         );
@@ -57,7 +57,7 @@ impl Backend {
             || self.cleanup_blocked.is_some()
             || !self.overlay_cleanup_blocked.is_empty()
         {
-            esp_println::println!(
+            console::println!(
                 "UI_SETTINGS state=rejected reason=stale_or_blocked source={:?}",
                 owned.source,
             );
@@ -66,32 +66,32 @@ impl Backend {
 
         let now_ms = Instant::now().as_millis();
         let return_intent = match owned.intent {
-            crate::firmware::ui::shell::settings::UiSettingsIntent::SelectAmbient(id) => {
+            shell::settings::UiSettingsIntent::SelectAmbient(id) => {
                 if !self
                     .catalogue
                     .entry_is_ready_for(id, CatalogueViewKind::AmbientPicker)
                 {
-                    esp_println::println!(
+                    console::println!(
                         "UI_SETTINGS state=rejected kind=ambient reason=unavailable id={:?}",
                         id,
                     );
                     return;
                 }
                 let changed = self.settings.select_ambient(id, now_ms);
-                esp_println::println!(
+                console::println!(
                     "UI_SETTINGS state={} kind=ambient id={:?}",
                     if changed { "changed" } else { "unchanged" },
                     id,
                 );
                 NavIntent::Home
             }
-            crate::firmware::ui::shell::settings::UiSettingsIntent::ToggleOverlay(id) => {
+            shell::settings::UiSettingsIntent::ToggleOverlay(id) => {
                 if id != REFRESH_CONTROL_ENTRY_ID
                     || !self
                         .catalogue
                         .entry_is_ready_for(id, CatalogueViewKind::OverlaySettings)
                 {
-                    esp_println::println!(
+                    console::println!(
                         "UI_SETTINGS state=rejected kind=overlay reason=unavailable id={:?}",
                         id,
                     );
@@ -110,14 +110,14 @@ impl Backend {
                     self.remove_settings_overlay(self.surfaces.sticky_status)
                 };
                 if !lifecycle_ok {
-                    esp_println::println!(
+                    console::println!(
                         "UI_SETTINGS state=rejected kind=overlay reason=lifecycle id={:?}",
                         id,
                     );
                     return;
                 }
                 let applied = self.settings.toggle_overlay(id, now_ms);
-                esp_println::println!(
+                console::println!(
                     "UI_SETTINGS state=changed kind=overlay id={:?} enabled={}",
                     id,
                     applied.unwrap_or(enable),
@@ -134,7 +134,7 @@ impl Backend {
             })
             .is_err()
         {
-            esp_println::println!("UI_SETTINGS state=applied navigation=deferred");
+            console::println!("UI_SETTINGS state=applied navigation=deferred");
             return;
         }
         self.drain_shell_navigation();
@@ -171,7 +171,7 @@ impl Backend {
             || self.cleanup_blocked.is_some()
             || !self.overlay_cleanup_blocked.is_empty()
         {
-            esp_println::println!(
+            console::println!(
                 "UI_COMPOSITION state=rejected reason=cleanup_blocked source={:?}",
                 owned.source,
             );
@@ -180,7 +180,7 @@ impl Backend {
         let prepared = match self.shell.prepare_composition_intent(owned) {
             Ok(prepared) => prepared,
             Err(error) => {
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=rejected reason=prepare source={:?} intent={:?} error={:?}",
                     owned.source,
                     owned.intent,
@@ -193,13 +193,13 @@ impl Backend {
             CompositionPlanResult::Admission(OverlayAdmission::Queued(instance)) => {
                 match self.shell.commit_overlay_request(prepared) {
                     Ok(OverlayAdmission::Queued(committed)) if committed == instance => {
-                        esp_println::println!(
+                        console::println!(
                             "UI_COMPOSITION state=queued token={:?}",
                             committed.token,
                         );
                     }
                     Ok(_) | Err(_) => {
-                        esp_println::println!(
+                        console::println!(
                             "UI_COMPOSITION state=rejected reason=queued_commit token={:?}",
                             instance.token,
                         );
@@ -212,13 +212,13 @@ impl Backend {
             CompositionPlanResult::Removal(dismissal) if !dismissal.removed_was_live => {
                 match self.shell.commit_overlay_removal(prepared) {
                     Ok(CompositionPlanResult::Removal(committed)) if committed == dismissal => {
-                        esp_println::println!(
+                        console::println!(
                             "UI_COMPOSITION state=removed_queued token={:?}",
                             dismissal.removed.token,
                         );
                     }
                     Ok(_) | Err(_) => {
-                        esp_println::println!(
+                        console::println!(
                             "UI_COMPOSITION state=rejected reason=queued_remove_commit token={:?}",
                             dismissal.removed.token,
                         );
@@ -229,9 +229,7 @@ impl Backend {
                 self.remove_live_overlay(prepared, dismissal);
             }
             CompositionPlanResult::Cleanup(_) => {
-                esp_println::println!(
-                    "UI_COMPOSITION state=rejected reason=unexpected_cleanup_intent"
-                );
+                console::println!("UI_COMPOSITION state=rejected reason=unexpected_cleanup_intent");
             }
         }
     }
@@ -248,13 +246,13 @@ impl Backend {
                 .expect("an admission delta is bounded by live overlay capacity");
         }
         if self.overlays.len().saturating_sub(departures.len()) == LIVE_OVERLAY_CAPACITY {
-            esp_println::println!("UI_COMPOSITION state=rejected reason=runtime_capacity");
+            console::println!("UI_COMPOSITION state=rejected reason=runtime_capacity");
             return;
         }
         let mut candidates = match self.stage_overlay_entries(prepared.delta().enter_live()) {
             Some(candidates) => candidates,
             None => {
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=rejected reason=entry token={:?}",
                     instance.token,
                 );
@@ -265,7 +263,7 @@ impl Backend {
             self.destroy_uncommitted_overlays(&mut candidates);
             self.navigation_faulted = true;
             self.composition_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_COMPOSITION state=fault reason=preemption_runtime_misaligned token={:?}",
                 instance.token,
             );
@@ -275,7 +273,7 @@ impl Backend {
             Ok(OverlayAdmission::Active(committed)) if committed == instance => {
                 self.complete_overlay_departures(&departures);
                 self.activate_overlay_entries(&mut candidates);
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=active token={:?} input={:?} preempted={}",
                     instance.token,
                     instance.input,
@@ -285,7 +283,7 @@ impl Backend {
             Ok(_) | Err(_) => {
                 self.restore_overlay_departures(&departures);
                 self.destroy_uncommitted_overlays(&mut candidates);
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=rejected reason=commit token={:?}",
                     instance.token,
                 );
@@ -302,7 +300,7 @@ impl Backend {
             Some(instance) => match self.create_overlay_candidate(instance) {
                 Ok(candidate) => Some(candidate),
                 Err(error) => {
-                    esp_println::println!(
+                    console::println!(
                         "UI_COMPOSITION state=rejected reason=promotion_entry token={:?} error={:?}",
                         instance.token,
                         error,
@@ -335,7 +333,7 @@ impl Backend {
             }
             self.navigation_faulted = true;
             self.composition_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_COMPOSITION state=fault reason=missing_runtime token={:?}",
                 dismissal.removed.token,
             );
@@ -347,7 +345,7 @@ impl Backend {
             if let Some(candidate) = promotion {
                 self.destroy_uncommitted_overlay(candidate);
             }
-            esp_println::println!(
+            console::println!(
                 "UI_COMPOSITION state=rejected reason=quiesce token={:?}",
                 dismissal.removed.token,
             );
@@ -365,7 +363,7 @@ impl Backend {
                 if let Some(candidate) = promotion {
                     self.destroy_uncommitted_overlay(candidate);
                 }
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=rolled_back token={:?}",
                     dismissal.removed.token,
                 );
@@ -384,7 +382,7 @@ impl Backend {
         if dismissal.promoted.is_none() && destroy_ok {
             set_system_layer_capture(false);
         }
-        esp_println::println!(
+        console::println!(
             "UI_COMPOSITION state=dismissed token={:?} promoted={:?} cleanup_blocked={}",
             dismissal.removed.token,
             dismissal.promoted.map(|instance| instance.token),
@@ -568,7 +566,7 @@ impl Backend {
             else {
                 self.navigation_faulted = true;
                 self.composition_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_COMPOSITION state=fault reason=missing_runtime token={:?}",
                     token
                 );
@@ -586,9 +584,7 @@ impl Backend {
                 Err(DestroyFailure::Audit) => {
                     self.navigation_faulted = true;
                     self.composition_faulted = true;
-                    esp_println::println!(
-                        "UI_COMPOSITION state=fault reason=unexpected_overlay_audit"
-                    );
+                    console::println!("UI_COMPOSITION state=fault reason=unexpected_overlay_audit");
                 }
             }
         }
@@ -659,7 +655,7 @@ impl Backend {
                 } else {
                     self.navigation_faulted = true;
                 }
-                esp_println::println!(
+                console::println!(
                     "UI_NAV state=cleanup_recovered navigation_faulted={}",
                     self.navigation_faulted
                 );
@@ -671,7 +667,7 @@ impl Backend {
             Err(DestroyFailure::Audit) => {
                 self.navigation_faulted = true;
                 self.lifecycle_audit_faulted = true;
-                esp_println::println!("UI_NAV state=fault reason=cleanup_route_audit");
+                console::println!("UI_NAV state=fault reason=cleanup_route_audit");
             }
         }
     }

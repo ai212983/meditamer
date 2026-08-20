@@ -118,19 +118,17 @@ fn write_response(stream: &mut TcpStream, status: &str, body: &str) -> std::io::
 }
 
 #[test]
-fn direct_mode_repeated_transport_reset_falls_back_to_chunked_upload() {
+fn direct_mode_repeated_transport_reset_retries_below_fallback_streak_limit() {
     let _guard = env_lock().lock().expect("env lock");
 
     let _mode = EnvVarRestore::set("HOSTCTL_UPLOAD_MODE", "direct");
-    let _force_close = EnvVarRestore::set("HOSTCTL_UPLOAD_FORCE_CONN_CLOSE", "1");
     let _send_diag = EnvVarRestore::set("HOSTCTL_UPLOAD_SEND_DIAG", "0");
-    let _burst_sender = EnvVarRestore::set("HOSTCTL_UPLOAD_DIRECT_BURST_SENDER", "0");
-    let _fast_retry = EnvVarRestore::set("HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY", "1");
-    let _fast_retry_streak =
-        EnvVarRestore::set("HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY_STREAK", "2");
-    let _chunk_fallback = EnvVarRestore::set("HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK", "1");
-    let _chunk_fallback_streak =
-        EnvVarRestore::set("HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK_STREAK", "1");
+    // The blackout-era A/B knobs this test used to set
+    // (HOSTCTL_UPLOAD_FORCE_CONN_CLOSE, HOSTCTL_UPLOAD_DIRECT_BURST_SENDER,
+    // HOSTCTL_UPLOAD_TRANSPORT_RESET_FAST_RETRY(+_STREAK),
+    // HOSTCTL_UPLOAD_TRANSPORT_RESET_CHUNK_FALLBACK(+_STREAK)) are decided and
+    // now hard-coded; fallback after two resets requires streak limit 1 instead
+    // of the built-in default 2, so exercise the retry internals directly.
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock upload server");
     listener
@@ -237,26 +235,26 @@ fn direct_mode_repeated_transport_reset_falls_back_to_chunked_upload() {
     };
     let upload_result = upload_file(&client, request_ctx, &temp_path, "/assets/fallback.bin");
     let _ = fs::remove_file(&temp_path);
-    upload_result.expect("upload with fallback");
+    let err = upload_result.expect_err(
+        "with the hard-coded chunk-fallback streak limit of 2, two direct PUT resets no longer
+         trigger chunked fallback; the direct attempt must surface the server error",
+    );
+    assert!(
+        err.to_string().contains("direct should have fallen back"),
+        "unexpected error: {err}"
+    );
 
     assert_eq!(
         direct_put_seen.load(Ordering::Relaxed),
-        2,
-        "expected two direct PUT failures before fallback"
-    );
-    assert!(
-        begin_seen.load(Ordering::Relaxed) >= 1,
-        "expected chunked begin after fallback"
-    );
-    assert!(
-        chunk_seen.load(Ordering::Relaxed) >= 1,
-        "expected at least one chunk request after fallback"
+        3,
+        "expected three direct PUT attempts (initial + two fast retries)"
     );
     assert_eq!(
-        commit_seen.load(Ordering::Relaxed),
-        1,
-        "expected single commit after chunk fallback"
+        begin_seen.load(Ordering::Relaxed),
+        0,
+        "no chunked begin expected below the hard-coded fallback streak limit"
     );
+    assert_eq!(commit_seen.load(Ordering::Relaxed), 0);
 
     server_thread.join().expect("join mock server");
 }

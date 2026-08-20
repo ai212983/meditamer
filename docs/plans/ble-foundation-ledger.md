@@ -73,6 +73,7 @@ moves affected passed phases to `Needs revalidation` and creates a transition en
 | B-015 | Current VHCI RX allocates per packet into unbounded `VecDeque`; TX has unbounded busy waits. | `esp-radio` 1.0.0-beta.0 source | Current beta is compile/size probe only. |
 | B-016 | ESP32 adapter forces `BTDM_MODEM_SLEEP_MODE_NONE`. | `esp-radio` source | Approved numeric power ceilings block device acceptance. |
 | B-017 | Wi-Fi controller and net runner are long-lived. | `src/firmware/net/runtime.rs` | Serialized traffic is still coex-enabled dual stack. |
+| B-018 | ADR-0014 (Accepted) supersedes the A/B layout B-006 records: one `ota_0` of 3,670,016 bytes, written from an SD bundle, with the SD updater enforcing a 3,661,824-byte payload ceiling (`MAX_FIRMWARE_LEN`). | ADR-0014; `src/updater/mod.rs`; `config/partitions-single-production.csv` | The binding image ceiling is 3,661,824, not B-006's 1,900,544; `check_ble_image_budget.sh` follows the updater constant. Phase 1's 78,096-byte forecast was anchored to the retired number and no longer describes available headroom. |
 
 ## Decision history — append only
 

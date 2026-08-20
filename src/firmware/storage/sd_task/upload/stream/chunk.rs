@@ -46,7 +46,7 @@ pub(super) async fn handle_chunk(
     let ensure_ready_started_at = Instant::now();
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
         let ensure_ready_ms = elapsed_ms_u32(ensure_ready_started_at);
-        esp_println::println!(
+        console::println!(
             "sd_upload: chunk ensure_upload_ready failed code={:?} bytes_written={} data_len={} ensure_ready_ms={}",
             code,
             active.bytes_written,
@@ -84,7 +84,7 @@ pub(super) async fn handle_chunk(
     .await;
     let append_total_ms = elapsed_ms_u32(append_started_at);
     if !matches!(result, FatResult::Done) {
-        esp_println::println!(
+        console::println!(
             "sd_upload: chunk engine failed result={:?} bytes_written={} data_len={} append_total_ms={}",
             result,
             active.bytes_written,

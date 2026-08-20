@@ -3,7 +3,6 @@ extern crate alloc;
 mod command_dispatch;
 mod command_family;
 mod commands;
-mod firmware_stream;
 mod io;
 mod labels;
 mod line_reader;
@@ -12,6 +11,7 @@ mod parser;
 mod queue;
 mod status;
 mod task_state;
+mod time_dispatch;
 
 use core::pin::Pin;
 
@@ -23,43 +23,32 @@ use line_reader::{LineReadEvent, SerialLineReader};
 use parser::parse_serial_command;
 use task_state::SerialTaskState;
 
-use super::{touch::debug_log::uart_write_all, types::SerialUart};
+use super::{
+    touch::debug_log::uart_write_all,
+    types::{SerialUart, SharedI2cDevice},
+};
 
 #[embassy_executor::task]
-pub(crate) async fn serial_task(mut uart: SerialUart) {
+pub(crate) async fn serial_task(mut uart: SerialUart, rtc_i2c: SharedI2cDevice) {
     let mut line_reader = SerialLineReader::new();
-    let mut frame_reader = firmware_stream::FirmwareFrameReader::new();
     let mut rx = [0u8; 128];
-    let mut state = SerialTaskState::new();
+    let mut state = SerialTaskState::new(rtc_i2c);
 
     state.write_trace_headers(&mut uart).await;
 
     loop {
         state.drain_runtime_samples(&mut uart).await;
+        time_dispatch::process_wall_clock_requests(&mut state).await;
 
         match with_timeout(Duration::from_millis(10), uart.read_async(&mut rx)).await {
             Ok(Ok(read)) => {
                 for byte in rx[..read].iter().copied() {
-                    if state.firmware_stream_active() {
-                        let event = frame_reader.push_byte(byte);
-                        if !matches!(&event, firmware_stream::FrameReadEvent::None) {
-                            firmware_stream::handle_frame(&mut uart, &mut state, event).await;
-                        }
-                        if !state.firmware_stream_active() {
-                            frame_reader.reset();
-                        }
-                    } else {
-                        handle_uart_byte(&mut uart, &mut line_reader, &mut state, byte).await;
-                    }
+                    handle_uart_byte(&mut uart, &mut line_reader, &mut state, byte).await;
                 }
             }
             Ok(Err(error)) => {
-                if state.firmware_stream_active() {
-                    frame_reader.reset();
-                } else {
-                    line_reader.discard_until_line_end();
-                }
-                esp_println::println!("SERIAL_RX status=error reason={error:?}");
+                line_reader.discard_until_line_end();
+                console::println!("SERIAL_RX status=error reason={error:?}");
             }
             Err(_) => {}
         }
@@ -155,7 +144,6 @@ async fn handle_uart_byte(
                     cmd,
                     SerialCommand::StackStatus
                         | SerialCommand::AllocatorStatus
-                        | SerialCommand::FirmwareAbort
                         | SerialCommand::BlePhase1sStart { .. }
                         | SerialCommand::BlePhase1sStatus
                         | SerialCommand::RadioHandoffAcquire { .. }
@@ -176,9 +164,7 @@ async fn handle_uart_byte(
                 #[cfg(not(feature = "ble-foundation"))]
                 let low_overhead_diagnostic = matches!(
                     cmd,
-                    SerialCommand::StackStatus
-                        | SerialCommand::AllocatorStatus
-                        | SerialCommand::FirmwareAbort
+                    SerialCommand::StackStatus | SerialCommand::AllocatorStatus
                 );
                 #[cfg(all(not(feature = "ble-foundation"), feature = "asset-upload-http"))]
                 let low_overhead_diagnostic = low_overhead_diagnostic

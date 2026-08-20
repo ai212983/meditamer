@@ -1,5 +1,8 @@
-# Runtime Setup and Service Modes
+# Service Modes and Allocator Diagnostics
 
+Runtime *control* over UART — changing what the device is doing and probing the
+allocator. Reading counters and timing is
+[Runtime Metrics and Serial Diagnostics](runtime-metrics.md).
 
 ## Allocator Diagnostics
 

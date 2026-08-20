@@ -49,7 +49,7 @@ impl Backend {
         event: io::LvglGestureEvent,
     ) -> Option<DirtyArea> {
         if self.shell.active_modal().is_some() {
-            esp_println::println!("UI_GESTURE state=blocked reason=modal_active event={event:?}");
+            console::println!("UI_GESTURE state=blocked reason=modal_active event={event:?}");
             return None;
         }
         self.render_with(display, |backend| {
@@ -72,6 +72,49 @@ impl Backend {
             let runtime_us = Instant::now().as_micros().saturating_sub(started_us);
             backend.timer_metrics.finish_handler(runtime_us);
         })
+    }
+
+    /// Cheap, monotonic-clock-only check for the active Ambient Home screen:
+    /// does anything need a fresh wall-clock read right now? Consumes a
+    /// pending background-tap flag either way, so a stale tap left over
+    /// from a screen that is no longer active is silently discarded rather
+    /// than leaking into a later activation.
+    pub(crate) fn ambient_home_poll(&mut self, now_ms: u64) -> ambient_view::AmbientHomeAction {
+        let tapped = intent_bridge::take_ambient_tap_requested();
+        let Some(screen) = self
+            .active
+            .as_mut()
+            .and_then(ActiveSurface::ambient_view_mut)
+        else {
+            return ambient_view::AmbientHomeAction::None;
+        };
+        if tapped {
+            screen.handle_tap()
+        } else {
+            screen.poll(now_ms)
+        }
+    }
+
+    /// Applies a wall-clock query outcome for `action` to the active
+    /// Ambient Home screen, if it is still the active surface. Returns
+    /// `true` when the visible surface changed and needs a full-screen
+    /// repaint (the caller is responsible for requesting the e-ink hardware
+    /// full refresh, matching the plan's "every arc-and-circle render uses
+    /// a full-screen update").
+    pub(crate) fn ambient_home_apply(
+        &mut self,
+        action: ambient_view::AmbientHomeAction,
+        snapshot: Option<rtc::driver::WallClockSnapshot>,
+        now_ms: u64,
+    ) -> bool {
+        let Some(screen) = self
+            .active
+            .as_mut()
+            .and_then(ActiveSurface::ambient_view_mut)
+        else {
+            return false;
+        };
+        unsafe { screen.apply(action, snapshot, now_ms) }
     }
 
     pub(crate) fn invalidate(&mut self, display: &mut InkplateDriver) -> Option<DirtyArea> {

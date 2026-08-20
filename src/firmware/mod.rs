@@ -9,6 +9,8 @@ pub(crate) mod imu;
 pub(crate) mod input;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) mod net;
+#[cfg(feature = "asset-upload-http")]
+pub(crate) mod net_host;
 pub(crate) mod observability;
 pub(crate) mod panel_bus;
 mod power;
@@ -32,7 +34,7 @@ pub(crate) fn reset_pending_update_or_halt() -> ! {
         status.image_state == Some(esp_bootloader_esp_idf::ota::OtaImageState::PendingVerify)
     });
     if pending {
-        esp_println::println!(
+        console::println!(
             "runtime: startup allocation failed during pending verification; rebooting for rollback"
         );
         esp_hal::system::software_reset();

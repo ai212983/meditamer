@@ -162,7 +162,9 @@ _run_hostctl_abs_path() {
 _run_hostctl_port_cache_path() {
     local repo_root raw_path
     repo_root="$(_run_hostctl_repo_root)"
-    raw_path="${HOSTCTL_SERIAL_PORT_CACHE_PATH:-logs/.state/hostctl_last_usbserial_port}"
+    # Internal plumbing: cache path is fixed, not env-overridable
+    # (hostctl-env-audit.md cat 3).
+    raw_path="logs/.state/hostctl_last_usbserial_port"
     _run_hostctl_abs_path "$repo_root" "$raw_path"
 }
 

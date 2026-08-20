@@ -3,6 +3,7 @@ code-analysis-guard	yes	no	no	self-test	-	Self-tests code-analysis enforcement a
 include-usage	yes	no	no	self-test	-	Self-tests the generated-only include! policy (scripts/tests/host/test_include_usage.sh).
 orphan-modules	yes	no	no	self-test	-	Self-tests Rust source reachability detection (scripts/tests/host/test_orphan_modules.sh).
 event-config	yes	yes	yes	crate	tools/event_config_compiler/Cargo.toml	Event configuration compiler tests, strict Clippy, and coverage.
+lvgl-font	yes	yes	yes	crate	tools/lvgl_font_compiler/Cargo.toml	LVGL font compiler tests (generated `lv_font_fmt_txt` tables), strict Clippy, and coverage.
 event-engine	yes	yes	yes	crate	test-support/host/event_engine_host_harness/Cargo.toml	Event-engine host harness tests, strict Clippy, and coverage.
 app-state	yes	yes	yes	crate	test-support/host/app_state_store_host_harness/Cargo.toml	App-state/store host harness tests, strict Clippy, and coverage.
 net-status	yes	yes	no	crate	test-support/host/net_status_host_harness/Cargo.toml	Network/DHCP status ownership tests and strict Clippy.
@@ -14,3 +15,6 @@ hostctl	yes	yes	yes	crate-hostctl	tools/hostctl/Cargo.toml	Hostctl native tests 
 scene-maker	yes	no	no	crate-workdir	tools/scene_maker/Cargo.toml	Scene-bundle builder/inspector tests.
 scene-viewer	yes	no	no	crate-workdir	tools/scene_viewer/Cargo.toml	Offline .scenebundle renderer/emulator tests.
 sdcard	yes	yes	no	crate-feature	packages/sdcard/Cargo.toml	Host-feature SD-card FAT-engine tests and strict Clippy (--features host-tests).
+rtc	yes	yes	no	crate-feature	packages/rtc/Cargo.toml	Host-feature PCF85063A calendar/offset/mock-I2C driver tests and strict Clippy (--features host-tests).
+bundle	yes	yes	no	crate	packages/bundle/Cargo.toml	Shared signed-bundle-format header/digest/signature tests (ADR-0014 Phase 1) and strict Clippy.
+otadata	yes	yes	no	crate	packages/otadata/Cargo.toml	Host-testable ESP-IDF otadata record CRC tests (ADR-0014 Phase 5) and strict Clippy.

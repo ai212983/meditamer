@@ -6,7 +6,6 @@ use serde_json::json;
 
 use super::runtime::{open_console, RuntimeModesScenarioRuntime, RuntimeModesSmokeOptions};
 use crate::{
-    env_utils,
     logging::Logger,
     scenarios::{execute_workflow, load_workflow},
 };
@@ -18,11 +17,10 @@ pub fn run_runtime_modes_smoke(logger: &mut Logger, opts: RuntimeModesSmokeOptio
             opts.suite
         ));
     }
-    let settle_ms = env_utils::parse_env_u64("HOSTCTL_MODE_SMOKE_SETTLE_MS", 0)?;
-    let post_upload_status_repeats =
-        env_utils::parse_env_u32("HOSTCTL_MODE_SMOKE_POST_UPLOAD_STATUS_REPEATS", 3)?;
-    let post_upload_ping_repeats =
-        env_utils::parse_env_u32("HOSTCTL_MODE_SMOKE_POST_UPLOAD_PING_REPEATS", 2)?;
+    // Smoke-test internals; formerly env-tunable (hostctl-env-audit.md cat 3).
+    let settle_ms = 0u64;
+    let post_upload_status_repeats = 3u32;
+    let post_upload_ping_repeats = 2u32;
 
     let output_path = opts.output_path.unwrap_or_else(|| {
         PathBuf::from(format!(

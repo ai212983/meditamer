@@ -60,20 +60,22 @@ pub(super) fn run_full_flash(opts: FullFlashOptions<'_>) -> Result<FlashResult> 
         .ok_or_else(|| anyhow!("ESP-IDF env is required for full flash"))?;
     let bootloader = opts
         .repo_dir
-        .join("target/ota-bootloader/bootloader/bootloader.bin");
-    let partition_csv = opts.repo_dir.join("config/partitions-ab.csv");
+        .join("target/single-production-bootloader/bootloader/bootloader.bin");
+    let partition_csv = opts
+        .repo_dir
+        .join("config/partitions-single-production.csv");
     let partition_table = opts
         .repo_dir
-        .join("target/ota-bootloader/partition_table/partition-table.bin");
+        .join("target/single-production-bootloader/partition_table/partition-table.bin");
     let ota_data = opts
         .repo_dir
-        .join("target/ota-bootloader/ota_data_initial.bin");
+        .join("target/single-production-bootloader/ota_data_initial.bin");
     if !bootloader.is_file()
         || !partition_csv.is_file()
         || !partition_table.is_file()
         || !ota_data.is_file()
     {
-        bail!("pinned A/B bootloader or partition table is missing");
+        bail!("pinned single-production bootloader or partition table is missing");
     }
     let app_offset = resolve_partition_offset(&partition_csv, "ota_0")?;
     let ota_data_offset = resolve_partition_offset(&partition_csv, "otadata")?;
@@ -154,7 +156,9 @@ pub(super) fn run_app_only_flash(opts: AppOnlyFlashOptions<'_>) -> Result<FlashR
         build_app_binary(opts.image_path, opts.flash_log, opts.skip_update_check)?
     };
 
-    let partition_table = opts.repo_dir.join("config/partitions-ab.csv");
+    let partition_table = opts
+        .repo_dir
+        .join("config/partitions-single-production.csv");
     let app_offset = resolve_partition_offset(&partition_table, "ota_0")?;
     let command =
         build_app_flash_command(idf_env, opts.port, opts.flash_baud, app_offset, &app_bin);

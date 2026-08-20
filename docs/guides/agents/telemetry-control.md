@@ -1,7 +1,9 @@
 # Telemetry Control (Agent-First)
 
 This guide defines the UART contract for runtime telemetry verbosity control.
-Primary audience: automation/LLM agents. Secondary: humans.
+Primary audience: automation/LLM agents. Secondary: humans. The counters this
+control does *not* affect are in
+[Runtime Metrics and Serial Diagnostics](../runtime-metrics.md).
 
 ## Goal
 

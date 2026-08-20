@@ -61,9 +61,11 @@ pub(super) fn archive_firmware_artifacts(opts: ArchiveFirmwareArtifactsOptions<'
     validate_app_capacity(&outputs.app_bin)?;
 
     if include_bootloader {
-        let built_bootloader = repo_dir.join("target/ota-bootloader/bootloader/bootloader.bin");
-        let built_partition_table =
-            repo_dir.join("target/ota-bootloader/partition_table/partition-table.bin");
+        let built_bootloader =
+            repo_dir.join("target/single-production-bootloader/bootloader/bootloader.bin");
+        let built_partition_table = repo_dir.join(
+            "target/single-production-bootloader/partition_table/partition-table.bin",
+        );
         for path in [&built_bootloader, &built_partition_table] {
             if !path.is_file() {
                 bail!("OTA build artifact does not exist: {}", path.display());

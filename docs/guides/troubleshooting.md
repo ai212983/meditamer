@@ -28,10 +28,9 @@ Optional env vars:
 - `HOSTCTL_TROUBLESHOOT_PROBE_TIMEOUT_MS` (`4000` default)
 - `HOSTCTL_TROUBLESHOOT_SOAK_CYCLES` (`4` default)
 
-Agent-oriented contract and runbook:
-
-- `docs/guides/agents/troubleshoot.md`
-- `docs/guides/hostctl-workflow-authoring.md`
+Agent-oriented contract, preconditions, failure-class triage map, and required
+reporting fields: [Firmware Troubleshoot Workflow](agents/troubleshoot.md).
+Editing the workflow itself: [Hostctl Workflow Authoring](hostctl-workflow-authoring.md).
 
 ## Soak Script
 

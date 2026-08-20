@@ -14,17 +14,13 @@ enforce_wifi_upload_experiment_novelty_guard "test_wifi_regression_gate.sh"
 
 reject_legacy_env_vars "test_wifi_regression_gate.sh" \
     HOSTCTL_PORT \
-    HOSTCTL_BAUD \
-    HOSTCTL_WIFI_UPLOAD_CYCLES \
-    HOSTCTL_WIFI_UPLOAD_SSID \
-    HOSTCTL_WIFI_UPLOAD_PASSWORD
+    HOSTCTL_BAUD
 
 required=(
     HOSTCTL_NET_PORT
     HOSTCTL_NET_BAUD
     HOSTCTL_NET_SSID
     HOSTCTL_NET_PASSWORD
-    HOSTCTL_NET_POLICY_PATH
 )
 for name in "${required[@]}"; do
     if [[ -z "${!name:-}" ]]; then
@@ -38,11 +34,7 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 1
 fi
 
-panic_context_lines="${HOSTCTL_NET_PANIC_CONTEXT_LINES:-80}"
-if ! [[ "$panic_context_lines" =~ ^[0-9]+$ ]]; then
-    echo "test_wifi_regression_gate.sh: HOSTCTL_NET_PANIC_CONTEXT_LINES must be an integer" >&2
-    exit 1
-fi
+panic_context_lines=80
 panic_auto_troubleshoot="${HOSTCTL_NET_PANIC_AUTO_TROUBLESHOOT:-1}"
 if [[ "$panic_auto_troubleshoot" != "0" && "$panic_auto_troubleshoot" != "1" ]]; then
     echo "test_wifi_regression_gate.sh: HOSTCTL_NET_PANIC_AUTO_TROUBLESHOOT must be 0 or 1" >&2
@@ -57,7 +49,7 @@ fi
 run_id="$(date +%Y%m%d_%H%M%S)"
 run_dir="${HOSTCTL_NET_REGRESSION_OUTPUT_DIR:-./logs/wifi_regression_gate_${run_id}}"
 mkdir -p "$run_dir"
-report_path="${HOSTCTL_NET_REGRESSION_REPORT_PATH:-${run_dir}/report.json}"
+report_path="${run_dir}/report.json"
 
 epoch_ms() {
     local ts
@@ -85,7 +77,7 @@ panic_class=""
 panic_marker_line=""
 panic_marker_index=""
 panic_source_log=""
-panic_excerpt_path="${HOSTCTL_NET_PANIC_EXCERPT_PATH:-${run_dir}/panic_excerpt.log}"
+panic_excerpt_path="${run_dir}/panic_excerpt.log"
 troubleshoot_invoked=false
 troubleshoot_log_path=""
 failure_stage=""
@@ -360,8 +352,8 @@ jq -n \
     --arg finished_at "$finished_at" \
     --arg port "$HOSTCTL_NET_PORT" \
     --arg baud "$HOSTCTL_NET_BAUD" \
-    --arg policy_path "$HOSTCTL_NET_POLICY_PATH" \
-    --arg profile_path "${HOSTCTL_NET_DISCOVERY_PROFILE_PATH:-./tools/hostctl/scenarios/wifi-discovery-debug.default.toml}" \
+    --arg policy_path "tools/hostctl/scenarios/wifi-policy.default.json" \
+    --arg profile_path "tools/hostctl/scenarios/wifi-discovery-debug.default.toml" \
     --arg s1_name "$stage1_name" \
     --arg s1_status "$stage1_status" \
     --arg s1_cmd "$stage1_cmd" \

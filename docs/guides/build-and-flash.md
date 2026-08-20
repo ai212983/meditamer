@@ -1,5 +1,9 @@
 # Build, Flash, and Monitor
 
+Day-to-day build, flash, and serial-monitor workflow. Installing a signed
+firmware bundle through the factory updater is a separate workflow:
+[Firmware Update (ADR-0014)](firmware-update.md).
+
 ## Build
 
 ```bash
@@ -56,6 +60,9 @@ ESPFLASH_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh debug
 - `--capture-mode boot`
 - `/dev/cu.*` preferred over `/dev/tty.*`
 - artifact directory with `flash.log`, `capture.log`, and `summary.txt`
+- automatic device wall-clock synchronization (`TIMESET`/`TIMEGET` against the
+  host's current UTC time and fixed local offset) after every capture branch;
+  pass `--no-time-sync` to disable it outright
 
 These bundles accumulate under `logs/` across runs; see
 [Log and Artifact Cleanup](development-setup.md#log-and-artifact-cleanup) for the hostctl
@@ -70,6 +77,28 @@ Optional flash env vars consumed by the workflow:
 - `ESPFLASH_SKIP_UPDATE_CHECK` (`1` default)
 - `HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS` (default `8000`)
 - `HOSTCTL_FLASH_CAPTURE_LOG_PATH` (optional artifact directory override for `scripts/device/flash.sh`)
+- `FLASH_SET_TIME_AFTER_FLASH` (`1` default; compatibility override for `hostctl flash-capture`
+  directly — set `0` to disable time sync the same way `--no-time-sync` does. `--no-time-sync`
+  wins outright when both are present.)
+
+### Wall-clock synchronization
+
+`summary.txt` records the outcome as `time_sync=ok|skipped|failed`, plus
+`time_sync_utc`, `time_sync_offset_min`, and `time_sync_reason` (`n/a` when
+not applicable). A failed sync does not discard a successful flash: the run
+still completes and writes its artifacts, but `hostctl flash-capture` exits
+nonzero, summarized as `flash=ok time_sync=failed`. Inspect device time
+directly at any point with:
+
+```bash
+cargo run --manifest-path tools/hostctl/Cargo.toml -- timestatus
+cargo run --manifest-path tools/hostctl/Cargo.toml -- timeset
+```
+
+`timestatus` exits successfully whenever it receives and parses a `TIMEGET
+OK` response, whether or not the device currently reports a valid time
+(`valid=on`/`valid=off`); only a transport error, parse error, or `TIMEGET
+ERR` is a failure.
 
 ### Port Selection
 
@@ -100,7 +129,7 @@ If flashing appears "stuck":
 
 - `hostctl flash-capture` first tries complete stub-assisted `esptool.py` flashing at 460800
 - when enabled, automatic fallback repeats the complete bootloader, partition, OTA-data, and app write
-  at `ESPFLASH_FALLBACK_BAUD` with `--no-stub`; it never changes an A/B full flash into app-only
+  at `ESPFLASH_FALLBACK_BAUD` with `--no-stub`; it never changes a full flash into app-only
 - the wrapper preserves the old `FLASH_TIMEOUT_SEC` and fallback env knobs
 
 If serial port is busy:
@@ -120,9 +149,10 @@ ESPFLASH_FALLBACK_BAUD=115200 \
 scripts/device/flash.sh debug
 ```
 
-Both full and app-only paths use [`config/partitions-ab.csv`](../../config/partitions-ab.csv).
-Full flash also builds and archives the pinned rollback bootloader. App-only recovery resolves the
-`ota_0` offset from the CSV; it does not assume the former `0x10000` application address.
+Both full and app-only paths use
+[`config/partitions-single-production.csv`](../../config/partitions-single-production.csv).
+Full flash also builds and archives the pinned bootloader. App-only recovery resolves the
+`ota_0` offset from the CSV rather than assuming a fixed application address.
 
 ### BLE Phase 1D baseline
 
@@ -154,71 +184,13 @@ resident, and emits a JSON report beside its serial log. A passing report is del
 1D baseline**, not the full gate: largest-internal-block telemetry and forced closes at both HCI TX
 waits and active/full-queue RX ingress remain required by the BLE plan.
 
-## Signed A/B firmware update
+## Firmware update
 
-Generate a private 32-byte Ed25519 seed outside tracked source, then derive the public build value:
-
-```bash
-scripts/device/generate_firmware_signing_key.sh target/firmware-signing.seed
-cargo run --manifest-path tools/hostctl/Cargo.toml -- firmware-key \
-  --key target/firmware-signing.seed
-```
-
-Keep the seed private and backed up. The generator refuses to overwrite an existing key. Put the
-printed public value and an observable build id into the release build:
-
-```bash
-MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX=<64-hex-public-key> \
-MEDITAMER_FIRMWARE_BUILD_ID=<1-31-character-id> \
-scripts/build/build.sh release
-
-espflash save-image --chip esp32 \
-  --partition-table config/partitions-ab.csv \
-  --target-app-partition ota_0 \
-  target/xtensa-esp32-none-elf/release/meditamer \
-  target/meditamer-update.bin
-```
-
-The first A/B installation is a full flash using the same public-key environment. It migrates the
-legacy lifecycle record before any update may touch the second slot:
-
-```bash
-ESPFLASH_PORT=/dev/cu.usbserial-540 \
-HOSTCTL_FLASH_CAPTURE_FLASH_MODE=full \
-MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX=<64-hex-public-key> \
-MEDITAMER_FIRMWARE_BUILD_ID=<build-id> \
-scripts/device/flash.sh release
-```
-
-Stage, verify, activate, boot, and confirm a signed application binary:
-
-```bash
-HOSTCTL_PORT=/dev/cu.usbserial-540 \
-HOSTCTL_FIRMWARE_UPDATE_LOG_PATH=logs/firmware-update.log \
-scripts/hostctl.sh firmware-update \
-  --image target/meditamer-update.bin \
-  --key target/firmware-signing.seed
-```
-
-`scripts/hostctl.sh` is the direct launcher. Relative typed paths and default evidence paths are
-resolved from the repository root even though its isolated Cargo process starts in `/tmp`.
-
-Set `HOSTCTL_FIRMWARE_UPDATE_STAGE_ONLY=1` to stop after signature and full flash read-back
-verification, before OTA metadata activation. `FWSTATUS` reports the running build/slot, selection
-state, key id, staging progress, maximum erase/write call times, read-back time, and multicore flash
-policy. A missing compiled public key fails closed for update staging but does not prevent normal boot.
-
-A missing chunk acknowledgement is retried at most twice with the exact same offset and payload;
-firmware recognizes only that immediately previous chunk as an idempotent resend. Explicit chunk
-errors and an ambiguous activation acknowledgement are never retried. Recover by checking
-`FWSTATUS`; use the full-flash path if neither application slot remains usable.
-
-Firmware that advertises `stream=bin1@460800` uses CRC-framed 112-byte binary payloads. Each complete
-126-byte frame fits UART0's 128-byte FIFO, and two payloads coalesce into one 224-byte internal-RAM
-flash batch. Older firmware transparently retains the 48-byte hex transport for the first upgrade.
-The inactive image range is erased before binary streaming; interruption still leaves the running
-slot selected. On a binary transport failure, the host restores 115200 and resets the board without
-activating the partial image.
+Flashing over USB, above, is the development path. Shipping a new image to a
+device that is already in the field goes through the factory updater and a
+signed SD-card bundle instead — complete USB flash, bundle build/sign/inspect,
+updater status lines, and ROM recovery are all in
+[Firmware Update (ADR-0014)](firmware-update.md).
 
 ## Monitor
 

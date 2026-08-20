@@ -174,7 +174,7 @@ pub(in crate::firmware::display) async fn service_panel_power_lease(
             let shutdown = context.inkplate.eink_off_async().await;
             panel_bus::resume_clients(false).await;
             match shutdown {
-                Ok(()) => esp_println::println!(
+                Ok(()) => console::println!(
                     "LVGL_PANEL_LEASE event=shutdown mode=terminal_hold reason=idle_timeout status=ok active_ms={} shutdown_ms={}",
                     active_ms,
                     Instant::now()
@@ -183,7 +183,7 @@ pub(in crate::firmware::display) async fn service_panel_power_lease(
                 ),
                 Err(error) => {
                     state.refresh_tracking.record_failure();
-                    esp_println::println!(
+                    console::println!(
                         "LVGL_PANEL_LEASE event=shutdown mode=terminal_hold reason=idle_timeout status=error error={:?} recovery=full_next active_ms={} shutdown_ms={}",
                         error,
                         active_ms,
@@ -219,7 +219,7 @@ pub(in crate::firmware::display) async fn force_full_repaint(
     }
     state.pending_dirty = None;
     state.last_service_ms = Instant::now().as_millis();
-    esp_println::println!(
+    console::println!(
         "LVGL_REPAINT full_repaint=true reason={} status={} refresh_ms={}",
         reason,
         if refresh_succeeded { "ok" } else { "error" },
@@ -237,13 +237,13 @@ pub(in crate::firmware::display) async fn refresh_panel(
     let plan = RefreshPlan::for_state(state);
 
     if POST_RELEASE_SETTLE_DIAGNOSTIC && request.phase == "released" {
-        esp_println::println!("LVGL_REFRESH phase=released settle_ms=5000");
+        console::println!("LVGL_REFRESH phase=released settle_ms=5000");
         Timer::after_millis(5_000).await;
     }
 
     if option_env!("MEDITAMER_PANEL_FRAME_DEBUG").is_some() {
         let snapshot = context.inkplate.binary_framebuffer_debug_snapshot();
-        esp_println::println!(
+        console::println!(
             "PANEL_FRAME phase=pre_refresh current_hash={:#010x} previous_hash={:?} changed_bytes={} changed_pixels={} rows={:?}..{:?} byte_columns={:?}..{:?}",
             snapshot.current_hash,
             snapshot.previous_hash,
@@ -328,7 +328,7 @@ pub(in crate::firmware::display) async fn refresh_panel(
         Err(error) => {
             state.refresh_tracking.record_failure();
             state.panel_power_lease.mark_panel_off();
-            esp_println::println!(
+            console::println!(
                 "LVGL_REFRESH phase={} source={} status=error requested={} error={:?} recovery=full_next dirty={},{},{},{} terminal_hold_requested={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={}",
                 request.phase,
                 request.source,
@@ -367,7 +367,7 @@ fn record_refresh_success(
         CompletedRefresh::NoChange => ("no_change", "not_applicable"),
     };
     let partial = PartialRefreshMetrics::from_timing(outcome.timing);
-    esp_println::println!(
+    console::println!(
         "LVGL_REFRESH phase={} source={} status=ok kind={} recovery_requested={} dirty={},{},{},{} terminal_hold_requested={} lease_renewed={} bus_quiet_wait_ms={} refresh_ms={} input_to_visible_ms={} partial_count={} partial_strategy={} transition_scan_rows={} neutral_drain_rows={} cleanup_zero_passes=0 cleanup_neutral_passes=0 waveform_us={} full_fallback={}",
         request.phase,
         request.source,
@@ -410,7 +410,7 @@ pub(in crate::firmware::display) async fn full_refresh_panel(
     match refresh_result {
         Ok(()) => true,
         Err(error) => {
-            esp_println::println!("LVGL_FULL_REFRESH status=error error={:?}", error);
+            console::println!("LVGL_FULL_REFRESH status=error error={:?}", error);
             false
         }
     }

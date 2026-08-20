@@ -61,7 +61,7 @@ async fn handle_ui_provider_fixture_step_event(
         )
         .await
     };
-    esp_println::println!(
+    console::println!(
         "UI_PROVIDER_FIXTURE_STEP request={} status={:?}",
         ack_request_id,
         status
@@ -74,7 +74,7 @@ async fn handle_ui_provider_fixture_step_event(
         .try_send(ack)
         .is_err()
     {
-        esp_println::println!(
+        console::println!(
             "UI_PROVIDER_FIXTURE_STEP request={} status=AckQueueFull",
             ack_request_id
         );

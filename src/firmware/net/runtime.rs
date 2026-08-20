@@ -11,6 +11,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use console::println;
 use embassy_futures::{
     join::join3,
     select::{select, select3, Either, Either3},
@@ -19,12 +20,12 @@ use embassy_net::{Runner, StackResources};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_hal::rng::Rng;
-use esp_println::println;
 use static_cell::StaticCell;
 
 use super::handoff::control_quiescence_complete;
 #[cfg(feature = "ble-foundation")]
 use super::handoff::request_matches_ack;
+use super::host::{self, NetHost};
 use super::wifi::{WifiController, WifiDevice};
 use super::{
     handoff::{
@@ -34,13 +35,10 @@ use super::{
     },
     wifi,
 };
-use crate::firmware::{
-    observability as telemetry, psram, service_mode, storage, types::WifiRuntimePolicy,
-    update as firmware_update,
-};
+use crate::firmware::{observability as telemetry, psram, service_mode, types::WifiRuntimePolicy};
 use off_resources::settled_off_resource_snapshot;
 
-const NET_STACK_SOCKETS: usize = 4;
+pub(crate) const NET_STACK_SOCKETS: usize = 4;
 const ACTIVE_OPERATION_GRACE: Duration = Duration::from_secs(12);
 const FORCED_ABORT_GRACE: Duration = Duration::from_secs(2);
 const WIFI_STOP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -198,8 +196,14 @@ enum DrainResult {
     Complete,
 }
 
-#[embassy_executor::task]
-pub(crate) async fn network_owner_task(
+/// Supervise Wi-Fi, the Embassy stack, and the product's serving work across
+/// network epochs, restarting them as ownership changes hands.
+///
+/// Generic over the product (ADR-0015 Tier 2). The `#[embassy_executor::task]`
+/// that drives this lives product-side, because an embassy task cannot be
+/// generic and this must not name a concrete product type.
+pub(crate) async fn run_network_owner<H: NetHost>(
+    net_host: &H,
     mut wifi_peripheral: esp_hal::peripherals::WIFI<'static>,
     resources: &'static mut StackResources<NET_STACK_SOCKETS>,
 ) {
@@ -223,6 +227,7 @@ pub(crate) async fn network_owner_task(
     loop {
         service_mode::set_radio_handoff_admission_open(true);
         let epoch_result = run_network_epoch(
+            net_host,
             &mut wifi_peripheral,
             resources,
             &mut machine,
@@ -296,7 +301,8 @@ pub(crate) async fn network_owner_task(
     }
 }
 
-async fn run_network_epoch(
+async fn run_network_epoch<H: NetHost>(
+    net_host: &H,
     wifi_peripheral: &mut esp_hal::peripherals::WIFI<'static>,
     resources: &mut StackResources<NET_STACK_SOCKETS>,
     machine: &mut NetworkOwnerMachine,
@@ -345,7 +351,7 @@ async fn run_network_epoch(
                 stack,
             );
             let network = run_network_runner(&mut runner);
-            let http = storage::upload::run_http_server(stack);
+            let http = net_host.serve(stack);
             let mut services = pin!(join3(connection, network, http));
             let restored = await_restoration(
                 services.as_mut(),
@@ -391,7 +397,7 @@ async fn run_network_epoch(
             Ok(epoch) => (epoch, None),
             Err(reason) => (current_restore_epoch, Some(reason)),
         };
-        if finish_product_quiescence().await {
+        if finish_product_quiescence(net_host).await {
             break (epoch, service_error);
         }
         if service_error.is_some() {
@@ -655,13 +661,13 @@ fn reject_active_quiescence(machine: &mut NetworkOwnerMachine, epoch: u32, reaso
     publish_ack(ack);
 }
 
-async fn finish_product_quiescence() -> bool {
+async fn finish_product_quiescence<H: NetHost>(net_host: &H) -> bool {
     // Abort is also the SD-task FIFO fence. Even when the caller-side roundtrip
     // count and session bit are clear, an earlier timed-out request can still be
     // executing in the single SD owner. Its correlated Abort response proves all
     // earlier work completed before radio ownership is released.
     let started = embassy_time::Instant::now();
-    let abort_ok = with_timeout(FORCED_ABORT_GRACE, storage::upload::abort_sd_upload())
+    let abort_ok = with_timeout(FORCED_ABORT_GRACE, net_host.abort_upload())
         .await
         .unwrap_or(false);
     let elapsed = started.elapsed();
@@ -681,11 +687,7 @@ async fn finish_product_quiescence() -> bool {
         .await
         .is_ok()
     };
-    sd_barrier_complete(
-        abort_ok,
-        storage::upload::sd_upload_session_active(),
-        quiescent,
-    )
+    sd_barrier_complete(abort_ok, host::upload_session_active(), quiescent)
 }
 
 fn restoration_ready() -> bool {
@@ -851,16 +853,13 @@ fn reject_without_transition(
 }
 
 fn update_reserved() -> bool {
-    firmware_update::transport_quiet()
-        || firmware_update::status()
-            .map(|status| status.phase != firmware_update::SessionPhase::Idle)
-            .unwrap_or(true)
+    host::transport_quiet()
 }
 
 fn product_work_quiescent() -> bool {
-    storage::upload::active_http_connections() == 0
-        && storage::upload::active_sd_roundtrips() == 0
-        && !storage::upload::sd_upload_session_active()
+    host::active_http_connections() == 0
+        && host::active_sd_roundtrips() == 0
+        && !host::upload_session_active()
 }
 
 fn network_control_quiescent() -> bool {
@@ -896,9 +895,9 @@ fn resource_snapshot(probe_largest_block: bool) -> ResourceSnapshot {
         probe_free_before_bytes: block.free_before_bytes.min(u32::MAX as usize) as u32,
         probe_free_after_bytes: block.free_after_bytes.min(u32::MAX as usize) as u32,
         probe_reserve_bytes: block.reserve_bytes.min(u32::MAX as usize) as u32,
-        http_connections: storage::upload::active_http_connections(),
-        sd_roundtrips: storage::upload::active_sd_roundtrips(),
-        sd_sessions: u16::from(storage::upload::sd_upload_session_active()),
+        http_connections: host::active_http_connections(),
+        sd_roundtrips: host::active_sd_roundtrips(),
+        sd_sessions: u16::from(host::upload_session_active()),
         radio_callbacks: callbacks.in_flight.min(u16::MAX as u32) as u16,
         radio_queues: queues
             .active

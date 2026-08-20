@@ -4,6 +4,7 @@ mod gpio36_feedback;
 mod panel;
 mod presentation;
 mod state;
+mod wall_clock;
 
 use super::{
     config::APP_EVENTS, input::gpio36::Gpio36Mode, touch::tasks::request_touch_pipeline_reset,
@@ -57,13 +58,13 @@ fn announce_runtime_ready(state: &mut DisplayLoopState) {
     {
         state.runtime_ready_announced = true;
         crate::firmware::scheduling::mark_runtime_ready();
-        esp_println::println!("RUNTIME_READY app_state=ready display=ready");
+        console::println!("RUNTIME_READY app_state=ready display=ready");
     }
 }
 
 async fn render_initial_display_state(context: &mut DisplayContext, state: &mut DisplayLoopState) {
     if !presentation::initialize(context, &mut state.presentation).await {
-        esp_println::println!("RUNTIME_READY blocked=display_init_failed");
+        console::println!("RUNTIME_READY blocked=display_init_failed");
     }
 }
 

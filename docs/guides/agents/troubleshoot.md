@@ -64,12 +64,9 @@ HOSTCTL_PORT=/dev/cu.usbserial-540 \
 
 ## Agent Control Knobs
 
-- `HOSTCTL_TROUBLESHOOT_FLASH_FIRST` (`1` default)
-- `HOSTCTL_TROUBLESHOOT_FLASH_RETRIES` (`2` default)
-- `HOSTCTL_TROUBLESHOOT_PROBE_RETRIES` (`6` default)
-- `HOSTCTL_TROUBLESHOOT_PROBE_DELAY_MS` (`700` default)
-- `HOSTCTL_TROUBLESHOOT_PROBE_TIMEOUT_MS` (`4000` default)
-- `HOSTCTL_TROUBLESHOOT_SOAK_CYCLES` (`4` default)
+The `HOSTCTL_TROUBLESHOOT_*` env vars (flash-first, flash/probe retries, probe
+delay and timeout, soak cycles) and their defaults are listed once, in
+[Troubleshooting, Soak, and Lifecycle Evidence](../troubleshooting.md#firmware-troubleshoot-workflow-serverless-workflow-dsl).
 
 ## Deterministic Agent Procedure
 

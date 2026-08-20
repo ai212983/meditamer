@@ -140,7 +140,7 @@ pub(crate) fn allocator_memory_snapshot() -> AllocatorMemorySnapshot {
 
 pub(crate) fn log_allocator_status() {
     let snapshot = allocator_memory_snapshot();
-    esp_println::println!(
+    console::println!(
         "psram: feature_enabled={} state={:?} total_bytes={} used_bytes={} free_bytes={} peak_used_bytes={} internal_free_bytes={} external_free_bytes={} min_free_bytes={} min_internal_free_bytes={} min_internal_alloc_charge_bytes={} min_internal_alloc_internal_required={} min_internal_alloc_charge_overflow={} min_internal_alloc_post_free_bytes={} min_internal_alloc_correlation_stable={} min_internal_alloc_wifi_rx_matched={} min_internal_alloc_released={} min_external_free_bytes={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={}",
         snapshot.feature_enabled,
         snapshot.state,

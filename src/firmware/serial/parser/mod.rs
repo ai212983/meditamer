@@ -106,6 +106,15 @@ fn parse_basic_command(line: &[u8]) -> Option<SerialCommand> {
     if let Some((kind, targets)) = basic::parse_state_diag_command(line) {
         return Some(SerialCommand::StateDiag { kind, targets });
     }
+    if let Some((utc_epoch_seconds, offset_minutes)) = basic::parse_timeset_command(line) {
+        return Some(SerialCommand::TimeSet {
+            utc_epoch_seconds,
+            offset_minutes,
+        });
+    }
+    if basic::parse_timeget_command(line) {
+        return Some(SerialCommand::TimeGet);
+    }
     None
 }
 

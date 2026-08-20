@@ -75,13 +75,19 @@ unallocated.
 | --- | ---: |
 | `ShellModel` (`1048` host) / `CompositionReferences<4, 4>` | 1008 / 232 |
 | `Backend` / `LvglState` / display-loop state | 1904 / 1808 / 1840 |
-| `CompiledCatalogue<8>` / filtered `CatalogueView<8>` | 328 / 324 |
+| `CompiledCatalogue<8>` / filtered `CatalogueView<8>` | 264 / 260 |
 | `ActiveOverlay` / `OwnedShellIntent` | 36 / 36 |
 | `PreparedNavigation` / `CompositionPlan` / `PreparedComposition` | 812 / 640 / 644 |
 | `ProviderRemovalPlan` / pending removal / runtime audit | 824 / 32 / 8 |
 | Callback action queue / one `IntentBindings` / route table, including mutex wrappers | 304 / 192 / 1004 |
 | Full-repaint request latch | 1 |
 | `lv_mem_monitor_t` / allocator snapshot stack temporaries | 28 / 52 |
+
+ADR-0013's compiled-only catalogue reduces each Xtensa `CatalogueEntry` from 40 to 32 bytes. The
+persistent catalogue and filtered-view layouts therefore each shrink by 64 bytes from the Phase 5
+328/324-byte measurements below. The 264/260-byte layouts were re-measured with rustc
+`-Zprint-type-sizes` for the release Xtensa target on 2026-08-17; this is type-layout evidence, not a
+new isolated linked-section or device high-water measurement.
 
 The Phase 3 release ELF has pool 4128, callback storage 272/212/1, `.data` 14036, `.bss` 67876, `.stack` 114156, and `.dram2_uninit` 104392; against E-0003, linked `.data` plus `.bss` grew 360.
 
@@ -222,6 +228,31 @@ CPU ROM stack
 and the unmapped hole below it. The evidence, the reset-path analysis, the
 linker-search-order workaround and the deep-sleep interaction are in
 [DRAM Budget: Reclaiming the ROM Stack](./dram-budget-rom-stack.md).
+
+## Wall-Clock Sync Addition (2026-08-17)
+
+The PCF85063A RTC driver ([`packages/rtc`](../../../packages/rtc)) added a
+fourth shared-bus `I2cDevice` owned by `SerialTaskState`
+(`src/firmware/serial/task_state.rs`) and new `TIMESET`/`TIMEGET` command
+handling. Measured on an isolated diff (this change alone, against the same
+tree otherwise) with the default feature set, release profile:
+
+| Section | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `.data` | 16768 | 16784 | +16 |
+| `.bss` | 69868 | 69868 | 0 |
+| `.stack` (remainder) | 109428 | 109412 | -16 |
+| `.dram2_uninit` | 113736 | 113736 | 0 |
+| `serial_task::POOL` | 3080 | 3088 | +8 |
+
+`serial_task::POOL` only grows by the new `rtc: InkplateRtcDriver` field on
+`SerialTaskState` (an `I2cDevice` handle, effectively one pointer): `TIMESET`
+and `TIMEGET` themselves dispatch through the same internal-heap-bounded
+command allocation as every other ordinary serial command
+(`src/firmware/serial.rs`), so they do not inflate the task's own persistent
+future. The RTC driver's calendar/offset logic is pure `no_std` code with no
+static storage of its own. Net effect on the CPU0 stack remainder is a few
+bytes, well inside normal link-order noise for a change this size.
 
 ## Guards
 

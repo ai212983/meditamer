@@ -3,6 +3,12 @@ name = "ui_shell_host_harness"
 version = "0.1.0"
 edition = "2021"
 
+[build-dependencies]
+lvgl_font_compiler = { path = "../../../tools/lvgl_font_compiler" }
+
 [dependencies]
 heapless = "0.9.3"
+# ADR-0015: the shell moved to its own crate, which is host-testable in its
+# own right; this harness re-exports it for the LVGL overlay-semantics tests.
+shell = { path = "../../../platform/shell" }
 lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }

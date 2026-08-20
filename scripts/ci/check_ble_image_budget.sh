@@ -3,7 +3,12 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 elf="${1:-$repo_root/target/xtensa-esp32-none-elf/ble-release/meditamer}"
-ceiling="${BLE_IMAGE_CEILING_BYTES:-1900544}"
+# What the device actually accepts: ADR-0014 replaced ADR-0009's two 0x1f0000
+# A/B slots with one 0x380000 `ota_0` production partition written from an SD
+# bundle, so the binding limit is the SD updater's payload ceiling --
+# `MAX_FIRMWARE_LEN` in src/updater/mod.rs (0x380000 - 0x2000). Keep this in
+# step with that constant; an image the updater would reject must fail here.
+ceiling="${BLE_IMAGE_CEILING_BYTES:-3661824}"
 board_pool_ceiling="${BLE_BOARD_RUNTIME_POOL_CEILING_BYTES:-72}"
 linked_stack_floor="${BLE_LINKED_STACK_FLOOR_BYTES:-33900}"
 

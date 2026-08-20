@@ -1,12 +1,15 @@
 #![no_std]
 
-extern crate self as esp_println;
-
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[path = "esp_println.rs"]
-mod uart_println;
-pub use crate::{esp_uart_print as print, esp_uart_println as println};
-pub(crate) use uart_println::{dropped_write_count, write_response as write_uart_response};
+// The UART console moved to the `console` platform crate (ADR-0015 step 1).
+// This crate used to alias itself as `esp_println` so that `esp_println::println!`
+// resolved here rather than to the upstream crate; only one crate per build can
+// do that, which blocked every shared-crate extraction the ADR depends on.
+// Call sites now say `console::println!`. These two re-exports keep the
+// non-macro helpers reachable at the `crate::` paths their callers already use.
+pub(crate) use console::{dropped_write_count, write_response as write_uart_response};
 pub mod firmware;
 pub mod platform;
+#[cfg(feature = "factory-updater")]
+pub mod updater;

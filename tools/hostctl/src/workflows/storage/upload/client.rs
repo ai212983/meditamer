@@ -66,9 +66,8 @@ pub(crate) use retry::{
 #[allow(unused_imports)]
 use config::{
     append_host_diag_line, should_use_direct_burst_sender, upload_direct_burst_bytes,
-    upload_direct_burst_mode_active, upload_direct_burst_sender_enabled,
-    upload_force_connection_close, upload_pre_put_delay_ms, upload_send_diag_deep_enabled,
-    upload_send_diag_enabled, upload_tcp_nodelay_enabled,
+    upload_direct_burst_mode_active, upload_force_connection_close, upload_pre_put_delay_ms,
+    upload_send_diag_deep_enabled, upload_send_diag_enabled, upload_tcp_nodelay_enabled,
     upload_transport_reset_chunk_fallback_enabled,
     upload_transport_reset_chunk_fallback_streak_limit, upload_transport_reset_fast_retry_enabled,
     upload_transport_reset_fast_retry_streak_limit,

@@ -20,15 +20,15 @@ pub(super) async fn handle_mkdir(
     fat_engine: &mut FatEngine,
 ) -> SdUploadResult {
     if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
-        esp_println::println!("sd_upload: mkdir enter");
+        console::println!("sd_upload: mkdir enter");
     }
     if session.is_some() {
-        esp_println::println!("sd_upload: mkdir busy(active session)");
+        console::println!("sd_upload: mkdir busy(active session)");
         return upload_result(false, SdUploadResultCode::Busy, 0);
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
-        esp_println::println!(
+        console::println!(
             "sd_upload: mkdir ensure_upload_ready failed code={:?}",
             code
         );
@@ -38,12 +38,12 @@ pub(super) async fn handle_mkdir(
     let path_str = match parse_upload_path(&path, path_len) {
         Ok(path) => path,
         Err(code) => {
-            esp_println::println!("sd_upload: mkdir invalid path code={:?}", code);
+            console::println!("sd_upload: mkdir invalid path code={:?}", code);
             return upload_result(false, code, 0);
         }
     };
     if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
-        esp_println::println!("sd_upload: mkdir path={}", path_str);
+        console::println!("sd_upload: mkdir path={}", path_str);
     }
 
     let mut output = [];
@@ -58,12 +58,12 @@ pub(super) async fn handle_mkdir(
     match result {
         FatResult::Done | FatResult::Error(FatEngineError::Fat(SdFatError::AlreadyExists)) => {
             if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
-                esp_println::println!("sd_upload: mkdir ok/already_exists");
+                console::println!("sd_upload: mkdir ok/already_exists");
             }
             upload_result(true, SdUploadResultCode::Ok, 0)
         }
         result => {
-            esp_println::println!("sd_upload: mkdir engine error={:?}", result);
+            console::println!("sd_upload: mkdir engine error={:?}", result);
             upload_result(false, map_fat_result_to_upload_code(&result), 0)
         }
     }

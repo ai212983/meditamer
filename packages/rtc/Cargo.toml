@@ -1,0 +1,15 @@
+[package]
+name = "rtc"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+
+[features]
+default = []
+host-tests = []
+
+[dependencies]
+embedded-hal-async = "1.0.0"
+
+[dev-dependencies]
+embedded-hal = "1.0.0"

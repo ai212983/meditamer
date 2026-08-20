@@ -14,6 +14,7 @@ pub(crate) type SharedI2cDevice =
 pub(crate) type InkplateDriver = InkplateHal<SharedI2cDevice, BusyDelay>;
 pub(crate) type InkplateImuDriver = InkplateImu<SharedI2cDevice>;
 pub(crate) type InkplateTouchDriver = InkplateTouch<SharedI2cDevice>;
+pub(crate) type InkplateRtcDriver = rtc::driver::Pcf85063a<SharedI2cDevice>;
 pub(crate) type SerialUart = Uart<'static, Async>;
 pub(crate) type SdProbeDriver = probe::SdCardProbe<'static>;
 pub(crate) use sdcard::{SD_PATH_MAX, SD_WRITE_MAX};

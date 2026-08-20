@@ -64,6 +64,28 @@ pub struct FlashCaptureOptions {
     pub post_command: Option<String>,
     pub post_pattern: Option<String>,
     pub post_timeout_ms: Option<u64>,
+    /// `--no-time-sync`: disables the post-capture wall-clock sync outright,
+    /// regardless of `FLASH_SET_TIME_AFTER_FLASH`.
+    pub no_time_sync: bool,
+}
+
+/// Outcome of the `time_sync` workflow action, recorded verbatim into
+/// `summary.txt` as `time_sync=<label>`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TimeSyncStatus {
+    Skipped,
+    Ok,
+    Failed,
+}
+
+impl TimeSyncStatus {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            TimeSyncStatus::Skipped => "skipped",
+            TimeSyncStatus::Ok => "ok",
+            TimeSyncStatus::Failed => "failed",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -171,6 +193,10 @@ pub(super) struct FlashCaptureRuntime<'a> {
     flash_result: Option<FlashResult>,
     capture_bytes: usize,
     post_command_match: Option<String>,
+    time_sync_status: TimeSyncStatus,
+    time_sync_utc: Option<u32>,
+    time_sync_offset_minutes: Option<i16>,
+    time_sync_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

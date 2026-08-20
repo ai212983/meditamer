@@ -15,6 +15,7 @@ directory; nothing here should be treated as current guidance.
 | [`refactors/`](refactors/) | Completed structural refactor plans, with their outcome, deviations, and device evidence | The record of why the module tree is shaped the way it is, and what was measured to prove each move safe |
 | [`host-tooling/`](host-tooling/) | Completed host-tooling plans and execution ledgers | Evidence behind durable commands and operating policies documented in `docs/guides/` |
 | [`hardware/`](hardware/) | Closed hardware-validation plans and identified-device evidence | Retains the exact scope and limitations of accepted physical-device gates |
+| [`firmware-update/`](firmware-update/) | The completed single-production factory-updater plan (ADR-0014), phase by phase with device evidence | The record of how the A/B firmware-update layout was replaced and what was proved on hardware at each phase |
 
 ## Before re-running a Wi-Fi or upload experiment
 

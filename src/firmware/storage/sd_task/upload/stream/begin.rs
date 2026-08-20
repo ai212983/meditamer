@@ -32,7 +32,7 @@ pub(super) async fn handle_begin(
         Err(code) => return upload_result(false, code, 0),
     };
     if observability::log_filter_enabled(observability::LOG_DOMAIN_SD) {
-        esp_println::println!(
+        console::println!(
             "sd_upload: begin path={} expected_size={}",
             final_path,
             expected_size
@@ -40,7 +40,7 @@ pub(super) async fn handle_begin(
     }
     let final_path_bytes = final_path.as_bytes();
     if final_path_bytes.len() > SD_UPLOAD_PATH_BUF_MAX {
-        esp_println::println!(
+        console::println!(
             "sd_upload: begin final_path_too_long path_len={} max_len={}",
             final_path_bytes.len(),
             SD_UPLOAD_PATH_BUF_MAX
@@ -49,7 +49,7 @@ pub(super) async fn handle_begin(
     }
 
     if let Err(code) = ensure_upload_ready(sd_probe, powered, upload_mounted).await {
-        esp_println::println!(
+        console::println!(
             "sd_upload: begin ensure_upload_ready failed code={:?}",
             code
         );
@@ -81,7 +81,7 @@ pub(super) async fn handle_begin(
     )
     .await;
     if !matches!(result, FatResult::Done) {
-        esp_println::println!("sd_upload: begin engine failed result={:?}", result);
+        console::println!("sd_upload: begin engine failed result={:?}", result);
         return upload_result(false, map_fat_result_to_upload_code(&result), 0);
     }
     observability::log_stack_headroom("sd_upload_begin_fat_after");

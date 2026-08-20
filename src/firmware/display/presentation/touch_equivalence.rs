@@ -100,7 +100,7 @@ impl TouchEquivalenceProbe {
         }
         self.stage = ProbeStage::WaitingSyntheticDown;
         self.next_synthetic_ms = now_ms.saturating_add(SYNTHETIC_START_DELAY_MS);
-        esp_println::println!(
+        console::println!(
             "PANEL_EQUIV state=armed mode={} target=top_test x={} y={} synthetic_delay_ms={}",
             if PIPELINE_REPLAY_PROBE_ENABLED {
                 "pipeline_replay"
@@ -155,7 +155,7 @@ impl TouchEquivalenceProbe {
                 if PRIME_THEN_SYNTHETIC_PROBE_ENABLED || PIPELINE_REPLAY_PROBE_ENABLED {
                     self.stage = ProbeStage::WaitingControlSyntheticDown;
                     self.next_synthetic_ms = now_ms.saturating_add(CONTROL_PAIR_DELAY_MS);
-                    esp_println::println!(
+                    console::println!(
                         "PANEL_EQUIV state=scheduled_control_pair delay_ms={}",
                         CONTROL_PAIR_DELAY_MS
                     );
@@ -184,7 +184,7 @@ impl TouchEquivalenceProbe {
                     if matches { "match" } else { "mismatch" },
                     signature,
                 );
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV state=control_complete down_match={} up_match={} updates=4",
                     self.physical_down_match,
                     matches
@@ -192,7 +192,7 @@ impl TouchEquivalenceProbe {
                 if PIPELINE_REPLAY_PROBE_ENABLED {
                     self.stage = ProbeStage::WaitingPipelineReplayRequest;
                     self.next_synthetic_ms = u64::MAX;
-                    esp_println::println!(
+                    console::println!(
                         "PANEL_EQUIV state=pipeline_replay_pending target=blank x={}..{} y={}..{}",
                         PRIME_X_MIN,
                         PRIME_X_MAX,
@@ -202,7 +202,7 @@ impl TouchEquivalenceProbe {
                 } else {
                     self.stage = ProbeStage::WaitingPrimeDown;
                     self.next_synthetic_ms = u64::MAX;
-                    esp_println::println!(
+                    console::println!(
                         "PANEL_EQUIV state=awaiting_prime target=blank x={}..{} y={}..{} instruction=tap_once",
                         PRIME_X_MIN,
                         PRIME_X_MAX,
@@ -234,7 +234,7 @@ impl TouchEquivalenceProbe {
                 );
                 self.stage = ProbeStage::Complete;
                 self.next_synthetic_ms = u64::MAX;
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV state=complete mode={} down_match={} up_match={}",
                     if PIPELINE_REPLAY_PROBE_ENABLED {
                         "pipeline_replay"
@@ -250,7 +250,7 @@ impl TouchEquivalenceProbe {
     }
 
     pub(super) fn synthetic_render_missing(&mut self, phase: SyntheticTouchPhase) {
-        esp_println::println!(
+        console::println!(
             "PANEL_EQUIV source=synthetic phase={} verdict=invalid reason=no_dirty_render",
             phase.label()
         );
@@ -266,7 +266,7 @@ impl TouchEquivalenceProbe {
             return false;
         }
         if !control_refresh_succeeded {
-            esp_println::println!(
+            console::println!(
                 "PANEL_EQUIV source=pipeline_replay verdict=invalid reason=control_refresh_failed"
             );
             self.stage = ProbeStage::Disabled;
@@ -275,7 +275,7 @@ impl TouchEquivalenceProbe {
 
         self.stage = ProbeStage::WaitingPipelineReplayDown;
         self.pipeline_replay_active = true;
-        esp_println::println!(
+        console::println!(
             "PANEL_EQUIV state=pipeline_replay_requested target=blank x={}..{} y={}..{}",
             PRIME_X_MIN,
             PRIME_X_MAX,
@@ -287,7 +287,7 @@ impl TouchEquivalenceProbe {
 
     pub(super) fn observe_prime_event(&mut self, event: TouchEvent, rendered: bool, now_ms: u64) {
         if self.pipeline_replay_active && rendered {
-            esp_println::println!(
+            console::println!(
                 "PANEL_EQUIV source=pipeline_replay phase={:?} verdict=invalid reason=unexpected_dirty_render",
                 event.kind
             );
@@ -301,7 +301,7 @@ impl TouchEquivalenceProbe {
                 if prime_target_contains(event.x, event.y) =>
             {
                 self.stage = ProbeStage::WaitingPipelineReplayUp;
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV source=pipeline_replay phase=down verdict=accepted x={} y={} rendered=false",
                     event.x,
                     event.y
@@ -310,7 +310,7 @@ impl TouchEquivalenceProbe {
             (ProbeStage::WaitingPipelineReplayUp, TouchEventKind::Up | TouchEventKind::Cancel) => {
                 self.stage = ProbeStage::WaitingPostPrimeSyntheticDown;
                 self.next_synthetic_ms = now_ms.saturating_add(POST_PRIME_DELAY_MS);
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV source=pipeline_replay phase=up verdict=accepted x={} y={} rendered=false post_synthetic_delay_ms={}",
                     event.x,
                     event.y,
@@ -321,14 +321,14 @@ impl TouchEquivalenceProbe {
                 if prime_target_contains(event.x, event.y) =>
             {
                 if rendered {
-                    esp_println::println!(
+                    console::println!(
                         "PANEL_EQUIV source=physical_prime phase=down verdict=invalid reason=unexpected_dirty_render"
                     );
                     self.stage = ProbeStage::Disabled;
                     return;
                 }
                 self.stage = ProbeStage::WaitingPrimeUp;
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV source=physical_prime phase=down verdict=accepted x={} y={} rendered=false",
                     event.x,
                     event.y
@@ -336,7 +336,7 @@ impl TouchEquivalenceProbe {
             }
             (ProbeStage::WaitingPrimeUp, TouchEventKind::Up | TouchEventKind::Cancel) => {
                 if rendered {
-                    esp_println::println!(
+                    console::println!(
                         "PANEL_EQUIV source=physical_prime phase=up verdict=invalid reason=unexpected_dirty_render"
                     );
                     self.stage = ProbeStage::Disabled;
@@ -344,7 +344,7 @@ impl TouchEquivalenceProbe {
                 }
                 self.stage = ProbeStage::WaitingPostPrimeSyntheticDown;
                 self.next_synthetic_ms = now_ms.saturating_add(POST_PRIME_DELAY_MS);
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV source=physical_prime phase=up verdict=accepted x={} y={} rendered=false post_synthetic_delay_ms={}",
                     event.x,
                     event.y,
@@ -359,7 +359,7 @@ impl TouchEquivalenceProbe {
         if !self.pipeline_replay_active || !rendered {
             return;
         }
-        esp_println::println!(
+        console::println!(
             "PANEL_EQUIV source=pipeline_replay verdict=invalid reason=unexpected_dirty_render render_source={}",
             source
         );
@@ -411,7 +411,7 @@ impl TouchEquivalenceProbe {
             }
             SyntheticTouchPhase::Up => {
                 self.stage = ProbeStage::Complete;
-                esp_println::println!(
+                console::println!(
                     "PANEL_EQUIV state=complete down_match={} up_match={}",
                     self.physical_down_match,
                     expected == Some(actual)
@@ -459,7 +459,7 @@ fn prime_target_contains(x: u16, y: u16) -> bool {
 
 fn log_signature(source: &str, phase: &str, verdict: &str, signature: RenderSignature) {
     let framebuffer = signature.framebuffer;
-    esp_println::println!(
+    console::println!(
         "PANEL_EQUIV source={} phase={} verdict={} current_hash={:#010x} previous_hash={:?} changed_bytes={} changed_pixels={} rows={:?}..{:?} byte_columns={:?}..{:?} dirty={},{},{},{}",
         source,
         phase,

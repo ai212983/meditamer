@@ -1,7 +1,7 @@
 use super::catalogue_presenter;
 use crate::firmware::ui::lvgl::intent_bridge;
-use crate::firmware::ui::shell::catalogue::{CatalogueViewKind, DefaultCatalogue};
-use crate::firmware::ui::shell::settings::UiSettings;
+use shell::catalogue::{CatalogueViewKind, DefaultCatalogue};
+use shell::settings::UiSettings;
 
 pub(in crate::firmware::ui) type LauncherScreen = catalogue_presenter::CatalogueScreen;
 

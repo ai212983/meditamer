@@ -339,38 +339,13 @@ pub(crate) fn phase1s_ownership() -> Phase1sOwnership {
     }
 }
 
-pub(crate) async fn close_phase1s_for_update() -> Result<(), ()> {
-    match phase1s_ownership() {
-        Phase1sOwnership::KnownClosed => return Ok(()),
-        Phase1sOwnership::Unknown => return Err(()),
-        Phase1sOwnership::Active => {}
-    }
-    PHASE1S_CLOSE_REQUEST.signal(());
-    let closed = async {
-        loop {
-            match phase1s_ownership() {
-                Phase1sOwnership::KnownClosed => return Ok(()),
-                Phase1sOwnership::Unknown => return Err(()),
-                Phase1sOwnership::Active => {}
-            }
-            Timer::after(Duration::from_millis(10)).await;
-        }
-    };
-    embassy_time::with_timeout(Duration::from_secs(5), closed)
-        .await
-        .map_err(|_| ())?
-}
-
 fn update_reserved() -> bool {
     crate::firmware::update::transport_quiet()
-        || crate::firmware::update::status()
-            .map(|status| status.phase != crate::firmware::update::SessionPhase::Idle)
-            .unwrap_or(true)
 }
 
 #[embassy_executor::task]
 pub(crate) async fn phase1_task(bluetooth: esp_hal::peripherals::BT<'static>) {
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1S state=armed build_id={} cycles={} packet_mtu={} packet_count={} coex=false",
         BUILD_ID,
         PHASE1S_CYCLES,
@@ -389,7 +364,7 @@ pub(crate) async fn phase1_task(bluetooth: esp_hal::peripherals::BT<'static>) {
         let completion = run_phase1s_probe(&mut first_device, request).await;
         PHASE1D_FAILURE.store(completion.failure as u8, Ordering::Relaxed);
         PHASE1D_STATE.store(completion.state as u8, Ordering::Release);
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1S state={} boot={} epoch={} failure={}",
             completion.state.label(),
             request.boot_generation,
@@ -480,7 +455,7 @@ async fn run_phase1s_cycle(
         return Err(ProbeFailure::UpdateReserved);
     }
     let connector = BleConnector::new(device, Default::default()).map_err(|error| {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1D state=init_error cycle={} error={:?}",
             cycle,
             error
@@ -521,7 +496,7 @@ async fn run_phase1s_cycle(
     let before_drop = hci_callback_stats();
 
     if !wait_for_hci_callback_quiescence(CALLBACK_QUIESCENCE_TIMEOUT).await {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1D state=close_timeout cycle={} callbacks_in_flight={}",
             cycle,
             hci_callback_stats().in_flight,
@@ -567,7 +542,7 @@ async fn run_phase1s_cycle(
     if pool_exhausted_count() != 0 {
         return Err(ProbeFailure::PacketExhausted);
     }
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1D close cycle={} deadline_ms=2000 pre_in_flight={} accepted={} rejected={} callback_high_water={} settled_in_flight={} rx_queue_high_water={} rx_queue_overflow={} rx_oversize={} tx_rejected={} tx_timeout={} transport_faulted={} packets_free={} pool_exhausted={}",
         cycle,
         before_drop.in_flight,
@@ -692,7 +667,7 @@ fn log_phase1s_sample(stage: &'static str, request: ProbeRequest) -> SampleResul
     );
     let resource_ready =
         main_stack >= 8_192 && touch_stack >= 1_024 && heap.free_internal_bytes >= 16_384;
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1S sample stage={} boot={} epoch={} coex=false wifi_controller={} net_runner={} wifi_link={} radio_quiesced={} listener={} internal_free={} internal_min={} cpu0_stack_min={} touch_stack_min={} callback_admission={} callback_in_flight={} callback_accepted={} callback_rejected={} callback_high_water={} rx_queue_high_water={} rx_queue_overflow={} rx_oversize={} tx_rejected={} tx_timeout={} transport_faulted={} packets_free={} pool_exhausted={} exclusive_ok={} resource_ok={}",
         stage,
         request.boot_generation,
@@ -737,7 +712,7 @@ fn current_internal_free() -> u32 {
 
 async fn run_host(mut runner: Runner<'_, Controller, Phase1PacketPool>) {
     if let Err(error) = runner.run().await {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1 state=host_error error={:?} pool_exhausted={}",
             error,
             pool_exhausted_count()

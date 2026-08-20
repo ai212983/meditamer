@@ -147,7 +147,7 @@ impl Backend {
                 return Err(error);
             }
         }
-        esp_println::println!("UI_SETTINGS_BOOT base=home state=entered");
+        console::println!("UI_SETTINGS_BOOT base=home state=entered");
         backend.apply_startup_entry();
         backend.log_lifecycle_checkpoint("initialized", 0);
         let rendered = backend
@@ -211,7 +211,7 @@ impl Backend {
                 CatalogueAction::Unavailable(_) => None,
             })
         else {
-            esp_println::println!(
+            console::println!(
                 "UI_SETTINGS_STARTUP status=fallback reason=unavailable id={:?}",
                 id,
             );
@@ -239,7 +239,7 @@ impl Backend {
         }
 
         if self.shell.active().surface == destination && self.active_surface_is_renderable() {
-            esp_println::println!("UI_SETTINGS_STARTUP status=applied id={:?}", id);
+            console::println!("UI_SETTINGS_STARTUP status=applied id={:?}", id);
             return;
         }
         let _ = self.shell.queue_intent(OwnedNavIntent {
@@ -247,7 +247,7 @@ impl Backend {
             intent: NavIntent::Home,
         });
         self.drain_shell_navigation();
-        esp_println::println!(
+        console::println!(
             "UI_SETTINGS_STARTUP status=fallback reason=entry_failed id={:?}",
             id,
         );
@@ -255,75 +255,58 @@ impl Backend {
 }
 
 fn build_compiled_catalogue(surfaces: SurfaceRefs) -> Result<DefaultCatalogue, InitError> {
-    use crate::firmware::ui::shell::catalogue::{
-        CatalogueEntry, Compatibility, EntryId, GlyphRef, Health, Residency, SourcePresence,
-    };
+    use shell::catalogue::{CatalogueAvailability, CatalogueEntry, EntryId, GlyphRef};
 
     let entries = [
         CatalogueEntry {
             id: HOME_ENTRY_ID,
             label: c"Meditamer home",
             glyph: GlyphRef(1),
-            surface: Some(surfaces.home),
+            surface: surfaces.home,
             capabilities: SurfaceCapabilities::AMBIENT,
             default_rank: 0,
             pin: None,
-            source: SourcePresence::BuiltIn,
-            residency: Residency::NotApplicable,
-            compatibility: Compatibility::Compatible,
-            health: Health::Ready,
+            availability: CatalogueAvailability::Ready,
         },
         CatalogueEntry {
             id: EntryId::new(BASE_NAMESPACE, 2),
             label: c"Gesture diagnostics",
             glyph: GlyphRef(2),
-            surface: Some(surfaces.diagnostics),
+            surface: surfaces.diagnostics,
             capabilities: SurfaceCapabilities::LAUNCHABLE,
             default_rank: 0,
             pin: None,
-            source: SourcePresence::BuiltIn,
-            residency: Residency::NotApplicable,
-            compatibility: Compatibility::Compatible,
-            health: Health::Ready,
+            availability: CatalogueAvailability::Ready,
         },
         CatalogueEntry {
             id: EntryId::new(BASE_NAMESPACE, 3),
             label: c"Ambient view",
             glyph: GlyphRef(3),
-            surface: Some(surfaces.ambient_view),
+            surface: surfaces.ambient_view,
             capabilities: SurfaceCapabilities::LAUNCHABLE,
             default_rank: 1,
             pin: None,
-            source: SourcePresence::BuiltIn,
-            residency: Residency::NotApplicable,
-            compatibility: Compatibility::Compatible,
-            health: Health::Ready,
+            availability: CatalogueAvailability::Ready,
         },
         CatalogueEntry {
             id: EntryId::new(BASE_NAMESPACE, 4),
             label: c"Overlay settings",
             glyph: GlyphRef(4),
-            surface: Some(surfaces.overlay_settings),
+            surface: surfaces.overlay_settings,
             capabilities: SurfaceCapabilities::LAUNCHABLE,
             default_rank: 2,
             pin: None,
-            source: SourcePresence::BuiltIn,
-            residency: Residency::NotApplicable,
-            compatibility: Compatibility::Compatible,
-            health: Health::Ready,
+            availability: CatalogueAvailability::Ready,
         },
         CatalogueEntry {
             id: EntryId::new(BASE_NAMESPACE, 5),
             label: c"Refresh control",
             glyph: GlyphRef(5),
-            surface: Some(surfaces.sticky_status),
+            surface: surfaces.sticky_status,
             capabilities: SurfaceCapabilities::OVERLAY,
             default_rank: 0,
             pin: None,
-            source: SourcePresence::BuiltIn,
-            residency: Residency::NotApplicable,
-            compatibility: Compatibility::Compatible,
-            health: Health::Ready,
+            availability: CatalogueAvailability::Ready,
         },
     ];
     DefaultCatalogue::new(&entries, HOME_ENTRY_ID).map_err(|_| InitError::ShellConfigurationFailed)

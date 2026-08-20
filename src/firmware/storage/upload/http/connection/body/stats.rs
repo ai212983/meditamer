@@ -1,5 +1,5 @@
+use console::println;
 use embassy_time::Instant;
-use esp_println::println;
 
 use super::progress::UPLOAD_CHUNK_PIPELINE_ENABLED;
 use crate::firmware::observability;

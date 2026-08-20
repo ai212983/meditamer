@@ -12,7 +12,10 @@ use crate::firmware::{
     self_test::diagnostics_task,
     serial::serial_task,
     storage, touch,
-    types::{DisplayContext, InkplateImuDriver, InkplateTouchDriver, SdProbeDriver, SerialUart},
+    types::{
+        DisplayContext, InkplateImuDriver, InkplateTouchDriver, SdProbeDriver, SerialUart,
+        SharedI2cDevice,
+    },
     update::firmware_health_task,
 };
 use crate::{
@@ -31,6 +34,7 @@ pub(super) struct BoardRuntimeResources {
     pub(super) display_context: DisplayContext,
     pub(super) touch_driver: InkplateTouchDriver,
     pub(super) imu_driver: InkplateImuDriver,
+    pub(super) rtc_i2c: SharedI2cDevice,
     pub(super) gpio36_input: Input<'static>,
     pub(super) sd_probe: SdProbeDriver,
     pub(super) uart: SerialUart,
@@ -63,6 +67,7 @@ async fn run_board_runtime(
         mut display_context,
         mut touch_driver,
         imu_driver,
+        rtc_i2c,
         gpio36_input,
         sd_probe,
         uart,
@@ -86,7 +91,7 @@ async fn run_board_runtime(
         match touch_driver.init_with_status().await {
             Ok(TouchInitStatus::Ready { x_res, y_res }) => Some((x_res, y_res)),
             status => {
-                esp_println::println!("touch: init_failed phase=bootstrap status={:?}", status);
+                console::println!("touch: init_failed phase=bootstrap status={:?}", status);
                 let _ = touch_driver.shutdown().await;
                 None
             }
@@ -124,7 +129,11 @@ async fn run_board_runtime(
     spawn_task(spawner, TaskClass::Diagnostics, diagnostics_task().unwrap());
     spawn_task(spawner, TaskClass::Battery, battery_task().unwrap());
     spawn_task(spawner, TaskClass::Sd, storage::sd_task(sd_probe).unwrap());
-    spawn_task(spawner, TaskClass::Serial, serial_task(uart).unwrap());
+    spawn_task(
+        spawner,
+        TaskClass::Serial,
+        serial_task(uart, rtc_i2c).unwrap(),
+    );
     spawn_task(
         spawner,
         TaskClass::FirmwareHealth,
@@ -145,7 +154,7 @@ fn external_value<T>(value: T) -> psram::ExternalValue<T> {
     match psram::ExternalValue::try_new(value) {
         Ok(value) => value,
         Err(_) => {
-            esp_println::println!("runtime: external startup allocation failed");
+            console::println!("runtime: external startup allocation failed");
             super::super::reset_pending_update_or_halt();
         }
     }

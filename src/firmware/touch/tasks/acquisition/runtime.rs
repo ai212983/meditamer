@@ -93,7 +93,7 @@ pub(super) async fn read_and_publish(
     let authoritative_count =
         contact_sampling.classify_touch_count(&sample.raw, sample.touch_count);
     if RELEASE_TRACE_ENABLED && contact_sampling.should_trace(t_ms, authoritative_count) {
-        esp_println::println!(
+        console::println!(
             "TOUCH_RELEASE_TRACE phase={} t_ms={} authoritative={:?} decoded_count={} raw={:02x},{:02x},{:02x},{:02x},{:02x},{:02x},{:02x},{:02x}",
             phase,
             t_ms,
@@ -132,7 +132,7 @@ pub(super) async fn handle_fault(
     request_touch_pipeline_reset();
     *retry_at = Instant::now() + Duration::from_millis(TOUCH_INIT_RETRY_MS);
     publish_touch_status(TouchStatus::Fault).await;
-    esp_println::println!("touch: read_error; retrying");
+    console::println!("touch: read_error; retrying");
 }
 
 pub(super) async fn publish_touch_status(status: TouchStatus) {
