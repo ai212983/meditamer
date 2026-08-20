@@ -1,0 +1,16 @@
+[package]
+name = "shtc3"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Sensirion SHTC3 temperature/humidity driver, shaped like packages/rtc: generic
+# over `embedded_hal_async::i2c::I2c`, so it names no chip and the CRC and
+# fixed-point conversions are testable on the host.
+
+[features]
+default = []
+host-tests = []
+
+[dependencies]
+embedded-hal-async = "1.0.0"

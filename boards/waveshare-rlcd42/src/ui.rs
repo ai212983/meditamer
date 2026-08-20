@@ -86,6 +86,29 @@ pub unsafe fn init(width: i32, height: i32) -> *mut lv::lv_display_t {
     }
 }
 
+/// The two labels the sensor task rewrites in place. LVGL owns the objects;
+/// these are handles, published once at build time.
+static mut READING_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
+static mut STATUS_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
+
+/// Rewrite the reading, and mark the label dirty so the next `lv_timer_handler`
+/// redraws just that region rather than the whole screen.
+pub unsafe fn set_reading(text: &core::ffi::CStr) {
+    unsafe {
+        if !READING_LABEL.is_null() {
+            lv::lv_label_set_text(READING_LABEL, text.as_ptr());
+        }
+    }
+}
+
+pub unsafe fn set_status(text: &core::ffi::CStr) {
+    unsafe {
+        if !STATUS_LABEL.is_null() {
+            lv::lv_label_set_text(STATUS_LABEL, text.as_ptr());
+        }
+    }
+}
+
 /// Build a screen from what a shell provider registered, so the surface on the
 /// glass is the one the registry resolved rather than a hardcoded layout.
 pub unsafe fn build_screen(title: &core::ffi::CStr, subtitle: &core::ffi::CStr) {
@@ -112,5 +135,17 @@ pub unsafe fn build_screen(title: &core::ffi::CStr, subtitle: &core::ffi::CStr) 
         lv::lv_obj_set_style_border_color(panel, lv::lv_color_black(), 0);
         lv::lv_obj_set_style_bg_color(panel, lv::lv_color_white(), 0);
         lv::lv_obj_set_style_radius(panel, 8, 0);
+
+        let reading = lv::lv_label_create(panel);
+        lv::lv_label_set_text(reading, c"--.- C   --.- %".as_ptr());
+        lv::lv_obj_set_style_text_font(reading, &raw const lv::lv_font_montserrat_24, 0);
+        lv::lv_obj_align(reading, lv::lv_align_t_LV_ALIGN_CENTER, 0, -12);
+        READING_LABEL = reading;
+
+        let status = lv::lv_label_create(panel);
+        lv::lv_label_set_text(status, c"waiting for sensor".as_ptr());
+        lv::lv_obj_set_style_text_font(status, &raw const lv::lv_font_montserrat_14, 0);
+        lv::lv_obj_align(status, lv::lv_align_t_LV_ALIGN_CENTER, 0, 26);
+        STATUS_LABEL = status;
     }
 }

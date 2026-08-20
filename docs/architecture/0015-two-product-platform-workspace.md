@@ -685,3 +685,29 @@ Two defects worth recording, both found by looking rather than by a gate:
   resolve. `scripts/build/build.sh` already does this for esp32; the board needs its own because the
   variable is target-suffixed — `BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf` is not
   interchangeable with the esp32 spelling. Hence `boards/waveshare-rlcd42/build.sh`.
+
+## Live sensor data on the S3 screen (2026-08-20)
+
+The board now reads an SHTC3 and puts the reading on the glass, refreshed on a fixed cadence. That
+closes the loop the earlier steps opened: a peripheral, a shared bus, a package, the shell registry,
+LVGL, `board::Panel`, and the ST7305 driver, all in one running program.
+
+`packages/shtc3` follows `packages/rtc`'s shape — generic over `embedded_hal_async::i2c::I2c`, no
+chip named, and the CRC and fixed-point conversions host-tested, including the datasheet's own
+`crc8(0xBE, 0xEF) == 0x92` check value.
+
+**The self-heating correction stays out of the driver.** Waveshare's code subtracts a fixed 4 °C, and
+it is tempting to copy that into the driver where it would be invisible. But it describes where the
+part sits relative to warm components on *this* board, not the sensor's behaviour, so the board
+applies it and the driver returns what the part reported. A driver that baked it in would be
+silently wrong on every other layout — the same error as `dither` hardcoding one panel's memory
+format, caught earlier in this ADR.
+
+Two things the console proved that the screen could not. The sensor's ID reads `0x0887` with a valid
+CRC, which is a stronger presence check than an I²C ACK. And successive samples agree to within
+0.04 °C, so the conversion path is stable rather than plausible-looking noise.
+
+The refresh interval was visibly not five seconds, and the cause is worth recording because it is a
+common shape: the loop slept five seconds *after* a 50 ms wakeup, a 20 ms conversion, and its bus
+traffic, so every period ran ~80 ms long and the error accumulated. An `embassy_time::Ticker` holds
+the cadence regardless of how long the work takes; a `Timer::after` at the end of a loop body cannot.

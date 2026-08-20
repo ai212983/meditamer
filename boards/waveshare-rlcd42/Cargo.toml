@@ -39,6 +39,10 @@ esp-println = { version = "0.17.0", default-features = false, features = [
 ] }
 embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
 embassy-time = "0.5.1"
+# The RTC and the sensor share one bus, so it needs an owner both can borrow
+# from -- the same shared_bus arrangement Meditamer uses for its I2C devices.
+embassy-sync = "0.8.0"
+embassy-embedded-hal = "0.6.0"
 static_cell = "2.1.1"
 embedded-hal-async = "1.0.0"
 
@@ -51,6 +55,7 @@ lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["libr
 # Already shipping on the Inkplate; the S3 carries the same PCF85063A, so this
 # is the package's second board rather than a second driver.
 rtc = { path = "../../packages/rtc" }
+shtc3 = { path = "../../packages/shtc3" }
 
 [patch.crates-io]
 esp-backtrace = { path = "../../vendor/esp-backtrace-0.19.0-window-spill-fix" }

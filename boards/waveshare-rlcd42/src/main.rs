@@ -26,6 +26,9 @@ use esp_hal::spi::Mode as SpiMode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use board::{Panel, RefreshMode};
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 use arbitration::claim::{self, Ownership};
@@ -184,10 +187,147 @@ fn main() -> ! {
     // executor rather than the blocking loop this used to end in.
     static EXECUTOR: StaticCell<esp_rtos::embassy::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(esp_rtos::embassy::Executor::new());
+    // One bus, two devices. Each task borrows it per transaction rather than
+    // owning it, which is what lets the sensor and the clock coexist.
+    static I2C_BUS: StaticCell<
+        Mutex<CriticalSectionRawMutex, I2c<'static, esp_hal::Async>>,
+    > = StaticCell::new();
+    let i2c_bus = I2C_BUS.init(Mutex::new(i2c));
+
     executor.run(|spawner| {
-        spawner.spawn(clock_task(i2c).unwrap());
+        spawner.spawn(clock_task(I2cDevice::new(i2c_bus)).unwrap());
+        spawner.spawn(sensor_task(I2cDevice::new(i2c_bus)).unwrap());
         spawner.spawn(ui_task(lv_display).unwrap());
     });
+}
+
+/// One borrow of the shared bus, as handed to each device task.
+type SharedI2c = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, esp_hal::Async>>;
+
+/// Read the SHTC3 and put it on the glass. Applies this board's self-heating
+/// correction here rather than in the driver: 4 C is a property of where the
+/// part sits relative to warm components, which Waveshare's own code subtracts
+/// and which would be wrong on any other layout.
+#[embassy_executor::task]
+async fn sensor_task(i2c: SharedI2c) {
+    /// Waveshare's `SHTC3_PETP_VOL`, in millidegrees.
+    const SELF_HEATING_MC: i32 = 4_000;
+
+    let mut sensor = shtc3::Shtc3::new(i2c);
+
+    if sensor.wakeup().await.is_err() {
+        console::println!("SHTC3 wakeup failed");
+        unsafe { ui::set_status(c"sensor not responding") };
+        return;
+    }
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
+
+    match sensor.read_id().await {
+        Ok(id) => console::println!("SHTC3_ID 0x{:04x}", id),
+        Err(error) => console::println!("SHTC3_ID error={:?}", error),
+    }
+
+    // A Ticker, not a sleep: the wakeup, the 20ms conversion and the bus traffic
+    // all sit inside the loop, so sleeping 5s after them drifts by ~80ms every
+    // cycle. Ticker holds the cadence regardless of how long the work took.
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_secs(5));
+    let mut samples: u32 = 0;
+    loop {
+        let reading = async {
+            sensor.wakeup().await?;
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
+            sensor.start_measurement().await?;
+            // The part needs the conversion time before the read; polling mode
+            // means it will NACK rather than stretch the clock if we are early.
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(20)).await;
+            let measurement = sensor.read_measurement().await?;
+            let _ = sensor.sleep().await;
+            Ok::<_, shtc3::Error<_>>(measurement)
+        }
+        .await;
+
+        match reading {
+            Ok(measurement) => {
+                let temperature = measurement.temperature_millicelsius - SELF_HEATING_MC;
+                let humidity = measurement.humidity_millipercent;
+                samples += 1;
+                console::println!(
+                    "SHTC3 t_mC={} rh_m%={} corrected_t_mC={} samples={}",
+                    measurement.temperature_millicelsius,
+                    humidity,
+                    temperature,
+                    samples
+                );
+
+                let mut text = [0u8; 32];
+                let len = format_reading(&mut text, temperature, humidity);
+                if let Ok(c_text) = core::ffi::CStr::from_bytes_with_nul(&text[..len]) {
+                    unsafe {
+                        ui::set_reading(c_text);
+                        ui::set_status(c"SHTC3 - updates every 5s");
+                    }
+                }
+            }
+            Err(error) => {
+                console::println!("SHTC3 read error={:?}", error);
+                unsafe { ui::set_status(c"sensor read failed") };
+            }
+        }
+
+        ticker.next().await;
+    }
+}
+
+/// Render `21.4 C   47.8 %` into `buffer`, NUL-terminated, returning the length
+/// including the NUL. Hand-rolled because `core::fmt` into a fixed buffer costs
+/// more code than these two fixed-point conversions do.
+fn format_reading(buffer: &mut [u8; 32], temperature_mc: i32, humidity_mpct: i32) -> usize {
+    struct Writer<'a> {
+        buffer: &'a mut [u8; 32],
+        at: usize,
+    }
+
+    impl Writer<'_> {
+        fn push(&mut self, byte: u8) {
+            if self.at < 31 {
+                self.buffer[self.at] = byte;
+                self.at += 1;
+            }
+        }
+
+        /// One decimal place, from thousandths.
+        fn tenths(&mut self, value: i32) {
+            let magnitude = value.unsigned_abs();
+            let whole = magnitude / 1000;
+            let tenth = (magnitude % 1000) / 100;
+            if value < 0 {
+                self.push(b'-');
+            }
+            if whole >= 100 {
+                self.push(b'0' + (whole / 100 % 10) as u8);
+            }
+            if whole >= 10 {
+                self.push(b'0' + (whole / 10 % 10) as u8);
+            }
+            self.push(b'0' + (whole % 10) as u8);
+            self.push(b'.');
+            self.push(b'0' + tenth as u8);
+        }
+
+        fn str(&mut self, text: &str) {
+            for byte in text.as_bytes() {
+                self.push(*byte);
+            }
+        }
+    }
+
+    let mut writer = Writer { buffer, at: 0 };
+    writer.tenths(temperature_mc);
+    writer.str(" C   ");
+    writer.tenths(humidity_mpct);
+    writer.str(" %");
+    writer.push(0);
+    writer.at
 }
 
 /// Drive LVGL. The screen's content comes from a shell provider registration,
@@ -246,7 +386,7 @@ async fn ui_task(display: *mut lightvgl_sys::lv_display_t) {
 /// oscillator has never been started reports the clock as stopped and there
 /// would be nothing to read back.
 #[embassy_executor::task]
-async fn clock_task(i2c: I2c<'static, esp_hal::Async>) {
+async fn clock_task(i2c: SharedI2c) {
     const KNOWN_EPOCH: u32 = 1_787_227_200; // 2026-08-20T12:00:00Z
     const OFFSET_MINUTES: i16 = 120; // UTC+2
 

@@ -20,6 +20,7 @@ members = [
     "packages/otadata",
     "packages/rtc",
     "packages/sdcard",
+    "packages/shtc3",
     "platform/arbitration",
     "platform/board",
     "platform/console",
