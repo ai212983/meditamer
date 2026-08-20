@@ -531,3 +531,44 @@ that decides when Wi-Fi may be torn down for BLE — precisely the area ADR-0014
 scheduler defect lives next to. The gates prove it compiles and that the model's own tests pass; they
 do not prove a real handoff still works on the device. It should be exercised on hardware before
 being relied on.
+
+## Hardware verification attempt (2026-08-20)
+
+The arbitration change could not be verified on hardware, because this tree now reproduces
+ADR-0014's unresolved scheduler defect. That is a finding about the defect, not about the change.
+
+Flashed to the Inkplate 4 TEMPERA (ESP32 rev 3.1) through
+`hostctl single-production-flash` — note that `flash-capture --flash-mode full` writes an `otadata`
+selecting *factory*, so it boots the updater and never exercises `ota_0`; only
+`single-production-flash` selects the production image, exactly as ADR-0014's addendum warns.
+
+`ota_0` boots, initialises PSRAM, reaches `FIRMWARE_BOOT booted=ota_0 state=pending_verify` and
+`RADIO_HANDOFF state=serving`, then panics before `RUNTIME_READY`:
+
+```
+Exception occurred on ProCpu 'LoadStoreError'
+EXCVADDR: 0x4000c0d4   PC: 0x40080fd9
+0x40080fd6  <esp_rtos::run_queue::RunQueue>::mark_task_ready
+0x40083d9e  __level_1_interrupt
+```
+
+Same fault, same address, same call chain as ADR-0014's addendum records, down to the coincidental
+`touch: init_failed ... ArbitrationLost` in the same capture. Because the app never confirms, the
+bootloader marks `ota_0` aborted and falls back to the factory updater, which is the layout behaving
+correctly.
+
+Matching a known signature is not proof of innocence, so this was A/B'd against `63e34441`, the
+commit immediately before the arbitration work. **It crashes identically** — same PC, same EXCVADDR
+— which exonerates the arbitration change and confirms the defect is ambient in this tree.
+
+That is consistent with the addendum's own conclusion: the crash is sensitive to binary layout
+rather than to logic, and should be treated as ambient risk for any sufficiently large firmware
+change. This session added five crates and moved several thousand lines, which is exactly the kind
+of perturbation it responds to.
+
+**Consequence for this ADR: no further extraction should be treated as hardware-verified until the
+ADR-0014 defect is resolved.** The gates prove compilation and host behaviour; they cannot prove a
+real handoff, a real refresh, or a real upload still works. The ESP-Prog ordered for that
+investigation is now on the critical path for ADR-0015 as well as ADR-0014.
+
+The device is left booting the factory updater — a safe recovery state, not a working product image.
