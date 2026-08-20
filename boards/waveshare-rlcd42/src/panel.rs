@@ -29,6 +29,16 @@ use esp_hal::Blocking;
 /// is initialised at 400x300 too, so landscape is the board's intended viewing
 /// orientation. Callers work in these coordinates and never see the native
 /// ones.
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+/// Payload of the most recent flush, published for the UI task, which cannot
+/// borrow the panel because LVGL owns it for the lifetime of the program.
+static LAST_FLUSH_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+pub fn last_flush_bytes() -> usize {
+    LAST_FLUSH_BYTES.load(Ordering::Relaxed)
+}
+
 pub const WIDTH: usize = 400;
 pub const HEIGHT: usize = 300;
 
@@ -55,7 +65,50 @@ const PACK: [[u8; 4]; 4] = [
     [0x00, 0x02, 0x01, 0x03],
 ];
 
+/// Inclusive bounding box of changed pixels, in **native** coordinates, since
+/// that is what the panel's window commands address.
+#[derive(Clone, Copy)]
+struct Dirty {
+    x0: usize,
+    x1: usize,
+    y0: usize,
+    y1: usize,
+}
+
+impl Dirty {
+    const EMPTY: Self = Self {
+        x0: usize::MAX,
+        x1: 0,
+        y0: usize::MAX,
+        y1: 0,
+    };
+
+    fn is_empty(&self) -> bool {
+        self.x0 > self.x1 || self.y0 > self.y1
+    }
+
+    fn add(&mut self, x: usize, y: usize) {
+        self.x0 = self.x0.min(x);
+        self.x1 = self.x1.max(x);
+        self.y0 = self.y0.min(y);
+        self.y1 = self.y1.max(y);
+    }
+
+    const fn everything() -> Self {
+        Self {
+            x0: 0,
+            x1: NATIVE_WIDTH - 1,
+            y0: 0,
+            y1: NATIVE_HEIGHT - 1,
+        }
+    }
+}
+
 pub struct St7305<'d> {
+    dirty: Dirty,
+    /// Payload bytes sent by the most recent flush, so callers can see what a
+    /// partial refresh saved rather than assume it.
+    last_flush_bytes: usize,
     framebuffer: &'d mut [u8; FRAMEBUFFER_BYTES],
     spi: Spi<'d, Blocking>,
     dc: Output<'d>,
@@ -73,6 +126,10 @@ impl<'d> St7305<'d> {
         reset: Output<'d>,
     ) -> Self {
         Self {
+            // Nothing has been drawn yet, but nothing on the glass is known
+            // either: the first refresh must push everything.
+            dirty: Dirty::everything(),
+            last_flush_bytes: 0,
             framebuffer,
             spi,
             dc,
@@ -155,26 +212,57 @@ impl<'d> St7305<'d> {
         self.command(0x29); // display on
     }
 
+    /// Payload bytes written by the most recent flush.
+    pub fn last_flush_bytes(&self) -> usize {
+        self.last_flush_bytes
+    }
+
+    /// Direct framebuffer access. The caller may write anywhere, so this
+    /// conservatively marks the whole panel dirty — a partial refresh after
+    /// this is indistinguishable from a full one.
     pub fn framebuffer_mut(&mut self) -> &mut [u8; FRAMEBUFFER_BYTES] {
+        self.dirty = Dirty::everything();
         self.framebuffer
     }
 
-    /// Push the whole framebuffer. One tile row at a time: the column window is
-    /// constant, only the row window advances.
+    /// Push the whole framebuffer.
     pub fn flush(&mut self) {
-        // Whole-width window, computed the way the panel expects rather than
-        // hardcoded, so the arithmetic is checkable against WIDTH.
-        let addr_start = COL_ADDR_BASE;
-        let addr_end = COL_ADDR_BASE + ((NATIVE_WIDTH - 1) / COL_GROUP) as u8;
+        self.dirty = Dirty::everything();
+        self.flush_dirty();
+    }
+
+    /// Push only the region marked dirty, then clear the mark.
+    ///
+    /// Both windows narrow, not just the rows: the column address is per
+    /// twelve-pixel group, so the range is rounded outward to a group boundary
+    /// and everything inside it is sent. Redrawing one label costs the bytes
+    /// its bounding box covers instead of all 15,000.
+    fn flush_dirty(&mut self) {
+        if self.dirty.is_empty() {
+            return;
+        }
+        let dirty = self.dirty;
+        self.dirty = Dirty::EMPTY;
+
+        let addr_start = COL_ADDR_BASE + (dirty.x0 / COL_GROUP) as u8;
+        let addr_end = COL_ADDR_BASE + (dirty.x1 / COL_GROUP) as u8;
         let groups = (addr_end - addr_start + 1) as usize;
         // Three bytes per column group per sub-row: 12 pixels / 4 per byte.
         let bytes_per_subrow = groups * 3;
+        // The packing works from the group boundary, not the dirty edge.
+        let first_column = (addr_start - COL_ADDR_BASE) as usize * COL_GROUP;
+        let last_column =
+            (((addr_end - COL_ADDR_BASE) as usize + 1) * COL_GROUP - 1).min(NATIVE_WIDTH - 1);
+        let first_page = dirty.y0 / 8;
+        let last_page = dirty.y1 / 8;
+        self.last_flush_bytes = (last_page - first_page + 1) * bytes_per_subrow * 4;
+        LAST_FLUSH_BYTES.store(self.last_flush_bytes, Ordering::Relaxed);
 
         let mut packed = [0u8; NATIVE_WIDTH];
         // Copied out because `command_with` borrows self mutably while the
         // framebuffer borrow would still be live.
         let mut row_buffer = [0u8; NATIVE_WIDTH];
-        for page in 0..PAGES {
+        for page in first_page..=last_page {
             // The framebuffer's contract is "bit set = ink", matching the
             // Inkplate and what `set_pixel` and `blit_l8` document. This panel
             // renders a set bit as paper, so polarity is inverted here -- once,
@@ -191,7 +279,7 @@ impl<'d> St7305<'d> {
             for sub_row in 0..4 {
                 let shift = sub_row * 2;
                 let base = sub_row * bytes_per_subrow;
-                for (index, column) in (0..NATIVE_WIDTH).step_by(4).enumerate() {
+                for (index, column) in (first_column..=last_column).step_by(4).enumerate() {
                     packed[base + index] = PACK[0][((row[column] >> shift) & 3) as usize]
                         | PACK[1][((row[column + 1] >> shift) & 3) as usize]
                         | PACK[2][((row[column + 2] >> shift) & 3) as usize]
@@ -237,12 +325,11 @@ impl Panel for St7305<'_> {
         }
     }
 
-    /// Only whole-panel refresh so far. The ST7305 can window a partial update
-    /// — [`St7305::flush`] already writes one tile row at a time — but nothing
-    /// tracks the dirty region across blits yet, and claiming support the driver
-    /// does not have would be worse than admitting it.
-    fn supports(&self, mode: RefreshMode) -> bool {
-        matches!(mode, RefreshMode::Full)
+    /// Both modes. `Partial` sends only the bounding box of what `blit_l8`
+    /// touched since the last refresh, which is what makes redrawing one label
+    /// cost a fraction of a full frame.
+    fn supports(&self, _mode: RefreshMode) -> bool {
+        true
     }
 
     unsafe fn blit_l8(&mut self, area: DirtyArea, pixels: *const u8) -> bool {
@@ -272,16 +359,20 @@ impl Panel for St7305<'_> {
                 // Same threshold as the Inkplate's blit: below mid-grey is ink.
                 let ink = source[row * width + column] < 128;
                 set_pixel(self.framebuffer, x as usize, y as usize, ink);
+                // Record in native coordinates, matching set_pixel's rotation,
+                // because the window commands address the panel that way.
+                self.dirty
+                    .add(HEIGHT - 1 - y as usize, x as usize);
             }
         }
         true
     }
 
     fn refresh(&mut self, mode: RefreshMode) -> Result<(), RefreshError> {
-        if !self.supports(mode) {
-            return Err(RefreshError::Unsupported(mode));
+        match mode {
+            RefreshMode::Full => self.flush(),
+            RefreshMode::Partial => self.flush_dirty(),
         }
-        self.flush();
         Ok(())
     }
 }

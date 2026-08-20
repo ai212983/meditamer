@@ -60,8 +60,12 @@ unsafe extern "C" fn flush_cb(
         };
         // LVGL flushes a frame in several chunks and only the last is marked;
         // pushing to the glass on every chunk would tear and be slow.
+        //
+        // Partial, not Full: the blits have recorded what they touched, so this
+        // sends the bounding box of the change rather than all 15,000 bytes.
+        // Redrawing one label is most of the reason this board wakes at all.
         if accepted && unsafe { lv::lv_display_flush_is_last(display) } {
-            let _ = unsafe { (*panel).refresh(RefreshMode::Full) };
+            let _ = unsafe { (*panel).refresh(RefreshMode::Partial) };
         }
     }
     unsafe { lv::lv_display_flush_ready(display) };

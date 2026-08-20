@@ -145,21 +145,35 @@ fn main() -> ! {
     };
 
     let geometry = panel.geometry();
-    let partial = panel.supports(RefreshMode::Partial);
-    let refreshed = panel.refresh(RefreshMode::Full).is_ok();
-    let rejected = panel.refresh(RefreshMode::Partial);
+    let partial_supported = panel.supports(RefreshMode::Partial);
+
+    // Full first: the glass holds unknown content at boot, so the whole surface
+    // has to be written before a partial update means anything.
+    let full_ok = panel.refresh(RefreshMode::Full).is_ok();
+    let full_bytes = panel::last_flush_bytes();
+
+    // Then a partial with nothing dirty, which must send nothing at all rather
+    // than quietly repeating the frame.
+    let partial_ok = panel.refresh(RefreshMode::Partial).is_ok();
+    let idle_bytes = panel::last_flush_bytes();
+
     console::println!(
-        "PANEL_TRAIT {}x{} glyph=F strokes_ok={} clip_ok={} full_ok={} partial_supported={} rejected={:?}",
+        "PANEL_TRAIT {}x{} glyph=F strokes_ok={} clip_ok={} full_ok={} full_bytes={} partial_supported={} partial_ok={} idle_bytes={}",
         geometry.width,
         geometry.height,
         all_ok,
         clipped,
-        refreshed,
-        partial,
-        rejected
+        full_ok,
+        full_bytes,
+        partial_supported,
+        partial_ok,
+        idle_bytes
     );
-    assert!(all_ok && clipped && refreshed && !partial);
-    assert!(matches!(rejected, Err(board::RefreshError::Unsupported(_))));
+    assert!(all_ok && clipped && full_ok && partial_supported && partial_ok);
+    assert!(full_bytes == panel::FRAMEBUFFER_BYTES);
+    // An empty dirty box must not touch the panel; `last_flush_bytes` is left
+    // at the previous value because no flush happened.
+    assert!(idle_bytes == full_bytes);
 
     // Hand the panel to LVGL. The display outlives the UI, so it is promoted to
     // 'static rather than borrowed across the executor.
@@ -346,7 +360,7 @@ fn format_reading(buffer: &mut [u8; 32], temperature_mc: i32, humidity_mpct: i32
 /// layout hardcoded in the backend -- the property the Inkplate's closed
 /// `SurfaceModel` enum currently lacks.
 #[embassy_executor::task]
-async fn ui_task(display: *mut lightvgl_sys::lv_display_t) {
+async fn ui_task(_display: *mut lightvgl_sys::lv_display_t) {
     let mut registry: SurfaceRegistry<PROVIDER_CAPACITY, SURFACE_CAPACITY> = SurfaceRegistry::new();
     let token = registry
         .register_provider(
@@ -413,12 +427,16 @@ async fn ui_task(display: *mut lightvgl_sys::lv_display_t) {
 
         if woken_by_change {
             redraws += 1;
+            // The payload is the point: a full frame is 15,000 bytes, so this
+            // shows what narrowing the window to the changed label actually
+            // saved, rather than asserting a saving.
             console::println!(
-                "UI_REDRAW n={} slept_ms={} passes={} display_null={}",
+                "UI_REDRAW n={} slept_ms={} passes={} flush_bytes={} of {}",
                 redraws,
                 elapsed_ms,
                 passes,
-                display.is_null()
+                panel::last_flush_bytes(),
+                panel::FRAMEBUFFER_BYTES
             );
         }
     }

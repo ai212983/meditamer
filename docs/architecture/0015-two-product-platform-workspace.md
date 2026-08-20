@@ -742,3 +742,36 @@ control. That is the obvious next saving, and it would finally exercise the half
 trait the ST7305 currently answers `false` to.
 
 Both need a current meter to justify, which is the honest reason they are listed rather than done.
+
+## RefreshMode::Partial, implemented and measured (2026-08-20)
+
+The ST7305 now answers `true` to both refresh modes, and `blit_l8` records the bounding box of what
+it touched so a refresh sends only that. Measured on the device:
+
+| | payload |
+| --- | --- |
+| First frame (whole screen unknown) | 15,000 bytes |
+| Each label update | **2,016 bytes** (13.4%, 7.4x less) |
+| Refresh with nothing dirty | 0 bytes — no transaction at all |
+
+At 24 MHz that is 5.00 ms of bus time per update down to 0.67 ms; over an hour at the 30-second
+cadence, 1,758 KiB down to 236 KiB.
+
+Both windows narrow, not just the rows. The column address is per twelve-pixel group, so the dirty
+range is rounded outward to a group boundary — narrowing only rows would have left most of the
+saving on the table. The bounding box is tracked in *native* coordinates, since that is what the
+window commands address, which means the rotation has to be applied when recording it exactly as
+`set_pixel` applies it when writing.
+
+This was deferred earlier pending a current meter. There isn't one on this board — the `0x40` that
+looks like an INA219 is the ES7210 microphone ADC, and the four devices found are fully accounted
+for as codec, mic ADC, RTC and humidity sensor. The board offers battery *voltage* on ADC channel 3
+through a 3x divider, which cannot compare two firmware builds' idle draw in any practical time. The
+work went ahead anyway because the argument never needed a meter: sending 2,016 bytes instead of
+15,000 is less SPI traffic and less CPU by construction. The panel's power-mode registers remain
+untouched, because that argument *does* need one.
+
+One thing worth noting about how it was caught: enabling `Partial` made an assertion fail
+immediately — the bring-up test asserted the mode was *unsupported*, which had been true when
+written. A test that encodes today's limitation will fail the day the limitation lifts, which is the
+correct behaviour and the reason it was written as an assertion rather than a log line.
