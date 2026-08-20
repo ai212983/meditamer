@@ -711,3 +711,34 @@ The refresh interval was visibly not five seconds, and the cause is worth record
 common shape: the loop slept five seconds *after* a 50 ms wakeup, a 20 ms conversion, and its bus
 traffic, so every period ran ~80 ms long and the error accumulated. An `embassy_time::Ticker` holds
 the cadence regardless of how long the work takes; a `Timer::after` at the end of a loop body cannot.
+
+## Idle cost, once battery life mattered more than cadence (2026-08-20)
+
+Told that exact timing was not important but battery life was, the sensor interval turned out to be
+the wrong thing to look at. The dominant cost was the UI.
+
+`lv_timer_handler` was being called on a 10ms timer — 6,000 CPU wakeups a minute, forever, against
+12 for the sensor. Polling LVGL is the obvious way to drive it and the wrong one for a battery
+device. The UI task now sleeps on a signal the sensor raises, advances LVGL's clock by however long
+it actually slept, and drains whatever work LVGL has pending. Measured on the device:
+`UI_REDRAW slept_ms=30000 passes=1` — a full thirty-second sleep, and one handler pass to finish the
+redraw.
+
+| | before | after |
+| --- | --- | --- |
+| UI wakeups/min | 6,000 | 2 |
+| Sensor samples/min | 12 | 2 |
+| CPU clock | 240 MHz | 80 MHz |
+
+The long timeout on the signal wait is a backstop rather than a cadence: LVGL's own timers would
+otherwise never run at all. Nothing on this screen animates, so it is deliberately long.
+
+Two things deliberately not done. The ST7305's power modes were left alone: u8g2's source comments
+`0x38` as *low* power mode while the vendor init treats it as high, and guessing at a panel power
+register whose effect cannot be measured here would be worse than leaving a working configuration.
+And `RefreshMode::Partial` is still unimplemented — pushing all 15,000 bytes to redraw one label is
+the largest remaining per-update cost, and unlike the panel registers it is entirely under our
+control. That is the obvious next saving, and it would finally exercise the half of the `Panel`
+trait the ST7305 currently answers `false` to.
+
+Both need a current meter to justify, which is the honest reason they are listed rather than done.

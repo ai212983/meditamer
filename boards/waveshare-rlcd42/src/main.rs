@@ -44,7 +44,7 @@ const SURFACE_CAPACITY: usize = 8;
 
 #[esp_hal::main]
 fn main() -> ! {
-    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz));
 
     // esp-println's jtag-serial backend drops output when the host has not
     // finished attaching; give the CDC port time to enumerate after the reset
@@ -201,6 +201,11 @@ fn main() -> ! {
     });
 }
 
+/// Raised when something the UI shows has changed. The UI task sleeps on this
+/// rather than polling LVGL on a timer.
+static UI_DIRTY: embassy_sync::signal::Signal<CriticalSectionRawMutex, ()> =
+    embassy_sync::signal::Signal::new();
+
 /// One borrow of the shared bus, as handed to each device task.
 type SharedI2c = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, esp_hal::Async>>;
 
@@ -212,6 +217,10 @@ type SharedI2c = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, esp_ha
 async fn sensor_task(i2c: SharedI2c) {
     /// Waveshare's `SHTC3_PETP_VOL`, in millidegrees.
     const SELF_HEATING_MC: i32 = 4_000;
+    /// Room temperature and humidity move slowly, and every sample costs a
+    /// wakeup, a 50ms settle, a 20ms conversion and a screen redraw. Exact
+    /// cadence does not matter here; battery life does.
+    const SAMPLE_INTERVAL: embassy_time::Duration = embassy_time::Duration::from_secs(30);
 
     let mut sensor = shtc3::Shtc3::new(i2c);
 
@@ -230,7 +239,7 @@ async fn sensor_task(i2c: SharedI2c) {
     // A Ticker, not a sleep: the wakeup, the 20ms conversion and the bus traffic
     // all sit inside the loop, so sleeping 5s after them drifts by ~80ms every
     // cycle. Ticker holds the cadence regardless of how long the work took.
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_secs(5));
+    let mut ticker = embassy_time::Ticker::every(SAMPLE_INTERVAL);
     let mut samples: u32 = 0;
     loop {
         let reading = async {
@@ -264,13 +273,15 @@ async fn sensor_task(i2c: SharedI2c) {
                 if let Ok(c_text) = core::ffi::CStr::from_bytes_with_nul(&text[..len]) {
                     unsafe {
                         ui::set_reading(c_text);
-                        ui::set_status(c"SHTC3 - updates every 5s");
+                        ui::set_status(c"SHTC3");
                     }
+                    UI_DIRTY.signal(());
                 }
             }
             Err(error) => {
                 console::println!("SHTC3 read error={:?}", error);
                 unsafe { ui::set_status(c"sensor read failed") };
+                UI_DIRTY.signal(());
             }
         }
 
@@ -363,20 +374,52 @@ async fn ui_task(display: *mut lightvgl_sys::lv_display_t) {
         definition.refresh_hint
     );
 
-    // LVGL needs its tick advanced and its timers run; there is no OS port.
-    let mut elapsed_ms: u32 = 0;
-    let mut frames: u32 = 0;
+    // Event-driven, not polled. Ticking LVGL every 10ms costs 100 CPU wakeups a
+    // second forever, which on a battery dwarfs everything else here -- the
+    // sensor reads once per sample period. Instead the UI sleeps until
+    // something marks it dirty, advances LVGL's clock by however long it
+    // actually slept, and drains the work LVGL has pending.
+    //
+    // The timeout is a backstop, not a cadence: LVGL's own timers (label
+    // scrolling, style transitions) would otherwise never run. Nothing here
+    // animates, so it is deliberately long.
+    const IDLE_BACKSTOP: embassy_time::Duration = embassy_time::Duration::from_secs(60);
+
+    let mut last_tick = embassy_time::Instant::now();
+    let mut redraws: u32 = 0;
     loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
-        elapsed_ms += 10;
-        unsafe {
-            lightvgl_sys::lv_tick_inc(10);
-            lightvgl_sys::lv_timer_handler();
+        let woken_by_change =
+            embassy_time::with_timeout(IDLE_BACKSTOP, UI_DIRTY.wait())
+                .await
+                .is_ok();
+
+        let now = embassy_time::Instant::now();
+        let elapsed_ms = (now - last_tick).as_millis().min(u32::MAX as u64) as u32;
+        last_tick = now;
+
+        unsafe { lightvgl_sys::lv_tick_inc(elapsed_ms) };
+
+        // lv_timer_handler returns the milliseconds until it next needs to run;
+        // zero means it still has work in hand. Bounded so a misbehaving timer
+        // cannot spin the task forever.
+        let mut passes = 0;
+        loop {
+            let idle_ms = unsafe { lightvgl_sys::lv_timer_handler() };
+            passes += 1;
+            if idle_ms > 0 || passes >= 8 {
+                break;
+            }
         }
-        if elapsed_ms % 5_000 == 0 {
-            frames += 1;
-            console::println!("UI_ALIVE seconds={} display_null={}", elapsed_ms / 1000, display.is_null());
-            let _ = frames;
+
+        if woken_by_change {
+            redraws += 1;
+            console::println!(
+                "UI_REDRAW n={} slept_ms={} passes={} display_null={}",
+                redraws,
+                elapsed_ms,
+                passes,
+                display.is_null()
+            );
         }
     }
 }
