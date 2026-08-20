@@ -1,0 +1,52 @@
+[package]
+name = "waveshare-rlcd42"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Waveshare ESP32-S3-RLCD-4.2: ESP32-S3 (Xtensa LX7), 300x400 reflective LCD.
+#
+# The second board of ADR-0015's `boards/` axis, and the reason the platform
+# crates can be validated against a chip other than the one they grew up on.
+# It selects the chip for everything below it -- the platform crates name no
+# chip themselves.
+#
+# Outside the root workspace: it targets xtensa-esp32s3-none-elf, and a
+# workspace shares one target and one set of `[env]` values across members.
+
+[[bin]]
+name = "waveshare-rlcd42"
+path = "src/main.rs"
+test = false
+harness = false
+
+[profile.release]
+opt-level = 3
+debug = true
+
+[dependencies]
+esp-hal = { version = "=1.1.1", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.3.0", features = ["esp32s3", "embassy"] }
+esp-backtrace = { version = "0.19.0", default-features = false, features = [
+    "esp32s3",
+    "panic-handler",
+    "println",
+] }
+esp-println = { version = "0.17.0", default-features = false, features = [
+    "esp32s3",
+    "jtag-serial",
+] }
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
+embassy-time = "0.5.1"
+static_cell = "2.1.1"
+
+# The platform layer under test. None of these name a chip.
+arbitration = { path = "../../platform/arbitration" }
+console = { path = "../../platform/console" }
+shell = { path = "../../platform/shell" }
+
+[patch.crates-io]
+esp-backtrace = { path = "../../vendor/esp-backtrace-0.19.0-window-spill-fix" }
+esp-rtos = { path = "../../vendor/esp-rtos-0.3.0-idle-context-fix" }
+xtensa-lx-rt = { path = "../../vendor/xtensa-lx-rt-0.22.0-user-mode-vector-fix" }

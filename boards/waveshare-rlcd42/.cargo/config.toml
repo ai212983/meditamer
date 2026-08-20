@@ -1,0 +1,14 @@
+[target.xtensa-esp32s3-none-elf]
+rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x"]
+
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["core", "alloc"]
+
+[env]
+# The repo root's `[env]` selects esp32-only linker hooks; Cargo merges `[env]`
+# from ancestor configs, so they have to be overridden rather than inherited.
+ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "false"
+ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "true"

@@ -27,6 +27,7 @@ members = [
 ]
 exclude = [
     ".scratch",
+    "boards",
     "test-support",
     "tools",
     "vendor",
@@ -169,6 +170,9 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 sha2 = { version = "0.10.9", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false }
 arbitration = { path = "platform/arbitration" }
+# Not referenced in code: it selects the chip and console transport for the
+# `console` crate, which names neither (ADR-0015).
+esp-println-upstream = { package = "esp-println", version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
 console = { path = "platform/console" }
 render = { path = "platform/render" }
 shell = { path = "platform/shell" }
