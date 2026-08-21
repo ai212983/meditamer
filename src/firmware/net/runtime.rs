@@ -22,18 +22,18 @@ use embassy_time::{with_timeout, Duration, Timer};
 use esp_hal::rng::Rng;
 use static_cell::StaticCell;
 
+use super::host::{self, NetHost};
+use super::wifi;
+use super::wifi::{WifiController, WifiDevice};
+use crate::firmware::{observability as telemetry, psram, service_mode, types::WifiRuntimePolicy};
 use arbitration::handoff::control_quiescence_complete;
 #[cfg(feature = "ble-foundation")]
 use arbitration::handoff::request_matches_ack;
-use super::host::{self, NetHost};
-use super::wifi::{WifiController, WifiDevice};
 use arbitration::handoff::{
     classify_drain, sd_barrier_complete, DrainAction, NetworkOwnerAck, NetworkOwnerAckKind,
     NetworkOwnerCommand, NetworkOwnerMachine, NetworkOwnerRequest, OwnerAction, RejectReason,
     ResourceSnapshot, TeardownSequence, TeardownStage,
 };
-use super::wifi;
-use crate::firmware::{observability as telemetry, psram, service_mode, types::WifiRuntimePolicy};
 use off_resources::settled_off_resource_snapshot;
 
 pub(crate) const NET_STACK_SOCKETS: usize = 4;

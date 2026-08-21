@@ -533,7 +533,8 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         }
         #[cfg(feature = "ble-foundation")]
         SerialCommand::RadioHandoffStatus => {
-            run_radio_handoff_command(uart, arbitration::handoff::NetworkOwnerCommand::Status).await;
+            run_radio_handoff_command(uart, arbitration::handoff::NetworkOwnerCommand::Status)
+                .await;
         }
         _ => unreachable!("only low-overhead diagnostics bypass the boxed dispatcher"),
     }

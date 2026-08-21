@@ -5,13 +5,13 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex:
 use heapless::Deque;
 use lightvgl_sys as lv;
 
-use render::DirtyArea;
-use crate::platform::inkplate::panel_blit;
 use super::{HEIGHT, WIDTH};
 use crate::firmware::{
     touch::lvgl_multitouch::LvglContactBatch,
     touch::types::{TouchEvent, TouchEventKind},
 };
+use crate::platform::inkplate::panel_blit;
+use render::DirtyArea;
 
 const GESTURE_QUEUE_CAPACITY: usize = 8;
 
@@ -158,7 +158,10 @@ pub(super) unsafe extern "C" fn flush_callback(
         };
         // Published by `begin` from a `&mut [u8]` that outlives the flush.
         let framebuffer = unsafe {
-            core::slice::from_raw_parts_mut(framebuffer, ACTIVE_FRAMEBUFFER_LEN.load(Ordering::Relaxed))
+            core::slice::from_raw_parts_mut(
+                framebuffer,
+                ACTIVE_FRAMEBUFFER_LEN.load(Ordering::Relaxed),
+            )
         };
         let copied = unsafe { panel_blit::blit_l8(area, pixels, framebuffer) };
         if copied {

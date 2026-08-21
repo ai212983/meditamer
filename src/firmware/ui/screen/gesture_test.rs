@@ -4,11 +4,11 @@ use core::ptr;
 use heapless::String;
 use lightvgl_sys as lv;
 
-use render::intent_bridge;
 use crate::firmware::ui::lvgl::io::{
     LvglGestureDirection, LvglGestureEvent, LvglGestureKind, LvglGestureState,
 };
 use crate::firmware::ui::widget::carousel;
+use render::intent_bridge;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const RESULT_TEXT_CAPACITY: usize = 192;

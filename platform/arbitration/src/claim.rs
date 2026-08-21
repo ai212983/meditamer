@@ -11,7 +11,7 @@
 //! path that must not block each other, and the arbitration model
 //! ([`crate::handoff`]) is what turns these observations into decisions.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// What the BLE side reports about its own hold on the radio.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -19,8 +19,6 @@ use embassy_time::Instant;
 use heapless::Vec;
 use lightvgl_sys as lv;
 
-use render::DirtyArea;
-use render::intent_bridge;
 use super::{io, HEIGHT, WIDTH};
 use crate::firmware::ui::overlay::base_overlays::{
     ActiveOverlay, BaseOverlayKind, OverlayEnterError,
@@ -35,6 +33,8 @@ use crate::firmware::{
     touch::types::TouchEvent,
     types::InkplateDriver,
 };
+use render::intent_bridge;
+use render::DirtyArea;
 #[cfg(feature = "ui-provider-fixture")]
 use shell::model::{PendingProviderRemoval, ProviderRuntimeAudit};
 use shell::{

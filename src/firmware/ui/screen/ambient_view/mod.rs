@@ -19,8 +19,8 @@ use core::ptr;
 use heapless::String;
 use lightvgl_sys as lv;
 
-use render::intent_bridge;
 use model::AmbientHomeConfig;
+use render::intent_bridge;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;

@@ -118,9 +118,7 @@ static CALLBACK_OVERFLOWED: AtomicBool = AtomicBool::new(false);
 static FULL_REPAINT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static AMBIENT_TAP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub fn claim(
-    bindings: IntentBindings,
-) -> Result<CallbackLease, CallbackRouteError> {
+pub fn claim(bindings: IntentBindings) -> Result<CallbackLease, CallbackRouteError> {
     BINDINGS.lock(|routes| {
         routes
             .borrow_mut()
@@ -272,9 +270,7 @@ pub unsafe extern "C" fn show_confirm_callback(event: *mut lv::lv_event_t) {
 ///
 /// Must be invoked only by LVGL, from the thread driving it, with a valid
 /// `event` pointer. It additionally requires the event target to be an object this bridge installed the route on.
-pub unsafe extern "C" fn dismiss_modal_callback(
-    event: *mut lv::lv_event_t,
-) {
+pub unsafe extern "C" fn dismiss_modal_callback(event: *mut lv::lv_event_t) {
     enqueue(event, |bindings| match bindings {
         IntentBindings::Modal { dismiss } => Some(OwnedShellIntent::Compose(dismiss)),
         IntentBindings::Screen { .. } | IntentBindings::Refresh { .. } => None,

@@ -2,8 +2,8 @@ use core::{ffi::CStr, ptr};
 
 use lightvgl_sys as lv;
 
-use render::intent_bridge;
 use crate::firmware::ui::widget::carousel;
+use render::intent_bridge;
 use shell::catalogue::{CatalogueAction, CatalogueEntry, CatalogueViewKind, DefaultCatalogue};
 use shell::settings::UiSettings;
 

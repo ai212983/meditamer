@@ -2,8 +2,8 @@ use core::ptr;
 
 use lightvgl_sys as lv;
 
-use render::intent_bridge;
 use crate::firmware::ui::widget::{ambient_content, carousel};
+use render::intent_bridge;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;

@@ -129,7 +129,11 @@ pub const fn exclusive_ownership_confirmed(
     wifi_link: bool,
     service_listening: bool,
 ) -> bool {
-    exact_lease && !wifi_controller_resident && !net_runner_resident && !wifi_link && !service_listening
+    exact_lease
+        && !wifi_controller_resident
+        && !net_runner_resident
+        && !wifi_link
+        && !service_listening
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,11 +422,7 @@ impl NetworkOwnerMachine {
         ack
     }
 
-    pub fn restore_failed(
-        &mut self,
-        epoch: u32,
-        resources: ResourceSnapshot,
-    ) -> NetworkOwnerAck {
+    pub fn restore_failed(&mut self, epoch: u32, resources: ResourceSnapshot) -> NetworkOwnerAck {
         self.state = NetworkOwnerState::Restoring;
         self.resources = resources;
         let ack = self.ack_for(
@@ -804,11 +804,17 @@ mod tests {
     #[test]
     fn teardown_effects_reject_skips_and_reordering() {
         let mut sequence = TeardownSequence::new();
-        assert_eq!(sequence.advance(TeardownStage::RunnerDropped), Err(OutOfOrder));
+        assert_eq!(
+            sequence.advance(TeardownStage::RunnerDropped),
+            Err(OutOfOrder)
+        );
         sequence
             .advance(TeardownStage::ProductQuiesced)
             .expect("quiesced");
-        assert_eq!(sequence.advance(TeardownStage::SourceDisabled), Err(OutOfOrder));
+        assert_eq!(
+            sequence.advance(TeardownStage::SourceDisabled),
+            Err(OutOfOrder)
+        );
         assert!(!sequence.complete());
     }
 }
