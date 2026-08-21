@@ -5,6 +5,7 @@
 
 /.embuild
 /target
+/boards/*/target/
 /packages/*/target/
 /packages/*/Cargo.lock
 !/packages/sdcard/Cargo.lock
