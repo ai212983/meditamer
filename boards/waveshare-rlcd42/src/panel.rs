@@ -130,6 +130,12 @@ pub enum HighPowerRate {
 }
 
 /// Low-power frame rate, per FRCTRL (B2h) bits 2:0.
+///
+/// The full ladder is spelled out because it is the register's encoding, not a
+/// menu of what this board happens to call today: the firmware settled on the
+/// slowest rate for battery life, and a driver that only named the one value in
+/// use would hide what the hardware offers from the next board to need it.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum LowPowerRate {
@@ -267,11 +273,6 @@ impl<'d> St7305<'d> {
             PowerMode::High => 0x38,
             PowerMode::Low => 0x39,
         });
-    }
-
-    /// Payload bytes written by the most recent flush.
-    pub fn last_flush_bytes(&self) -> usize {
-        self.last_flush_bytes
     }
 
     /// Set one pixel, in logical coordinates, tracking exactly what changed.
@@ -431,8 +432,7 @@ impl Panel for St7305<'_> {
                 set_pixel(self.framebuffer, x as usize, y as usize, ink);
                 // Record in native coordinates, matching set_pixel's rotation,
                 // because the window commands address the panel that way.
-                self.dirty
-                    .add(HEIGHT - 1 - y as usize, x as usize);
+                self.dirty.add(HEIGHT - 1 - y as usize, x as usize);
             }
         }
         true

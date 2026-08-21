@@ -90,14 +90,12 @@ pub unsafe fn init(width: i32, height: i32) -> *mut lv::lv_display_t {
     }
 }
 
-/// The two labels the sensor task rewrites in place. LVGL owns the objects;
-/// these are handles, published once at build time.
+/// The labels the cycle task rewrites in place each wake. LVGL owns the
+/// objects; these are handles, published once at build time.
+static mut CLOCK_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
 static mut READING_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
 static mut STATUS_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
-/// Temporary: a seconds-resolution clock, so panel refresh latency is visible.
-/// A sensor reading that holds steady looks identical to a frozen panel; a
-/// ticking clock does not. Remove once the refresh rate is settled.
-static mut CLOCK_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
+static mut BATTERY_LABEL: *mut lv::lv_obj_t = ptr::null_mut();
 
 /// Rewrite the reading, and mark the label dirty so the next `lv_timer_handler`
 /// redraws just that region rather than the whole screen.
@@ -105,6 +103,14 @@ pub unsafe fn set_reading(text: &core::ffi::CStr) {
     unsafe {
         if !READING_LABEL.is_null() {
             lv::lv_label_set_text(READING_LABEL, text.as_ptr());
+        }
+    }
+}
+
+pub unsafe fn set_status(text: &core::ffi::CStr) {
+    unsafe {
+        if !STATUS_LABEL.is_null() {
+            lv::lv_label_set_text(STATUS_LABEL, text.as_ptr());
         }
     }
 }
@@ -117,10 +123,10 @@ pub unsafe fn set_clock(text: &core::ffi::CStr) {
     }
 }
 
-pub unsafe fn set_status(text: &core::ffi::CStr) {
+pub unsafe fn set_battery(text: &core::ffi::CStr) {
     unsafe {
-        if !STATUS_LABEL.is_null() {
-            lv::lv_label_set_text(STATUS_LABEL, text.as_ptr());
+        if !BATTERY_LABEL.is_null() {
+            lv::lv_label_set_text(BATTERY_LABEL, text.as_ptr());
         }
     }
 }
@@ -134,19 +140,27 @@ pub unsafe fn build_screen(title: &core::ffi::CStr, subtitle: &core::ffi::CStr) 
 
         let heading = lv::lv_label_create(screen);
         lv::lv_label_set_text(heading, title.as_ptr());
-        lv::lv_obj_set_style_text_font(heading, &raw const lv::lv_font_montserrat_24, 0);
-        lv::lv_obj_align(heading, lv::lv_align_t_LV_ALIGN_TOP_MID, 0, 24);
+        lv::lv_obj_set_style_text_font(heading, &raw const lv::lv_font_montserrat_14, 0);
+        lv::lv_obj_align(heading, lv::lv_align_t_LV_ALIGN_TOP_MID, 0, 10);
 
         let caption = lv::lv_label_create(screen);
         lv::lv_label_set_text(caption, subtitle.as_ptr());
         lv::lv_obj_set_style_text_font(caption, &raw const lv::lv_font_montserrat_14, 0);
-        lv::lv_obj_align(caption, lv::lv_align_t_LV_ALIGN_TOP_MID, 0, 64);
+        lv::lv_obj_align(caption, lv::lv_align_t_LV_ALIGN_TOP_MID, 0, 28);
+
+        // Largest face this build carries (lv_conf.h enables 14/18/24 only).
+        // A wall clock is the one thing on this screen worth the extra size.
+        let clock = lv::lv_label_create(screen);
+        lv::lv_label_set_text(clock, c"--:--".as_ptr());
+        lv::lv_obj_set_style_text_font(clock, &raw const lv::lv_font_montserrat_24, 0);
+        lv::lv_obj_align(clock, lv::lv_align_t_LV_ALIGN_TOP_MID, 0, 55);
+        CLOCK_LABEL = clock;
 
         // A framed box: proves fills, borders and text composite correctly
         // through the L8 path, not just glyphs.
         let panel = lv::lv_obj_create(screen);
-        lv::lv_obj_set_size(panel, 240, 120);
-        lv::lv_obj_align(panel, lv::lv_align_t_LV_ALIGN_CENTER, 0, 30);
+        lv::lv_obj_set_size(panel, 280, 110);
+        lv::lv_obj_align(panel, lv::lv_align_t_LV_ALIGN_CENTER, 0, 25);
         lv::lv_obj_set_style_border_width(panel, 3, 0);
         lv::lv_obj_set_style_border_color(panel, lv::lv_color_black(), 0);
         lv::lv_obj_set_style_bg_color(panel, lv::lv_color_white(), 0);
@@ -154,20 +168,20 @@ pub unsafe fn build_screen(title: &core::ffi::CStr, subtitle: &core::ffi::CStr) 
 
         let reading = lv::lv_label_create(panel);
         lv::lv_label_set_text(reading, c"--.- C   --.- %".as_ptr());
-        lv::lv_obj_set_style_text_font(reading, &raw const lv::lv_font_montserrat_24, 0);
-        lv::lv_obj_align(reading, lv::lv_align_t_LV_ALIGN_CENTER, 0, -12);
+        lv::lv_obj_set_style_text_font(reading, &raw const lv::lv_font_montserrat_18, 0);
+        lv::lv_obj_align(reading, lv::lv_align_t_LV_ALIGN_CENTER, 0, -14);
         READING_LABEL = reading;
 
         let status = lv::lv_label_create(panel);
         lv::lv_label_set_text(status, c"waiting for sensor".as_ptr());
         lv::lv_obj_set_style_text_font(status, &raw const lv::lv_font_montserrat_14, 0);
-        lv::lv_obj_align(status, lv::lv_align_t_LV_ALIGN_CENTER, 0, 26);
+        lv::lv_obj_align(status, lv::lv_align_t_LV_ALIGN_CENTER, 0, 18);
         STATUS_LABEL = status;
 
-        let clock = lv::lv_label_create(screen);
-        lv::lv_label_set_text(clock, c"--:--:--".as_ptr());
-        lv::lv_obj_set_style_text_font(clock, &raw const lv::lv_font_montserrat_24, 0);
-        lv::lv_obj_align(clock, lv::lv_align_t_LV_ALIGN_BOTTOM_MID, 0, -12);
-        CLOCK_LABEL = clock;
+        let battery = lv::lv_label_create(screen);
+        lv::lv_label_set_text(battery, c"battery --".as_ptr());
+        lv::lv_obj_set_style_text_font(battery, &raw const lv::lv_font_montserrat_14, 0);
+        lv::lv_obj_align(battery, lv::lv_align_t_LV_ALIGN_BOTTOM_MID, 0, -12);
+        BATTERY_LABEL = battery;
     }
 }
