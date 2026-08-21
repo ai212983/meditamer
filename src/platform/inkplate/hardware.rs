@@ -121,5 +121,5 @@ pub(super) static FRAMEBUFFER_TAKEN: AtomicBool = AtomicBool::new(false);
 // Read by the interrupt-masked scan passes, so this one must stay in internal
 // RAM. Its previous-frame counterpart is supplied by the caller instead, which
 // lets it live in PSRAM.
-#[unsafe(link_section = ".dram2_uninit")]
+#[unsafe(link_section = ".dram2_uninit.framebuffer")]
 pub(super) static mut FRAMEBUFFER_BW: MaybeUninit<[u8; FRAMEBUFFER_BYTES]> = MaybeUninit::uninit();

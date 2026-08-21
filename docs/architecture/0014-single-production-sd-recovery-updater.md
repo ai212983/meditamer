@@ -802,6 +802,77 @@ correct in isolation -- host tests pass, the compiled face renders correctly -- 
 pending this bug, since it is what most recently re-triggered the crash. Nothing from this
 investigation has been committed.
 
+## Addendum: root-caused and fixed -- the heap was on the APP CPU ROM stack (2026-08-21)
+
+The 2026-08-19 addendum above concluded that binary layout was "perturbing interrupt timing".
+That framing was wrong, though its observations were all correct. Layout was not nudging a
+timing window: it was moving the **internal heap onto the APP CPU ROM stack**.
+
+`.dram2_uninit` holds two statics -- the 68,736-byte internal heap
+(`src/firmware/psram/init.rs`) and the 45,000-byte `FRAMEBUFFER_BW`
+(`src/platform/inkplate/hardware.rs`). esp-hal's `dram2.x` emits only a bare
+`*(.dram2_uninit)`, so which one landed at the bottom of `dram2_seg` was decided by
+**incidental link order**. In the failing builds the heap was at the bottom
+(`0x3ffe4350`-`0x3fff4fd0`), covering `reserved_rom_stack_app` (`0x3ffe5230`-`0x3ffe7e30`).
+That is exactly the "config C" layout that
+[DRAM Budget: Reclaiming the ROM Stack](../reference/dram/dram-budget-rom-stack.md) had already
+measured at 13/40 boot panics -- shipping had silently drifted into it, because nothing
+enforced the documented intent that the window hold `FRAMEBUFFER_BW`.
+
+Mechanism, end to end:
+
+- Core 1 walks its ROM stack coming out of reset, overwriting whatever lives there.
+- An `esp_rtos` `TaskListItem.next` (offset `0x10c`) took the value `0x4000bfd4` -- *exactly*
+  the ROM symbol `_xtos_p_none`, which is not plausible heap garbage and was the clue that
+  broke this open.
+- `RunQueue::mark_task_ready` then executed `addmi a14, a11, 0x100` / `s8i a9, a14, 0`. `s8i`
+  is a **byte** store, and a narrow store into instruction memory is precisely what raises
+  `LoadStoreError` (`EXCCAUSE=3`), with `EXCVADDR = 0x4000bfd4 + 0x100 = 0x4000c0d4` -- the
+  fixed address reported in every occurrence of this crash.
+
+This explains the two things the previous addendum could not: why the fault address was always
+*identical* rather than random, and why unrelated code-size changes toggled it.
+
+### Fix
+
+Distinct input sections (`.dram2_uninit.framebuffer`, `.dram2_uninit.heap`) plus a `SECTIONS`
+block pinning their order, appended to `config/linker/esp32/meditamer-memory.x` (included before
+esp-hal's `esp32.x`/`dram2.x`). The framebuffer always occupies the bottom, so the heap always
+begins above `0x3FFE7E30`. No memory is given up. Details and the maintenance rule for adding a
+third static are in
+[Enforcing the order](../reference/dram/dram-budget-rom-stack.md#enforcing-the-order).
+
+### Evidence
+
+Hardware A/B on the same source and board, differing only in those two `link_section` strings:
+
+| Layout | Boot panics | `RUNTIME_READY` |
+| --- | ---: | ---: |
+| heap above the window (fixed) | 0/40 | 40/40 |
+| heap over the window (control) | 12/12 | 0/12 |
+
+Every control panic was `EXCVADDR=0x4000c0d4`. Verified afterwards on the pinned production
+bootloader (rollback enabled): `ota_seq=1 state=VALID`, `RUNTIME_READY app_state=ready
+display=ready`, LVGL up at 600x600.
+
+`touch: init_failed ... Err(I2c(I2c(ArbitrationLost)))` was **not** the coincidence the previous
+addendum judged it to be. It is a second symptom of the same corruption -- the touch driver runs
+on core 1 -- and post-fix boots reach `touch: ready ... x_res=1152 y_res=1152`.
+
+The two hypotheses disproven on 2026-08-19 (the missing `rsync`, the core-launch barrier) were
+correctly disproven; they were at the wrong layer. The recommended S3 repro is now moot for this
+bug: that board never had this memory map, which is why it could not reproduce it.
+
+### Note on the debugging path
+
+The crash was invisible in normal use because
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` reverts `ota_0` to `ABORTED` on the boot after the
+panic, and the factory updater then erases both `otadata` sectors -- leaving only four innocuous
+`UPDATER_*` lines. Building the bootloader with rollback disabled (into a *separate* build dir,
+leaving `tools/ota_bootloader/sdkconfig.single-production.defaults` untouched) makes the panic
+print over UART on every boot. `CONFIG_BOOTLOADER_LOG_LEVEL_DEBUG=y` does not fit -- the
+bootloader grows to `0x7450` against a `0x7000` ceiling.
+
 ## Consequences
 
 ### Benefits

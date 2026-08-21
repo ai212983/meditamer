@@ -12,11 +12,15 @@ PRO CPU half of the same reclaim was measured unsafe and reverted.
 
 | Region | Range | Status |
 | --- | --- | --- |
-| APP CPU ROM stack + hole | `0x3FFE4350`-`0x3FFE7E30` | in use, holds `FRAMEBUFFER_BW` |
+| APP CPU ROM stack + hole | `0x3FFE4350`-`0x3FFE7E30` | in use, holds `FRAMEBUFFER_BW` — **now enforced by the linker**, see [Enforcing the order](#enforcing-the-order) |
 | PRO CPU ROM stack + hole | `0x3FFE0440`-`0x3FFE3F20` | **reverted, measured unsafe** |
 
 Do not re-add the PRO CPU region without new evidence. See
 [Measured Failure](#measured-failure).
+
+The "holds `FRAMEBUFFER_BW`" half of that first row was an *intent*, not a fact, until
+2026-08-21: nothing enforced it, and for some builds it was false. See
+[Enforcing the order](#enforcing-the-order).
 
 ## The Original Reasoning
 
@@ -133,6 +137,13 @@ from the allocator.
   `FRAMEBUFFER_BW` there and has been clean, but that is weaker evidence than it
   looks given the use-after-free hypothesis.
 
+  **Corrected 2026-08-21:** "the shipping config puts `FRAMEBUFFER_BW` there" was
+  not reliably true — the placement was unpinned, and builds in which the *heap*
+  took that slot are what produced the ADR-0014 `EXCVADDR=0x4000c0d4` crash. It is
+  true and enforced now; see [Enforcing the order](#enforcing-the-order). The
+  narrower claim this bullet makes — that the window is safe for passive data of
+  ours — is now supported by 40/40 clean boots with the framebuffer there.
+
 ## Deep sleep is compatible with the reclaim
 
 Adding deep sleep does not put the reclaimed ROM stack at risk, because the ROM
@@ -166,3 +177,68 @@ Two consequences worth planning for:
   physically still shows the pre-sleep image. Partial-refresh diffing against a
   zeroed `FRAMEBUFFER_BW_PREVIOUS` would produce artifacts. This is unrelated to
   the ROM stack change, but it goes live the moment deep sleep ships.
+
+## Enforcing the order
+
+Added 2026-08-21, after the "config C" layout this document already measured as unsafe turned
+out to be what was actually shipping.
+
+`.dram2_uninit` holds two statics: the internal heap (`src/firmware/psram/init.rs`, 68,736 bytes)
+and `FRAMEBUFFER_BW` (`src/platform/inkplate/hardware.rs`, 45,000 bytes). esp-hal's `dram2.x`
+emits a bare `*(.dram2_uninit)`, so **which of them landed at the bottom of `dram2_seg` — that
+is, on the APP CPU ROM stack — was decided by incidental link order.** Nothing expressed the
+intent recorded in [Result Summary](#result-summary), so nothing preserved it. In the failing
+builds the heap was at the bottom (`0x3ffe4350`-`0x3fff4fd0`), covering
+`reserved_rom_stack_app` (`0x3ffe5230`-`0x3ffe7e30`) — exactly config C, measured here at 13/40
+boot panics.
+
+That is also the mechanism behind the "binary layout perturbs interrupt timing" conclusion in
+ADR-0014's 2026-08-19 addendum. Layout was not nudging a timing window; it was moving the heap
+into and out of the ROM stack. Symptom, in full:
+
+- Core 1 walks its ROM stack coming out of reset and overwrites whatever lives there.
+- An `esp_rtos` `TaskListItem.next` (offset `0x10c`) took the value `0x4000bfd4` — exactly
+  `_xtos_p_none`, a ROM symbol, not plausible heap garbage.
+- `RunQueue::mark_task_ready` then ran `addmi a14, a11, 0x100` / `s8i a9, a14, 0`. `s8i` is a
+  *byte* store, and a narrow store into instruction memory is what raises `LoadStoreError`
+  (`EXCCAUSE=3`), with `EXCVADDR = 0x4000bfd4 + 0x100 = 0x4000c0d4` — the fixed address seen in
+  every occurrence of this crash since it was first reported.
+
+The fix gives the two statics distinct input sections and pins their order in a `SECTIONS` block
+at the end of `config/linker/esp32/meditamer-memory.x`, which is included before esp-hal's
+`esp32.x`/`dram2.x`:
+
+```
+.dram2_uninit (NOLOAD) : ALIGN(4) {
+  *(.dram2_uninit.framebuffer)
+  *(.dram2_uninit.heap)
+} > dram2_seg
+```
+
+`FRAMEBUFFER_BW` is 45,000 bytes, comfortably larger than the `0x3AE0` offset from
+`0x3FFE4350` to the top of the ROM stack window, so it always covers the window and the heap
+always begins above `0x3FFE7E30`. No memory is given up; the 15,072-byte reclaim is retained.
+
+Hardware A/B, same source and board, only the two `link_section` strings differing:
+
+| Layout | Boot panics | `RUNTIME_READY` |
+| --- | ---: | ---: |
+| heap above the window (fixed) | 0/40 | 40/40 |
+| heap over the window (control) | 12/12 | 0/12 |
+
+Every control panic was `EXCVADDR=0x4000c0d4`. Touch also recovered: pre-fix boots logged
+`touch: init_failed ... Err(I2c(I2c(ArbitrationLost)))`, post-fix boots reach `touch: ready`.
+The `ArbitrationLost` was a second symptom of the same corruption — the touch driver runs on
+core 1 — not the coincidence ADR-0014's addendum took it for.
+
+**If you add a third static to `.dram2_uninit`, give it its own `.dram2_uninit.*` input section
+and place it explicitly in that block.** A bare `.dram2_uninit` will land after the pinned two
+via esp-hal's trailing wildcard, which is safe today only because the framebuffer already covers
+the window — do not rely on that. Verify placement after any change to statics in this section:
+
+```bash
+xtensa-esp32-elf-nm -n -S target/xtensa-esp32-none-elf/release/meditamer \
+  | awk '$1 >= "3ffe4350"'
+```
+
+The heap symbol must start at or above `0x3FFE7E30`.

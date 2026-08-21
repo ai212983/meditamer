@@ -56,3 +56,30 @@ MEMORY
   /* RTC slow memory (data accessible). Persists over deep sleep. */
   rtc_slow_seg(RW)       : ORIGIN = 0x50000000, len = 8k
 }
+
+/* MEDITAMER: pin the order of `.dram2_uninit` contents.
+ *
+ * `dram2_seg` is extended down over the APP CPU ROM stack
+ * (`reserved_rom_stack_app`, 0x3FFE5230-0x3FFE7E30); see
+ * docs/reference/dram/dram-budget-rom-stack.md. That reclaim is only safe for
+ * our own passive data -- putting *heap* there was measured at 13/40 boot
+ * panics ("config C"), because the APP CPU walks that ROM stack as it comes out
+ * of reset and smears ROM values (e.g. `_xtos_p_none`) over whatever lives
+ * there.
+ *
+ * esp-hal's `dram2.x` emits a bare `*(.dram2_uninit)`, so which static landed on
+ * the ROM stack was decided by incidental link order -- which is why unrelated
+ * changes that perturb binary layout could silently move the heap into the
+ * window. This block makes it explicit: the framebuffer (45000 bytes, larger
+ * than the 0x3AE0 window offset) always occupies the bottom, so the heap always
+ * begins above 0x3FFE7E30.
+ *
+ * Included before esp-hal's `esp32.x`/`dram2.x`, so these input patterns are
+ * matched first and the trailing `*(.dram2_uninit)` there picks up any rest.
+ */
+SECTIONS {
+  .dram2_uninit (NOLOAD) : ALIGN(4) {
+    *(.dram2_uninit.framebuffer)
+    *(.dram2_uninit.heap)
+  } > dram2_seg
+}
