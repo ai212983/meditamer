@@ -52,20 +52,14 @@ struct TroubleshootRuntime<'a> {
 }
 
 pub fn run_troubleshoot(logger: &mut Logger, opts: TroubleshootOptions) -> Result<()> {
-    let flash_first = env_utils::parse_env_bool01("HOSTCTL_TROUBLESHOOT_FLASH_FIRST", true)?;
-    let flash_retries = env_utils::parse_env_u32("HOSTCTL_TROUBLESHOOT_FLASH_RETRIES", 2)?.max(1);
-    let probe_retries = env_utils::parse_env_u32("HOSTCTL_TROUBLESHOOT_PROBE_RETRIES", 6)?.max(1);
-    let probe_delay_ms = env_utils::parse_env_u64("HOSTCTL_TROUBLESHOOT_PROBE_DELAY_MS", 700)?;
-    let probe_timeout_ms = env_utils::parse_env_u64("HOSTCTL_TROUBLESHOOT_PROBE_TIMEOUT_MS", 4000)?;
-    let soak_cycles = env_utils::parse_env_u32("HOSTCTL_TROUBLESHOOT_SOAK_CYCLES", 4)?.max(1);
-
+    // Troubleshoot recipe constants; formerly env-tunable (hostctl-env-audit.md cat 3).
     let config = TroubleshootConfig {
-        flash_first,
-        flash_retries,
-        probe_retries,
-        probe_delay_ms,
-        probe_timeout_ms,
-        soak_cycles,
+        flash_first: true,
+        flash_retries: 2,
+        probe_retries: 6,
+        probe_delay_ms: 700,
+        probe_timeout_ms: 4000,
+        soak_cycles: 4,
     };
 
     let ts = Local::now().format("%Y%m%d_%H%M%S").to_string();

@@ -83,6 +83,7 @@ fn flash_options() -> FlashCaptureOptions {
         post_command: None,
         post_pattern: None,
         post_timeout_ms: None,
+        no_time_sync: false,
     }
 }
 
@@ -115,8 +116,10 @@ fn explicit_app_image_is_archived_with_hash_and_metadata() {
     fs::write(&source, b"deterministic firmware").expect("write source");
     let outputs = prepare_output_paths(Some(&temp.path().join("artifacts"))).expect("output paths");
 
-    let bootloader = temp.path().join("target/ota-bootloader/bootloader");
-    let partition_table = temp.path().join("target/ota-bootloader/partition_table");
+    let bootloader = temp.path().join("target/single-production-bootloader/bootloader");
+    let partition_table = temp
+        .path()
+        .join("target/single-production-bootloader/partition_table");
     fs::create_dir_all(&bootloader).expect("bootloader dir");
     fs::create_dir_all(&partition_table).expect("partition dir");
     fs::write(bootloader.join("bootloader.bin"), b"bootloader").expect("bootloader");
@@ -182,13 +185,132 @@ fn explicit_app_only_archive_does_not_require_bootloader_artifacts() {
 #[derive(Default)]
 struct RecordingRuntime {
     calls: Vec<(String, Value)>,
+    /// When set, the simulated `time_sync` action reports failure instead of
+    /// success, mirroring what the real action does when `sync_time` errors.
+    force_time_sync_failure: bool,
 }
 
 impl WorkflowRuntime for RecordingRuntime {
-    fn invoke(&mut self, action: &str, args: &Value, _context: &mut Value) -> Result<()> {
+    fn invoke(&mut self, action: &str, args: &Value, context: &mut Value) -> Result<()> {
         self.calls.push((action.to_owned(), args.clone()));
-        Ok(())
+        match action {
+            // Mirror the one piece of context the real `time_sync` action
+            // always sets, so the workflow's `time_sync_result_gate` has a
+            // field to read regardless of which fixture is driving it.
+            "time_sync" => {
+                if let Some(map) = context.as_object_mut() {
+                    map.insert(
+                        "time_sync_ok".to_string(),
+                        Value::Bool(!self.force_time_sync_failure),
+                    );
+                }
+                Ok(())
+            }
+            // The real action_fail_time_sync always errors when reached;
+            // faithfully reproduce that rather than silently succeeding.
+            "fail_time_sync" => Err(anyhow::anyhow!("simulated time sync failure")),
+            _ => Ok(()),
+        }
     }
+}
+
+fn action_index(calls: &[(String, Value)], action: &str) -> Option<usize> {
+    calls.iter().position(|(name, _)| name == action)
+}
+
+#[test]
+fn time_sync_runs_after_capture_and_before_the_summary_for_every_capture_mode() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/flash-capture.sw.yaml");
+    let workflow = load_workflow(&path).expect("load workflow");
+
+    for capture_mode in ["none", "stream", "boot"] {
+        let mut runtime = RecordingRuntime::default();
+        execute_workflow(
+            &workflow,
+            &mut runtime,
+            &serde_json::json!({
+                "flash_mode": "app-only",
+                "capture_mode": capture_mode,
+                "image_supplied": true,
+                "fallback_allowed": false,
+                "post_command_supplied": false,
+                "time_sync_enabled": true,
+            }),
+        )
+        .unwrap_or_else(|error| panic!("{capture_mode} workflow: {error}"));
+
+        let capture_index = action_index(&runtime.calls, "capture").expect("capture ran");
+        let time_sync_index = action_index(&runtime.calls, "time_sync").expect("time_sync ran");
+        let write_summary_index =
+            action_index(&runtime.calls, "write_summary").expect("write_summary ran");
+        assert!(
+            capture_index < time_sync_index,
+            "{capture_mode}: time_sync must run after capture"
+        );
+        assert!(
+            time_sync_index < write_summary_index,
+            "{capture_mode}: time_sync must run before write_summary"
+        );
+    }
+}
+
+#[test]
+fn time_sync_runs_before_the_post_command_when_one_is_supplied() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/flash-capture.sw.yaml");
+    let workflow = load_workflow(&path).expect("load workflow");
+    let mut runtime = RecordingRuntime::default();
+    execute_workflow(
+        &workflow,
+        &mut runtime,
+        &serde_json::json!({
+            "flash_mode": "app-only",
+            "capture_mode": "none",
+            "image_supplied": true,
+            "fallback_allowed": false,
+            "post_command_supplied": true,
+            "time_sync_enabled": true,
+        }),
+    )
+    .expect("workflow with a post command");
+
+    let time_sync_index = action_index(&runtime.calls, "time_sync").expect("time_sync ran");
+    let post_command_index =
+        action_index(&runtime.calls, "post_command").expect("post_command ran");
+    assert!(time_sync_index < post_command_index);
+}
+
+#[test]
+fn a_rejected_time_sync_still_writes_the_summary_before_the_workflow_fails() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/flash-capture.sw.yaml");
+    let workflow = load_workflow(&path).expect("load workflow");
+    let mut runtime = RecordingRuntime {
+        force_time_sync_failure: true,
+        ..Default::default()
+    };
+    let result = execute_workflow(
+        &workflow,
+        &mut runtime,
+        &serde_json::json!({
+            "flash_mode": "app-only",
+            "capture_mode": "none",
+            "image_supplied": true,
+            "fallback_allowed": false,
+            "post_command_supplied": false,
+            "time_sync_enabled": true,
+        }),
+    );
+
+    assert!(
+        result.is_err(),
+        "the workflow must fail overall on a rejected time sync"
+    );
+    let write_summary_index =
+        action_index(&runtime.calls, "write_summary").expect("summary was written");
+    let fail_index = action_index(&runtime.calls, "fail_time_sync").expect("fail_time_sync ran");
+    assert!(
+        write_summary_index < fail_index,
+        "the summary must be written before the terminal failing action runs"
+    );
 }
 
 #[test]
@@ -328,9 +450,12 @@ fn app_offset_is_resolved_from_the_accepted_partition_table() {
         .parent()
         .expect("repo root")
         .to_path_buf();
-    let offset = resolve_partition_offset(&repo_root.join("config/partitions-ab.csv"), "ota_0")
-        .expect("ota_0 offset");
-    assert_eq!(offset, 0x20000);
+    let offset = resolve_partition_offset(
+        &repo_root.join("config/partitions-single-production.csv"),
+        "ota_0",
+    )
+    .expect("ota_0 offset");
+    assert_eq!(offset, 0x80000);
 }
 
 #[test]

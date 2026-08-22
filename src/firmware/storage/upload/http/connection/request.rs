@@ -1,5 +1,5 @@
+use console::println;
 use embassy_net::tcp::{Error as TcpError, TcpSocket};
-use esp_println::println;
 
 use super::super::helpers::{
     drain_remaining_body, find_header_end, parse_content_length, validate_upload_auth,

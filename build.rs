@@ -1,6 +1,7 @@
 use std::{env, fs, path::PathBuf};
 
 use event_config_compiler::generate_from_path;
+use lvgl_font_compiler::generate_ambient_clock_font;
 
 const OTA_PUBLIC_KEY_ENV: &str = "MEDITAMER_FIRMWARE_PUBLIC_KEY_HEX";
 const OTA_BUILD_ID_ENV: &str = "MEDITAMER_FIRMWARE_BUILD_ID";
@@ -149,11 +150,31 @@ fn write_ota_build_config(out_dir: &std::path::Path) {
         .join(", ");
     let generated = format!(
         "pub(crate) const OTA_PUBLIC_KEY_CONFIGURED: bool = {};\n\
+         // Only the `factory-updater` binary (src/updater/) verifies bundle signatures with the\n\
+         // raw key bytes now that ADR-0014 Phase 5 removed the default binary's own signature\n\
+         // verification path; other feature combinations legitimately never read this constant.\n\
+         #[allow(dead_code)]\n\
          pub(crate) const OTA_PUBLIC_KEY: [u8; 32] = [{key_literal}];\n\
          pub(crate) const OTA_BUILD_ID: &str = {build_id:?};\n",
         configured.is_some(),
     );
     let path = out_dir.join("ota_build_config.rs");
+    fs::write(&path, generated)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
+}
+
+/// Compiles the Ambient Home clock face (`docs/plans/ambient-home-prototype.md`).
+/// LVGL's built-in Montserrat stops at 48 px, so the 128 px clock is compiled
+/// from the vendored face over just the characters `HH:MM` and its unavailable
+/// placeholder need.
+fn write_ambient_clock_font(manifest_dir: &std::path::Path, out_dir: &std::path::Path) {
+    let assets = manifest_dir.join("assets/fonts");
+    println!("cargo:rerun-if-changed={}", assets.display());
+
+    let generated = generate_ambient_clock_font(&assets)
+        .unwrap_or_else(|error| panic!("ambient clock font compile failed: {error}"));
+
+    let path = out_dir.join("ambient_clock_font.rs");
     fs::write(&path, generated)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
 }
@@ -179,6 +200,7 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing OUT_DIR"));
     write_ota_build_config(&out_dir);
+    write_ambient_clock_font(&manifest_dir, &out_dir);
     let out_file = out_dir.join("event_config.rs");
     fs::write(&out_file, generated)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out_file.display()));

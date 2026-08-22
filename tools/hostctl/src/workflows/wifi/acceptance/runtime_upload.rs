@@ -14,12 +14,9 @@ use std::time::Instant;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
-use crate::{
-    env_utils,
-    workflows::{
-        upload,
-        wifi::common::{ctx_get_string, ctx_get_u32, query_net_status_line},
-    },
+use crate::workflows::{
+    upload,
+    wifi::common::{ctx_get_string, ctx_get_u32, query_net_status_line},
 };
 
 use super::WifiAcceptanceRuntime;
@@ -115,10 +112,9 @@ impl WifiAcceptanceRuntime<'_> {
             .unwrap_or_else(|| "net_acceptance_payload.bin".to_string());
         let remote_file = format!("{}/{}", self.remote_root, upload_name);
         let started = Instant::now();
-        let upload_timeout_sec =
-            env_utils::parse_env_f64("HOSTCTL_NET_UPLOAD_TIMEOUT_SEC", 180.0)?.max(1.0);
+        let upload_timeout_sec = 180.0f64.max(1.0);
         let retry_policy = resolve_net_upload_retry_policy()?;
-        let refresh_on_failure = refresh_upload_client_on_failure_enabled()?;
+        let refresh_on_failure = refresh_upload_client_on_failure_enabled();
         let result = self.run_direct_upload_attempt(
             &ip,
             &cycle_root,
@@ -217,8 +213,7 @@ impl WifiAcceptanceRuntime<'_> {
     pub(super) fn handle_net_verify_once(&mut self, context: &mut Value) -> Result<()> {
         let ip = ctx_get_string(context, "ip")?;
         let remote_file = ctx_get_string(context, "remote_file")?;
-        let verify_timeout_sec =
-            env_utils::parse_env_f64("HOSTCTL_NET_VERIFY_TIMEOUT_SEC", 30.0)?.max(0.5);
+        let verify_timeout_sec = 30.0f64.max(0.5);
         let retry_policy = resolve_net_upload_retry_policy()?;
         if !upload::stat_remote_file(
             &ip,

@@ -89,7 +89,7 @@ async fn ensure_initialized_for_request(
         sd_probe.recover_after_timeout();
         fat_engine.invalidate();
         if !crate::firmware::update::transport_quiet() {
-            esp_println::println!("sdtask: init_error id={} err={:?}", request.id, err);
+            console::println!("sdtask: init_error id={} err={:?}", request.id, err);
         }
         return Some(SdResult {
             id: request.id,
@@ -260,7 +260,7 @@ async fn reinitialize_after_retry(
             sd_probe.recover_after_timeout();
             fat_engine.invalidate();
             if !crate::firmware::update::transport_quiet() {
-                esp_println::println!("sdtask: retry_init_error id={} err={:?}", request_id, err);
+                console::println!("sdtask: retry_init_error id={} err={:?}", request_id, err);
             }
             Err(SdResultCode::InitFailed)
         }

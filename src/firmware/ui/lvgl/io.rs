@@ -1,17 +1,17 @@
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicUsize, Ordering};
 use core::{cell::RefCell, ptr};
 
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, blocking_mutex::Mutex};
 use heapless::Deque;
 use lightvgl_sys as lv;
 
-use super::dither::{self, DirtyArea};
 use super::{HEIGHT, WIDTH};
 use crate::firmware::{
     touch::lvgl_multitouch::LvglContactBatch,
     touch::types::{TouchEvent, TouchEventKind},
-    types::InkplateDriver,
 };
+use crate::platform::inkplate::panel_blit;
+use render::DirtyArea;
 
 const GESTURE_QUEUE_CAPACITY: usize = 8;
 
@@ -49,7 +49,11 @@ pub(crate) struct LvglGestureEvent {
     pub(crate) state: LvglGestureState,
 }
 
-static ACTIVE_DISPLAY: AtomicPtr<InkplateDriver> = AtomicPtr::new(ptr::null_mut());
+// The flush path needs the framebuffer, not the driver that owns it. Holding
+// a `&mut [u8]` as a thin pointer plus length keeps this module free of any
+// board type (ADR-0015); a `*mut dyn Trait` could not live in an AtomicPtr.
+static ACTIVE_FRAMEBUFFER: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+static ACTIVE_FRAMEBUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
 static GESTURE_INPUT: AtomicPtr<lv::lv_indev_t> = AtomicPtr::new(ptr::null_mut());
 static INPUT_X: AtomicI32 = AtomicI32::new(0);
 static INPUT_Y: AtomicI32 = AtomicI32::new(0);
@@ -94,13 +98,15 @@ pub(crate) fn take_gesture() -> Option<LvglGestureEvent> {
     GESTURE_EVENTS.lock(|events| events.borrow_mut().pop_front())
 }
 
-pub(super) fn begin(display: &mut InkplateDriver) {
+pub(super) fn begin(framebuffer: &mut [u8]) {
     reset_dirty_area();
-    ACTIVE_DISPLAY.store(display, Ordering::Release);
+    ACTIVE_FRAMEBUFFER_LEN.store(framebuffer.len(), Ordering::Relaxed);
+    ACTIVE_FRAMEBUFFER.store(framebuffer.as_mut_ptr(), Ordering::Release);
 }
 
 pub(super) fn finish() -> Option<DirtyArea> {
-    ACTIVE_DISPLAY.store(ptr::null_mut(), Ordering::Release);
+    ACTIVE_FRAMEBUFFER.store(ptr::null_mut(), Ordering::Release);
+    ACTIVE_FRAMEBUFFER_LEN.store(0, Ordering::Relaxed);
     take_dirty_area()
 }
 
@@ -141,8 +147,8 @@ pub(super) unsafe extern "C" fn flush_callback(
     area: *const lv::lv_area_t,
     pixels: *mut u8,
 ) {
-    let display = ACTIVE_DISPLAY.load(Ordering::Acquire);
-    if !display.is_null() && !area.is_null() {
+    let framebuffer = ACTIVE_FRAMEBUFFER.load(Ordering::Acquire);
+    if !framebuffer.is_null() && !area.is_null() {
         let area = unsafe { *area };
         let area = DirtyArea {
             x1: area.x1,
@@ -150,7 +156,14 @@ pub(super) unsafe extern "C" fn flush_callback(
             x2: area.x2,
             y2: area.y2,
         };
-        let copied = unsafe { dither::blit_l8(area, pixels, (&mut *display).framebuffer_bw_mut()) };
+        // Published by `begin` from a `&mut [u8]` that outlives the flush.
+        let framebuffer = unsafe {
+            core::slice::from_raw_parts_mut(
+                framebuffer,
+                ACTIVE_FRAMEBUFFER_LEN.load(Ordering::Relaxed),
+            )
+        };
+        let copied = unsafe { panel_blit::blit_l8(area, pixels, framebuffer) };
         if copied {
             record_dirty_area(area);
         }

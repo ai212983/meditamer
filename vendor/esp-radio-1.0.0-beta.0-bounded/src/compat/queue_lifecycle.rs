@@ -239,11 +239,7 @@ pub(crate) struct QueueUseGuard {
 impl Drop for QueueUseGuard {
     fn drop(&mut self) {
         with_lifecycle_lock(|| {
-            complete_operation_locked(
-                self.operation,
-                self.active_token,
-                false,
-            );
+            complete_operation_locked(self.operation, self.active_token, false);
         });
     }
 }
@@ -383,9 +379,7 @@ fn complete_operation_locked(
     }
     // The in-flight decrement is the quiescence publication. An Acquire load
     // that observes zero must also observe the accounting update above.
-    QUEUES[queue_slot]
-        .in_flight
-        .fetch_sub(1, Ordering::AcqRel);
+    QUEUES[queue_slot].in_flight.fetch_sub(1, Ordering::AcqRel);
     record
         .token
         .store(operation_token(generation, EMPTY), Ordering::Release);
@@ -413,9 +407,12 @@ fn begin_use_with_owner(
 
     let epoch = slot.owner_epoch.load(Ordering::Acquire);
     let Some((operation, record, generation)) =
-        OPERATIONS.iter().enumerate().find_map(|(operation, record)| {
-            claim_operation(record).map(|generation| (operation, record, generation))
-        })
+        OPERATIONS
+            .iter()
+            .enumerate()
+            .find_map(|(operation, record)| {
+                claim_operation(record).map(|generation| (operation, record, generation))
+            })
     else {
         OPERATION_REGISTRY_FULL.fetch_add(1, Ordering::Relaxed);
         return None;

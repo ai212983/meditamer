@@ -56,7 +56,7 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
         if state.transfers_pause_started_at.is_none()
             && observability::log_filter_enabled(observability::LOG_DOMAIN_NET)
         {
-            esp_println::println!(
+            console::println!(
                 "upload_http: transfers_paused upload_enabled={} phase={} diag_kind={} diag_targets=0x{:02x} listener_enabled={} listener_seq={}",
                 app_snapshot.services.upload_enabled,
                 app_snapshot.phase.as_u8(),
@@ -76,7 +76,7 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
     }
     if let Some(paused_started_at) = state.transfers_pause_started_at.take() {
         if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-            esp_println::println!(
+            console::println!(
                 "upload_http: transfers_resumed pause_ms={} phase={} diag_kind={}",
                 elapsed_ms_u32(paused_started_at),
                 app_snapshot.phase.as_u8(),
@@ -91,7 +91,7 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
         || listener_seq != state.listener_gate_last_seq
     {
         if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-            esp_println::println!(
+            console::println!(
                 "upload_http: listener_gate transition enabled={} seq={} prev_enabled={} prev_seq={}",
                 listener_enabled,
                 listener_seq,
@@ -110,7 +110,7 @@ async fn service_mode_ready(state: &mut HttpServerLoopState) -> bool {
         if !state.listener_gate_disabled_logged
             && observability::log_filter_enabled(observability::LOG_DOMAIN_NET)
         {
-            esp_println::println!(
+            console::println!(
                 "upload_http: listener gate disabled; waiting for NET LISTENER ON (seq={})",
                 listener_seq
             );
@@ -136,7 +136,7 @@ async fn gate_dhcp_ipv4(stack: &Stack<'_>, state: &mut HttpServerLoopState) -> O
                     .map(|cfg| cfg.address.address().octets())
                     .unwrap_or([0, 0, 0, 0]);
                 if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                    esp_println::println!(
+                    console::println!(
                         "upload_http: listener_gate reason={} wifi_connected={} link_up={} config_ipv4={}.{}.{}.{} listener_enabled={} listener_seq={}",
                         net_pipeline_gate_reason_str(gate_reason),
                         observability::wifi_link_connected(),
@@ -160,7 +160,7 @@ async fn gate_dhcp_ipv4(stack: &Stack<'_>, state: &mut HttpServerLoopState) -> O
 
             if !state.waiting_dhcp_logged {
                 if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                    esp_println::println!("upload_http: waiting for dhcp ipv4 lease");
+                    console::println!("upload_http: waiting for dhcp ipv4 lease");
                 }
                 state.waiting_dhcp_logged = true;
             }
@@ -181,7 +181,7 @@ async fn gate_dhcp_ipv4(stack: &Stack<'_>, state: &mut HttpServerLoopState) -> O
                 .take()
                 .map(elapsed_ms_u32)
                 .unwrap_or(0);
-            esp_println::println!(
+            console::println!(
                 "upload_http: listener_gate clear reason={} wait_ms={} ipv4={}.{}.{}.{}",
                 net_pipeline_gate_reason_str(reason),
                 gate_wait_ms,
@@ -205,7 +205,7 @@ async fn gate_dhcp_ipv4(stack: &Stack<'_>, state: &mut HttpServerLoopState) -> O
     }
     if state.waiting_dhcp_logged {
         if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-            esp_println::println!(
+            console::println!(
                 "upload_http: dhcp ipv4 ready {}.{}.{}.{}",
                 local_ipv4[0],
                 local_ipv4[1],
@@ -225,7 +225,7 @@ fn log_listener_start(local_ipv4: [u8; 4], state: &mut HttpServerLoopState) {
     }
 
     if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-        esp_println::println!(
+        console::println!(
             "upload_http: listening on {}.{}.{}.{}:{}",
             local_ipv4[0],
             local_ipv4[1],

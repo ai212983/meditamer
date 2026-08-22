@@ -1,5 +1,5 @@
+use console::println;
 use embassy_net::tcp::TcpSocket;
-use esp_println::println;
 
 use super::params::{drain_body, parse_path_or_400, sd_upload_or_http_error, write_response};
 use super::RequestContext;

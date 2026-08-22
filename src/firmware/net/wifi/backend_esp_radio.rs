@@ -59,7 +59,7 @@ pub(crate) fn initialize_runtime_sta<'d>(
         }
         Err(err) => {
             WIFI_STARTED.store(false, Ordering::Release);
-            esp_println::println!("asset-upload-http: wifi init err={:?}", err);
+            console::println!("asset-upload-http: wifi init err={:?}", err);
             if matches!(err, WifiError::CleanupFailed) {
                 Err("asset-upload-http: wifi ownership unknown")
             } else {

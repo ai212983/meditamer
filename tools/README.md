@@ -20,8 +20,8 @@ Status meanings:
 | Tool | Status | Purpose and evidence |
 | --- | --- | --- |
 | [`event_config_compiler/`](event_config_compiler/) | Production | Root `build.rs` build-dependency that compiles `config/events.toml`; also host-tested, linted, and covered. |
-| [`hostctl/`](hostctl/) | Production | Primary device orchestration, flashing, capture, upload, firmware-update, and hardware-test CLI; current wrappers, guides, tests, lint, and coverage all depend on it. |
-| [`ota_bootloader/`](ota_bootloader/) | Production | Pinned ESP-IDF A/B bootloader project; built by `scripts/build/ota_bootloader.sh` for firmware flashing. |
+| [`hostctl/`](hostctl/) | Production | Primary device orchestration, flashing, capture, upload, single-production firmware update, and hardware-test CLI; current wrappers, guides, tests, lint, and coverage all depend on it. |
+| [`ota_bootloader/`](ota_bootloader/) | Production | Pinned ESP-IDF bootloader project; built by `scripts/build/single_production_bootloader.sh` (ADR-0014, default) or the superseded `scripts/build/ota_bootloader.sh` (ADR-0009, boards not yet migrated) for firmware flashing. |
 | [`scene_maker/`](scene_maker/) | Maintained standalone | Builds and inspects `.scenebundle` assets; CI tests it and scene-viewer helpers call it, but no current firmware consumer was found. |
 | [`scene_viewer/`](scene_viewer/) | Maintained standalone | Offline `.scenebundle` renderer/emulator; CI-tested and documented, but no current firmware consumer was found. |
 | [`touch_replay/`](touch_replay/) | Automated test support | Deterministic touch replay plus host-side firmware tests; test, strict Clippy, coverage, and capture-to-fixture workflows. |
@@ -43,7 +43,6 @@ literal full-path reference is not evidence that a scenario is unused.
 | File | Status | Evidence |
 | --- | --- | --- |
 | [`hostctl/scenarios/ble-phase1d.sw.yaml`](hostctl/scenarios/ble-phase1d.sw.yaml) | Production | Loaded by the `hostctl test ble-phase1d` implementation and covered by workflow-contract tests/current BLE plan. |
-| [`hostctl/scenarios/firmware-update.sw.yaml`](hostctl/scenarios/firmware-update.sw.yaml) | Production | Loaded by `hostctl firmware-update` and its tests/current build-and-flash guide. |
 | [`hostctl/scenarios/flash-capture.sw.yaml`](hostctl/scenarios/flash-capture.sw.yaml) | Production | Canonical flash/capture orchestration mandated by `AGENTS.md`; loaded and contract-tested by hostctl. |
 | [`hostctl/scenarios/runtime-modes-smoke.sw.yaml`](hostctl/scenarios/runtime-modes-smoke.sw.yaml) | Production | Loaded by `hostctl test runtime-modes-smoke` and tested in hostctl. |
 | [`hostctl/scenarios/sdcard-hw.sw.yaml`](hostctl/scenarios/sdcard-hw.sw.yaml) | Production | Loaded by both SD-card hostctl test paths. |

@@ -9,11 +9,8 @@ use anyhow::{anyhow, Result};
 use regex::Regex;
 use serde_json::Value;
 
-use crate::{
-    env_utils,
-    workflows::wifi::common::{
-        ctx_get_string, ctx_get_u32, is_ready, net_status_line_re, query_net_status,
-    },
+use crate::workflows::wifi::common::{
+    ctx_get_string, ctx_get_u32, is_ready, net_status_line_re, query_net_status,
 };
 
 use super::super::WifiAcceptanceRuntime;
@@ -119,13 +116,8 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     fn wait_recover_ready(&mut self) {
-        let ready_timeout_sec =
-            env_utils::parse_env_f64("HOSTCTL_NET_RECOVER_READY_TIMEOUT_SEC", 12.0)
-                .unwrap_or(12.0)
-                .max(0.5);
-        let poll_sec = env_utils::parse_env_f64("HOSTCTL_NET_RECOVER_READY_POLL_SEC", 0.4)
-            .unwrap_or(0.4)
-            .max(0.05);
+        let ready_timeout_sec = 12.0f64.max(0.5);
+        let poll_sec = 0.4f64.max(0.05);
         let deadline = Instant::now() + Duration::from_secs_f64(ready_timeout_sec);
 
         loop {

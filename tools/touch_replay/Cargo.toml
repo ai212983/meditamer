@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 statig = "0.4.1"
+# ADR-0015: tests/panel_blit.rs re-hosts the Inkplate blit, which takes its
+# rectangle type from the render crate.
+render = { path = "../../platform/render", default-features = false }

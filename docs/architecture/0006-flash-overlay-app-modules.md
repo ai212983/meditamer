@@ -1,12 +1,14 @@
 # ADR-0006: Evaluate native flash-overlay app modules
 
-- Status: Proposed
+- Status: Deprecated
 - Date: 2026-08-07
-- Blocked-on: Feasibility evidence; see "Consequences" for what must be measured
-  before this can move to Accepted.
+- Amended: 2026-08-17 — ADR-0013 removed the external-app requirement and made the UI catalogue
+  compiled-only. A future external executable-provider proposal requires a new ADR.
+- Deprecated-by: [ADR-0013](0013-compiled-only-ui-catalogue.md)
 - Amended: 2026-08-09
 - References: [ADR-0007](0007-ui-and-application-structure.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
+  [ADR-0013](0013-compiled-only-ui-catalogue.md),
   [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [DRAM budget](../reference/dram/dram-budget.md)
 

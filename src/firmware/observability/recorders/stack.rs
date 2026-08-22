@@ -66,7 +66,7 @@ pub(crate) fn log_stack_headroom(tag: &str) {
         // low-water line can overrun UART evidence and mask command replies;
         // the METRICS command remains the authoritative minimum report.
         if installed && headroom_bytes <= 4 * 1024 {
-            esp_println::println!(
+            console::println!(
                 "stack_diag: tag={} sp=0x{:08x} guard=0x{:08x} headroom={} used={} total={}",
                 tag,
                 sp as u32,
@@ -104,7 +104,7 @@ pub(crate) fn record_touch_core_stack_headroom() {
         let installed = install_minimum(&TOUCH_CORE_STACK_HEADROOM_MIN_BYTES, headroom);
 
         if installed && headroom <= 512 {
-            esp_println::println!(
+            console::println!(
                 "touch_core_stack_diag: sp=0x{:08x} guard=0x{:08x} headroom={} used={} total={}",
                 sp as u32,
                 guard as u32,

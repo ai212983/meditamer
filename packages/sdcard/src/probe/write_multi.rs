@@ -20,7 +20,7 @@ where
         if data.is_empty() {
             return Ok(());
         }
-        if data.len() % SD_SECTOR_SIZE != 0 {
+        if !data.len().is_multiple_of(SD_SECTOR_SIZE) {
             return Err(SdProbeError::WriteLengthInvalid(data.len()));
         }
 

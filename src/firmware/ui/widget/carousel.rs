@@ -98,7 +98,7 @@ unsafe fn create_button(
         lv::lv_obj_set_style_text_color(button, white, STYLE_PRESSED);
         lv::lv_obj_set_user_data(
             button,
-            crate::firmware::ui::lvgl::intent_bridge::action_user_data(spec.action_index),
+            render::intent_bridge::action_user_data(spec.action_index),
         );
         lv::lv_obj_add_event_cb(
             button,

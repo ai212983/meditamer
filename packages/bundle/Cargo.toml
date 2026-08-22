@@ -1,0 +1,18 @@
+[package]
+name = "bundle"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+
+[features]
+default = []
+host-tests = []
+
+[dependencies]
+sha2 = { version = "0.10.9", default-features = false }
+ed25519-dalek = { version = "2.2.0", default-features = false }
+
+[dev-dependencies]
+# Test fixtures sign bundles from a fixed seed (no RNG needed); the updater
+# and hostctl signer only ever verify with the default (verify-only) build.
+ed25519-dalek = "2.2.0"

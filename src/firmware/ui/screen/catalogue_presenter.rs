@@ -2,12 +2,10 @@ use core::{ffi::CStr, ptr};
 
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
-use crate::firmware::ui::shell::catalogue::{
-    CatalogueAction, CatalogueEntry, CatalogueViewKind, DefaultCatalogue,
-};
-use crate::firmware::ui::shell::settings::UiSettings;
 use crate::firmware::ui::widget::carousel;
+use render::intent_bridge;
+use shell::catalogue::{CatalogueAction, CatalogueEntry, CatalogueViewKind, DefaultCatalogue};
+use shell::settings::UiSettings;
 
 const STYLE_DEFAULT: lv::lv_style_selector_t = 0;
 const STYLE_PRESSED: lv::lv_style_selector_t = lv::lv_state_t_LV_STATE_PRESSED;
@@ -190,10 +188,9 @@ unsafe fn create_row(
         lv::lv_obj_set_pos(label, 14, 13);
 
         let badge_text = match kind {
-            CatalogueViewKind::Launcher => entry.badge().label(),
+            CatalogueViewKind::Launcher => entry.availability.label(),
             CatalogueViewKind::AmbientPicker
-                if entry.badge()
-                    == crate::firmware::ui::shell::catalogue::CatalogueBadge::Ready =>
+                if entry.availability == shell::catalogue::CatalogueAvailability::Ready =>
             {
                 if settings.ambient_binding() == entry.id {
                     c"Selected"
@@ -202,8 +199,7 @@ unsafe fn create_row(
                 }
             }
             CatalogueViewKind::OverlaySettings
-                if entry.badge()
-                    == crate::firmware::ui::shell::catalogue::CatalogueBadge::Ready =>
+                if entry.availability == shell::catalogue::CatalogueAvailability::Ready =>
             {
                 if settings.overlay_enabled(entry.id) {
                     c"Enabled"
@@ -212,7 +208,7 @@ unsafe fn create_row(
                 }
             }
             CatalogueViewKind::AmbientPicker | CatalogueViewKind::OverlaySettings => {
-                entry.badge().label()
+                entry.availability.label()
             }
         };
         lv::lv_label_set_text(badge, badge_text.as_ptr());

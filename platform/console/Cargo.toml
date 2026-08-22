@@ -1,0 +1,34 @@
+[package]
+name = "console"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+[lib]
+test = false
+harness = false
+bench = false
+doctest = false
+
+[dependencies]
+# No chip feature here on purpose. The chip is a property of the final
+# binary, and Cargo unifies features across the graph, so the product's own
+# esp-hal dependency selects it. Naming it here would force mutually exclusive
+# chip features on a library -- which additive-feature semantics and the
+# --all-features gate both reject (ADR-0015).
+esp-hal = { version = "=1.1.1", features = ["unstable"] }
+# The upstream writer this crate arbitrates access to. Aliased for the same
+# reason the root crate aliased it: `esp_println` is the name the macros used
+# to be reached under, and keeping the alias makes the distinction explicit.
+# No transport feature either, for the same reason as the chip: the Inkplate
+# logs over UART and the Waveshare board over native USB-Serial-JTAG, and
+# esp-println permits exactly one. The binary selects it.
+esp-println-upstream = { package = "esp-println", version = "0.17.0", default-features = false }
+
+[features]
+# Forwarded from the product's own `telemetry-defmt`. The feature lives here
+# because this crate owns the `esp-println` dependency after ADR-0015 step 1.
+telemetry-defmt = [
+    "esp-println-upstream/critical-section",
+    "esp-println-upstream/defmt-espflash",
+]

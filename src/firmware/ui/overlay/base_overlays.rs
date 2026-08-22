@@ -2,10 +2,10 @@ use core::ptr;
 
 use lightvgl_sys as lv;
 
-use crate::firmware::ui::lvgl::intent_bridge;
+use render::intent_bridge;
 #[cfg(feature = "ui-provider-fixture")]
-use crate::firmware::ui::shell::types::ProviderToken;
-use crate::firmware::ui::shell::{
+use shell::types::ProviderToken;
+use shell::{
     lifecycle::DestroyFailure,
     types::{
         CompositionIntent, OverlayInput, OverlayInstance, OwnedCompositionIntent,

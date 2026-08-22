@@ -1,6 +1,6 @@
+use console::println;
 use embassy_net::tcp::TcpSocket;
 use embassy_time::Duration;
-use esp_println::println;
 
 use super::super::super::super::observability;
 use super::super::super::super::types::SD_PATH_MAX;

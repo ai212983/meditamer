@@ -23,6 +23,8 @@ use esp_hal::{
 use super::config::UART_BAUD;
 #[cfg(feature = "asset-upload-http")]
 use super::net;
+#[cfg(feature = "asset-upload-http")]
+use super::net_host;
 use super::types::{DisplayContext, PanelPinHold};
 use super::{
     app_state::{publish_app_state_snapshot, AppStateSnapshot, AppStateStore},
@@ -43,14 +45,14 @@ pub fn run() -> ! {
     let peripherals = esp_hal::init(hal_config);
     #[cfg(feature = "ble-foundation")]
     let ble_peripheral = peripherals.BT;
-    esp_println::println!("CPU_CLOCK hz={}", esp_hal::clock::cpu_clock().as_hz());
-    esp_println::println!(
+    console::println!("CPU_CLOCK hz={}", esp_hal::clock::cpu_clock().as_hz());
+    console::println!(
         "PANEL_TIMING cl_high_hold_cycles={}",
         PANEL_CL_HIGH_HOLD_CYCLES
     );
     let reset_reason = esp_hal::system::reset_reason();
     observability::set_boot_reset_reason_code(reset_reason.map(|value| value as u8));
-    esp_println::println!(
+    console::println!(
         "BOOT_RESET reason={:?} code={}",
         reset_reason,
         reset_reason.map(|value| value as u8).unwrap_or(0),
@@ -58,7 +60,7 @@ pub fn run() -> ! {
     let allocator_status = psram::init_allocator(peripherals.PSRAM);
     psram::log_allocator_status();
     if !matches!(allocator_status.state, psram::AllocatorState::Initialized) {
-        esp_println::println!(
+        console::println!(
             "psram: allocator initialization failed: {:?}",
             allocator_status
         );
@@ -86,7 +88,7 @@ pub fn run() -> ! {
     #[allow(unused_mut)]
     let mut persisted_state = app_state_store.load_state().unwrap_or_default();
     if let Err(error) = super::update::initialize_boot_state() {
-        esp_println::println!("FIRMWARE_BOOT status=error reason={}", error.label());
+        console::println!("FIRMWARE_BOOT status=error reason={}", error.label());
         halt_forever();
     }
     #[allow(unused_mut)]
@@ -97,7 +99,7 @@ pub fn run() -> ! {
         initial_snapshot.services.upload_enabled = false;
         persisted_state.services.upload_enabled = false;
         app_state_store.save_state(persisted_state);
-        esp_println::println!(
+        console::println!(
             "runtime_mode: upload requested but asset-upload-http is disabled; starting normal mode"
         );
     }
@@ -123,7 +125,7 @@ pub fn run() -> ! {
             .with_buffers(rx, tx)
             .into_async()
     };
-    esp_println::println!("sd_spi: mode=dma");
+    console::println!("sd_spi: mode=dma");
     let sd_cs = Output::new(peripherals.GPIO15, Level::High, OutputConfig::default());
     let sd_probe = probe::SdCardProbe::new(sd_spi, sd_cs);
 
@@ -164,6 +166,7 @@ pub fn run() -> ! {
     let display_i2c = I2cDevice::new(i2c_bus);
     let touch_i2c = I2cDevice::new(i2c_bus);
     let imu_i2c = I2cDevice::new(i2c_bus);
+    let rtc_i2c = I2cDevice::new(i2c_bus);
     let mut inkplate =
         match InkplateHal::new(display_i2c, crate::platform::platform::BusyDelay::new()) {
             Ok(driver) => driver,
@@ -176,26 +179,26 @@ pub fn run() -> ! {
     let previous_buffer = match psram::alloc_large_byte_buffer(FRAMEBUFFER_BYTES) {
         Ok(buffer) => buffer,
         Err(error) => {
-            esp_println::println!("panel: previous framebuffer allocation failed: {:?}", error);
+            console::println!("panel: previous framebuffer allocation failed: {:?}", error);
             halt_forever()
         }
     };
     let previous_placement = previous_buffer.placement();
     if !matches!(previous_placement, psram::BufferPlacement::Psram) {
-        esp_println::println!(
+        console::println!(
             "panel: previous framebuffer requires psram actual={:?}",
             previous_placement
         );
         halt_forever();
     }
     if !inkplate.install_previous_framebuffer(previous_buffer.into_static_mut_slice()) {
-        esp_println::println!(
+        console::println!(
             "panel: previous framebuffer size mismatch expected={}",
             FRAMEBUFFER_BYTES
         );
         halt_forever();
     }
-    esp_println::println!(
+    console::println!(
         "panel: previous framebuffer ready bytes={} placement={:?}",
         FRAMEBUFFER_BYTES,
         previous_placement
@@ -204,13 +207,13 @@ pub fn run() -> ! {
     let transition_buffer = match psram::alloc_large_byte_buffer(PARTIAL_TRANSITION_BYTES) {
         Ok(buffer) => buffer,
         Err(error) => {
-            esp_println::println!("panel: partial transition allocation failed: {:?}", error);
+            console::println!("panel: partial transition allocation failed: {:?}", error);
             halt_forever()
         }
     };
     let transition_placement = transition_buffer.placement();
     if !matches!(transition_placement, psram::BufferPlacement::Psram) {
-        esp_println::println!(
+        console::println!(
             "panel: partial transition requires psram actual={:?}",
             transition_placement
         );
@@ -218,13 +221,13 @@ pub fn run() -> ! {
     }
     let transition = transition_buffer.into_static_mut_slice();
     if !inkplate.install_partial_transition_buffer(transition) {
-        esp_println::println!(
+        console::println!(
             "panel: partial transition size mismatch expected={}",
             PARTIAL_TRANSITION_BYTES
         );
         halt_forever();
     }
-    esp_println::println!(
+    console::println!(
         "panel: partial transition ready bytes={} placement={:?}",
         PARTIAL_TRANSITION_BYTES,
         transition_placement
@@ -256,13 +259,13 @@ pub fn run() -> ! {
             spawn_task(
                 spawner,
                 TaskClass::Wifi,
-                net::network_owner_task(peripherals.WIFI, network_resources).unwrap(),
+                net_host::network_owner_task(peripherals.WIFI, network_resources).unwrap(),
             );
         }
 
         if boot_scan_only_diag_active {
-            esp_println::println!("runtime: boot_scan_only_diag active; non-wifi tasks skipped");
-            esp_println::println!("sdprobe: boot_scan_only_diag active; sd_task skipped");
+            console::println!("runtime: boot_scan_only_diag active; non-wifi tasks skipped");
+            console::println!("sdprobe: boot_scan_only_diag active; sd_task skipped");
         } else {
             spawner.spawn(
                 board_runtime_task(
@@ -271,6 +274,7 @@ pub fn run() -> ! {
                         display_context,
                         touch_driver,
                         imu_driver,
+                        rtc_i2c,
                         gpio36_input,
                         sd_probe,
                         uart,

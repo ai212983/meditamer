@@ -15,8 +15,15 @@ if [[ "$screen_load_count" -ne 1 || "$screen_loads" != *'/backend.rs:'* ]]; then
   exit 1
 fi
 
-for surface in home.rs launcher.rs gesture_test.rs ambient_picker.rs overlay_settings.rs; do
-  if rg -n 'super::.*\b(home|launcher|gesture_test|ambient_picker|overlay_settings)\b' "$screen_dir/$surface"; then
+for surface in home.rs launcher.rs gesture_test.rs ambient_view overlay_settings.rs; do
+  # A surface module may be a single file or a directory (e.g. ambient_view,
+  # which also has a pure, non-LVGL model.rs submodule); resolve either.
+  if [[ -d "$screen_dir/$surface" ]]; then
+    surface_path="$screen_dir/$surface/mod.rs"
+  else
+    surface_path="$screen_dir/$surface"
+  fi
+  if rg -n 'super::.*\b(home|launcher|gesture_test|ambient_view|overlay_settings)\b' "$surface_path"; then
     echo "ui-shell ownership: $surface imports a sibling surface" >&2
     exit 1
   fi

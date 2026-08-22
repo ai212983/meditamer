@@ -1,4 +1,4 @@
-use super::runtime_helpers::{action_abort_flash, action_write_summary};
+use super::runtime_helpers::{action_abort_flash, action_fail_time_sync, action_write_summary};
 use super::FlashCaptureRuntime;
 
 use anyhow::{anyhow, Result};
@@ -17,8 +17,10 @@ impl WorkflowRuntime for FlashCaptureRuntime<'_> {
             "flash" => self.action_flash(args),
             "capture" => self.action_capture(args, context),
             "post_command" => self.action_post_command(context),
+            "time_sync" => self.action_time_sync(context),
             "write_summary" => action_write_summary(self, context),
             "abort_flash" => action_abort_flash(context),
+            "fail_time_sync" => action_fail_time_sync(context),
             other => Err(anyhow!(
                 "unsupported flash-capture workflow action: {other}"
             )),

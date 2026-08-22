@@ -211,16 +211,19 @@ do:
       call: "capture"
       with:
         mode: "none"
-      then: "post_command_gate"
+      then: "time_sync"
   - capture_stream:
       call: "capture"
       with:
         mode: "stream"
-      then: "post_command_gate"
+      then: "time_sync"
   - capture_boot:
       call: "capture"
       with:
         mode: "boot"
+      then: "time_sync"
+  - time_sync:
+      call: "time_sync"
       then: "post_command_gate"
   - post_command_gate:
       switch:
@@ -234,3 +237,13 @@ do:
       then: "write_summary"
   - write_summary:
       call: "write_summary"
+      then: "time_sync_result_gate"
+  - time_sync_result_gate:
+      switch:
+        - time_sync_failed:
+            when: "${ .time_sync_ok == false }"
+            then: "fail_time_sync"
+        - default:
+            then: "__end__"
+  - fail_time_sync:
+      call: "fail_time_sync"

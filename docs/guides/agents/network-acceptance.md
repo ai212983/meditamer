@@ -24,7 +24,6 @@ tools/hostctl/scenarios/wifi-acceptance.sw.yaml
 - `HOSTCTL_NET_BAUD`
 - `HOSTCTL_NET_SSID`
 - `HOSTCTL_NET_PASSWORD`
-- `HOSTCTL_NET_POLICY_PATH`
 - `HOSTCTL_NET_LOG_PATH`
 
 Default policy template:
@@ -53,7 +52,9 @@ Readiness and failure diagnosis must use structured lines:
 4. Classify from `NET_STATUS.failure_class` / `failure_code` first, then from HTTP upload errors.
 5. Apply one targeted fix, rerun, and compare cycle summaries.
 
-For full Wi-Fi/upload regression verification (discovery + acceptance + panic-first reporting), run:
+For full Wi-Fi/upload regression verification (discovery + acceptance +
+panic-first reporting), see the [Wi-Fi Regression Gate](../wifi-regression-gate.md)
+and run:
 
 ```bash
 scripts/tests/hw/test_wifi_regression_gate.sh

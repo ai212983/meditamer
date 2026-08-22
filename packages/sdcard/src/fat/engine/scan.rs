@@ -329,6 +329,14 @@ impl FatEngine {
                 self.stage = CommandStage::Read;
                 Ok(FatStep::Continue)
             }
+            FatReadReturn::Stream => {
+                let next = next.ok_or(SdFatError::ClusterChainTooLong)?;
+                self.stream.cluster = next;
+                self.stream.sector_offset = 0;
+                self.stream.visited = self.stream.visited.saturating_add(1);
+                self.stage = CommandStage::Stream;
+                Ok(FatStep::Continue)
+            }
             FatReadReturn::DataWrite | FatReadReturn::UploadCursor => {
                 Err(SdFatError::BadCluster(value))
             }
@@ -431,6 +439,22 @@ impl FatEngine {
                 self.read
                     .start(found.record.first_cluster, found.record.size, *output);
                 self.stage = CommandStage::Read;
+                Ok(FatStep::Continue)
+            }
+            FatRequest::Stream { .. } => {
+                let found = self.target.ok_or(SdFatError::NotFound)?;
+                if found.record.is_dir() {
+                    return Err(SdFatError::IsDirectory);
+                }
+                if found.record.size == 0 {
+                    return Ok(self.finish(FatResult::Streamed { bytes: 0 }));
+                }
+                if found.record.first_cluster < 2 {
+                    return Err(SdFatError::BadCluster(found.record.first_cluster));
+                }
+                self.stream
+                    .start(found.record.first_cluster, found.record.size);
+                self.stage = CommandStage::Stream;
                 Ok(FatStep::Continue)
             }
             _ => Ok(self.finish(FatResult::Error(super::FatEngineError::UnsupportedRequest))),

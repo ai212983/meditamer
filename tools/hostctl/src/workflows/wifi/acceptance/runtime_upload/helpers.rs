@@ -1,40 +1,16 @@
 use anyhow::Result;
 
-use crate::{
-    env_utils,
-    workflows::{upload, wifi::common::PanicSignal},
-};
+use crate::workflows::{upload, wifi::common::PanicSignal};
 
 pub(super) fn resolve_net_upload_retry_policy() -> Result<upload::UploadRetryPolicy> {
-    let default_sd_busy_retry_s =
-        env_utils::parse_env_f64("HOSTCTL_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC", 30.0)?.max(1.0);
-    let default_net_recovery_timeout_s =
-        env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_TIMEOUT_SEC", 8.0)?.max(0.1);
-    let default_net_recovery_poll_s =
-        env_utils::parse_env_f64("HOSTCTL_UPLOAD_NET_RECOVERY_POLL_SEC", 0.8)?.max(0.05);
-    let default_net_recovery_consecutive_health =
-        env_utils::parse_env_u32("HOSTCTL_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH", 2)?.max(1);
+    // Acceptance-specific retry budget: tighter than the general `upload`
+    // defaults (net recovery 8s / sd-busy 30s vs 45s / 180s). Formerly env-tunable
+    // via HOSTCTL_NET_UPLOAD_*; now fixed constants (hostctl-env-audit.md).
     Ok(upload::UploadRetryPolicy {
-        sd_busy_total_retry_sec: env_utils::parse_env_f64(
-            "HOSTCTL_NET_UPLOAD_SD_BUSY_TOTAL_RETRY_SEC",
-            default_sd_busy_retry_s,
-        )?
-        .max(1.0),
-        net_recovery_timeout_sec: env_utils::parse_env_f64(
-            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_TIMEOUT_SEC",
-            default_net_recovery_timeout_s,
-        )?
-        .max(0.1),
-        net_recovery_poll_sec: env_utils::parse_env_f64(
-            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_POLL_SEC",
-            default_net_recovery_poll_s,
-        )?
-        .max(0.05),
-        net_recovery_consecutive_health_successes: env_utils::parse_env_u32(
-            "HOSTCTL_NET_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH",
-            default_net_recovery_consecutive_health,
-        )?
-        .max(1),
+        sd_busy_total_retry_sec: 30.0f64.max(1.0),
+        net_recovery_timeout_sec: 8.0f64.max(0.1),
+        net_recovery_poll_sec: 0.8f64.max(0.05),
+        net_recovery_consecutive_health_successes: 2u32,
     })
 }
 
@@ -87,8 +63,9 @@ pub(super) fn refresh_retry_eligible_host_failure(class: &str) -> bool {
     )
 }
 
-pub(super) fn refresh_upload_client_on_failure_enabled() -> Result<bool> {
-    env_utils::parse_env_bool01("HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE", true)
+pub(super) fn refresh_upload_client_on_failure_enabled() -> bool {
+    // Acceptance-internal knob (HOSTCTL_NET_UPLOAD_REFRESH_ON_FAILURE): on.
+    true
 }
 
 pub(super) fn append_panic_signal_context(

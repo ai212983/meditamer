@@ -44,14 +44,7 @@ pub(super) async fn handle_serial_command(
         SerialCommand::UiProviderFixtureStep => {
             run_ui_provider_fixture_step_command(uart, state).await;
         }
-        SerialCommand::FirmwareStatus
-        | SerialCommand::FirmwarePrepare
-        | SerialCommand::FirmwareBegin { .. }
-        | SerialCommand::FirmwareChunk { .. }
-        | SerialCommand::FirmwareStream { .. }
-        | SerialCommand::FirmwareFinish
-        | SerialCommand::FirmwareActivate
-        | SerialCommand::FirmwareAbort => {
+        SerialCommand::FirmwareFactoryBoot => {
             unreachable!("firmware command reached ordinary boxed dispatcher");
         }
         #[cfg(feature = "ble-foundation")]
@@ -77,7 +70,9 @@ pub(super) async fn handle_serial_command(
         | SerialCommand::AllocatorAllocProbe { .. }
         | SerialCommand::SdWait { .. }
         | SerialCommand::DiagGet
-        | SerialCommand::StateGet => {
+        | SerialCommand::StateGet
+        | SerialCommand::TimeSet { .. }
+        | SerialCommand::TimeGet => {
             handle_local_command(uart, state, cmd).await;
         }
         SerialCommand::StackStatus | SerialCommand::AllocatorStatus => {
@@ -225,6 +220,21 @@ async fn handle_local_command(
         SerialCommand::StateGet => {
             write_state_status_line(uart).await;
         }
+        SerialCommand::TimeSet {
+            utc_epoch_seconds,
+            offset_minutes,
+        } => {
+            super::time_dispatch::run_timeset_command(
+                uart,
+                state,
+                utc_epoch_seconds,
+                offset_minutes,
+            )
+            .await;
+        }
+        SerialCommand::TimeGet => {
+            super::time_dispatch::run_timeget_command(uart, state).await;
+        }
         SerialCommand::AllocatorAllocProbe { bytes } => {
             run_allocator_alloc_probe(uart, bytes as usize).await;
         }
@@ -301,9 +311,9 @@ async fn handle_local_command(
 #[cfg(feature = "ble-foundation")]
 async fn run_radio_handoff_command(
     uart: &mut SerialUart,
-    command: net::handoff::NetworkOwnerCommand,
+    command: arbitration::handoff::NetworkOwnerCommand,
 ) {
-    let timeout = if matches!(command, net::handoff::NetworkOwnerCommand::Status) {
+    let timeout = if matches!(command, arbitration::handoff::NetworkOwnerCommand::Status) {
         embassy_time::Duration::from_secs(3)
     } else {
         embassy_time::Duration::from_secs(200)
@@ -327,11 +337,11 @@ async fn run_radio_handoff_command(
         return;
     };
     let (kind, reason) = match ack.kind {
-        net::handoff::NetworkOwnerAckKind::Status => ("status", "none"),
-        net::handoff::NetworkOwnerAckKind::Quiesced => ("quiesced", "none"),
-        net::handoff::NetworkOwnerAckKind::Restored => ("restored", "none"),
-        net::handoff::NetworkOwnerAckKind::Rejected(reason) => ("rejected", reason.label()),
-        net::handoff::NetworkOwnerAckKind::Faulted(reason) => ("faulted", reason.label()),
+        arbitration::handoff::NetworkOwnerAckKind::Status => ("status", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Quiesced => ("quiesced", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Restored => ("restored", "none"),
+        arbitration::handoff::NetworkOwnerAckKind::Rejected(reason) => ("rejected", reason.label()),
+        arbitration::handoff::NetworkOwnerAckKind::Faulted(reason) => ("faulted", reason.label()),
     };
     let mut line = heapless::String::<640>::new();
     let _ = write!(
@@ -347,9 +357,9 @@ async fn run_radio_handoff_command(
         ack.resources.probe_free_before_bytes,
         ack.resources.probe_free_after_bytes,
         ack.resources.probe_reserve_bytes,
-        ack.resources.http_connections,
-        ack.resources.sd_roundtrips,
-        ack.resources.sd_sessions,
+        ack.resources.service_connections,
+        ack.resources.storage_roundtrips,
+        ack.resources.storage_sessions,
         ack.resources.radio_callbacks,
         ack.resources.radio_queues,
         ack.resources.radio_source_active,
@@ -378,204 +388,18 @@ pub(super) async fn handle_firmware_command(
     state: &mut SerialTaskState,
     cmd: SerialCommand,
 ) {
+    let _ = state;
     match cmd {
-        SerialCommand::FirmwareStatus => write_firmware_status(uart).await,
-        SerialCommand::FirmwarePrepare => prepare_firmware_update(uart, state).await,
-        SerialCommand::FirmwareBegin {
-            image_len,
-            digest,
-            signature,
-        } => {
-            if !require_firmware_update_lease(uart, state, "FWBEGIN").await {
-                return;
-            }
-            match crate::firmware::update::begin(image_len, digest, signature) {
-                Ok(target) => {
-                    let mut line = heapless::String::<96>::new();
-                    let _ = write!(
-                        &mut line,
-                        "FWBEGIN OK target={} total={}\r\n",
-                        target.label(),
-                        image_len,
-                    );
-                    let _ = uart_write_all(uart, line.as_bytes()).await;
-                }
-                Err(error) => write_firmware_error(uart, "FWBEGIN", error).await,
-            }
-        }
-        SerialCommand::FirmwareChunk { offset, bytes, len } => {
-            if !require_firmware_update_lease(uart, state, "FWCHUNK").await {
-                return;
-            }
-            match crate::firmware::update::write_chunk(offset, &bytes[..len as usize]) {
-                Ok(written) => {
-                    let mut line = heapless::String::<64>::new();
-                    let _ = write!(&mut line, "FWCHUNK OK written={}\r\n", written);
-                    let _ = uart_write_all(uart, line.as_bytes()).await;
-                }
-                Err(error) => write_firmware_error(uart, "FWCHUNK", error).await,
-            }
-        }
-        SerialCommand::FirmwareStream { baud } => {
-            super::firmware_stream::begin_stream(uart, state, baud).await;
-        }
-        SerialCommand::FirmwareFinish => finish_firmware_update(uart, state).await,
-        SerialCommand::FirmwareActivate => {
-            if !require_firmware_update_lease(uart, state, "FWACTIVATE").await {
-                return;
-            }
-            match crate::firmware::update::activate() {
-                Ok(target) => {
-                    let mut line = heapless::String::<80>::new();
-                    let _ = write!(
-                        &mut line,
-                        "FWACTIVATE OK target={} rebooting=yes\r\n",
-                        target.label(),
-                    );
-                    let _ = uart_write_all(uart, line.as_bytes()).await;
+        SerialCommand::FirmwareFactoryBoot => {
+            match crate::firmware::update::request_factory_boot() {
+                Ok(()) => {
+                    let _ = uart_write_all(uart, b"FWFACTORYBOOT OK rebooting=yes\r\n").await;
                     esp_hal::system::software_reset();
                 }
-                Err(error) => write_firmware_error(uart, "FWACTIVATE", error).await,
+                Err(error) => write_firmware_error(uart, "FWFACTORYBOOT", error).await,
             }
-        }
-        SerialCommand::FirmwareAbort => {
-            unreachable!("firmware abort uses the allocation-free recovery path");
         }
         _ => unreachable!("firmware command must map to firmware dispatch"),
-    }
-}
-
-async fn require_firmware_update_lease(
-    uart: &mut SerialUart,
-    state: &SerialTaskState,
-    command: &str,
-) -> bool {
-    if state.firmware_update_hardware_lease_active() && crate::firmware::update::transport_quiet() {
-        return true;
-    }
-    let mut line = heapless::String::<64>::new();
-    let _ = write!(&mut line, "{} ERR reason=not_prepared\r\n", command);
-    let _ = uart_write_all(uart, line.as_bytes()).await;
-    false
-}
-
-async fn prepare_firmware_update(uart: &mut SerialUart, state: &mut SerialTaskState) {
-    if state.firmware_update_hardware_lease_active() {
-        if crate::firmware::update::transport_quiet() {
-            let _ = uart_write_all(
-                uart,
-                b"FWPREPARE OK quiet=yes panel_clients=suspended other_core=parked\r\n",
-            )
-            .await;
-        } else {
-            let _ = uart_write_all(uart, b"FWPREPARE ERR reason=grant_inconsistent\r\n").await;
-        }
-        return;
-    }
-    crate::firmware::update::prepare_transport();
-    #[cfg(feature = "ble-foundation")]
-    if let Err(reason) = prepare_network_owner_for_update().await {
-        crate::firmware::update::end_transport();
-        let mut line = heapless::String::<112>::new();
-        let _ = write!(&mut line, "FWPREPARE ERR reason={reason}\r\n");
-        let _ = uart_write_all(uart, line.as_bytes()).await;
-        return;
-    }
-    if state.begin_firmware_update_hardware_lease() {
-        crate::firmware::panel_bus::suspend_clients().await;
-        crate::firmware::flash::park_other_core_for_update();
-    }
-    let _ = uart_write_all(
-        uart,
-        b"FWPREPARE OK quiet=yes panel_clients=suspended other_core=parked\r\n",
-    )
-    .await;
-}
-
-#[cfg(feature = "ble-foundation")]
-async fn prepare_network_owner_for_update() -> Result<(), &'static str> {
-    crate::firmware::ble::close_phase1s_for_update()
-        .await
-        .map_err(|_| "ble_ownership_unknown")?;
-    let deadline = embassy_time::Instant::now() + embassy_time::Duration::from_secs(190);
-    loop {
-        if embassy_time::Instant::now() >= deadline {
-            return Err("radio_handoff_timeout");
-        }
-        let ticket = net::request_handoff(net::handoff::NetworkOwnerCommand::Status)
-            .map_err(|_| "radio_handoff_busy")?;
-        let ack = match embassy_time::with_timeout(
-            embassy_time::Duration::from_secs(3),
-            net::receive_handoff_ack(ticket),
-        )
-        .await
-        {
-            Ok(ack) => ack,
-            Err(_) => {
-                net::cancel_handoff_request(ticket);
-                return Err("radio_handoff_status_timeout");
-            }
-        };
-        match ack.state {
-            net::handoff::NetworkOwnerState::Serving => return Ok(()),
-            net::handoff::NetworkOwnerState::OffConfirmed => {
-                let ticket =
-                    net::request_handoff(net::handoff::NetworkOwnerCommand::ReleaseExclusive {
-                        boot_generation: ack.boot_generation,
-                        epoch: ack.epoch,
-                    })
-                    .map_err(|_| "radio_handoff_busy")?;
-                let restored = match embassy_time::with_timeout(
-                    deadline.saturating_duration_since(embassy_time::Instant::now()),
-                    net::receive_handoff_ack(ticket),
-                )
-                .await
-                {
-                    Ok(ack) => ack,
-                    Err(_) => {
-                        net::cancel_handoff_request(ticket);
-                        return Err("radio_restore_timeout");
-                    }
-                };
-                if restored.state == net::handoff::NetworkOwnerState::Serving {
-                    return Ok(());
-                }
-                if restored.state == net::handoff::NetworkOwnerState::Faulted {
-                    return Err("radio_ownership_unknown");
-                }
-            }
-            net::handoff::NetworkOwnerState::Quiescing
-            | net::handoff::NetworkOwnerState::Restoring => {
-                // prepare_transport() has priority. A quiescing owner observes
-                // it and rolls back; a restoring owner finishes recreation.
-                embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
-            }
-            net::handoff::NetworkOwnerState::Faulted => {
-                return Err("radio_ownership_unknown");
-            }
-        }
-    }
-}
-
-async fn finish_firmware_update(uart: &mut SerialUart, state: &mut SerialTaskState) {
-    if !require_firmware_update_lease(uart, state, "FWFINISH").await {
-        return;
-    }
-    match crate::firmware::update::finish() {
-        Ok(digest) => {
-            let mut line = heapless::String::<96>::new();
-            let _ = line.push_str("FWFINISH OK sha256=");
-            for byte in digest {
-                let _ = write!(&mut line, "{byte:02x}");
-            }
-            let _ = line.push_str("\r\n");
-            let _ = uart_write_all(uart, line.as_bytes()).await;
-        }
-        Err(error) => {
-            write_firmware_error(uart, "FWFINISH", error).await;
-            release_firmware_update_hardware(state).await;
-            crate::firmware::update::end_transport();
-        }
     }
 }
 
@@ -583,37 +407,6 @@ pub(super) async fn release_firmware_update_hardware(state: &mut SerialTaskState
     let _ = crate::firmware::flash::unpark_other_core_after_update();
     if state.end_firmware_update_hardware_lease() {
         let _ = crate::firmware::panel_bus::try_request_clients_resume(true);
-    }
-}
-
-async fn write_firmware_status(uart: &mut SerialUart) {
-    match crate::firmware::update::status() {
-        Ok(status) => {
-            let mut line = heapless::String::<320>::new();
-            let _ = write!(
-                &mut line,
-                "FWSTATUS build_id={} booted={} selected={} state={} phase={} target={} written={} total={} key={} key_id={:02x}{:02x}{:02x}{:02x} erase_max_us={} write_max_us={} verify_read_us={} multicore=transaction_park stream=bin1@{}\r\n",
-                status.build_id,
-                status.booted.label(),
-                status.selected.map_or("none", |slot| slot.label()),
-                status.image_state.map_or("none", crate::firmware::update::image_state_label),
-                status.phase.label(),
-                status.target.map_or("none", |slot| slot.label()),
-                status.written,
-                status.total,
-                if status.public_key_configured { "configured" } else { "missing" },
-                status.public_key_id[0],
-                status.public_key_id[1],
-                status.public_key_id[2],
-                status.public_key_id[3],
-                status.max_erase_us,
-                status.max_write_us,
-                status.verify_read_us,
-                super::firmware_stream::STREAM_BAUD,
-            );
-            let _ = uart_write_all(uart, line.as_bytes()).await;
-        }
-        Err(error) => write_firmware_error(uart, "FWSTATUS", error).await,
     }
 }
 
@@ -651,6 +444,8 @@ async fn handle_network_command(uart: &mut SerialUart, cmd: SerialCommand) {
     }
 }
 
+// `state` is only read by the asset-upload-http-gated app-state arms below.
+#[cfg_attr(not(feature = "asset-upload-http"), allow(unused_variables))]
 pub(super) async fn run_low_overhead_diagnostic_command(
     uart: &mut SerialUart,
     state: &mut SerialTaskState,
@@ -659,7 +454,6 @@ pub(super) async fn run_low_overhead_diagnostic_command(
     match command {
         SerialCommand::StackStatus => write_stack_status_line(uart).await,
         SerialCommand::AllocatorStatus => write_allocator_status_line(uart).await,
-        SerialCommand::FirmwareAbort => abort_firmware_update(uart, state).await,
         #[cfg(feature = "asset-upload-http")]
         SerialCommand::NetStatus => write_net_status_line(uart).await,
         #[cfg(feature = "asset-upload-http")]
@@ -716,7 +510,7 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         } => {
             run_radio_handoff_command(
                 uart,
-                net::handoff::NetworkOwnerCommand::AcquireExclusive {
+                arbitration::handoff::NetworkOwnerCommand::AcquireExclusive {
                     boot_generation,
                     epoch,
                 },
@@ -730,7 +524,7 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         } => {
             run_radio_handoff_command(
                 uart,
-                net::handoff::NetworkOwnerCommand::ReleaseExclusive {
+                arbitration::handoff::NetworkOwnerCommand::ReleaseExclusive {
                     boot_generation,
                     epoch,
                 },
@@ -739,7 +533,8 @@ pub(super) async fn run_low_overhead_diagnostic_command(
         }
         #[cfg(feature = "ble-foundation")]
         SerialCommand::RadioHandoffStatus => {
-            run_radio_handoff_command(uart, net::handoff::NetworkOwnerCommand::Status).await;
+            run_radio_handoff_command(uart, arbitration::handoff::NetworkOwnerCommand::Status)
+                .await;
         }
         _ => unreachable!("only low-overhead diagnostics bypass the boxed dispatcher"),
     }
@@ -756,16 +551,6 @@ async fn recover_network(uart: &mut SerialUart) {
     } else {
         let _ = uart_write_all(uart, b"NET ERR reason=busy\r\n").await;
     }
-}
-
-async fn abort_firmware_update(uart: &mut SerialUart, state: &mut SerialTaskState) {
-    if !require_firmware_update_lease(uart, state, "FWABORT").await {
-        return;
-    }
-    crate::firmware::update::abort();
-    let _ = uart_write_all(uart, b"FWABORT OK\r\n").await;
-    release_firmware_update_hardware(state).await;
-    crate::firmware::update::end_transport();
 }
 
 #[cfg(feature = "asset-upload-http")]
@@ -859,7 +644,7 @@ async fn run_net_listener_set_command(uart: &mut SerialUart, enabled: bool) {
     if crate::firmware::observability::log_filter_enabled(
         crate::firmware::observability::LOG_DOMAIN_NET,
     ) {
-        esp_println::println!(
+        console::println!(
             "upload_http: listener_control cmd={} prev_enabled={} next_enabled={} seq_before={} seq_after={}",
             if enabled { "on" } else { "off" },
             previous_enabled,

@@ -4,7 +4,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channe
 use super::super::types::WifiCredentials;
 use super::super::types::{
     AppEvent, AppStateApplyAck, SdPowerRequest, SdRequest, SdResult, SdUploadRequest,
-    SdUploadResult, SerialStatusEvent, TapTraceSample, UiCycleStepAck,
+    SdUploadResult, SerialStatusEvent, TapTraceSample, UiCycleStepAck, WallClockQueryResult,
 };
 #[cfg(feature = "asset-upload-http")]
 use super::super::types::{
@@ -59,4 +59,10 @@ pub(crate) static APP_STATE_APPLY_ACKS: Channel<CriticalSectionRawMutex, AppStat
 pub(crate) static UI_CYCLE_STEP_ACKS: Channel<CriticalSectionRawMutex, UiCycleStepAck, 2> =
     Channel::new();
 pub(crate) static TAP_TRACE_SAMPLES: Channel<CriticalSectionRawMutex, TapTraceSample, 8> =
+    Channel::new();
+// The Ambient Home screen (display task) requests fresh RTC reads from the
+// serial task, the sole owner of RTC I2C access. No result is cached here:
+// each request produces exactly one fresh transaction.
+pub(crate) static WALL_CLOCK_REQUESTS: Channel<CriticalSectionRawMutex, (), 2> = Channel::new();
+pub(crate) static WALL_CLOCK_RESPONSES: Channel<CriticalSectionRawMutex, WallClockQueryResult, 2> =
     Channel::new();

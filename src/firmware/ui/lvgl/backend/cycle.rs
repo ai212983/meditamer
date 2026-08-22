@@ -3,7 +3,7 @@
 use super::*;
 
 #[cfg(feature = "ui-provider-fixture")]
-use crate::firmware::ui::shell::types::ProviderToken;
+use shell::types::ProviderToken;
 
 impl Backend {
     pub(crate) fn cycle_step(
@@ -178,13 +178,13 @@ impl Backend {
             {
                 backend.navigation_faulted = true;
                 backend.composition_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=fault stage=queued_owner owner={:?}",
                     owner,
                 );
                 return;
             }
-            esp_println::println!(
+            console::println!(
                 "UI_PROVIDER_REMOVE state=staged owner={:?} provider_requested_base_live=true provider_modal_queued=true",
                 owner,
             );
@@ -195,7 +195,7 @@ impl Backend {
                 intent_bridge::purge_provider(owner);
                 backend.navigation_faulted = true;
                 backend.composition_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=fault stage=callback_probe owner={:?}",
                     owner,
                 );
@@ -257,7 +257,7 @@ impl Backend {
             Ok(plan) => plan,
             Err(error) => {
                 self.navigation_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=rejected stage=prepare owner={:?} error={:?}",
                     owner,
                     error,
@@ -267,7 +267,7 @@ impl Backend {
         };
         let Some(fallback) = plan.fallback_transition() else {
             self.navigation_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_PROVIDER_REMOVE state=rejected stage=fallback owner={:?}",
                 owner,
             );
@@ -279,7 +279,7 @@ impl Backend {
                 || active.token.surface.owner != owner
         }) {
             self.navigation_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_PROVIDER_REMOVE state=fault stage=alignment owner={:?}",
                 owner,
             );
@@ -289,7 +289,7 @@ impl Backend {
             match self.stage_overlay_entries(plan.composition_delta().enter_live()) {
                 Some(candidates) => candidates,
                 None => {
-                    esp_println::println!(
+                    console::println!(
                         "UI_PROVIDER_REMOVE state=rolled_back stage=overlay_entry owner={:?}",
                         owner,
                     );
@@ -306,7 +306,7 @@ impl Backend {
             self.destroy_uncommitted_overlays(&mut entering_overlays);
             self.navigation_faulted = true;
             self.composition_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_PROVIDER_REMOVE state=fault stage=overlay_alignment owner={:?}",
                 owner,
             );
@@ -336,18 +336,18 @@ impl Backend {
                 if purged != 1 {
                     self.navigation_faulted = true;
                     self.lifecycle_audit_faulted = true;
-                    esp_println::println!(
+                    console::println!(
                         "UI_PROVIDER_REMOVE state=audit_failed stage=callback_purge owner={:?} expected=1 actual={}",
                         owner,
                         purged,
                     );
                 }
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=detached owner={:?} callback_actions_purged={}",
                     owner,
                     purged,
                 );
-                Ok::<_, crate::firmware::ui::shell::model::ProviderRemovalError>(pending)
+                Ok::<_, shell::model::ProviderRemovalError>(pending)
             },
         );
         match result {
@@ -376,7 +376,7 @@ impl Backend {
                 self.navigation_faulted = self.cleanup_blocked.is_some()
                     || cleanup_audit_failed
                     || !self.active_surface_is_renderable();
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=rolled_back owner={:?} reason={:?}",
                     owner,
                     reason,
@@ -397,7 +397,7 @@ impl Backend {
                 self.complete_overlay_departures(&departing_overlays);
                 self.activate_overlay_entries(&mut entering_overlays);
                 self.navigation_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=cleanup_blocked owner={:?} reason={:?}",
                     owner,
                     reason,
@@ -438,7 +438,7 @@ impl Backend {
         if runtime_references || callback_references || !integrity_ok || !shell_aligned {
             self.navigation_faulted = true;
             self.lifecycle_audit_faulted = true;
-            esp_println::println!(
+            console::println!(
                 "UI_PROVIDER_REMOVE state=audit_failed owner={:?} runtime_refs={} callback_refs={} integrity_ok={} shell_aligned={}",
                 owner,
                 runtime_references,
@@ -455,7 +455,7 @@ impl Backend {
             Ok(purge) => {
                 self.provider_fixture_state = ProviderFixtureState::Removed;
                 self.navigation_faulted = false;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=finalized owner={:?} definitions={} overlays={} queued={}",
                     owner,
                     purge.definitions,
@@ -467,7 +467,7 @@ impl Backend {
             Err(error) => {
                 self.navigation_faulted = true;
                 self.lifecycle_audit_faulted = true;
-                esp_println::println!(
+                console::println!(
                     "UI_PROVIDER_REMOVE state=audit_failed owner={:?} error={:?}",
                     owner,
                     error,

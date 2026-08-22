@@ -15,13 +15,11 @@ use logging::Logger;
 use workflows::artifacts::{run_artifacts_inventory, run_artifacts_prune, ArtifactsPruneOptions};
 use workflows::ble_phase1d::BlePhase1dOptions;
 use workflows::ble_phase1s::BlePhase1sOptions;
-use workflows::firmware_update::{
-    firmware_public_key_hex, run_firmware_update, FirmwareUpdateOptions,
-};
 use workflows::flash_capture::{run_flash_capture, CaptureMode, FlashCaptureOptions, FlashMode};
 use workflows::runtime_modes::RuntimeModesSmokeOptions;
 use workflows::sdcard::{SdcardHwOptions, SdcardSuite};
-use workflows::serial::RepaintOptions;
+use workflows::serial::{RepaintOptions, TimeSetOptions, TimeStatusOptions};
+use workflows::signing_key::firmware_public_key_hex;
 use workflows::troubleshoot::TroubleshootOptions;
 use workflows::ui_lifecycle::UiLifecycleOptions;
 use workflows::upload::UploadOptions;
@@ -41,8 +39,13 @@ enum Commands {
     Artifacts(ArtifactsArgs),
     FlashCapture(FlashCaptureArgs),
     FirmwareKey(FirmwareKeyArgs),
-    FirmwareUpdate(FirmwareUpdateArgs),
     Repaint(RepaintArgs),
+    SingleProductionBundleBuild(SingleProductionBundleBuildArgs),
+    SingleProductionBundleInspect(SingleProductionBundleInspectArgs),
+    SingleProductionFlash(SingleProductionFlashArgs),
+    SingleProductionSdPush(SingleProductionSdPushArgs),
+    TimeSet(TimeSetArgs),
+    TimeStatus(TimeStatusArgs),
     Upload(UploadArgs),
     Test(TestArgs),
 }
@@ -84,20 +87,6 @@ struct FirmwareKeyArgs {
 }
 
 #[derive(Debug, Args)]
-struct FirmwareUpdateArgs {
-    #[arg(long)]
-    image: PathBuf,
-    #[arg(long)]
-    key: PathBuf,
-    #[arg(long)]
-    port: Option<String>,
-    #[arg(long)]
-    output: Option<PathBuf>,
-    #[arg(long, default_value_t = false)]
-    stage_only: bool,
-}
-
-#[derive(Debug, Args)]
 struct FlashCaptureArgs {
     #[arg(long, default_value = "release")]
     profile: String,
@@ -127,6 +116,10 @@ struct FlashCaptureArgs {
     post_pattern: Option<String>,
     #[arg(long)]
     post_timeout_ms: Option<u64>,
+    /// Disables the automatic post-capture wall-clock sync, overriding
+    /// `FLASH_SET_TIME_AFTER_FLASH` outright.
+    #[arg(long)]
+    no_time_sync: bool,
 }
 
 #[derive(Debug, Args)]
@@ -134,6 +127,92 @@ struct RepaintArgs {
     #[arg(long)]
     command: Option<String>,
 }
+
+/// Builds and signs an ADR-0014 bundle (header + firmware payload) from a
+/// release image, ready to stage on SD via `single-production-sd-push` or a
+/// real delivery transport.
+#[derive(Debug, Args)]
+struct SingleProductionBundleBuildArgs {
+    /// The production release image to wrap (e.g. an `espflash save-image`
+    /// output).
+    #[arg(long)]
+    firmware: PathBuf,
+    /// Signing key: 32 raw bytes or 64 hex characters (same format
+    /// `firmware-key` already accepts).
+    #[arg(long)]
+    key: PathBuf,
+    #[arg(long, default_value_t = 1)]
+    target_id: u16,
+    #[arg(long, default_value_t = 1)]
+    layout_id: u16,
+    #[arg(long)]
+    build_id: String,
+    #[arg(long)]
+    out: PathBuf,
+}
+
+/// Parses a bundle's header and reports its fields, without touching a
+/// device — for confirming a bundle built elsewhere is well-formed before
+/// staging it.
+#[derive(Debug, Args)]
+struct SingleProductionBundleInspectArgs {
+    bundle: PathBuf,
+    /// 64 hex characters; verifies the signature if given (matches
+    /// `firmware-key`'s output format).
+    #[arg(long)]
+    public_key: Option<String>,
+}
+
+/// Pushes a signed bundle to a board's SD card over serial (ADR-0014 Phase
+/// 4) — bench/qualification only, since the device's SD card is not
+/// otherwise reachable without disassembly. The board must already be
+/// running the `sd-qual-push` updater build variant
+/// (`CARGO_FEATURES=sd-qual-push`); see src/updater/sd_push.rs.
+#[derive(Debug, Args)]
+struct SingleProductionSdPushArgs {
+    #[arg(long)]
+    port: Option<String>,
+    bundle: PathBuf,
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+/// Complete USB flash for the single-production layout (ADR-0014 Phase 2):
+/// bootloader + partition table + factory (updater) image + production
+/// (`ota_0`) image + a freshly constructed initial `otadata`, in one
+/// `esptool.py write_flash`. Build the bootloader/partition table first
+/// with `scripts/build/single_production_bootloader.sh`.
+#[derive(Debug, Args)]
+struct SingleProductionFlashArgs {
+    #[arg(long)]
+    port: String,
+    #[arg(long, default_value_t = 460_800)]
+    baud: u32,
+    /// The factory-updater release image (`target/xtensa-esp32-none-elf/release/updater`,
+    /// via `espflash save-image`).
+    #[arg(long)]
+    factory: PathBuf,
+    /// The production (`ota_0`) release image.
+    #[arg(long)]
+    production: PathBuf,
+    /// Defaults to `target/single-production-bootloader/bootloader/bootloader.bin`.
+    #[arg(long)]
+    bootloader: Option<PathBuf>,
+    /// Defaults to `target/single-production-bootloader/partition_table/partition-table.bin`.
+    #[arg(long)]
+    partition_table: Option<PathBuf>,
+}
+
+/// Synchronizes the device's PCF85063A wall clock to the host's current UTC
+/// time and fixed local offset, then verifies the readback.
+#[derive(Debug, Args)]
+struct TimeSetArgs {}
+
+/// Reports the device's current wall-clock validity via `TIMEGET`. Exits
+/// successfully for either `TIMEGET OK` form (`valid=on` or `valid=off`);
+/// only a transport error, parse error, or `TIMEGET ERR` is a failure.
+#[derive(Debug, Args)]
+struct TimeStatusArgs {}
 
 #[derive(Debug, Args)]
 struct UploadArgs {
@@ -261,10 +340,6 @@ fn parse_suite(raw: &str) -> Result<SdcardSuite> {
     }
 }
 
-fn firmware_update_activate(cli_stage_only: bool, env_stage_only: bool) -> bool {
-    !(cli_stage_only || env_stage_only)
-}
-
 fn run(cli: Cli) -> Result<()> {
     std::env::set_current_dir(workflows::common::repo_root())
         .context("set hostctl runtime working directory to repository root")?;
@@ -299,6 +374,7 @@ fn run(cli: Cli) -> Result<()> {
                 post_command: args.post_command,
                 post_pattern: args.post_pattern,
                 post_timeout_ms: args.post_timeout_ms,
+                no_time_sync: args.no_time_sync,
             },
         ),
         Commands::FirmwareKey(args) => {
@@ -308,25 +384,95 @@ fn run(cli: Cli) -> Result<()> {
             );
             Ok(())
         }
-        Commands::FirmwareUpdate(args) => run_firmware_update(
-            &mut logger,
-            FirmwareUpdateOptions {
-                image: args.image,
-                key: args.key,
-                port: args.port,
-                output: args.output,
-                activate: firmware_update_activate(
-                    args.stage_only,
-                    env_utils::parse_env_bool01("HOSTCTL_FIRMWARE_UPDATE_STAGE_ONLY", false)?,
-                ),
-            },
-        ),
         Commands::Repaint(args) => workflows::serial::run_repaint(
             &mut logger,
             RepaintOptions {
                 command: args.command,
             },
         ),
+        Commands::SingleProductionBundleBuild(args) => {
+            let built = workflows::single_production::bundle::build_and_sign(
+                &args.firmware,
+                &args.key,
+                args.target_id,
+                args.layout_id,
+                &args.build_id,
+                &args.out,
+            )?;
+            println!("bundle_bytes={}", built.bundle_bytes);
+            println!("firmware_len={}", built.firmware_len);
+            println!(
+                "firmware_digest={}",
+                workflows::single_production::bundle::hex(&built.firmware_digest)
+            );
+            println!("build_id={}", built.build_id);
+            println!("public_key_hex={}", built.public_key_hex);
+            println!("out={}", args.out.display());
+            Ok(())
+        }
+        Commands::SingleProductionBundleInspect(args) => {
+            let inspected = workflows::single_production::bundle::inspect(
+                &args.bundle,
+                args.public_key.as_deref(),
+            )?;
+            println!("target_id={}", inspected.target_id);
+            println!("layout_id={}", inspected.layout_id);
+            println!("build_id={}", inspected.build_id);
+            println!("firmware_len={}", inspected.firmware_len);
+            println!(
+                "firmware_digest={}",
+                workflows::single_production::bundle::hex(&inspected.firmware_digest)
+            );
+            println!(
+                "signature_valid={}",
+                inspected
+                    .signature_valid
+                    .map_or("not_checked".to_string(), |v| v.to_string())
+            );
+            println!(
+                "payload_digest_matches={}",
+                inspected
+                    .payload_digest_matches
+                    .map_or("truncated".to_string(), |v| v.to_string())
+            );
+            Ok(())
+        }
+        Commands::SingleProductionSdPush(args) => workflows::single_production::sd_push::run_sd_push(
+            &mut logger,
+            workflows::single_production::sd_push::SdPushOptions {
+                port: args.port,
+                bundle_path: args.bundle,
+                output: args.output,
+            },
+        ),
+        Commands::SingleProductionFlash(args) => {
+            let idf_env = idf_env::bootstrap_idf_env(None, None)?;
+            let repo_root = workflows::common::repo_root();
+            let build_dir = repo_root.join("target/single-production-bootloader");
+            let bootloader = args
+                .bootloader
+                .unwrap_or_else(|| build_dir.join("bootloader/bootloader.bin"));
+            let partition_table = args
+                .partition_table
+                .unwrap_or_else(|| build_dir.join("partition_table/partition-table.bin"));
+            let otadata_scratch = build_dir.join("otadata-initial.bin");
+            workflows::single_production::flash::run_complete_flash(
+                workflows::single_production::flash::CompleteFlashInputs {
+                    idf_env: &idf_env,
+                    port: &args.port,
+                    flash_baud: args.baud,
+                    bootloader_bin: &bootloader,
+                    partition_table_bin: &partition_table,
+                    factory_bin: &args.factory,
+                    production_bin: &args.production,
+                    otadata_scratch_path: &otadata_scratch,
+                },
+            )
+        }
+        Commands::TimeSet(_args) => workflows::serial::run_timeset(&mut logger, TimeSetOptions {}),
+        Commands::TimeStatus(_args) => {
+            workflows::serial::run_timestatus(&mut logger, TimeStatusOptions {})
+        }
         Commands::Upload(args) => workflows::upload::run_upload(
             &mut logger,
             UploadOptions {
@@ -421,18 +567,5 @@ fn main() {
     if let Err(err) = run(cli) {
         eprintln!("error: {err:?}");
         std::process::exit(1);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::firmware_update_activate;
-
-    #[test]
-    fn either_stage_only_control_prevents_activation() {
-        assert!(firmware_update_activate(false, false));
-        assert!(!firmware_update_activate(true, false));
-        assert!(!firmware_update_activate(false, true));
-        assert!(!firmware_update_activate(true, true));
     }
 }

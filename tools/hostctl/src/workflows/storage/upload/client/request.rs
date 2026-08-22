@@ -79,9 +79,8 @@ impl Read for InstrumentedBodyReader {
 pub(crate) fn make_client(timeout_sec: f64) -> Result<Client> {
     let connect_timeout_s =
         crate::env_utils::parse_env_f64("HOSTCTL_UPLOAD_CONNECT_TIMEOUT_SEC", 4.0)?;
-    let disable_pool = crate::env_utils::parse_env_bool01("HOSTCTL_UPLOAD_DISABLE_POOL", false)?
-        || upload_direct_burst_mode_active();
-    let tcp_nodelay = upload_tcp_nodelay_enabled()?;
+    let disable_pool = upload_direct_burst_mode_active();
+    let tcp_nodelay = upload_tcp_nodelay_enabled();
     let timeout = Duration::from_secs_f64(timeout_sec.max(0.1));
     let connect_timeout = Duration::from_secs_f64(connect_timeout_s.max(0.1));
     let mut builder = Client::builder()
@@ -115,14 +114,14 @@ pub(crate) fn request_raw_timed(
     token: Option<&str>,
     timeout_s: f64,
 ) -> Result<TimedResponse> {
-    let burst_read_cap = if body.is_some() && should_use_direct_burst_sender(&method, url)? {
-        Some(upload_direct_burst_bytes()?)
+    let burst_read_cap = if body.is_some() && should_use_direct_burst_sender(&method, url) {
+        Some(upload_direct_burst_bytes())
     } else {
         None
     };
     if let Some(burst_bytes) = burst_read_cap {
         let payload = body.unwrap_or_default();
-        let tcp_nodelay = upload_tcp_nodelay_enabled()?;
+        let tcp_nodelay = upload_tcp_nodelay_enabled();
         let timed = request_raw_timed_direct_stream(
             &method,
             url,

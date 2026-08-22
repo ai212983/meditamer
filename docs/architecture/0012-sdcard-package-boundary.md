@@ -1,6 +1,6 @@
 # ADR-0012: Retain the `sdcard` package boundary; no Wi-Fi package extraction
 
-- Status: Accepted
+- Status: Superseded by ADR-0015
 - Author: Claude/Sonnet5
 - Date: 2026-08-13
 - References: [Source tree architecture cleanup](../archive/refactors/source-tree-architecture-cleanup.md) S6,

@@ -135,9 +135,50 @@ fn parses_state_get() {
 }
 
 #[test]
-fn rejects_removed_timeset_command() {
-    assert!(parse_serial_command(b"TIMESET 1762531200 -300").is_none());
+fn parses_timeset_command() {
+    let cmd = parse_serial_command(b"TIMESET 1762531200 -300");
+    match cmd {
+        Some(SerialCommand::TimeSet {
+            utc_epoch_seconds,
+            offset_minutes,
+        }) => {
+            assert_eq!(utc_epoch_seconds, 1_762_531_200);
+            assert_eq!(offset_minutes, -300);
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn parses_timeset_command_with_a_positive_offset() {
+    let cmd = parse_serial_command(b"TIMESET 1762531200 60");
+    match cmd {
+        Some(SerialCommand::TimeSet {
+            utc_epoch_seconds,
+            offset_minutes,
+        }) => {
+            assert_eq!(utc_epoch_seconds, 1_762_531_200);
+            assert_eq!(offset_minutes, 60);
+        }
+        _ => panic!("unexpected command"),
+    }
+}
+
+#[test]
+fn rejects_malformed_timeset_commands() {
     assert!(parse_serial_command(b"TIMESET").is_none());
+    assert!(parse_serial_command(b"TIMESET 1762531200").is_none());
+    assert!(parse_serial_command(b"TIMESET notanumber -300").is_none());
+    assert!(parse_serial_command(b"TIMESET 1762531200 -300 trailing").is_none());
+}
+
+#[test]
+fn parses_timeget_command() {
+    assert!(matches!(
+        parse_serial_command(b"TIMEGET"),
+        Some(SerialCommand::TimeGet)
+    ));
+    assert!(parse_serial_command(b"TIMEGET extra").is_none());
 }
 
 #[test]

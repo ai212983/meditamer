@@ -1,0 +1,29 @@
+[package]
+name = "render"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Product- and board-neutral rendering support (ADR-0015 Tier 1).
+#
+# Seeded with the one piece of `firmware::ui::lvgl` that carries no product or
+# board coupling: the LVGL callback/intent bridge. The rest of `lvgl` cannot
+# follow until `platform/board` exists -- `io.rs` writes through
+# `InkplateDriver` and `backend.rs` owns a closed enum over Meditamer's screens.
+
+[dependencies]
+embassy-sync = { version = "0.8.0", optional = true }
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = [
+    "library",
+    "raw-bindings",
+], optional = true }
+shell = { path = "../shell", optional = true }
+
+[features]
+default = ["lvgl"]
+# `geometry` is plain arithmetic and must stay reachable without dragging LVGL
+# in: board code and host harnesses want the rectangle type on its own.
+lvgl = ["dep:embassy-sync", "dep:lightvgl-sys", "dep:shell"]
+# Forwarded from the product. `intent_bridge` gates the fixture callback routes
+# on it, so the flag has to exist on this side of the boundary too.
+ui-provider-fixture = []

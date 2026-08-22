@@ -19,11 +19,11 @@ use super::{
 pub fn run_sdcard_hw(logger: &mut Logger, opts: SdcardHwOptions) -> Result<()> {
     maybe_flash_first(logger, &opts.build_mode)?;
 
-    let verify_lba = env_utils::parse_env_u32("HOSTCTL_SDCARD_VERIFY_LBA", 2048)?;
+    // Test-internal knobs; formerly env-tunable (hostctl-env-audit.md cat 3).
+    let verify_lba = 2048u32;
     let run_tag = Local::now().format("%H%M%S").to_string();
-    let base_path =
-        std::env::var("HOSTCTL_SDCARD_BASE_PATH").unwrap_or_else(|_| format!("/sd{run_tag}"));
-    let sdwait_timeout_ms = env_utils::parse_env_u32("HOSTCTL_SDCARD_SDWAIT_TIMEOUT_MS", 300_000)?;
+    let base_path = format!("/sd{run_tag}");
+    let sdwait_timeout_ms = 300_000u32;
 
     let output_path = opts.output_path.unwrap_or_else(|| {
         PathBuf::from(format!(

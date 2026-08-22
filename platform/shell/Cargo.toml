@@ -1,0 +1,13 @@
+[package]
+name = "shell"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Product-neutral by construction: the surface registry, navigator, catalogue,
+# and lifecycle are generic over providers and surfaces and name no concrete
+# screen (ADR-0015). Its only dependencies are `core` and `heapless`, so unlike
+# the firmware crate it builds and tests natively on the host.
+
+[dependencies]
+heapless = "0.9.3"

@@ -17,7 +17,7 @@ pub(crate) fn init_allocator(psram: esp_hal::peripherals::PSRAM<'static>) -> All
     // external PSRAM. It sits outside `dram_seg`, so none of it comes out of the
     // CPU0 stack.
     esp_alloc::heap_allocator!(
-        #[unsafe(link_section = ".dram2_uninit")]
+        #[unsafe(link_section = ".dram2_uninit.heap")]
         size: INTERNAL_HEAP_DRAM2_BYTES
     );
 

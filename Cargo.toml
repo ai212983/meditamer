@@ -1,15 +1,65 @@
+# ADR-0015: the workspace the platform/board/product split lands in. Members are
+# this root package (still the Meditamer product plus its board code), the
+# existing `packages/*`, and the `platform/*` crates as they are extracted.
+#
+# `exclude` is load-bearing rather than cosmetic. Cargo makes every path
+# dependency inside the workspace directory a member automatically, which would
+# otherwise pull in `vendor/*` (the `[patch.crates-io]` trees, which carry their
+# own patch sections and must not be linted or resolved as first-party code),
+# the `tools/*` build-dependency crates (host-only; ADR-0015 keeps `tools/`
+# outside the workspace), and `.scratch/*` scratch crates.
+[workspace]
+# Explicit, not inherited. A workspace takes its resolver from
+# `[workspace.resolver]`; the `resolver` under `[package]` below governs only
+# that package. Resolver 2 is what keeps `packages/bundle`'s dev-dependency on
+# ed25519-dalek (default features, std) from unifying into the firmware's
+# verify-only `default-features = false` build.
+resolver = "2"
+members = [
+    "packages/bundle",
+    "packages/otadata",
+    "packages/rtc",
+    "packages/sdcard",
+    "packages/shtc3",
+    "platform/arbitration",
+    "platform/board",
+    "platform/console",
+    "platform/render",
+    "platform/shell",
+]
+exclude = [
+    ".scratch",
+    "boards",
+    "test-support",
+    "tools",
+    "vendor",
+]
+
 [package]
 name = "meditamer"
 version = "0.1.0"
 authors = ["Dimitri Fedorov <dimitri.fedorov@suprematic.net>"]
 edition = "2021"
-resolver = "2"
+# `resolver` moved to `[workspace]` above (ADR-0015 step 1). Cargo rejects the
+# field in both tables, and the workspace's setting is the one that governs.
 rust-version = "1.95"
 
 [[bin]]
 name = "meditamer"
 harness = false
 test = false
+
+# Factory updater (ADR-0014 / docs/archive/firmware-update/single-production-sd-recovery-updater.md).
+# A separate release artifact from the production `meditamer` binary above;
+# `required-features` keeps it out of a plain `cargo build` and out of the
+# default feature set's wifi/BLE/upload weight, so its size reflects only
+# what Phase 1 needs to measure.
+[[bin]]
+name = "updater"
+path = "src/bin/updater.rs"
+harness = false
+test = false
+required-features = ["factory-updater"]
 
 [lib]
 test = false
@@ -42,6 +92,13 @@ opt-level = 2
 [profile.dev.package.esp-radio]
 opt-level = 3
 
+# Keep the retained radio IPC implementation within the vendor task stacks.
+# Min-size optimization (`z`) makes its task-context wait loop exceed the
+# debug stack cushion and overwrite the adjacent RTOS wait-queue control word.
+[profile.dev.package.esp-radio-rtos-driver]
+opt-level = "s"
+codegen-units = 1
+
 [features]
 default = [
     "asset-upload-http",
@@ -49,10 +106,9 @@ default = [
 ]
 telemetry-defmt = [
     "dep:defmt",
-    "esp-println-upstream/critical-section",
-    "esp-println-upstream/defmt-espflash",
+    "console/telemetry-defmt",
 ]
-ui-provider-fixture = []
+ui-provider-fixture = ["render/ui-provider-fixture"]
 wifi-debug-slim-app = ["asset-upload-http"]
 ble-foundation = [
     "asset-upload-http",
@@ -71,6 +127,15 @@ asset-upload-http = [
 ]
 asset-upload-http-pipeline = ["asset-upload-http"]
 wifi-backend-esp-radio = ["dep:esp-radio"]
+# Selects the `updater` binary target. Build with --no-default-features so
+# the wifi/BLE/upload dependency tree stays out of the measured size.
+factory-updater = []
+# Bench/qualification-only build variant of the `updater` binary (ADR-0014
+# Phase 4): replaces the normal verify/install flow with a serial bundle
+# receiver, so hostctl can stage a signed bundle onto a bench board's SD
+# card without disassembling the device. Never the shipped updater — see
+# src/updater/sd_push.rs's module doc.
+sd-qual-push = ["factory-updater"]
 
 [dependencies]
 critical-section = "1.2.0"
@@ -80,7 +145,6 @@ esp-rtos = { version = "0.3.0", features = ["esp32", "embassy"] }
 esp-radio-rtos-driver = "=0.3.0"
 esp32 = "0.40.2"
 esp-alloc = { version = "=0.10.0", default-features = false, features = ["alloc-hooks", "compat", "esp32", "global-allocator"] }
-esp-println-upstream = { package = "esp-println", version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
 esp-backtrace = { version = "0.19.0", default-features = false, features = ["esp32", "panic-handler", "println"] }
 defmt = { version = "1.1.1", optional = true }
 esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.2.0", default-features = false }
@@ -107,13 +171,27 @@ embedded-storage = "0.3.1"
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 sha2 = { version = "0.10.9", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false }
+arbitration = { path = "platform/arbitration" }
+# Not referenced in code: it selects the chip and console transport for the
+# `console` crate, which names neither (ADR-0015).
+esp-println-upstream = { package = "esp-println", version = "0.17.0", default-features = false, features = ["esp32", "log-04", "uart"] }
+console = { path = "platform/console" }
+render = { path = "platform/render" }
+shell = { path = "platform/shell" }
 sdcard = { path = "packages/sdcard" }
+rtc = { path = "packages/rtc" }
+bundle = { path = "packages/bundle" }
+otadata = { path = "packages/otadata" }
 
 [build-dependencies]
 event_config_compiler = { path = "tools/event_config_compiler" }
+lvgl_font_compiler = { path = "tools/lvgl_font_compiler" }
 
 [patch.crates-io]
 embassy-net = { path = "vendor/embassy-net-0.9.1-restartable" }
 esp-alloc = { path = "vendor/esp-alloc-0.10.0-provenance" }
+esp-backtrace = { path = "vendor/esp-backtrace-0.19.0-window-spill-fix" }
 esp-radio = { path = "vendor/esp-radio-1.0.0-beta.0-bounded" }
 esp-radio-rtos-driver = { path = "vendor/esp-radio-rtos-driver-0.3.0-retained" }
+esp-rtos = { path = "vendor/esp-rtos-0.3.0-idle-context-fix" }
+xtensa-lx-rt = { path = "vendor/xtensa-lx-rt-0.22.0-user-mode-vector-fix" }

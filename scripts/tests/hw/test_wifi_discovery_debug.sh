@@ -10,19 +10,13 @@ ensure_hostctl_net_port "test_wifi_discovery_debug.sh"
 
 reject_legacy_env_vars "test_wifi_discovery_debug.sh" \
     HOSTCTL_PORT \
-    HOSTCTL_BAUD \
-    HOSTCTL_WIFI_UPLOAD_SSID \
-    HOSTCTL_WIFI_UPLOAD_PASSWORD \
-    HOSTCTL_WIFI_UPLOAD_CONNECT_TIMEOUT_SEC \
-    HOSTCTL_WIFI_UPLOAD_DHCP_TIMEOUT_MS \
-    HOSTCTL_WIFI_UPLOAD_PINNED_DHCP_TIMEOUT_MS
+    HOSTCTL_BAUD
 
 required=(
     HOSTCTL_NET_PORT
     HOSTCTL_NET_BAUD
     HOSTCTL_NET_SSID
     HOSTCTL_NET_PASSWORD
-    HOSTCTL_NET_POLICY_PATH
 )
 for name in "${required[@]}"; do
     if [[ -z "${!name:-}" ]]; then

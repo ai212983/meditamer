@@ -40,7 +40,7 @@ pub(crate) async fn request_sd_power(action: SdPowerRequest) -> bool {
         .await
         .is_err()
         {
-            esp_println::println!(
+            console::println!(
                 "sdtask: power_req_enqueue_timeout action={} timeout_ms={} attempt={}/{}",
                 action_label,
                 SD_POWER_REQUEST_ENQUEUE_TIMEOUT_MS,
@@ -64,7 +64,7 @@ pub(crate) async fn request_sd_power(action: SdPowerRequest) -> bool {
                         continue;
                     }
                     Err(_) => {
-                        esp_println::println!(
+                        console::println!(
                             "sdtask: power_resp_timeout action={} timeout_ms={} attempt={}/{}",
                             action_label,
                             response_timeout_ms,
@@ -83,7 +83,7 @@ pub(crate) async fn request_sd_power(action: SdPowerRequest) -> bool {
         attempt = attempt.saturating_add(1);
     }
 
-    esp_println::println!(
+    console::println!(
         "sdtask: power_request_failed action={} attempts={}",
         action_label,
         SD_POWER_REQUEST_MAX_ATTEMPTS

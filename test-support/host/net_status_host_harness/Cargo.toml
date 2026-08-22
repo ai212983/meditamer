@@ -7,3 +7,8 @@ edition = "2021"
 default = ["asset-upload-http"]
 asset-upload-http = []
 telemetry-defmt = []
+
+[dependencies]
+# ADR-0015: this harness shadows the observability recorders, which publish the
+# radio's observable service state into the arbiter.
+arbitration = { path = "../../../platform/arbitration" }

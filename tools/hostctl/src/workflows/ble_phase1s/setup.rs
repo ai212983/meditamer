@@ -5,12 +5,14 @@ pub(super) fn run_ble_phase1s_inner(logger: &mut Logger, opts: BlePhase1sOptions
     let ssid =
         std::env::var("HOSTCTL_NET_SSID").context("HOSTCTL_NET_SSID must be set (BLE Phase 1S)")?;
     let password = std::env::var("HOSTCTL_NET_PASSWORD").unwrap_or_default();
-    let policy_path = std::env::var("HOSTCTL_NET_POLICY_PATH")
-        .context("HOSTCTL_NET_POLICY_PATH must be set (BLE Phase 1S)")?;
+    let policy_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios/wifi-policy.default.json")
+        .display()
+        .to_string();
     let policy_raw = fs::read_to_string(&policy_path)
-        .with_context(|| format!("failed reading HOSTCTL_NET_POLICY_PATH: {policy_path}"))?;
+        .with_context(|| format!("failed reading wifi policy template: {policy_path}"))?;
     let policy = serde_json::from_str::<NetPolicy>(&policy_raw)
-        .context("invalid HOSTCTL_NET_POLICY_PATH JSON")?;
+        .context("invalid wifi policy template JSON")?;
     enforce_policy_floors(policy, None)?;
     let netcfg_command = build_phase1s_netcfg_command(&ssid, &password, policy)?;
     if !env_utils::parse_env_bool01("HOSTCTL_NET_SKIP_HOST_WIFI_CHECK", false)? {

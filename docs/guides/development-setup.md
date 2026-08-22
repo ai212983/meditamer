@@ -108,11 +108,15 @@ scripts/host-test.sh test app-state
 The harness runs the production record, migration, and alternating-sector
 algorithm against independent in-memory sectors with injected write and read-back failures.
 
-Rust-analyzer baseline lint:
+Rust-analyzer baseline lint — fast static signal that complements, but does not
+replace, `cargo check` and strict `cargo clippy`:
 
 ```bash
 scripts/ci/lint_rust_analyzer.sh
 ```
+
+Analyzer execution uses the `stable` toolchain; override with
+`RUST_ANALYZER_TOOLCHAIN=<toolchain>`.
 
 Stack-risk guard (host-side static check for large fixed stack arrays):
 
@@ -152,11 +156,11 @@ Optional SonarQube env vars:
 - `SONAR_CE_POLL_INTERVAL_SEC` (default `2`)
 - `SONAR_ENV_FILE` (optional override for env file path; defaults to `.env.local`, falls back to `.env` if missing)
 
-Notes for this workspace:
+Analyzer notes for this workspace:
 
-- The firmware is `no_std`; the optional Wi-Fi, telemetry, and slim diagnostic profiles can still produce analyzer noise outside the active build profile.
+- The firmware is `no_std` and heavily feature/cfg gated; the optional Wi-Fi, telemetry, and slim diagnostic profiles produce inactive-code and unresolved-import noise outside the active build profile.
 - The baseline script intentionally runs with `--disable-build-scripts --disable-proc-macros` for stable, fast CI signal.
-- Authoritative correctness gates remain `cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` and strict `cargo +esp clippy -Zbuild-std=core,alloc --target xtensa-esp32-none-elf` on `--bins --lib`.
+- Treat analyzer output as triage signal. Authoritative correctness gates remain `cargo +esp check -Zbuild-std=core,alloc --target xtensa-esp32-none-elf --workspace --all-features --bins --lib` and the same invocation under strict `cargo +esp clippy ... -- -D warnings`.
 
 Formatting enforcement:
 

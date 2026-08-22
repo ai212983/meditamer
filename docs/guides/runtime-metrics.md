@@ -1,5 +1,9 @@
 # Runtime Metrics and Serial Diagnostics
 
+Runtime *observation* over UART — counters, timing, and diagnostic test runs.
+Changing device state (upload mode, diagnostics, allocator probes) is
+[Service Modes and Allocator Diagnostics](service-modes.md).
+
 ## Baseline Runtime Periods
 
 - LVGL service period: 8 ms, with panel refreshes driven by accumulated dirty areas.
@@ -75,9 +79,8 @@ TELEMSET REASSOC ON
 - `TELEMSET` updates enabled domains (`WIFI`, `REASSOC`, `NET`, `HTTP`, `SD`, `ALL`, `DEFAULT`, `NONE`).
 - `METRICS` / `METRICSNET` remain available regardless of telemetry domain settings.
 
-Agent-oriented contract and runbook:
-
-- `docs/guides/agents/telemetry-control.md`
+Full UART contract, machine-parse regexes, and recommended domain profiles:
+[Telemetry Control](agents/telemetry-control.md).
 
 ## SD Card Hardware Test
 

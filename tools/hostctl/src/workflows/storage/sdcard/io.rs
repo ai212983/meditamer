@@ -18,7 +18,8 @@ pub(super) fn open_console(output_path: &Path) -> Result<SerialConsole> {
 }
 
 pub(super) fn maybe_flash_first(logger: &mut Logger, build_mode: &str) -> Result<()> {
-    let flash_first = env_utils::parse_env_bool01("HOSTCTL_SDCARD_FLASH_FIRST", false)?;
+    // Formerly HOSTCTL_SDCARD_FLASH_FIRST (test-internal, default off): hard-coded.
+    let flash_first = false;
     if !flash_first {
         return Ok(());
     }

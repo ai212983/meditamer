@@ -32,8 +32,9 @@ human interaction.
 | Script | Status | Purpose and evidence |
 | --- | --- | --- |
 | [`build/build.sh`](build/build.sh) | Automated | Canonical firmware build/Clippy entry point; called by the aggregate baseline and hostctl flash-capture. |
-| [`build/ota_bootloader.sh`](build/ota_bootloader.sh) | Support | Builds the pinned ESP-IDF A/B bootloader; called by the Xtensa runner and hostctl flash path. |
-| [`build/xtensa_runner.sh`](build/xtensa_runner.sh) | Automated | Cargo runner configured in `.cargo/config.toml`; flashes with the A/B bootloader and partition table. |
+| [`build/single_production_bootloader.sh`](build/single_production_bootloader.sh) | Support | Builds the pinned ESP-IDF single-production bootloader (ADR-0014); called by the Xtensa runner and hostctl flash path. |
+| [`build/ota_bootloader.sh`](build/ota_bootloader.sh) | Support | Builds the pinned ESP-IDF A/B bootloader (superseded, ADR-0009); retained for boards not yet migrated. |
+| [`build/xtensa_runner.sh`](build/xtensa_runner.sh) | Automated | Cargo runner configured in `.cargo/config.toml`; flashes with the single-production bootloader and partition table. |
 
 ## CI and repository checks
 

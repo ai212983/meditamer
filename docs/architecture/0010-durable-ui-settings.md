@@ -4,9 +4,12 @@
 - Author: Codex
 - Date: 2026-08-10
 - Amended: 2026-08-13 — reference path maintenance only
+- Amended: 2026-08-17 — ADR-0013 narrows catalogue resolution to stable id, capability, and
+  current-boot availability; external compatibility and executable residency are no longer modelled.
 - References: [ADR-0007](0007-ui-and-application-structure.md),
   [ADR-0008](0008-app-catalogue-and-launcher.md),
   [ADR-0009](0009-ab-firmware-update-foundation.md),
+  [ADR-0013](0013-compiled-only-ui-catalogue.md),
   [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [implementation ledger](../archive/refactors/ui-app-structure-rework-ledger.md),
   [DRAM budget](../reference/dram/dram-budget.md)

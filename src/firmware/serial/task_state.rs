@@ -15,7 +15,7 @@ use crate::firmware::{
         config::{TOUCH_EVENT_TRACE_ENABLED, TOUCH_EVENT_TRACE_SAMPLES},
         debug_log::{uart_write_all, write_touch_event_trace_sample},
     },
-    types::{SdResult, SerialUart},
+    types::{InkplateRtcDriver, SdResult, SerialUart, SharedI2cDevice},
 };
 use embassy_futures::yield_now;
 
@@ -24,40 +24,26 @@ pub(super) struct SerialTaskState {
     next_state_request_id: u16,
     last_sd_request_id: Option<u32>,
     sd_result_cache: heapless::Vec<SdResult, SD_RESULT_CACHE_CAP>,
-    firmware_stream_active: bool,
     firmware_update_clients_suspended: bool,
+    rtc: InkplateRtcDriver,
 }
 
 impl SerialTaskState {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(rtc_i2c: SharedI2cDevice) -> Self {
         Self {
             next_sd_request_id: 1,
             next_state_request_id: 1,
             last_sd_request_id: None,
             sd_result_cache: heapless::Vec::new(),
-            firmware_stream_active: false,
             firmware_update_clients_suspended: false,
+            rtc: InkplateRtcDriver::new(rtc_i2c),
         }
     }
 
-    pub(super) fn begin_firmware_stream(&mut self) {
-        self.firmware_stream_active = true;
-    }
-
-    pub(super) fn end_firmware_stream(&mut self) {
-        self.firmware_stream_active = false;
-    }
-
-    pub(super) fn firmware_stream_active(&self) -> bool {
-        self.firmware_stream_active
-    }
-
-    pub(super) fn begin_firmware_update_hardware_lease(&mut self) -> bool {
-        if self.firmware_update_clients_suspended {
-            return false;
-        }
-        self.firmware_update_clients_suspended = true;
-        true
+    /// The serial task is the sole owner of RTC access: no cross-task cache,
+    /// just fresh reads/writes through this driver on demand.
+    pub(super) fn rtc_mut(&mut self) -> &mut InkplateRtcDriver {
+        &mut self.rtc
     }
 
     pub(super) fn end_firmware_update_hardware_lease(&mut self) -> bool {

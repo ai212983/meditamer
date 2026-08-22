@@ -30,7 +30,7 @@ pub(super) async fn serve_connection_cycle(
                 .last_request_route
                 .map(|route| route.as_str())
                 .unwrap_or("unknown");
-            esp_println::println!(
+            console::println!(
                 "upload_http: accept_arm gap_us={} prev_route={}",
                 gap_us,
                 prev_route
@@ -65,7 +65,7 @@ pub(super) async fn serve_connection_cycle(
                 last_route = Some(route_kind);
                 if connection_close_requested {
                     if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
-                        esp_println::println!(
+                        console::println!(
                             "upload_http: close requested by client after route={}",
                             route_kind.as_str()
                         );
@@ -109,7 +109,7 @@ async fn accept_connection(
             state.reset_all();
             observability::set_upload_http_listener(false, None);
             if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                esp_println::println!(
+                console::println!(
                     "upload_http: accept paused while transfers are disabled; re-arm later"
                 );
             }
@@ -128,7 +128,7 @@ async fn accept_connection(
             state.reset_all();
             observability::set_upload_http_listener(false, None);
             if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                esp_println::println!(
+                console::println!(
                     "upload_http: accept paused while listener gate is disabled; re-arm later"
                 );
             }
@@ -141,7 +141,7 @@ async fn accept_connection(
             state.reset_link_state();
             observability::set_upload_http_listener(false, None);
             if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                esp_println::println!(
+                console::println!(
                     "upload_http: accept paused due to connectivity gate loss; re-arm later"
                 );
             }
@@ -165,7 +165,7 @@ async fn accept_connection(
                 observability::record_upload_http_accept();
                 log_http_mem_diag("accept_ok");
                 if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
-                    esp_println::println!("upload_http: accepted connection");
+                    console::println!("upload_http: accepted connection");
                 }
                 return true;
             }
@@ -178,7 +178,7 @@ async fn accept_connection(
                 }
                 observability::set_upload_http_listener(false, None);
                 if observability::log_filter_enabled(observability::LOG_DOMAIN_NET) {
-                    esp_println::println!("upload_http: accept err={:?}", err);
+                    console::println!("upload_http: accept err={:?}", err);
                 }
                 log_http_mem_diag("accept_err");
                 socket.abort();
@@ -227,7 +227,7 @@ async fn handle_connection_request(
             }
             log_http_mem_diag("request_err");
             if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
-                esp_println::println!(
+                console::println!(
                     "upload_http: request err={} recv_queue={} send_queue={} state={:?} remote={:?}",
                     err,
                     socket.recv_queue(),

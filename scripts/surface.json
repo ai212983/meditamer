@@ -8,8 +8,8 @@
       "note": "Exact ratchet, not just a ceiling check: check_script_surface.py requires the live public-role count to equal `count` exactly, so deleting a public script requires lowering this number in the same change instead of leaving silent headroom under `ceiling`. `ceiling` is the archived plan's closeout limit (docs/archive/host-tooling/scripts-tools-surface-cleanup.md); `count` may sit anywhere at or below it."
     },
     "documented_leaf_commands": {
-      "count": 16,
-      "source": "tools/hostctl/src/main.rs: enum Commands (7 variants, minus the Test and Artifacts containers) + enum TestSubcommand (9 variants) + enum ArtifactsSubcommand (2 variants)",
+      "count": 21,
+      "source": "tools/hostctl/src/main.rs: enum Commands (9 variants, minus the Test and Artifacts containers) + enum TestSubcommand (9 variants) + enum ArtifactsSubcommand (2 variants)",
       "change_log": [
         {
           "date": "2026-08-13",
@@ -22,6 +22,18 @@
         {
           "date": "2026-08-14",
           "change": "Phase 1S selective integration: added the `test ble-phase1s` leaf for the exclusive Wi-Fi/BLE handoff evidence workflow. count 15 -> 16."
+        },
+        {
+          "date": "2026-08-17",
+          "change": "docs/plans/wall-clock-sync.md: added the `timeset` and `timestatus` leaf commands for PCF85063A RTC synchronization/status (tools/hostctl/src/main.rs). count 16 -> 18."
+        },
+        {
+          "date": "2026-08-18",
+          "change": "ADR-0014 Phase 4: added `single-production-bundle-build`, `single-production-bundle-inspect`, `single-production-flash`, and `single-production-sd-push` leaf commands (tools/hostctl/src/main.rs). count 18 -> 22. Not recorded at the time; caught and backfilled during Phase 5."
+        },
+        {
+          "date": "2026-08-18",
+          "change": "ADR-0014 Phase 5: removed the `firmware-update` leaf command with the rest of the A/B host workflow it drove (`FirmwareKey` stays). count 22 -> 21."
         }
       ]
     }
@@ -38,8 +50,15 @@
       "path": "scripts/build/ota_bootloader.sh",
       "role": "internal",
       "owner": "Firmware + Host Tooling",
-      "caller": "build/xtensa_runner.sh; hostctl flash path",
+      "caller": "retained for boards not yet migrated off the superseded A/B layout (ADR-0009)",
       "reason": "builds the pinned ESP-IDF A/B bootloader project, a distinct C toolchain from the Rust firmware build"
+    },
+    {
+      "path": "scripts/build/single_production_bootloader.sh",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "build/xtensa_runner.sh; hostctl flash path",
+      "reason": "builds the pinned ESP-IDF single-production bootloader project (ADR-0014), a distinct C toolchain from the Rust firmware build"
     },
     {
       "path": "scripts/build/xtensa_runner.sh",
@@ -147,6 +166,13 @@
       "reason": "raw-line advisory distinct from the blocking rust-code-analysis SLOC ratchet"
     },
     {
+      "path": "scripts/ci/check_script_surface.py",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "lefthook.yml; aggregate baseline quality lane",
+      "reason": "the ratchet that keeps this file (scripts/surface.json) and the script/tool surface honest; must exist outside the surface it audits"
+    },
+    {
       "path": "scripts/ci/check_secrets.sh",
       "role": "internal",
       "owner": "Firmware + Host Tooling",
@@ -220,7 +246,7 @@
       "path": "scripts/device/generate_firmware_signing_key.sh",
       "role": "public",
       "owner": "Firmware + Host Tooling",
-      "caller": "docs/guides/build-and-flash.md",
+      "caller": "docs/guides/firmware-update.md",
       "reason": "creates a protected signing seed and prints its public key; a one-time credential-generation workflow"
     },
     {
@@ -271,6 +297,13 @@
       "owner": "Firmware + Host Tooling",
       "caller": "scripts/touch/*.sh; scripts/device/{soak_boot,soak_refresh,cold_boot_matrix,monitor}.sh; scripts/tests/hw/test_wifi_*.sh",
       "reason": "shared macOS/Linux serial-port autodetection plus hostctl port-cache/env helpers; sourced library, not standalone"
+    },
+    {
+      "path": "scripts/module_census.py",
+      "role": "internal",
+      "owner": "Firmware + Host Tooling",
+      "caller": "manual, before each ADR-0015 crate extraction",
+      "reason": "whole-module import census: expands grouped `use` braces, resolves super:: chains, and catches inline fully-qualified paths, so module coupling is planned from a complete graph rather than greps (ADR-0015)"
     },
     {
       "path": "scripts/tests/host/test_check_stack_risk.sh",
@@ -334,13 +367,6 @@
       "owner": "Firmware + Host Tooling",
       "caller": "tools/touch_replay README; docs/reference/event-engine-guide.md; docs/archive/refactors/statig-event-engine.md",
       "reason": "captures raw/decoded touch traces (--mode touch) or tap/event-engine traces (--mode tap) via passive monitor attach"
-    },
-    {
-      "path": "scripts/ci/check_script_surface.py",
-      "role": "internal",
-      "owner": "Firmware + Host Tooling",
-      "caller": "lefthook.yml; aggregate baseline quality lane",
-      "reason": "the ratchet that keeps this file (scripts/surface.json) and the script/tool surface honest; must exist outside the surface it audits"
     }
   ]
 }

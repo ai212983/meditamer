@@ -222,12 +222,9 @@ pub(crate) enum ProbeRequestError {
     UpdateReserved,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Phase1sOwnership {
-    KnownClosed,
-    Active,
-    Unknown,
-}
+/// BLE's hold on the radio. Defined by the arbiter so the supervisor can read
+/// it without depending on this module (ADR-0015).
+pub(crate) use arbitration::claim::Ownership as Phase1sOwnership;
 
 pub(crate) fn phase1d_status() -> Phase1dStatus {
     let callbacks = hci_callback_stats();
@@ -284,7 +281,7 @@ pub(crate) fn request_phase1s_probe(
     boot_generation: u32,
     epoch: u32,
 ) -> Result<(), ProbeRequestError> {
-    if !crate::firmware::net::exclusive_lease_matches(boot_generation, epoch) {
+    if !arbitration::claim::exclusive_lease_matches(boot_generation, epoch) {
         return Err(ProbeRequestError::ExclusiveLease);
     }
     if update_reserved() {
@@ -320,6 +317,7 @@ pub(crate) fn request_phase1s_probe(
         PHASE1S_TX_TIMEOUT.store(0, Ordering::Relaxed);
         PHASE1S_QUEUE_TASK_CANCELLED.store(0, Ordering::Relaxed);
         PHASE1D_STATE.store(ProbeState::Queued as u8, Ordering::Release);
+        publish_ble_ownership();
         Ok(())
     })?;
     PHASE1S_REQUEST.signal(ProbeRequest {
@@ -329,7 +327,14 @@ pub(crate) fn request_phase1s_probe(
     Ok(())
 }
 
-pub(crate) fn phase1s_ownership() -> Phase1sOwnership {
+/// Mirror this module's probe state into the arbitration claim. Called after
+/// every `PHASE1D_STATE` transition; the supervisor reads the claim rather than
+/// calling in here, which is what broke the `ble` <-> `net` cycle (ADR-0015).
+fn publish_ble_ownership() {
+    arbitration::claim::set_ble_ownership(phase1s_ownership());
+}
+
+fn phase1s_ownership() -> Phase1sOwnership {
     match ProbeState::from_raw(PHASE1D_STATE.load(Ordering::Acquire)) {
         ProbeState::Queued | ProbeState::Running => Phase1sOwnership::Active,
         ProbeState::OwnershipUnknown => Phase1sOwnership::Unknown,
@@ -339,38 +344,13 @@ pub(crate) fn phase1s_ownership() -> Phase1sOwnership {
     }
 }
 
-pub(crate) async fn close_phase1s_for_update() -> Result<(), ()> {
-    match phase1s_ownership() {
-        Phase1sOwnership::KnownClosed => return Ok(()),
-        Phase1sOwnership::Unknown => return Err(()),
-        Phase1sOwnership::Active => {}
-    }
-    PHASE1S_CLOSE_REQUEST.signal(());
-    let closed = async {
-        loop {
-            match phase1s_ownership() {
-                Phase1sOwnership::KnownClosed => return Ok(()),
-                Phase1sOwnership::Unknown => return Err(()),
-                Phase1sOwnership::Active => {}
-            }
-            Timer::after(Duration::from_millis(10)).await;
-        }
-    };
-    embassy_time::with_timeout(Duration::from_secs(5), closed)
-        .await
-        .map_err(|_| ())?
-}
-
 fn update_reserved() -> bool {
     crate::firmware::update::transport_quiet()
-        || crate::firmware::update::status()
-            .map(|status| status.phase != crate::firmware::update::SessionPhase::Idle)
-            .unwrap_or(true)
 }
 
 #[embassy_executor::task]
 pub(crate) async fn phase1_task(bluetooth: esp_hal::peripherals::BT<'static>) {
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1S state=armed build_id={} cycles={} packet_mtu={} packet_count={} coex=false",
         BUILD_ID,
         PHASE1S_CYCLES,
@@ -383,13 +363,16 @@ pub(crate) async fn phase1_task(bluetooth: esp_hal::peripherals::BT<'static>) {
         if PHASE1S_CLOSE_REQUEST.try_take().is_some() || update_reserved() {
             PHASE1D_FAILURE.store(ProbeFailure::UpdateReserved as u8, Ordering::Relaxed);
             PHASE1D_STATE.store(ProbeState::Failed as u8, Ordering::Release);
+            publish_ble_ownership();
             continue;
         }
         PHASE1D_STATE.store(ProbeState::Running as u8, Ordering::Release);
+        publish_ble_ownership();
         let completion = run_phase1s_probe(&mut first_device, request).await;
         PHASE1D_FAILURE.store(completion.failure as u8, Ordering::Relaxed);
         PHASE1D_STATE.store(completion.state as u8, Ordering::Release);
-        esp_println::println!(
+        publish_ble_ownership();
+        console::println!(
             "BLE_PHASE1S state={} boot={} epoch={} failure={}",
             completion.state.label(),
             request.boot_generation,
@@ -473,14 +456,14 @@ async fn run_phase1s_cycle(
     let cycle = 1;
     let queue_task_cancelled_before =
         esp_radio::queue_lifecycle_stats().operation_cancelled_on_task_delete;
-    if !crate::firmware::net::exclusive_lease_matches(request.boot_generation, request.epoch) {
+    if !arbitration::claim::exclusive_lease_matches(request.boot_generation, request.epoch) {
         return Err(ProbeFailure::ExclusiveLease);
     }
     if update_reserved() {
         return Err(ProbeFailure::UpdateReserved);
     }
     let connector = BleConnector::new(device, Default::default()).map_err(|error| {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1D state=init_error cycle={} error={:?}",
             cycle,
             error
@@ -521,7 +504,7 @@ async fn run_phase1s_cycle(
     let before_drop = hci_callback_stats();
 
     if !wait_for_hci_callback_quiescence(CALLBACK_QUIESCENCE_TIMEOUT).await {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1D state=close_timeout cycle={} callbacks_in_flight={}",
             cycle,
             hci_callback_stats().in_flight,
@@ -567,7 +550,7 @@ async fn run_phase1s_cycle(
     if pool_exhausted_count() != 0 {
         return Err(ProbeFailure::PacketExhausted);
     }
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1D close cycle={} deadline_ms=2000 pre_in_flight={} accepted={} rejected={} callback_high_water={} settled_in_flight={} rx_queue_high_water={} rx_queue_overflow={} rx_oversize={} tx_rejected={} tx_timeout={} transport_faulted={} packets_free={} pool_exhausted={}",
         cycle,
         before_drop.in_flight,
@@ -676,32 +659,29 @@ fn log_phase1s_sample(stage: &'static str, request: ProbeRequest) -> SampleResul
     let heap = crate::firmware::psram::allocator_memory_snapshot();
     let main_stack = crate::firmware::observability::minimum_stack_headroom_bytes();
     let touch_stack = crate::firmware::observability::minimum_touch_core_stack_headroom_bytes();
-    let residency = crate::firmware::net::residency_snapshot();
-    let net = crate::firmware::net::wifi::net_status_snapshot();
+    let observed = arbitration::claim::observations();
     let callbacks = hci_callback_stats();
     let transport = hci_transport_stats();
     // The exact off lease is the supervisor's ownership proof. `radio_quiesced`
     // describes the connection task's intentional-dormant policy and is not
     // updated when the supervisor destroys a complete Wi-Fi epoch.
-    let exclusive_ok = crate::firmware::net::phase1s_exclusive_ownership_confirmed(
-        crate::firmware::net::exclusive_lease_matches(request.boot_generation, request.epoch),
-        residency.wifi_controller_task,
-        residency.net_runner_task,
-        net.link,
-        net.listener,
-    );
+    // One question, asked of the arbiter. This used to be assembled here from
+    // four separate reaches into the network supervisor, which is what made
+    // `ble` and `net` mutually dependent (ADR-0015).
+    let exclusive_ok =
+        arbitration::claim::exclusive_ownership_confirmed(request.boot_generation, request.epoch);
     let resource_ready =
         main_stack >= 8_192 && touch_stack >= 1_024 && heap.free_internal_bytes >= 16_384;
-    esp_println::println!(
+    console::println!(
         "BLE_PHASE1S sample stage={} boot={} epoch={} coex=false wifi_controller={} net_runner={} wifi_link={} radio_quiesced={} listener={} internal_free={} internal_min={} cpu0_stack_min={} touch_stack_min={} callback_admission={} callback_in_flight={} callback_accepted={} callback_rejected={} callback_high_water={} rx_queue_high_water={} rx_queue_overflow={} rx_oversize={} tx_rejected={} tx_timeout={} transport_faulted={} packets_free={} pool_exhausted={} exclusive_ok={} resource_ok={}",
         stage,
         request.boot_generation,
         request.epoch,
-        residency.wifi_controller_task,
-        residency.net_runner_task,
-        net.link,
-        net.radio_quiesced,
-        net.listener,
+        observed.wifi_controller_resident,
+        observed.net_runner_resident,
+        observed.wifi_link,
+        observed.radio_quiesced,
+        observed.service_listening,
         heap.free_internal_bytes,
         heap.min_free_internal_bytes,
         main_stack,
@@ -737,7 +717,7 @@ fn current_internal_free() -> u32 {
 
 async fn run_host(mut runner: Runner<'_, Controller, Phase1PacketPool>) {
     if let Err(error) = runner.run().await {
-        esp_println::println!(
+        console::println!(
             "BLE_PHASE1 state=host_error error={:?} pool_exhausted={}",
             error,
             pool_exhausted_count()

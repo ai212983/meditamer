@@ -19,10 +19,10 @@ run_monitor="${ESPFLASH_RUN_MONITOR:-0}"
 cmd=(espflash flash -c "$chip")
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-bootloader="$repo_root/target/ota-bootloader/bootloader/bootloader.bin"
-partition_table="$repo_root/config/partitions-ab.csv"
+bootloader="$repo_root/target/single-production-bootloader/bootloader/bootloader.bin"
+partition_table="$repo_root/config/partitions-single-production.csv"
 if [[ ! -f "$bootloader" ]]; then
-    "$repo_root/scripts/build/ota_bootloader.sh"
+    "$repo_root/scripts/build/single_production_bootloader.sh"
 fi
 cmd+=(--bootloader "$bootloader" --partition-table "$partition_table" --target-app-partition ota_0)
 

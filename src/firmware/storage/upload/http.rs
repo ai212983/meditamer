@@ -79,7 +79,7 @@ fn init_http_buffer<const N: usize>(
     match psram::alloc_large_byte_buffer(alloc_bytes) {
         Ok(buffer) => {
             if observability::log_filter_enabled(observability::LOG_DOMAIN_HTTP) {
-                esp_println::println!(
+                console::println!(
                     "upload_http: {} buffer placement={:?} bytes={}",
                     tag,
                     buffer.placement(),
@@ -90,7 +90,7 @@ fn init_http_buffer<const N: usize>(
             Some(HttpBuffer::Psram(buffer))
         }
         Err(err) => {
-            esp_println::println!(
+            console::println!(
                 "upload_http: buffer_alloc_failed tag={} placement=psram err={:?}",
                 tag,
                 err

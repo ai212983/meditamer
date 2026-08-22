@@ -11,14 +11,19 @@ use super::health::{
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 
-use crate::{
-    env_utils,
-    workflows::wifi::common::{
-        ctx_get_u32, is_ready, netcfg_set_payload, query_net_status, wait_net_ack, NetStatus,
-    },
+use crate::workflows::wifi::common::{
+    ctx_get_u32, is_ready, netcfg_set_payload, query_net_status, wait_net_ack, NetStatus,
 };
 
 use super::super::{wait_ready::wait_ready, WifiAcceptanceRuntime};
+
+impl WifiAcceptanceRuntime<'_> {
+    /// Whether to issue `NET STOP` before `NET RECOVER`. Formerly
+    /// `HOSTCTL_NET_FORCE_STOP_BEFORE_RECOVER`; hard-coded on (hostctl-env-audit.md).
+    fn force_stop_before_recover(&self) -> bool {
+        true
+    }
+}
 
 impl WifiAcceptanceRuntime<'_> {
     pub(super) fn handle_net_apply_config(&mut self) -> Result<()> {
@@ -85,7 +90,7 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     fn listener_ready_grace_ms(&self) -> Result<u32> {
-        env_utils::parse_env_u32("HOSTCTL_NET_LISTENER_READY_GRACE_MS", 2_000)
+        Ok(2_000)
     }
 
     fn wait_listener_ready_grace(&mut self, grace_ms: u32) -> Result<bool> {
@@ -159,7 +164,7 @@ impl WifiAcceptanceRuntime<'_> {
         self.logger.info(format!(
             "net_start: {reason}; forcing NET RECOVER before NET START"
         ));
-        if env_utils::parse_env_bool01("HOSTCTL_NET_FORCE_STOP_BEFORE_RECOVER", true)? {
+        if self.force_stop_before_recover() {
             if let Err(err) = wait_net_ack(&mut self.console, "NET STOP") {
                 self.logger.info(format!(
                     "net_start: NET STOP ack not obtained ({err}); continuing with NET RECOVER"
@@ -191,8 +196,7 @@ impl WifiAcceptanceRuntime<'_> {
     }
 
     pub(super) fn handle_init_wait_ready_recovery(&mut self) -> Result<Value> {
-        let recover_retries =
-            env_utils::parse_env_u32("HOSTCTL_NET_WAIT_READY_RECOVER_RETRIES", 1)?;
+        let recover_retries = 1u32;
         Ok(serde_json::json!({
             "net_wait_ready_attempt": 0,
             "net_wait_ready_recover_retries": recover_retries,

@@ -28,7 +28,6 @@ flash_artifacts="$repo_root/tools/hostctl/src/workflows/flash_capture/artifacts.
 firmware_build="$repo_root/scripts/build/build.sh"
 phase1s_workflow="$repo_root/tools/hostctl/scenarios/ble-phase1s.sw.yaml"
 serial_uart="$repo_root/src/firmware/serial_uart.rs"
-firmware_stream="$repo_root/src/firmware/serial/firmware_stream.rs"
 firmware_tree="$repo_root/src/firmware"
 uart_writer="$repo_root/src/firmware/touch/debug_log.rs"
 uart_writer_stub="$repo_root/src/firmware/touch/debug_log_stub.rs"
@@ -275,18 +274,16 @@ grep -Fq 'unreachable!("network recovery uses the allocation-free path")' "$seri
   || fail "network recovery can again enter the ordinary dispatcher"
 grep -Fq 'unreachable!("firmware command reached ordinary boxed dispatcher")' "$serial_dispatch" \
   || fail "firmware commands can again reach the ordinary boxed dispatcher"
-grep -Fq 'SerialCommand::FirmwareAbort => abort_firmware_update(uart, state).await' "$serial_dispatch" \
-  || fail "firmware abort can again depend on a fresh heap allocation"
 grep -Fq 'fail_firmware_dispatch_allocation(' "$serial_task" \
   || fail "firmware allocation failure can again strand the prepared hardware lease"
-grep -Fq 'firmware_update::abort();' "$serial_family" \
-  || fail "firmware allocation failure lost its allocation-free session cleanup"
+grep -Fq 'firmware_update::end_transport();' "$serial_family" \
+  || fail "firmware allocation failure lost its allocation-free transport cleanup"
 grep -Fq 'command_dispatch::release_firmware_update_hardware(state).await;' "$serial_family" \
   || fail "firmware allocation failure lost its hardware lease cleanup"
 grep -Fq 'const fn pre_box_command_class' "$serial_family" \
   || fail "command family routing lost its production compile-time contract"
-grep -Fq 'pre_box_command_class(&SerialCommand::FirmwareChunk' "$serial_family" \
-  || fail "firmware chunk is no longer compile-time guarded before allocation"
+grep -Fq 'pre_box_command_class(&SerialCommand::FirmwareFactoryBoot' "$serial_family" \
+  || fail "firmware factory-boot request is no longer compile-time guarded before allocation"
 grep -Fq 'PreBoxCommandClass::Metrics' "$serial_task" \
   || fail "multi-line metrics state can again inflate every ordinary serial command"
 grep -Fq 'PreBoxCommandClass::MetricsNet' "$serial_task" \
@@ -335,14 +332,6 @@ fi
 if grep -R -n -E 'uart\.(write|write_async|flush_async)\(' "$firmware_tree" >/dev/null; then
   fail "serial responses can race esp-println through HAL async TX"
 fi
-[[ "$(grep -Fc 'let _ = uart.flush();' "$firmware_stream")" -eq 2 ]] \
-  || fail "firmware stream must retain exactly two blocking baud-boundary flushes"
-first_flush_line="$(grep -n -m1 'let _ = uart.flush();' "$firmware_stream" | cut -d: -f1)"
-stream_baud_line="$(grep -n -m1 'serial_uart::config(STREAM_BAUD)' "$firmware_stream" | cut -d: -f1)"
-last_flush_line="$(grep -n 'let _ = uart.flush();' "$firmware_stream" | tail -n1 | cut -d: -f1)"
-restore_baud_line="$(grep -n 'serial_uart::config(UART_BAUD)' "$firmware_stream" | tail -n1 | cut -d: -f1)"
-[[ "$first_flush_line" -lt "$stream_baud_line" && "$last_flush_line" -lt "$restore_baud_line" ]] \
-  || fail "firmware stream changes baud before blocking UART drain"
 grep -Fq 'crate::write_uart_response(bytes).await;' "$uart_writer" \
   || fail "serial responses bypass the interrupt-enabled priority reservation"
 grep -Fq 'crate::write_uart_response(bytes).await;' "$uart_writer_stub" \
@@ -508,11 +497,6 @@ grep -Fq 'pub(crate) const RX_FIFO_FULL_THRESHOLD: u16 = 64;' "$serial_uart" \
   || fail "UART RX FIFO threshold no longer preserves half-FIFO scheduling headroom"
 grep -Fq 'super::serial_uart::config(UART_BAUD)' "$runtime_bootstrap" \
   || fail "bootstrap no longer uses the guarded UART configuration"
-[[ "$(grep -Fc 'super::super::serial_uart::config(' "$firmware_stream")" -eq 3 ]] \
-  || fail "firmware stream baud switches do not all retain the guarded UART configuration"
-if grep -Fq 'UartConfig::default()' "$firmware_stream"; then
-  fail "firmware stream can restore the unsafe default UART RX threshold"
-fi
 grep -Fq 'line_reader.discard_until_line_end();' "$serial_task" \
   || fail "UART RX errors no longer retire a damaged text command"
 grep -Fq 'SERIAL_RX status=error' "$serial_task" \
@@ -528,10 +512,6 @@ grep -Fq 'esp_hal::system::software_reset();' <<<"$pending_reset_body" \
   || fail "pending startup allocation failure no longer resets into rollback"
 grep -Fq 'core::hint::spin_loop();' <<<"$pending_reset_body" \
   || fail "confirmed-image startup allocation failure no longer fails closed"
-update_prepare_line="$(grep -n -m1 'prepare_network_owner_for_update().await' "$serial_dispatch" | cut -d: -f1)"
-flash_lease_line="$(grep -n -m1 'state.begin_firmware_update_hardware_lease()' "$serial_dispatch" | cut -d: -f1)"
-[[ "$update_prepare_line" -lt "$flash_lease_line" ]] \
-  || fail "firmware update can prepare flash before radio handoff rollback"
 if grep -R -n -E "Stack[[:space:]]*<['\"]static>" \
   "$runtime" "$wifi" "$wifi_tree" "$http" "$http_tree" >/dev/null; then
   fail "a static Stack escaped the supervised network epoch"
@@ -580,19 +560,6 @@ grep -Eq '(transport|active)\.rx_queue_overflow != 0' "$ble_runtime" \
   || fail "Phase 1S can pass after a bounded transport overflow"
 grep -Fq 'quiescent.rejected != 0' "$ble_runtime" \
   || fail "Phase 1S can pass after callback rejection during shutdown"
-close_line="$(grep -n -m1 'close_phase1s_for_update()' "$serial_dispatch" | cut -d: -f1)"
-update_status_line="$(grep -n 'NetworkOwnerCommand::Status' "$serial_dispatch" | tail -1 | cut -d: -f1)"
-[[ "$close_line" -lt "$update_status_line" ]] \
-  || fail "firmware update can restore Wi-Fi before BLE close completes"
-grep -Fq 'require_firmware_update_lease' "$serial_dispatch" \
-  || fail "firmware mutation commands no longer require FWPREPARE ownership"
-grep -Fq 'state.firmware_update_hardware_lease_active() || !firmware_update::transport_quiet()' "$firmware_stream" \
-  || fail "firmware stream can erase with a stale half-grant"
-grep -Fq 'if state.firmware_update_hardware_lease_active() {' "$serial_dispatch" \
-  || fail "repeated FWPREPARE is no longer idempotent over a live grant"
-if grep -Fq 'status.phase == crate::firmware::firmware_update::SessionPhase::Verified' "$serial_dispatch"; then
-  fail "FWSTATUS again releases transport ownership before activation or abort"
-fi
 grep -Fq 'call: "prepare_off_window"' "$phase1s_workflow" \
   || fail "Phase 1S workflow has no explicit Wi-Fi-off boundary"
 grep -Fq 'call: "run_ble_window"' "$phase1s_workflow" \

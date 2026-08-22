@@ -11,6 +11,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use console::println;
 use embassy_futures::{
     join::join3,
     select::{select, select3, Either, Either3},
@@ -19,28 +20,23 @@ use embassy_net::{Runner, StackResources};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_hal::rng::Rng;
-use esp_println::println;
 use static_cell::StaticCell;
 
-use super::handoff::control_quiescence_complete;
-#[cfg(feature = "ble-foundation")]
-use super::handoff::request_matches_ack;
+use super::host::{self, NetHost};
+use super::wifi;
 use super::wifi::{WifiController, WifiDevice};
-use super::{
-    handoff::{
-        classify_drain, sd_barrier_complete, DrainAction, NetworkOwnerAck, NetworkOwnerAckKind,
-        NetworkOwnerCommand, NetworkOwnerMachine, NetworkOwnerRequest, OwnerAction, RejectReason,
-        ResourceSnapshot, TeardownSequence, TeardownStage,
-    },
-    wifi,
-};
-use crate::firmware::{
-    observability as telemetry, psram, service_mode, storage, types::WifiRuntimePolicy,
-    update as firmware_update,
+use crate::firmware::{observability as telemetry, psram, service_mode, types::WifiRuntimePolicy};
+use arbitration::handoff::control_quiescence_complete;
+#[cfg(feature = "ble-foundation")]
+use arbitration::handoff::request_matches_ack;
+use arbitration::handoff::{
+    classify_drain, sd_barrier_complete, DrainAction, NetworkOwnerAck, NetworkOwnerAckKind,
+    NetworkOwnerCommand, NetworkOwnerMachine, NetworkOwnerRequest, OwnerAction, RejectReason,
+    ResourceSnapshot, TeardownSequence, TeardownStage,
 };
 use off_resources::settled_off_resource_snapshot;
 
-const NET_STACK_SOCKETS: usize = 4;
+pub(crate) const NET_STACK_SOCKETS: usize = 4;
 const ACTIVE_OPERATION_GRACE: Duration = Duration::from_secs(12);
 const FORCED_ABORT_GRACE: Duration = Duration::from_secs(2);
 const WIFI_STOP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -62,45 +58,15 @@ static NEXT_HANDOFF_REQUEST_ID: AtomicU32 = AtomicU32::new(1);
 static NETWORK_OWNER_RESIDENT: AtomicBool = AtomicBool::new(false);
 static WIFI_CONTROLLER_RESIDENT: AtomicBool = AtomicBool::new(false);
 static NET_RUNNER_RESIDENT: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "ble-foundation")]
-static OFF_LEASE_VALID: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "ble-foundation")]
-static OFF_LEASE_BOOT: AtomicU32 = AtomicU32::new(0);
-#[cfg(feature = "ble-foundation")]
-static OFF_LEASE_EPOCH: AtomicU32 = AtomicU32::new(0);
-
-#[cfg(feature = "ble-foundation")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NetRuntimeResidency {
-    pub(crate) wifi_controller_task: bool,
-    pub(crate) net_runner_task: bool,
-}
-
-#[cfg(feature = "ble-foundation")]
-pub(crate) fn residency_snapshot() -> NetRuntimeResidency {
-    NetRuntimeResidency {
-        wifi_controller_task: WIFI_CONTROLLER_RESIDENT.load(Ordering::Acquire),
-        net_runner_task: NET_RUNNER_RESIDENT.load(Ordering::Acquire),
-    }
-}
-
-#[cfg(feature = "ble-foundation")]
-pub(crate) fn exclusive_lease_matches(boot_generation: u32, epoch: u32) -> bool {
-    OFF_LEASE_VALID.load(Ordering::Acquire)
-        && OFF_LEASE_BOOT.load(Ordering::Relaxed) == boot_generation
-        && OFF_LEASE_EPOCH.load(Ordering::Relaxed) == epoch
-}
 
 #[cfg(feature = "ble-foundation")]
 fn publish_exclusive_lease(boot_generation: u32, epoch: u32) {
-    OFF_LEASE_BOOT.store(boot_generation, Ordering::Relaxed);
-    OFF_LEASE_EPOCH.store(epoch, Ordering::Relaxed);
-    OFF_LEASE_VALID.store(true, Ordering::Release);
+    arbitration::claim::publish_exclusive_lease(boot_generation, epoch);
 }
 
 #[cfg(feature = "ble-foundation")]
 fn clear_exclusive_lease() {
-    OFF_LEASE_VALID.store(false, Ordering::Release);
+    arbitration::claim::clear_exclusive_lease();
 }
 
 pub(crate) fn stack_resources() -> &'static mut StackResources<NET_STACK_SOCKETS> {
@@ -178,13 +144,24 @@ impl ResidencyGuard {
             !slot.swap(true, Ordering::AcqRel),
             "network owner started twice"
         );
+        publish_residency();
         Self(slot)
     }
+}
+
+/// Mirror task residency into the arbitration claim. The BLE side needs it to
+/// confirm exclusive ownership and must not reach into this module for it.
+fn publish_residency() {
+    arbitration::claim::set_residency(
+        WIFI_CONTROLLER_RESIDENT.load(Ordering::Acquire),
+        NET_RUNNER_RESIDENT.load(Ordering::Acquire),
+    );
 }
 
 impl Drop for ResidencyGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
+        publish_residency();
     }
 }
 
@@ -198,8 +175,14 @@ enum DrainResult {
     Complete,
 }
 
-#[embassy_executor::task]
-pub(crate) async fn network_owner_task(
+/// Supervise Wi-Fi, the Embassy stack, and the product's serving work across
+/// network epochs, restarting them as ownership changes hands.
+///
+/// Generic over the product (ADR-0015 Tier 2). The `#[embassy_executor::task]`
+/// that drives this lives product-side, because an embassy task cannot be
+/// generic and this must not name a concrete product type.
+pub(crate) async fn run_network_owner<H: NetHost>(
+    net_host: &H,
     mut wifi_peripheral: esp_hal::peripherals::WIFI<'static>,
     resources: &'static mut StackResources<NET_STACK_SOCKETS>,
 ) {
@@ -223,6 +206,7 @@ pub(crate) async fn network_owner_task(
     loop {
         service_mode::set_radio_handoff_admission_open(true);
         let epoch_result = run_network_epoch(
+            net_host,
             &mut wifi_peripheral,
             resources,
             &mut machine,
@@ -244,9 +228,9 @@ pub(crate) async fn network_owner_task(
                     && resources.probe_free_before_bytes as usize >= REQUIRED_OFF_FREE_BYTES
                     && resources.probe_free_after_bytes as usize >= REQUIRED_OFF_FREE_BYTES
                     && resources.probe_reserve_bytes as usize == INTERNAL_RESERVE_BYTES
-                    && resources.http_connections == 0
-                    && resources.sd_roundtrips == 0
-                    && resources.sd_sessions == 0
+                    && resources.service_connections == 0
+                    && resources.storage_roundtrips == 0
+                    && resources.storage_sessions == 0
                     && resources.radio_callbacks == 0
                     && resources.radio_queues == 0
                     && !resources.radio_source_active
@@ -296,7 +280,8 @@ pub(crate) async fn network_owner_task(
     }
 }
 
-async fn run_network_epoch(
+async fn run_network_epoch<H: NetHost>(
+    net_host: &H,
     wifi_peripheral: &mut esp_hal::peripherals::WIFI<'static>,
     resources: &mut StackResources<NET_STACK_SOCKETS>,
     machine: &mut NetworkOwnerMachine,
@@ -345,7 +330,7 @@ async fn run_network_epoch(
                 stack,
             );
             let network = run_network_runner(&mut runner);
-            let http = storage::upload::run_http_server(stack);
+            let http = net_host.serve(stack);
             let mut services = pin!(join3(connection, network, http));
             let restored = await_restoration(
                 services.as_mut(),
@@ -391,7 +376,7 @@ async fn run_network_epoch(
             Ok(epoch) => (epoch, None),
             Err(reason) => (current_restore_epoch, Some(reason)),
         };
-        if finish_product_quiescence().await {
+        if finish_product_quiescence(net_host).await {
             break (epoch, service_error);
         }
         if service_error.is_some() {
@@ -655,13 +640,13 @@ fn reject_active_quiescence(machine: &mut NetworkOwnerMachine, epoch: u32, reaso
     publish_ack(ack);
 }
 
-async fn finish_product_quiescence() -> bool {
+async fn finish_product_quiescence<H: NetHost>(net_host: &H) -> bool {
     // Abort is also the SD-task FIFO fence. Even when the caller-side roundtrip
     // count and session bit are clear, an earlier timed-out request can still be
     // executing in the single SD owner. Its correlated Abort response proves all
     // earlier work completed before radio ownership is released.
     let started = embassy_time::Instant::now();
-    let abort_ok = with_timeout(FORCED_ABORT_GRACE, storage::upload::abort_sd_upload())
+    let abort_ok = with_timeout(FORCED_ABORT_GRACE, net_host.abort_upload())
         .await
         .unwrap_or(false);
     let elapsed = started.elapsed();
@@ -681,11 +666,7 @@ async fn finish_product_quiescence() -> bool {
         .await
         .is_ok()
     };
-    sd_barrier_complete(
-        abort_ok,
-        storage::upload::sd_upload_session_active(),
-        quiescent,
-    )
+    sd_barrier_complete(abort_ok, host::upload_session_active(), quiescent)
 }
 
 fn restoration_ready() -> bool {
@@ -727,8 +708,8 @@ async fn wait_while_off(machine: &mut NetworkOwnerMachine) -> u32 {
             request.command,
             NetworkOwnerCommand::ReleaseExclusive { .. }
         ) {
-            match crate::firmware::ble::phase1s_ownership() {
-                crate::firmware::ble::Phase1sOwnership::Unknown => {
+            match arbitration::claim::ble_ownership() {
+                arbitration::claim::Ownership::Unknown => {
                     clear_exclusive_lease();
                     let ack = machine.fault_for_request(
                         request.request_id,
@@ -748,7 +729,7 @@ async fn wait_while_off(machine: &mut NetworkOwnerMachine) -> u32 {
                         publish_ack(ack);
                     }
                 }
-                crate::firmware::ble::Phase1sOwnership::Active => {
+                arbitration::claim::Ownership::Active => {
                     let ack = reject_without_transition(
                         machine,
                         request.request_id,
@@ -758,7 +739,7 @@ async fn wait_while_off(machine: &mut NetworkOwnerMachine) -> u32 {
                     publish_ack(ack);
                     continue;
                 }
-                crate::firmware::ble::Phase1sOwnership::KnownClosed => {}
+                arbitration::claim::Ownership::KnownClosed => {}
             }
         }
         match machine.command_with_id(request.request_id, request.command) {
@@ -851,16 +832,13 @@ fn reject_without_transition(
 }
 
 fn update_reserved() -> bool {
-    firmware_update::transport_quiet()
-        || firmware_update::status()
-            .map(|status| status.phase != firmware_update::SessionPhase::Idle)
-            .unwrap_or(true)
+    host::transport_quiet()
 }
 
 fn product_work_quiescent() -> bool {
-    storage::upload::active_http_connections() == 0
-        && storage::upload::active_sd_roundtrips() == 0
-        && !storage::upload::sd_upload_session_active()
+    host::active_http_connections() == 0
+        && host::active_sd_roundtrips() == 0
+        && !host::upload_session_active()
 }
 
 fn network_control_quiescent() -> bool {
@@ -896,9 +874,9 @@ fn resource_snapshot(probe_largest_block: bool) -> ResourceSnapshot {
         probe_free_before_bytes: block.free_before_bytes.min(u32::MAX as usize) as u32,
         probe_free_after_bytes: block.free_after_bytes.min(u32::MAX as usize) as u32,
         probe_reserve_bytes: block.reserve_bytes.min(u32::MAX as usize) as u32,
-        http_connections: storage::upload::active_http_connections(),
-        sd_roundtrips: storage::upload::active_sd_roundtrips(),
-        sd_sessions: u16::from(storage::upload::sd_upload_session_active()),
+        service_connections: host::active_http_connections(),
+        storage_roundtrips: host::active_sd_roundtrips(),
+        storage_sessions: u16::from(host::upload_session_active()),
         radio_callbacks: callbacks.in_flight.min(u16::MAX as u32) as u16,
         radio_queues: queues
             .active
@@ -941,9 +919,9 @@ fn println_ack(ack: NetworkOwnerAck) {
         ack.resources.probe_free_before_bytes,
         ack.resources.probe_free_after_bytes,
         ack.resources.probe_reserve_bytes,
-        ack.resources.http_connections,
-        ack.resources.sd_roundtrips,
-        ack.resources.sd_sessions,
+        ack.resources.service_connections,
+        ack.resources.storage_roundtrips,
+        ack.resources.storage_sessions,
         ack.resources.radio_callbacks,
         ack.resources.radio_queues,
         ack.resources.radio_source_active,

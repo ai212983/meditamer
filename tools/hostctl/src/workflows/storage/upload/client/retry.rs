@@ -103,16 +103,16 @@ impl RetrySettings {
             is_direct_upload_put,
             emit_send_diag: upload_send_diag_enabled() && is_direct_upload_put,
             pre_put_delay_ms: if is_direct_upload_put {
-                upload_pre_put_delay_ms()?
+                upload_pre_put_delay_ms()
             } else {
                 0
             },
-            transport_reset_fast_retry: upload_transport_reset_fast_retry_enabled()?,
-            transport_reset_fast_retry_streak_limit:
-                upload_transport_reset_fast_retry_streak_limit()?,
-            transport_reset_chunk_fallback: upload_transport_reset_chunk_fallback_enabled()?,
+            transport_reset_fast_retry: upload_transport_reset_fast_retry_enabled(),
+            transport_reset_fast_retry_streak_limit: upload_transport_reset_fast_retry_streak_limit(
+            ),
+            transport_reset_chunk_fallback: upload_transport_reset_chunk_fallback_enabled(),
             transport_reset_chunk_fallback_streak_limit:
-                upload_transport_reset_chunk_fallback_streak_limit()?,
+                upload_transport_reset_chunk_fallback_streak_limit(),
         })
     }
 }

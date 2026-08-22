@@ -34,8 +34,8 @@ impl<L: TxCancellationLatch> Drop for TxCancellationGuard<L> {
 mod tests {
     extern crate std;
 
-    use core::sync::atomic::{AtomicBool, Ordering};
     use self::std::sync::Mutex;
+    use core::sync::atomic::{AtomicBool, Ordering};
 
     use super::{TxCancellationGuard, TxCancellationLatch};
 

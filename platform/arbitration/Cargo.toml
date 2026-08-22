@@ -1,0 +1,17 @@
+[package]
+name = "arbitration"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Exclusive-radio arbitration between the Wi-Fi supervisor and the BLE stack
+# (ADR-0015).
+#
+# The two subsystems each need to know whether the other holds the radio, which
+# made them mutually dependent -- `ble` <-> `net`, four symbols each way, a
+# cycle no crate boundary could survive. Both questions are answered here
+# instead: each side publishes its own claim, and reads the composite. Neither
+# depends on the other.
+#
+# No dependencies, deliberately. The handoff model is a pure state machine, and
+# the claim registry is atomics.

@@ -1,6 +1,8 @@
 # Hardware Test Matrix (ESP-HAL)
 
-This checklist is the Phase 6 validation gate for the current `esp-hal` firmware.
+This is the canonical hardware acceptance checklist for the current `esp-hal` firmware —
+not tied to any single plan's phase number. Individual work items (e.g. wall-clock sync,
+BLE foundation) point here for the coverage they must add or preserve.
 
 ## Environment
 
@@ -73,7 +75,6 @@ HOSTCTL_NET_PORT=/dev/cu.usbserial-540 \
 HOSTCTL_NET_BAUD=115200 \
 HOSTCTL_NET_SSID='<wifi-ssid>' \
 HOSTCTL_NET_PASSWORD='<wifi-password>' \
-HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
 scripts/tests/hw/test_wifi_regression_gate.sh
 ```
 
@@ -169,6 +170,58 @@ Pass criteria:
 
 Repeat the cadence check with `40/80` and `100/125` configurations before changing defaults.
 
+## 2E. RTC Wall-Clock Sync (Automated + Manual)
+
+Command (automatic post-flash sync, via the canonical flash entrypoint):
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 scripts/device/flash.sh debug
+```
+
+Command (explicit, without reflashing):
+
+```bash
+HOSTCTL_PORT=/dev/cu.usbserial-540 cargo run --manifest-path tools/hostctl/Cargo.toml -- timeset
+HOSTCTL_PORT=/dev/cu.usbserial-540 cargo run --manifest-path tools/hostctl/Cargo.toml -- timestatus
+```
+
+Pass criteria:
+
+- `summary.txt` from the flash run records `time_sync=ok`, with
+  `time_sync_utc` and `time_sync_offset_min` populated
+- the delayed `TIMEGET` readback the sync policy verifies internally is
+  within two seconds of the host's UTC time at the moment of that check
+- a subsequent `hostctl timestatus` reports `TIMEGET OK valid=on ... os=clear`
+  and repeated calls show `utc=` advancing normally
+- a reset (`scripts/device/cold_boot_matrix.sh` or a plain reset-button
+  press) preserves the previously synchronized UTC and offset:
+  `timestatus` before and after the reset report the same offset and a
+  plausibly advanced (not reset-to-unavailable) UTC
+- flashing with `--no-time-sync` (or `FLASH_SET_TIME_AFTER_FLASH=0`) does
+  not alter a previously valid RTC value: `timestatus` immediately before
+  and after that flash reports the same `valid=on` state and offset
+- repeated `TIMEGET` calls succeed normally alongside ordinary display,
+  touch, and sensor I2C activity (no arbitration failures, no `TIMEGET ERR
+  reason=i2c`)
+
+Manual: backup-power retention (requires disconnecting main power while
+leaving the board's battery-backed RTC supply present):
+
+1. Confirm a valid time with `hostctl timestatus` (`valid=on`).
+2. Disconnect main board power while the RTC backup supply remains present;
+   wait at least a few minutes.
+3. Reconnect main power and let firmware boot normally.
+4. Run `hostctl timestatus` again.
+
+Pass criteria:
+
+- `valid=on`, with the same offset and a UTC value consistent with real
+  elapsed time (not reset to unavailable, not stuck at the pre-disconnect
+  value)
+
+Source tests and a successful build are not evidence of retention; only
+this manual backup-power check is.
+
 ## 3. Reset-Button Boot Cycles (Manual)
 
 This helper validates the ESP32 reset-button boot path. It does not cut the board's internal
@@ -256,6 +309,7 @@ Pass criteria:
 - Panic excerpt path (if yes):
 - Troubleshoot run path/result (if panic):
 - Reset-cycle soak result:
+- RTC sync result (post-flash + backup-power retention):
 - Cold boot result:
 - Long refresh result:
 - Frontlight/buzzer repetition result:

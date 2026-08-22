@@ -134,12 +134,6 @@ impl SerialConsole {
         Ok(())
     }
 
-    pub fn set_baud_rate(&mut self, baud: u32) -> Result<()> {
-        self.port
-            .set_baud_rate(baud)
-            .with_context(|| format!("failed to set serial baud rate to {baud}"))
-    }
-
     pub fn set_read_timeout(&mut self, timeout: Duration) -> Result<()> {
         self.port
             .set_timeout(timeout)

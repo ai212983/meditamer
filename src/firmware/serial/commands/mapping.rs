@@ -120,15 +120,9 @@ pub(in crate::firmware::serial) fn serial_command_event_and_responses(
             b"SDFATTRUNC OK\r\n",
             b"SDFATTRUNC BUSY\r\n",
         ),
-        SerialCommand::Ping
-        | SerialCommand::FirmwareStatus
-        | SerialCommand::FirmwarePrepare
-        | SerialCommand::FirmwareBegin { .. }
-        | SerialCommand::FirmwareChunk { .. }
-        | SerialCommand::FirmwareStream { .. }
-        | SerialCommand::FirmwareFinish
-        | SerialCommand::FirmwareActivate
-        | SerialCommand::FirmwareAbort => unreachable!("local command is handled inline"),
+        SerialCommand::Ping | SerialCommand::FirmwareFactoryBoot => {
+            unreachable!("local command is handled inline")
+        }
         SerialCommand::UiCycleStep => unreachable!("UI step command is handled inline"),
         #[cfg(feature = "ui-provider-fixture")]
         SerialCommand::UiProviderFixtureStep => {
@@ -159,6 +153,9 @@ pub(in crate::firmware::serial) fn serial_command_event_and_responses(
         }
         SerialCommand::SdWait { .. } => unreachable!("sdwait command is handled inline"),
         SerialCommand::DiagGet => unreachable!("diag get command is handled inline"),
+        SerialCommand::TimeSet { .. } | SerialCommand::TimeGet => {
+            unreachable!("time command is handled inline")
+        }
         SerialCommand::StateGet => unreachable!("state get command is handled inline"),
         SerialCommand::StateSet { .. } => unreachable!("state set command is handled inline"),
         SerialCommand::StateDiag { .. } => unreachable!("state diag command is handled inline"),

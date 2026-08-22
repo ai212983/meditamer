@@ -10,6 +10,7 @@ use super::panel::refresh::{
     full_refresh_panel, refresh_panel, service_panel_power_lease, RefreshRequest,
 };
 use super::panel::refresh_tracking::CompletedRefresh;
+use super::wall_clock::request_wall_clock_snapshot;
 pub(in crate::firmware::display) use state::PresentationState;
 use touch_equivalence::SyntheticTouchPhase;
 
@@ -24,8 +25,8 @@ use crate::firmware::{
     },
     types::{DisplayContext, UiCycleStepStatus},
     ui::lvgl::{
-        take_full_repaint_request, take_gesture, Backend, InitError, LvglGestureEvent,
-        LvglGestureKind, LvglGestureState, UiCycleStepError,
+        take_full_repaint_request, take_gesture, AmbientHomeAction, Backend, InitError,
+        LvglGestureEvent, LvglGestureKind, LvglGestureState, UiCycleStepError,
     },
 };
 
@@ -51,17 +52,17 @@ pub(super) async fn initialize(
                 InitError::SurfaceCleanupFailed => "surface_cleanup",
                 InitError::CallbackRouteUnavailable => "callback_route",
             };
-            esp_println::println!("LVGL init=failed reason={}", reason);
+            console::println!("LVGL init=failed reason={}", reason);
             return false;
         }
     };
     state.backend = Some(backend);
-    esp_println::println!(
+    console::println!(
         "LVGL_PANEL_TRANSPORT selected=gpio_reference partial_strategy=gate_neutral_drain cleanup=none touch_window={}",
         crate::firmware::panel_bus::touch_waveform_window_mode()
     );
     let lease_policy = state.panel_power_lease.policy();
-    esp_println::println!(
+    console::println!(
         "LVGL_PANEL_FINALIZATION mode={} idle_ms={}",
         if lease_policy.enabled() {
             "terminal_hold_lease"
@@ -75,7 +76,7 @@ pub(super) async fn initialize(
     let refresh_started_ms = Instant::now().as_millis();
     if !full_refresh_panel(context, true).await {
         state.refresh_tracking.record_failure();
-        esp_println::println!("LVGL init=failed reason=startup_refresh");
+        console::println!("LVGL init=failed reason=startup_refresh");
         return false;
     }
     let refresh_ms = Instant::now()
@@ -87,7 +88,7 @@ pub(super) async fn initialize(
     state.startup_refresh_complete = true;
     state.touch_equivalence.arm(Instant::now().as_millis());
     log_framebuffer_debug(context, "startup");
-    esp_println::println!(
+    console::println!(
         "LVGL init=ready display=600x600 format=L8_to_I1 loop=app_event startup_rendered={} startup_refresh=full refresh_ms={}",
         rendered.is_some(),
         refresh_ms,
@@ -97,7 +98,7 @@ pub(super) async fn initialize(
         .as_ref()
         .and_then(Backend::active_surface_label)
         .unwrap_or("unknown");
-    esp_println::println!("UI_STATE screen={} state=entered", active_surface);
+    console::println!("UI_STATE screen={} state=entered", active_surface);
     true
 }
 
@@ -106,7 +107,7 @@ fn log_framebuffer_debug(context: &DisplayContext, phase: &str) {
         return;
     }
     let snapshot = context.inkplate.binary_framebuffer_debug_snapshot();
-    esp_println::println!(
+    console::println!(
         "PANEL_FRAME phase={} current_hash={:#010x} previous_hash={:?} changed_bytes={} changed_pixels={} rows={:?}..{:?} byte_columns={:?}..{:?}",
         phase,
         snapshot.current_hash,
@@ -136,7 +137,7 @@ pub(super) async fn process_cycle(
             TouchEventKind::Down | TouchEventKind::Up | TouchEventKind::Cancel
         ) {
             let dequeue_latency_ms = Instant::now().as_millis().saturating_sub(event.t_ms);
-            esp_println::println!(
+            console::println!(
                 "LVGL_TOUCH phase={:?} x={} y={} queue_ms={} active_slots={}",
                 event.kind,
                 event.x,
@@ -178,7 +179,7 @@ pub(super) async fn process_cycle(
             continue;
         }
         if full_repaint_requested {
-            esp_println::println!(
+            console::println!(
                 "LVGL_REPAINT full_repaint=true reason=sticky_button status=rejected upload_active=true"
             );
         }
@@ -207,7 +208,7 @@ pub(super) async fn process_cycle(
             state.record_dirty(dirty);
         }
         if !crate::firmware::update::transport_quiet() {
-            esp_println::println!("LVGL_MULTITOUCH phase=reset reason=delivery_discontinuity");
+            console::println!("LVGL_MULTITOUCH phase=reset reason=delivery_discontinuity");
         }
         process_gestures(context, state);
     }
@@ -246,6 +247,42 @@ pub(super) async fn process_cycle(
             refresh_panel(context, state, RefreshRequest::from_service(dirty)).await;
         }
     }
+
+    // The Ambient Home screen (docs/plans/ambient-home-prototype.md) drives
+    // its own scheduled circle movement, tap-to-show-time, and day-rollover
+    // updates purely from timer ticks, with no touch event required in the
+    // same cycle -- so this runs unconditionally here rather than inside
+    // the touch-event loop above. `poll` is a cheap, monotonic-clock-only
+    // check; the wall-clock fetch only crosses to the serial task (the sole
+    // RTC owner) when it reports something is actually due.
+    let ambient_action = state
+        .backend
+        .as_mut()
+        .map(|backend| backend.ambient_home_poll(now_ms))
+        .unwrap_or(AmbientHomeAction::None);
+    if ambient_action != AmbientHomeAction::None {
+        let snapshot = request_wall_clock_snapshot().await;
+        let changed = state
+            .backend
+            .as_mut()
+            .map(|backend| backend.ambient_home_apply(ambient_action, snapshot, now_ms))
+            .unwrap_or(false);
+        // Every Ambient Home render is a full-screen e-ink update (unlike
+        // the sticky refresh button's own touch-scoped request, this one
+        // is decided and applied entirely within this call, so it can just
+        // act on `changed` directly instead of round-tripping through the
+        // `FULL_REPAINT_REQUESTED` flag).
+        if changed {
+            if allow_full_repaint {
+                refresh::force_full_repaint(context, state, "ambient_home").await;
+            } else {
+                console::println!(
+                    "LVGL_REPAINT full_repaint=true reason=ambient_home status=rejected upload_active=true"
+                );
+            }
+        }
+    }
+
     flush_ui_settings(context, state, now_ms);
     service_panel_power_lease(context, state).await;
 }
@@ -263,7 +300,7 @@ fn flush_ui_settings(context: &mut DisplayContext, state: &mut PresentationState
     if let Some(backend) = state.backend.as_mut() {
         backend.complete_settings_write(saved, Instant::now().as_millis());
     }
-    esp_println::println!(
+    console::println!(
         "UI_SETTINGS_SAVE status={}",
         if saved { "complete" } else { "retry_scheduled" },
     );
@@ -299,7 +336,7 @@ pub(super) async fn handle_ui_cycle_step(
         return UiCycleStepStatus::NoDirty;
     };
     if refresh_panel(context, state, RefreshRequest::from_ui_cycle(dirty)).await {
-        esp_println::println!("UI_CYCLE_VISIBLE surface={} status=ok", surface);
+        console::println!("UI_CYCLE_VISIBLE surface={} status=ok", surface);
         UiCycleStepStatus::Applied
     } else {
         UiCycleStepStatus::RefreshFailed
@@ -337,7 +374,7 @@ pub(super) async fn handle_ui_provider_fixture_step(
         return UiCycleStepStatus::NoDirty;
     };
     if refresh_panel(context, state, RefreshRequest::from_ui_cycle(dirty)).await {
-        esp_println::println!("UI_PROVIDER_FIXTURE_VISIBLE surface={} status=ok", surface);
+        console::println!("UI_PROVIDER_FIXTURE_VISIBLE surface={} status=ok", surface);
         UiCycleStepStatus::Applied
     } else {
         UiCycleStepStatus::RefreshFailed
@@ -381,7 +418,7 @@ async fn process_synthetic_touch_equivalence(
     )
     .await;
     if phase == SyntheticTouchPhase::Up && state.touch_equivalence.awaiting_physical_equivalence() {
-        esp_println::println!(
+        console::println!(
             "PANEL_EQUIV state=awaiting_physical target=top_test status={} instruction=tap_once",
             if refreshed { "ready" } else { "refresh_failed" }
         );
@@ -398,7 +435,7 @@ fn process_gestures(context: &mut DisplayContext, state: &mut PresentationState)
             LvglGestureEvent {
                 kind: LvglGestureKind::Pinch { scale },
                 state,
-            } => esp_println::println!(
+            } => console::println!(
                 "LVGL_GESTURE kind=pinch state={} scale={:.3}",
                 gesture_state_label(state),
                 scale
@@ -406,7 +443,7 @@ fn process_gestures(context: &mut DisplayContext, state: &mut PresentationState)
             LvglGestureEvent {
                 kind: LvglGestureKind::Rotation { radians },
                 state,
-            } => esp_println::println!(
+            } => console::println!(
                 "LVGL_GESTURE kind=rotation state={} radians={:.3}",
                 gesture_state_label(state),
                 radians
@@ -418,7 +455,7 @@ fn process_gestures(context: &mut DisplayContext, state: &mut PresentationState)
                         distance_px,
                     },
                 state,
-            } => esp_println::println!(
+            } => console::println!(
                 "LVGL_GESTURE kind=two_finger_swipe state={} direction={:?} distance_px={:.1}",
                 gesture_state_label(state),
                 direction,

@@ -17,9 +17,9 @@ fn rtos_settlement_barrier() {
 }
 
 fn ownership_quiescent(resources: &ResourceSnapshot) -> bool {
-    resources.http_connections == 0
-        && resources.sd_roundtrips == 0
-        && resources.sd_sessions == 0
+    resources.service_connections == 0
+        && resources.storage_roundtrips == 0
+        && resources.storage_sessions == 0
         && resources.radio_callbacks == 0
         && resources.radio_queues == 0
         && !resources.radio_source_active

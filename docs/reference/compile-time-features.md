@@ -1,7 +1,8 @@
 # Compile-Time Features
 
-The LVGL UI, PSRAM allocation, the ESP-HAL runtime, and the 3-second panel-power
-lease are part of every firmware build. They are not selectable Cargo features.
+The LVGL UI, PSRAM allocation, the ESP-HAL runtime, and the 3-second
+[panel-power lease](display-refresh.md#binary-panel-power-lease) are part of
+every firmware build. They are not selectable Cargo features.
 
 ## Supported Cargo Features
 

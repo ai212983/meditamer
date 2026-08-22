@@ -201,7 +201,7 @@ fn maybe_log_new_peak(tag: &str, peak_used_bytes: usize, total_bytes: usize, fre
         ) {
             Ok(_) => {
                 if !crate::firmware::update::transport_quiet() {
-                    esp_println::println!(
+                    console::println!(
                         "psram: high_water tag={} peak_used_bytes={} total_bytes={} free_bytes={}",
                         tag,
                         peak_used_bytes,

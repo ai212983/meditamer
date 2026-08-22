@@ -5,13 +5,15 @@ mod sd;
 mod serial;
 mod trace;
 mod ui_cycle;
+mod wall_clock;
 #[cfg(feature = "asset-upload-http")]
 mod wifi;
 
 pub(crate) use app_event::AppEvent;
 pub(crate) use base::{
-    DisplayContext, InkplateDriver, InkplateImuDriver, InkplateTouchDriver, PanelPinHold,
-    SdProbeDriver, SerialUart, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX, SD_WRITE_MAX,
+    DisplayContext, InkplateDriver, InkplateImuDriver, InkplateRtcDriver, InkplateTouchDriver,
+    PanelPinHold, SdProbeDriver, SerialUart, SharedI2cDevice, SD_PATH_MAX, SD_UPLOAD_CHUNK_MAX,
+    SD_WRITE_MAX,
 };
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use base::{
@@ -27,6 +29,7 @@ pub(crate) use sd::{
 pub(crate) use serial::SerialStatusEvent;
 pub(crate) use trace::TapTraceSample;
 pub(crate) use ui_cycle::{UiCycleStepAck, UiCycleStepStatus};
+pub(crate) use wall_clock::WallClockQueryResult;
 #[cfg(feature = "asset-upload-http")]
 pub(crate) use wifi::{
     NetConfigSet, NetControlCommand, WifiConfigRequest, WifiConfigResponse, WifiConfigResultCode,

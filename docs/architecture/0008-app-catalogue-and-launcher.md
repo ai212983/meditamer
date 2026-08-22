@@ -7,8 +7,11 @@
   ordering, and launcher presenters were implemented and evidenced in E-0013 of the
   [archived ledger](../archive/refactors/ui-app-structure-rework-ledger.md). The loader-dependent
   external catalogue remains conditional.
+- Amended: 2026-08-17 — ADR-0013 supersedes the external-package state axes and conditional external
+  catalogue. The compiled catalogue, filtered views, ordering, and durable identities remain accepted.
 - References: [ADR-0006](0006-flash-overlay-app-modules.md),
   [ADR-0007](0007-ui-and-application-structure.md),
+  [ADR-0013](0013-compiled-only-ui-catalogue.md),
   [UI/app rework plan](../archive/refactors/ui-app-structure-rework-plan.md),
   [UX guidelines](../product/ux-guidelines.md)
 

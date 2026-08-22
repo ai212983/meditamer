@@ -43,8 +43,9 @@ fn upload_send_diag_enabled() -> Result<bool> {
     env_utils::parse_env_bool01("HOSTCTL_UPLOAD_SEND_DIAG", false)
 }
 
-fn upload_fresh_client_per_upload_enabled() -> Result<bool> {
-    env_utils::parse_env_bool01("HOSTCTL_UPLOAD_FRESH_CLIENT_PER_UPLOAD", false)
+fn upload_fresh_client_per_upload_enabled() -> bool {
+    // Blackout-era A/B knob (HOSTCTL_UPLOAD_FRESH_CLIENT_PER_UPLOAD): decided off.
+    false
 }
 
 pub(super) fn mkdir_p(client: &Client, request_ctx: RequestContext<'_>, path: &str) -> Result<()> {
@@ -98,7 +99,7 @@ pub(super) fn upload_file(
     let data = fs::read(local_path)
         .with_context(|| format!("failed reading upload file {}", local_path.display()))?;
     let mode = upload_transport_mode_from_env()?;
-    let upload_client: Option<Client> = if upload_fresh_client_per_upload_enabled()? {
+    let upload_client: Option<Client> = if upload_fresh_client_per_upload_enabled() {
         Some(make_client(request_ctx.timeout_sec)?)
     } else {
         None

@@ -45,7 +45,9 @@ _hostctl_abs_path() {
 }
 
 _hostctl_port_cache_path() {
-    _hostctl_abs_path "${HOSTCTL_SERIAL_PORT_CACHE_PATH:-logs/.state/hostctl_last_usbserial_port}"
+    # Internal plumbing: cache path is fixed, not env-overridable
+    # (hostctl-env-audit.md cat 3).
+    _hostctl_abs_path "logs/.state/hostctl_last_usbserial_port"
 }
 
 _hostctl_read_cached_port() {
@@ -105,12 +107,7 @@ fi
 for name in \
     HOSTCTL_LOG_JSON_PATH \
     HOSTCTL_FLASH_CAPTURE_LOG_PATH \
-    HOSTCTL_FIRMWARE_UPDATE_LOG_PATH \
-    HOSTCTL_REPAINT_LOG_PATH \
     HOSTCTL_NET_LOG_PATH \
-    HOSTCTL_NET_POLICY_PATH \
-    HOSTCTL_NET_DISCOVERY_PROFILE_PATH \
-    HOSTCTL_NET_LOCK_PATH \
     HOSTCTL_UPLOAD_SEND_DIAG_PATH; do
     raw_path="${!name:-}"
     [[ -n "$raw_path" ]] || continue

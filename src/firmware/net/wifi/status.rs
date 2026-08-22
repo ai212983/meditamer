@@ -56,6 +56,7 @@ pub(super) fn publish_state(
 
 pub(super) fn publish_radio_quiesced(quiesced: bool) {
     RADIO_QUIESCED.store(quiesced, Ordering::Release);
+    arbitration::claim::set_radio_quiesced(quiesced);
 }
 
 pub(super) fn radio_quiesced() -> bool {

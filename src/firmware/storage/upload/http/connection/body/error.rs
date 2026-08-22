@@ -1,6 +1,6 @@
+use console::println;
 use embassy_net::tcp::{Error as TcpError, TcpSocket};
 use embassy_time::{with_timeout, Duration};
-use esp_println::println;
 
 use super::super::super::super::sd_bridge::{
     roundtrip_error_log, sd_upload_roundtrip, SdUploadRoundtripError,

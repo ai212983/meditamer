@@ -6,10 +6,10 @@ use crate::firmware::{
         APP_STATE_STORE_RECORD_LEN, APP_STATE_STORE_SECTOR_SIZE, APP_STATE_STORE_VERSION,
     },
     flash,
-    ui::shell::{
-        catalogue::EntryId,
-        settings::{PersistedUiSettings, UI_SETTINGS_CAPACITY},
-    },
+};
+use shell::{
+    catalogue::EntryId,
+    settings::{PersistedUiSettings, UI_SETTINGS_CAPACITY},
 };
 
 use super::snapshot::AppStateSnapshot;
@@ -35,7 +35,7 @@ impl StoreStorage for DeviceStorage {
 #[cfg(target_os = "none")]
 macro_rules! store_log {
     ($($argument:tt)*) => {
-        esp_println::println!($($argument)*)
+        console::println!($($argument)*)
     };
 }
 
@@ -211,10 +211,6 @@ impl AppStateStore {
         }
         saved
     }
-}
-
-pub(crate) fn migration_complete() -> bool {
-    current_record(&mut DeviceStorage).is_some()
 }
 
 fn default_record() -> StoredRecord {

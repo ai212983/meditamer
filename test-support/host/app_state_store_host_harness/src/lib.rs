@@ -3,4 +3,6 @@
 
 pub mod firmware;
 
-pub use firmware::ui::shell;
+// ADR-0015: the shell is its own crate; re-export it under the path the
+// harness tests already use.
+pub use shell;

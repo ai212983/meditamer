@@ -8,7 +8,7 @@ use embedded_storage::{
 };
 use esp_hal::{
     peripherals::CPU_CTRL,
-    system::{is_running, Cpu, CpuControl},
+    system::{Cpu, CpuControl},
 };
 use esp_storage::{FlashStorage, FlashStorageError};
 
@@ -38,33 +38,32 @@ pub(crate) fn replace(offset: u32, bytes: &[u8]) -> Result<(), FlashStorageError
     with(|flash| Storage::write(flash, offset, bytes))
 }
 
+// Only src/updater/install.rs (factory-updater, minus its sd-qual-push bench variant, which
+// stages onto SD instead of writing raw flash) erases/writes/reads flash directly now that
+// ADR-0014 Phase 5 removed the default binary's own signed-image write path; other feature
+// combinations legitimately never call these.
+#[cfg_attr(
+    not(all(feature = "factory-updater", not(feature = "sd-qual-push"))),
+    allow(dead_code)
+)]
 pub(crate) fn erase(from: u32, to: u32) -> Result<(), FlashStorageError> {
     with(|flash| NorFlash::erase(flash, from, to))
 }
 
+#[cfg_attr(
+    not(all(feature = "factory-updater", not(feature = "sd-qual-push"))),
+    allow(dead_code)
+)]
 pub(crate) fn write(offset: u32, bytes: &[u8]) -> Result<(), FlashStorageError> {
     with(|flash| NorFlash::write(flash, offset, bytes))
 }
 
+#[cfg_attr(
+    not(all(feature = "factory-updater", not(feature = "sd-qual-push"))),
+    allow(dead_code)
+)]
 pub(crate) fn read_aligned(offset: u32, bytes: &mut [u8]) -> Result<(), FlashStorageError> {
     with(|flash| ReadNorFlash::read(flash, offset, bytes))
-}
-
-pub(crate) fn park_other_core_for_update() {
-    if UPDATE_OTHER_CORE_PARKED.load(Ordering::Acquire) {
-        return;
-    }
-    let mut control = CpuControl::new(unsafe { CPU_CTRL::steal() });
-    let mut parked = false;
-    for other in Cpu::other() {
-        if is_running(other) {
-            // The caller first waits for the shared panel-bus clients to acknowledge suspension,
-            // so the APP core is at a cooperative boundary and owns no shared driver state.
-            unsafe { control.park_core(other) };
-            parked = true;
-        }
-    }
-    UPDATE_OTHER_CORE_PARKED.store(parked, Ordering::Release);
 }
 
 pub(crate) fn unpark_other_core_after_update() -> bool {

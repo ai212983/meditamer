@@ -20,6 +20,20 @@ toml = "0.8"
 urlencoding = "2.1"
 sha2 = "0.10.9"
 ed25519-dalek = "2.2.0"
+# "std" swaps its CRC32/MD5 for pure-software implementations instead of the
+# ESP32 ROM's, so the same otadata-reading logic used on-device
+# (esp_bootloader_esp_idf::ota::Ota) runs host-side byte-for-byte identically
+# — no chip feature enabled, so esp-hal never enters this build.
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["std"] }
+embedded-storage = "0.3.1"
+# Same version esp-bootloader-esp-idf's own "std" CRC32 uses (verified against
+# the pinned ESP-IDF v5.5.2 esp_rom_crc32_le reference implementation — see
+# tools/hostctl/src/workflows/single_production/otadata.rs).
+crc = "3.3.0"
+# Shared bundle-header format (ADR-0014) — one implementation of the header
+# layout/signing message/validation rules compiled into both the updater and
+# this host tooling, so they can't drift apart.
+bundle = { path = "../../packages/bundle" }
 
 [dev-dependencies]
 tempfile = "3.15"

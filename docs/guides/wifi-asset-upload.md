@@ -1,8 +1,9 @@
 # SD Asset Upload Over Wi-Fi
 
-## SD Asset Upload Over Wi-Fi (STA, HTTP)
+Upload server (STA + HTTP) for pushing assets to the SD card without removing
+it.
 
-Upload server for pushing assets to SD card without removing it.
+## Build and configure
 
 Build/flash:
 
@@ -31,6 +32,8 @@ Notes:
   disabled and non-`/health` endpoints accept requests without an `x-upload-token` header.
 - configure the token at build time with `MEDITAMER_UPLOAD_HTTP_TOKEN` (fallback: `UPLOAD_HTTP_TOKEN`).
 - mutating endpoints (`/mkdir`, `/rm`, `/upload*`) are limited to the `/assets` subtree.
+
+## Runtime network control (UART)
 
 Runtime network policy/config provisioning over UART:
 
@@ -61,6 +64,8 @@ Credential persistence:
 - On boot, firmware attempts to load `/config/wifi.cfg` before waiting for runtime `NETCFG SET`.
 - This survives reboot and firmware reflashes (as long as SD card content is retained).
 
+## Host-side credentials
+
 Local Wi-Fi credentials for hardware scripts:
 
 1. Copy `.env.example` to `.env.local`.
@@ -81,10 +86,11 @@ HOSTCTL_NET_PORT=/dev/cu.usbserial-510 \
 HOSTCTL_NET_BAUD=115200 \
 HOSTCTL_NET_SSID='<wifi-ssid>' \
 HOSTCTL_NET_PASSWORD='<wifi-password>' \
-HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
 HOSTCTL_NET_LOG_PATH=./logs/wifi_acceptance_manual.log \
 scripts/tests/hw/test_wifi_acceptance.sh
 ```
+
+## HTTP endpoints
 
 Health check:
 
@@ -108,6 +114,8 @@ curl -X DELETE \
   -H "x-upload-token: ${UPLOAD_TOKEN}" \
   "http://<device-ip>:8080/rm?path=/assets/old.bin"
 ```
+
+## Uploading with hostctl
 
 Upload an assets directory:
 
@@ -134,12 +142,6 @@ Optional upload helper tuning:
 - `HOSTCTL_UPLOAD_SEND_DIAG` (`0` default): emit host-side upload timing diagnostics (`host_upload_send_diag`) and retry classing (`host_upload_retry_diag`) for direct uploads.
 - `HOSTCTL_UPLOAD_SEND_DIAG_DEEP` (`0` default): enable deep body-read cadence instrumentation in host upload diagnostics (more intrusive; use only for short targeted runs).
 - `HOSTCTL_UPLOAD_SEND_DIAG_PATH` (optional): explicit path for host send-diagnostic sidecar log; defaults to `<HOSTCTL_NET_LOG_PATH>.hostdiag`.
-- `HOSTCTL_UPLOAD_FORCE_CONN_CLOSE` (`0` default): send `Connection: close` header on upload HTTP requests for A/B isolation.
-- `HOSTCTL_UPLOAD_DISABLE_POOL` (`0` default): set reqwest pool idle-per-host to `0` for A/B isolation.
-- `HOSTCTL_UPLOAD_FRESH_CLIENT_PER_UPLOAD` (`0` default): create a fresh HTTP client per upload request for A/B isolation.
-- `HOSTCTL_UPLOAD_TCP_NODELAY` (`1` default): controls socket `TCP_NODELAY` on host upload requests (`0` to allow Nagle for A/B isolation).
-- `HOSTCTL_UPLOAD_PRE_PUT_DELAY_MS` (`0` default): host-side delay before each direct `PUT /upload` attempt (use for bounded A/B when first-attempt connect resets/refusals are observed).
-- `HOSTCTL_UPLOAD_NET_RECOVERY_CONSECUTIVE_HEALTH` (`2` default): required consecutive `/health` successes before retrying an upload after a transport reset.
 
 Delete paths (relative to `--dst`, or absolute under `/assets`):
 
@@ -147,14 +149,16 @@ Delete paths (relative to `--dst`, or absolute under `/assets`):
 scripts/hostctl.sh upload --host <device-ip> --dst /assets --rm old.bin --rm unused/
 ```
 
-Suggested runtime flow:
+## Suggested runtime flow
 
 1. `STATE SET upload=on`
 2. `NETCFG SET {...}`
 3. `NET START`
 4. poll `NET STATUS` until `state="Ready"` and non-zero IPv4
-3. Upload files over HTTP
-4. `STATE SET upload=off`
+5. Upload files over HTTP
+6. `STATE SET upload=off`
+
+## Acceptance workflow and A/B knobs
 
 Wi-Fi acceptance workflow:
 
@@ -181,59 +185,13 @@ scripts/tests/hw/test_wifi_acceptance.sh
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES=asset-upload-http scripts/build/build.sh debug`
   - `CARGO_NO_DEFAULT_FEATURES=1 CARGO_FEATURES=asset-upload-http scripts/device/flash.sh debug`
 
-Wi-Fi zero-discovery diagnostic workflow:
+## Verifying a change
 
-```bash
-HOSTCTL_NET_PORT=/dev/cu.usbserial-540 \
-HOSTCTL_NET_BAUD=115200 \
-HOSTCTL_NET_SSID='<wifi-ssid>' \
-HOSTCTL_NET_PASSWORD='<wifi-password>' \
-HOSTCTL_NET_POLICY_PATH=./tools/hostctl/scenarios/wifi-policy.default.json \
-HOSTCTL_NET_DISCOVERY_PROFILE_PATH=./tools/hostctl/scenarios/wifi-discovery-debug.default.toml \
-HOSTCTL_NET_LOG_PATH=./logs/wifi_discovery_debug_manual.log \
-scripts/tests/hw/test_wifi_discovery_debug.sh
-```
+Discovery debug, the panic-first Wi-Fi/upload regression gate, and the
+`HOSTCTL_NET_*` guardrail env vars are documented once, in the
+[Wi-Fi Regression Gate](wifi-regression-gate.md). Run that gate before landing
+anything that touches Wi-Fi, the network stack, or upload.
 
-- runs via `hostctl test wifi-discovery-debug` behind the script wrapper.
-- strategy and pass/fail thresholds are declarative TOML in
-  `tools/hostctl/scenarios/wifi-discovery-debug.default.toml`.
-- default discovery profile temporarily disables HTTP listener during probe rounds
-  (`disable_listener_during_probe_rounds=true`) to reduce radio/memory pressure
-  while preserving Wi-Fi discovery.
-- workflow orchestration remains declarative in
-  `tools/hostctl/scenarios/wifi-discovery-debug.sw.yaml`.
-- reports round-level counters for:
-  - zero-result scan events
-  - non-zero scan events
-  - `no_ap_found` disconnect events
-  - target SSID visibility.
-- root-cause and guardrails reference:
-  `docs/archive/wifi/wifi-discovery-regression-guardrails.md`.
-
-Wi-Fi/upload regression gate (panic-first, fail-fast):
-
-```bash
-scripts/tests/hw/test_wifi_regression_gate.sh
-```
-
-- sequence: discovery debug -> acceptance 1-cycle -> acceptance 3-cycle -> optional soak
-- emits per-stage logs and machine-readable `report.json`
-- when panic/reboot markers are detected, the gate captures panic excerpt and can auto-run troubleshoot workflow
-
-Optional regression-gate env vars:
-
-- `HOSTCTL_NET_SOAK_CYCLES` (`0` default; skip soak)
-- `HOSTCTL_NET_PANIC_AUTO_TROUBLESHOOT` (`1` default)
-- `HOSTCTL_NET_PANIC_CONTEXT_LINES` (`80` default)
-- `HOSTCTL_NET_PANIC_EXCERPT_PATH` (optional override path)
-- `HOSTCTL_NET_REGRESSION_REPORT_PATH` (optional override path)
-- `HOSTCTL_NET_REQ_READ_BODY_RESET_MAX_DELTA` (`0` default; fail run if `METRICS UPLOAD req_read_body_reset` increases more than this delta)
-
-Wi-Fi workflow guardrail env vars:
-
-- `HOSTCTL_NET_LOCK_PATH` (optional lock file path override)
-- `HOSTCTL_NET_LOCK_WAIT_SEC` (`0` default; fail-fast lock)
-- `HOSTCTL_NET_ALLOW_LOG_APPEND` (`0` default; enforce unique log path)
-- `HOSTCTL_NET_ENFORCE_POLICY_FLOORS` (`1` default)
-- `HOSTCTL_EXPERIMENT_NOVELTY_GUARD` (`1` default; set `0` to bypass decision-ledger guard)
-- `HOSTCTL_EXPERIMENT_NOVELTY_OVERRIDE` (`0` default; set `1` to allow intentional reruns of already-decided knobs)
+The `HOSTCTL_NET_*` env contract and UART command contract used by the
+acceptance workflow itself are in
+[Network Acceptance Workflow](agents/network-acceptance.md).

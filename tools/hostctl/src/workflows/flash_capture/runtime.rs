@@ -6,10 +6,10 @@ use super::paths::{
     acquire_port_lock, build_firmware_image, build_ota_bootloader_command, ensure_port_available,
     normalize_output_root, prepare_output_paths, resolve_explicit_image, resolve_port,
 };
-use super::runtime_helpers::context_set_string;
+use super::runtime_helpers::{context_set_bool, context_set_string};
 use super::{
-    CaptureMode, FlashCaptureOptions, FlashCaptureRuntime, FlashMode, DEFAULT_ENABLE_FALLBACK,
-    DEFAULT_FLASH_BAUD,
+    CaptureMode, FlashCaptureOptions, FlashCaptureRuntime, FlashMode, TimeSyncStatus,
+    DEFAULT_ENABLE_FALLBACK, DEFAULT_FLASH_BAUD,
 };
 use std::{env, fs::File, path::PathBuf, time::Duration};
 
@@ -55,12 +55,17 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         "FLASH_LOG_DRAIN_TIMEOUT_MS",
         1_000,
     )?);
-    let boot_window = Duration::from_millis(opts.boot_window_ms.unwrap_or(
-        env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_BOOT_WINDOW_MS", 8_000)?,
-    ));
+    let boot_window = Duration::from_millis(opts.boot_window_ms.unwrap_or(8_000));
     let skip_update_check = env_utils::parse_env_bool01("ESPFLASH_SKIP_UPDATE_CHECK", true)?;
     let enable_fallback =
         env_utils::parse_env_bool01("ESPFLASH_ENABLE_FALLBACK", DEFAULT_ENABLE_FALLBACK)?;
+    // `--no-time-sync` wins outright; only in its absence does the
+    // `FLASH_SET_TIME_AFTER_FLASH=0` compatibility override apply.
+    let time_sync_enabled = if opts.no_time_sync {
+        false
+    } else {
+        env_utils::parse_env_bool01("FLASH_SET_TIME_AFTER_FLASH", true)?
+    };
 
     let workflow_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios/flash-capture.sw.yaml");
@@ -88,6 +93,10 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         flash_result: None,
         capture_bytes: 0,
         post_command_match: None,
+        time_sync_status: TimeSyncStatus::Skipped,
+        time_sync_utc: None,
+        time_sync_offset_minutes: None,
+        time_sync_reason: None,
     };
 
     let flash_mode = match runtime.opts.flash_mode {
@@ -106,6 +115,7 @@ pub fn run_flash_capture(logger: &mut Logger, opts: FlashCaptureOptions) -> Resu
         "image_supplied": runtime.opts.image.is_some(),
         "fallback_allowed": enable_fallback,
         "post_command_supplied": runtime.opts.post_command.is_some(),
+        "time_sync_enabled": time_sync_enabled,
     });
     execute_workflow(&workflow, &mut runtime, &workflow_input)?;
 
@@ -220,7 +230,7 @@ impl FlashCaptureRuntime<'_> {
             .as_deref()
             .ok_or_else(|| anyhow!("--post-pattern is required with --post-command"))?;
         let timeout_ms = self.opts.post_timeout_ms.unwrap_or(120_000);
-        let settle_ms = env_utils::parse_env_u64("HOSTCTL_FLASH_CAPTURE_POST_SETTLE_MS", 200)?;
+        let settle_ms = crate::workflows::serial::CONSOLE_SETTLE_MS;
         let regex = regex::Regex::new(pattern)
             .with_context(|| format!("invalid --post-pattern `{pattern}`"))?;
         let mut console =
@@ -240,6 +250,53 @@ impl FlashCaptureRuntime<'_> {
             .info(format!("post command completed: {matched}"));
         context_set_string(context, "post_command_match", &matched);
         self.post_command_match = Some(matched);
+        Ok(())
+    }
+
+    /// Runs the shared `hostctl timeset` readiness policy against the
+    /// just-flashed device. Never returns `Err`: a failure is recorded into
+    /// both `self` (for `write_summary`) and the workflow `context` (for the
+    /// `time_sync_result_gate`/`fail_time_sync` branch that runs *after* the
+    /// summary is written), rather than aborting the workflow here.
+    pub(super) fn action_time_sync(&mut self, context: &mut Value) -> Result<()> {
+        let enabled = context
+            .get("time_sync_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        if !enabled {
+            self.time_sync_status = TimeSyncStatus::Skipped;
+            context_set_bool(context, "time_sync_ok", true);
+            context_set_string(context, "time_sync_status", TimeSyncStatus::Skipped.label());
+            return Ok(());
+        }
+
+        let settle_ms = crate::workflows::serial::CONSOLE_SETTLE_MS;
+        let sync_result =
+            SerialConsole::open(&self.port, self.baud, None).and_then(|mut console| {
+                console.settle(settle_ms)?;
+                crate::workflows::serial::sync_time(&mut console)
+            });
+        match sync_result {
+            Ok(outcome) => {
+                self.time_sync_status = TimeSyncStatus::Ok;
+                self.time_sync_utc = Some(outcome.utc_epoch_seconds);
+                self.time_sync_offset_minutes = Some(outcome.offset_minutes);
+                self.logger.info(format!(
+                    "time sync OK utc={} offset_min={}",
+                    outcome.utc_epoch_seconds, outcome.offset_minutes
+                ));
+                context_set_bool(context, "time_sync_ok", true);
+                context_set_string(context, "time_sync_status", TimeSyncStatus::Ok.label());
+            }
+            Err(error) => {
+                self.time_sync_status = TimeSyncStatus::Failed;
+                self.time_sync_reason = Some(error.to_string());
+                self.logger.warn(format!("time sync failed: {error}"));
+                context_set_bool(context, "time_sync_ok", false);
+                context_set_string(context, "time_sync_status", TimeSyncStatus::Failed.label());
+                context_set_string(context, "time_sync_reason", &error.to_string());
+            }
+        }
         Ok(())
     }
 

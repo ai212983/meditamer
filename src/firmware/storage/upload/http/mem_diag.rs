@@ -14,7 +14,7 @@ pub(super) fn log_http_mem_diag(stage: &str) {
         && rx_before.payload_bytes_live == rx_after.payload_bytes_live
         && rx_before.created == rx_after.created
         && rx_before.dropped == rx_after.dropped;
-    esp_println::println!(
+    console::println!(
         "upload_http: upload_mem stage={} feature={} state={:?} total={} used={} free={} peak={} internal_free={} external_free={} min_free={} min_internal_free={} min_external_free={} large_alloc_external_ok={} large_alloc_internal_ok={} large_alloc_fail={} rx_window_stable={} rx_live={} rx_peak={} rx_payload_live={} rx_payload_peak={} rx_created={} rx_dropped={}",
         stage,
         snapshot.feature_enabled,

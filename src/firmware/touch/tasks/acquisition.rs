@@ -125,7 +125,7 @@ pub(crate) async fn touch_acquisition_task(
         let _ = touch.shutdown().await;
         publish_touch_status(TouchStatus::Fault).await;
     } else if let Some((x_res, y_res)) = initial_touch_resolution {
-        esp_println::println!(
+        console::println!(
             "touch: ready phase=bootstrap x_res={} y_res={}",
             x_res,
             y_res
@@ -149,7 +149,7 @@ pub(crate) async fn touch_acquisition_task(
             publish_touch_status(TouchStatus::Initializing).await;
             match touch.init_with_status().await {
                 Ok(TouchInitStatus::Ready { x_res, y_res }) => {
-                    esp_println::println!(
+                    console::println!(
                         "touch: ready phase=acquisition x_res={} y_res={}",
                         x_res,
                         y_res
@@ -161,7 +161,7 @@ pub(crate) async fn touch_acquisition_task(
                 status => {
                     let ext = touch.probe_external().await;
                     let controller = touch.probe_controller().await;
-                    esp_println::println!(
+                    console::println!(
                         "touch: init_failed phase=acquisition status={:?} probe_ext={} probe_touch={}",
                         status,
                         ext,
@@ -237,7 +237,7 @@ pub(crate) async fn touch_acquisition_task(
         }
 
         let edge_ms = Instant::now().as_millis();
-        esp_println::println!("input: gpio36 raw=low");
+        console::println!("input: gpio36 raw=low");
         publish_action(classifier.on_asserted(edge_ms, mode)).await;
 
         if touch_ready {
@@ -279,7 +279,7 @@ pub(crate) async fn touch_acquisition_task(
             }
             Either::Second(_) => {}
         }
-        esp_println::println!("input: gpio36 raw=high");
+        console::println!("input: gpio36 raw=high");
         publish_action(classifier.on_released()).await;
     }
 }
@@ -308,11 +308,11 @@ async fn handle_control_command(
                 // Let the controller supply and interrupt output settle before
                 // acknowledging the panel's quiet window.
                 Timer::after_millis(50).await;
-                esp_println::println!("touch: panel_quiet power=off status=ok");
+                console::println!("touch: panel_quiet power=off status=ok");
                 true
             }
             Err(error) => {
-                esp_println::println!(
+                console::println!(
                     "touch: panel_quiet power=off status=error error={:?}",
                     error
                 );
@@ -334,7 +334,7 @@ async fn handle_control_command(
                 break reset_pipeline;
             }
             TouchAcquisitionCommand::ReplayPipelineTap => {
-                esp_println::println!(
+                console::println!(
                     "TOUCH_PIPELINE_REPLAY state=rejected reason=acquisition_suspended"
                 );
             }
@@ -348,14 +348,14 @@ async fn handle_control_command(
                 *touch_ready = true;
                 request_touch_pipeline_reset();
                 publish_touch_status(TouchStatus::Ready { x_res, y_res }).await;
-                esp_println::println!(
+                console::println!(
                     "touch: panel_quiet power=on status=ready x_res={} y_res={}",
                     x_res,
                     y_res
                 );
             }
             status => {
-                esp_println::println!("touch: panel_quiet power=on status=error init={:?}", status);
+                console::println!("touch: panel_quiet power=on status=error init={:?}", status);
                 handle_fault(touch, touch_ready, retry_at).await;
             }
         }
@@ -393,7 +393,7 @@ async fn run_pipeline_replay_probe(
     reset_touch_pipeline().await;
 
     let started_ms = Instant::now().as_millis();
-    esp_println::println!(
+    console::println!(
         "TOUCH_PIPELINE_REPLAY state=started core=1 frames={} x={} y={}",
         PIPELINE_REPLAY_TAP.len(),
         PIPELINE_REPLAY_TAP[0].x,
@@ -422,7 +422,7 @@ async fn run_pipeline_replay_probe(
         contact_sampling.record_authoritative_count(replay.touch_count);
         scheduling::record_sample(t_ms, replay.touch_count);
         push_touch_input_sample(TouchSampleFrame { t_ms, sample }).await;
-        esp_println::println!(
+        console::println!(
             "TOUCH_PIPELINE_REPLAY state=frame index={} offset_ms={} t_ms={} count={} raw_mask={:#04x}",
             index,
             replay.offset_ms,
@@ -432,7 +432,7 @@ async fn run_pipeline_replay_probe(
         );
     }
 
-    esp_println::println!(
+    console::println!(
         "TOUCH_PIPELINE_REPLAY state=frames_complete elapsed_ms={}",
         Instant::now().as_millis().saturating_sub(started_ms)
     );

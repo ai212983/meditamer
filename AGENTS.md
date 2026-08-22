@@ -3,7 +3,7 @@
 |Uses: Rust, esp-hal, Embassy
 |../Inkplate-Arduino-library: Reference C++ library for baseline functionality
 |README.md: Documentation map. Start here. It defines the reference/guides/plans/notes split and says where new documents go.
-|guides/: How to work on the repo (setup, build/flash, metrics, troubleshooting, service modes, Wi-Fi)
+|guides/: How to work on the repo (setup, build/flash, firmware update, metrics, troubleshooting, service modes, Wi-Fi). `guides/README.md` is the index and names the single owner of each workflow.
 |reference/: How the system is (DRAM budgets, sensors, sound, features, test matrix, reliability register)
 |plans/: Unfinished work; each file carries a Status header
 |archive/: Frozen closed investigations; read-only, links not maintained
