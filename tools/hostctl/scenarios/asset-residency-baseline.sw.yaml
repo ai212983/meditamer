@@ -1,0 +1,330 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "asset-residency-baseline"
+  version: "1.0.0"
+do:
+  - measurement:
+      try:
+        - init_run:
+            call: "init_run"
+        - preflight_state:
+            call: "state_probe"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - preflight_state_retry:
+            call: "state_probe"
+            if: ".upload == null"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - normalize_upload_gate:
+            switch:
+              - upload_off:
+                  when: ".upload == \"off\""
+                  then: "init_ready"
+              - upload_on:
+                  when: ".upload == \"on\""
+                  then: "normalize_upload_off"
+              - default:
+                  then: "require_upload_off"
+        - require_upload_off:
+            call: "state_probe"
+            with:
+              expect_upload: "off"
+            then: "init_ready"
+        - normalize_upload_off:
+            call: "state_command"
+            with:
+              upload: "off"
+            then: "init_ready"
+        - init_ready:
+            call: "init_ready"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - await_ambient_assets:
+            call: "await_marker"
+            with:
+              key: "ambient_assets_adopted"
+              checkpoint: "ambient_assets_adopted"
+              from: "run"
+        - await_mountain_validated:
+            call: "await_marker"
+            with:
+              key: "mountain_validated"
+              checkpoint: "mountain_validated"
+              from: "run"
+              implied_by: "mountain_adopted"
+        - await_mountain_rendered:
+            call: "await_marker"
+            with:
+              key: "mountain_rendered"
+              checkpoint: "mountain_rendered"
+              from: "run"
+              implied_by: "mountain_adopted"
+        - await_mountain_adopted:
+            call: "await_marker"
+            with:
+              key: "mountain_adopted"
+              checkpoint: "mountain_adopted"
+              from: "run"
+        - await_mountain_composed:
+            call: "verify_mountain_ui_status"
+            with:
+              checkpoint: "mountain_composed"
+        - stress_upload_gate:
+            switch:
+              - stress:
+                  when: ".stress == true"
+                  then: "enable_upload_for_clock"
+              - default:
+                  then: "ready_loop"
+        - enable_upload_for_clock:
+            call: "state_command"
+            with:
+              upload: "on"
+        - verify_upload_for_clock:
+            call: "state_probe"
+            with:
+              expect_upload: "on"
+        - ready_loop:
+            do:
+              - probe_ready:
+                  call: "state_probe"
+                  metadata:
+                    hostctl:
+                      result:
+                        merge: true
+              - pause_ready:
+                  call: "ready_pause"
+                  if: ".ready != true"
+            metadata:
+              hostctl:
+                repeat:
+                  in: ".ready_budget"
+                  at: "ready_index"
+                  while: ".ready != true"
+        - ready_gate:
+            switch:
+              - ready:
+                  when: ".ready == true"
+                  then: "snapshot_ready"
+              - default:
+                  then: "abort_not_ready"
+        - abort_not_ready:
+            call: "state_probe"
+            with:
+              expect_ready: true
+        - snapshot_ready:
+            call: "psram_snapshot"
+            with:
+              label: "ready"
+              checkpoint: "ready"
+        - snapshot_ambient:
+            call: "psram_snapshot"
+            with:
+              label: "ambient_ready"
+              checkpoint: "ambient_ready"
+        - step_to_launcher:
+            call: "ui_command"
+        - begin_clock1:
+            call: "begin_phase"
+            with:
+              name: "clock1"
+        - step_to_clock:
+            call: "ui_command"
+            with:
+              target: "ANALOG_CLOCK"
+        - await_clock1_entered:
+            call: "await_marker"
+            with:
+              key: "clock_entered"
+              checkpoint: "clock1_entered"
+              from: "phase"
+              implied_by: "clock_frame_complete"
+        - snapshot_clock_entry:
+            call: "psram_snapshot"
+            with:
+              label: "clock_entry"
+              checkpoint: "clock_entry"
+        - await_clock1_assets:
+            call: "await_marker"
+            with:
+              key: "clock_assets_ready"
+              checkpoint: "clock1_assets_ready"
+              from: "phase"
+              implied_by: "clock_frame_complete"
+        - snapshot_loaded:
+            call: "psram_snapshot"
+            with:
+              label: "clock_loaded"
+              checkpoint: "clock_loaded"
+        - await_clock1_frame:
+            call: "await_marker"
+            with:
+              key: "clock_frame_complete"
+              checkpoint: "clock1_frame_complete"
+              from: "phase"
+        - await_clock1_profile:
+            call: "await_marker"
+            with:
+              key: "clock_profile"
+              checkpoint: "clock1_profile"
+              from: "phase"
+        - snapshot_first:
+            call: "psram_snapshot"
+            with:
+              label: "clock_first"
+              checkpoint: "clock_first"
+        - await_clock_steady:
+            call: "await_marker"
+            with:
+              key: "clock_frame_complete"
+              checkpoint: "clock_steady_frame"
+              from: "fresh"
+        - snapshot_steady:
+            call: "psram_snapshot"
+            with:
+              label: "clock_steady"
+              checkpoint: "clock_steady"
+        - stress_hold_gate:
+            switch:
+              - stress:
+                  when: ".stress == true"
+                  then: "stress_clock_hold"
+              - default:
+                  then: "begin_exit1"
+        - stress_clock_hold:
+            do:
+              - sample:
+                  call: "metrics_sample"
+                  with:
+                    settle_secs: 30
+                    abort_after_consecutive_misses: 1
+              - net_probe:
+                  call: "net_liveness"
+                  with:
+                    timeout_secs: 5
+                    require_reachable: true
+            metadata:
+              hostctl:
+                repeat:
+                  in: ".stress_hold_samples"
+                  at: "stress_sample_index"
+        - begin_exit1:
+            call: "begin_phase"
+            with:
+              name: "exit1"
+        - step_exit1:
+            call: "ui_command"
+        - await_released1:
+            call: "await_marker"
+            with:
+              key: "clock_assets_released"
+              checkpoint: "clock1_assets_released"
+              from: "phase"
+        - snapshot_exit1:
+            call: "psram_snapshot"
+            with:
+              label: "clock_exit"
+              checkpoint: "clock_exit"
+        - step_to_launcher2:
+            call: "ui_command"
+        - begin_clock2:
+            call: "begin_phase"
+            with:
+              name: "clock2"
+        - step_to_clock2:
+            call: "ui_command"
+            with:
+              target: "ANALOG_CLOCK"
+        - await_clock2_entered:
+            call: "await_marker"
+            with:
+              key: "clock_entered"
+              checkpoint: "clock2_entered"
+              from: "phase"
+              implied_by: "clock_frame_complete"
+        - await_clock2_assets:
+            call: "await_marker"
+            with:
+              key: "clock_assets_ready"
+              checkpoint: "clock2_assets_ready"
+              from: "phase"
+              implied_by: "clock_frame_complete"
+        - await_clock2_frame:
+            call: "await_marker"
+            with:
+              key: "clock_frame_complete"
+              checkpoint: "clock2_frame_complete"
+              from: "phase"
+        - snapshot_reentry:
+            call: "psram_snapshot"
+            with:
+              label: "clock_reentry_first"
+              checkpoint: "clock_reentry_first"
+        - begin_exit2:
+            call: "begin_phase"
+            with:
+              name: "exit2"
+        - step_exit2:
+            call: "ui_command"
+        - await_released2:
+            call: "await_marker"
+            with:
+              key: "clock_assets_released"
+              checkpoint: "clock2_assets_released"
+              from: "phase"
+        - snapshot_exit2:
+            call: "psram_snapshot"
+            with:
+              label: "clock_reexit"
+              checkpoint: "clock_reexit"
+        - upload_on_command:
+            call: "state_command"
+            with:
+              upload: "on"
+        - probe_upload_on:
+            call: "state_probe"
+            with:
+              expect_upload: "on"
+              checkpoint: "state_upload_on"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - snapshot_upload_on:
+            call: "psram_snapshot"
+            with:
+              label: "upload_on"
+              checkpoint: "upload_on"
+      catch:
+        as: "measurement_error"
+      then: "cleanup_upload"
+  - cleanup_upload:
+      call: "cleanup_upload_off"
+      then: "finalize"
+  - finalize:
+      call: "finalize_report"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".run_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_evidence"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_evidence:
+      call: "fail_evidence"

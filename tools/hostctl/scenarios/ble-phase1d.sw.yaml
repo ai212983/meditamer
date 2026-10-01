@@ -1,0 +1,40 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "ble-phase1d"
+  version: "1.0.0"
+do:
+  - await_ready:
+      call: "await_ready"
+      then: "pre_health"
+  - pre_health:
+      call: "pre_health"
+      then: "start_probe"
+  - start_probe:
+      call: "start_probe"
+      then: "await_terminal"
+  - await_terminal:
+      call: "await_terminal"
+      then: "post_health"
+  - post_health:
+      call: "post_health"
+      then: "analyze_evidence"
+  - analyze_evidence:
+      call: "analyze_evidence"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "baseline_gate"
+  - baseline_gate:
+      switch:
+        - passed:
+            when: ".baseline_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_evidence"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_evidence:
+      call: "fail_evidence"

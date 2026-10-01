@@ -1,0 +1,52 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "observation-fixture"
+  version: "1.0.0"
+do:
+  - run_fixture:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - readiness_gate:
+            switch:
+              - live_pong:
+                  when: ".ping_confirmed == true"
+                  then: "submit_request"
+              - default:
+                  then: "confirm_ready"
+        - confirm_ready:
+            call: "confirm_ready"
+        - submit_request:
+            call: "submit_request"
+        - await_result:
+            call: "await_result"
+        - assert_sample:
+            call: "assert_sample"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - observe_window:
+            call: "observe_window"
+        - mark_passed:
+            set:
+              fixture_passed: true
+      catch:
+        as: "fixture_error"
+      then: "write_report"
+  - write_report:
+      call: "write_report"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".fixture_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_fixture"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_fixture:
+      call: "fail_fixture"

@@ -1,0 +1,17 @@
+[package]
+name = "buzzer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Shared single-oscillator buzzer sequencer.
+# Product-neutral and board-neutral: scores name raw pitch codes,
+# never frequencies, so this crate never depends on a board, product, or
+# target crate. The board crate owns the nominal Hz<->code mapping and the
+# rail/timer actuation; firmware and host tools share this crate's sequencer,
+# execution contract, and diagnostic operation model.
+#
+# `no_std`, no `esp-hal`, no heap: scores are borrowed slices, traces fill
+# caller-provided buffers, and time is passed explicitly (monotonic
+# milliseconds) so host tests stay deterministic without a timer driver.
+[lib]

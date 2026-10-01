@@ -1,0 +1,10 @@
+[package]
+name = "hid_capture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ble = { path = "../../platform/connectivity/ble", features = ["host-tests"] }
+hidapi = { version = "=2.6.6", features = ["macos-shared-device"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

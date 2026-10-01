@@ -1,0 +1,197 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "asset-residency-reentry"
+  version: "1.0.0"
+do:
+  - measurement:
+      try:
+        - init_run:
+            call: "init_run"
+        - preflight_state:
+            call: "state_probe"
+            with:
+              expect_ready: true
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - normalize_upload_gate:
+            switch:
+              - upload_off:
+                  when: ".upload == \"off\""
+                  then: "cycle_loop"
+              - default:
+                  then: "normalize_upload_off"
+        - normalize_upload_off:
+            call: "state_command"
+            with:
+              upload: "off"
+        - cycle_loop:
+            do:
+              - begin_cycle:
+                  call: "begin_cycle"
+                  with:
+                    index: ".cycle_index"
+              - step_to_launcher:
+                  call: "ui_command"
+              - begin_mountain:
+                  call: "begin_phase"
+                  with:
+                    name: "mountain"
+              - step_to_mountain:
+                  call: "ui_command"
+                  with:
+                    target: "AMBIENT_VIEW"
+              - await_ambient_entered:
+                  call: "await_marker"
+                  with:
+                    key: "ambient_entered"
+                    checkpoint: "ambient_entered"
+                    from: "phase"
+                    silence_limit_secs: 20
+              - verify_mountain_ui_status:
+                  call: "verify_mountain_ui_status"
+              - snapshot_ambient:
+                  call: "psram_snapshot"
+                  with:
+                    label: "ambient_resident"
+                    checkpoint: "ambient_psram"
+              - step_mountain_exit:
+                  call: "ui_command"
+              - await_mountain_released:
+                  call: "await_marker"
+                  with:
+                    key: "mountain_released"
+                    checkpoint: "mountain_released"
+                    from: "phase"
+                    silence_limit_secs: 20
+              - await_cache_validated:
+                  call: "await_marker"
+                  with:
+                    key: "mountain_cache_validated"
+                    checkpoint: "mountain_cache_validated"
+                    from: "phase"
+                    implied_by: "mountain_released"
+                    silence_limit_secs: 20
+              - record_mountain_timing:
+                  call: "record_mountain_timing"
+              - snapshot_mountain_exit:
+                  call: "psram_snapshot"
+                  with:
+                    label: "mountain_exit"
+                    checkpoint: "mountain_exit_psram"
+              - begin_clock:
+                  call: "begin_phase"
+                  with:
+                    name: "clock"
+              - step_to_clock:
+                  call: "ui_command"
+                  with:
+                    target: "ANALOG_CLOCK"
+              - await_clock_entered:
+                  call: "await_marker"
+                  with:
+                    key: "clock_entered"
+                    checkpoint: "clock_entered"
+                    implied_by: "clock_frame_complete"
+                    from: "phase"
+                    silence_limit_secs: 20
+              - await_clock_assets:
+                  call: "await_marker"
+                  with:
+                    key: "clock_assets_ready"
+                    checkpoint: "clock_assets_ready"
+                    from: "phase"
+                    implied_by: "clock_frame_complete"
+                    silence_limit_secs: 20
+              - await_clock_frame:
+                  call: "await_marker"
+                  with:
+                    key: "clock_frame_complete"
+                    checkpoint: "clock_frame_complete"
+                    from: "phase"
+                    silence_limit_secs: 20
+              - snapshot_clock:
+                  call: "psram_snapshot"
+                  with:
+                    label: "clock_first"
+                    checkpoint: "clock_psram"
+              - begin_clock_exit:
+                  call: "begin_phase"
+                  with:
+                    name: "clock_exit"
+              - step_clock_exit:
+                  call: "ui_command"
+              - await_clock_released:
+                  call: "await_marker"
+                  with:
+                    key: "clock_assets_released"
+                    checkpoint: "clock_released"
+                    from: "phase"
+                    silence_limit_secs: 20
+              - snapshot_clock_exit:
+                  call: "psram_snapshot"
+                  with:
+                    label: "clock_exit"
+                    checkpoint: "clock_exit_psram"
+              - upload_on_command:
+                  call: "state_command"
+                  with:
+                    upload: "on"
+              - probe_upload_on:
+                  call: "state_probe"
+                  with:
+                    expect_upload: "on"
+                    checkpoint: "upload_on"
+              - snapshot_upload_on:
+                  call: "psram_snapshot"
+                  with:
+                    label: "upload_on"
+                    checkpoint: "upload_on_psram"
+              - upload_off_command:
+                  call: "state_command"
+                  with:
+                    upload: "off"
+              - probe_upload_off:
+                  call: "state_probe"
+                  with:
+                    expect_upload: "off"
+                    checkpoint: "upload_off"
+              - snapshot_upload_off:
+                  call: "psram_snapshot"
+                  with:
+                    label: "upload_off"
+                    checkpoint: "upload_off_psram"
+              - assert_no_fault:
+                  call: "assert_no_fault"
+            metadata:
+              hostctl:
+                repeat:
+                  in: ".reentry_cycles"
+                  at: "cycle_index"
+      catch:
+        as: "measurement_error"
+      then: "cleanup_upload"
+  - cleanup_upload:
+      call: "cleanup_upload_off"
+      then: "finalize"
+  - finalize:
+      call: "finalize_report"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".run_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_evidence"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_evidence:
+      call: "fail_evidence"

@@ -1,0 +1,18 @@
+[package]
+name = "clock-assets"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Runtime source-map pack for the analog clock: header + borrowed payload
+# slices over the canonical 600-map artwork. no_std, no allocation, no
+# large statics; the caller owns every byte. Device rotates and lights the
+# original PNG normal/spec sprites at runtime; nothing here is pre-rendered
+# for a dial position.
+
+[lib]
+name = "clock_assets"
+
+[dependencies]
+analog-clock = { path = "../analog-clock" }

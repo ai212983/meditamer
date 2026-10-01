@@ -1,0 +1,12 @@
+# Short notification candidates for the Inkplate buzzer probe.
+#
+# One RTTTL score per line; blank lines and `#` comments are skipped.
+# These are listening candidates, NOT acoustically selected presets.
+# Regenerate the firmware module after any change; see
+# docs/guides/audio/buzzer-listening.md for the exact command.
+#
+# Timing is literal: adjacent notes sound continuously (only SetCode), so
+# every motif carries `p` rests between notes for separate beeps.
+ack:d=16,o=6,b=120:c,32p,e
+attention:d=16,o=6,b=120:e,32p,e
+complete:d=16,o=6,b=120:c,32p,e,32p,g

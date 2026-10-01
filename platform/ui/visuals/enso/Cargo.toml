@@ -1,0 +1,40 @@
+[package]
+name = "enso"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# A procedural ensō: the brush path, the ink coverage across it, and the arc
+# position at which each pixel is first inked.
+#
+# The stroke is a pure function of a seed and a progress value, which is what
+# makes it affordable on this hardware. Progress comes from elapsed session
+# time, so the same model serves a five-minute sit and a twelve-hour one: only
+# the rate changes, never the artwork or its cost. Nothing is stored per frame
+# and nothing accumulates, so a session's whole visual state is one scalar.
+#
+# Ink is only ever added, never removed. That is a hardware contract rather than
+# an aesthetic one -- see `raster::dither` and `docs/references/display-refresh.md`
+# for why the Inkplate partial waveform requires it.
+#
+# Unlike `flipclock` and `hourglass`, this one is float. Those two run inside a
+# 30 Hz physics budget and earn their fixed-point tables; this generates once
+# per session against a panel refresh that already costs about 1.4 seconds, so
+# `libm` and an `f32` are the cheaper engineering choice.
+
+[features]
+default = []
+
+[dependencies]
+# `dither` is off by default in `raster` so the integer-only `flipclock` and
+# `hourglass` canvases don't pull in float code; this is the one consumer
+# that resolves continuous ink coverage onto the canvas, so it opts in.
+raster = { path = "../raster", features = ["dither"] }
+# Pure-software float math, so a host contact sheet and the device agree bit for
+# bit. Already in the workspace lockfile.
+libm = { version = "0.2.16", default-features = false }
+
+[dev-dependencies]
+# Host-only preview encoding. Neither this library nor any firmware target links
+# an image encoder; the same reason `products/medinote` kept it here.
+image = { version = "0.25.9", default-features = false, features = ["gif", "png"] }

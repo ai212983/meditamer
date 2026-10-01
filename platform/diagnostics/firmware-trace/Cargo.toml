@@ -1,0 +1,12 @@
+[package]
+name = "firmware-trace"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+[dependencies]
+heapless = "0.9.3"
+tracing = { version = "0.1.44", default-features = false }
+
+[dev-dependencies]
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }

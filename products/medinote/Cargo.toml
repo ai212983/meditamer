@@ -1,0 +1,82 @@
+[package]
+name = "medinote"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Medinote product library root (Product and target axis completion plan,
+# Phase 1 scaffold, Phase 2 content; ui-runtime-finalization plan, Phase 2).
+#
+# `presentation` (content formatting) and `config` (cadence/deployment
+# defaults) need no hardware dependency and no feature gate. `ui`/`screen`
+# (screen construction through `render::lvgl_adapter`'s checked handles)
+# needs `lightvgl-sys`, gated behind the `lvgl` feature -- the same shape
+# `platform/ui/render` uses to keep its own `geometry` reachable on its own.
+# The workspace's default LVGL configuration is Inkplate-specific, so a raw
+# workspace `cargo test -p medinote` must not silently exercise these screens
+# against that 128 KiB PSRAM profile. The registered Medinote host lane enables
+# `lvgl` with the target's own 48 KiB configuration; the firmware target also
+# enables it explicitly. Plain Cargo tests cover the hardware-independent
+# product logic.
+[lib]
+
+[features]
+default = []
+lvgl = ["dep:lightvgl-sys", "dep:render", "render/lvgl"]
+network-controls = []
+# A/B control. The paper CA is the default device backend; enabling this
+# restores the retained position-based dynamics implementation. Forwards to
+# the `hourglass` crate, which is where `backend.rs`/`paper_backend.rs` (the
+# only readers of this feature) now live.
+hourglass-pbd = ["hourglass/hourglass-pbd"]
+# Host-only visual experiment. Disjoint blocks share the production Margolus
+# phase but select neighboring cardinal transition rules from local gravity.
+# Forwards to the `hourglass` crate for the same reason as `hourglass-pbd`.
+hourglass-block-gravity = ["hourglass/hourglass-block-gravity"]
+
+[dependencies]
+observation = { path = "../../platform/sensing/observation" }
+heapless = "0.9.3"
+shell = { path = "../../platform/ui/shell" }
+statig = "0.4.1"
+lightvgl-sys = { version = "=9.5.4", optional = true, default-features = false, features = ["library", "raw-bindings"] }
+# `ui`'s checked-adapter screens/overlays build on `render::lvgl_adapter`
+# (`Widget`/`Timer`/`UiAccessToken`) the same way `products/meditamer` does;
+# `render`'s own `lvgl` feature (default-on there too) gates the pieces that
+# need it.
+render = { path = "../../platform/ui/render", optional = true, default-features = false }
+# The hourglass and flip-clock visual models: pure, chip-neutral crates that
+# used to live inside this product's own `apps/` tree. Medinote keeps only
+# its app-registration glue (`apps::hourglass::descriptor`) and the screens
+# that adapt these models onto `render::lvgl_adapter`.
+hourglass = { path = "../../platform/ui/visuals/hourglass" }
+flipclock = { path = "../../platform/ui/visuals/flipclock" }
+# The one-bit canvas contract both of the above render into. Screens adapt
+# their own LVGL canvas onto it (see `ui/screen/counter.rs`,
+# `ui/screen/hourglass.rs`); no `dither` feature needed, since neither model
+# dithers.
+raster = { path = "../../platform/ui/visuals/raster" }
+
+[dev-dependencies]
+# Test-only: the cross-source input-ordering fixture in `input/tests.rs`
+# merges local `CaptureGate` output against `ble::input::InputPublisher`
+# edges on one timeline. `host-tests` is the same feature
+# `scripts/host-test.sh test ble` builds with; it exposes `ble::input`
+# without pulling in the radio stack.
+ble = { path = "../../platform/connectivity/ble", features = ["host-tests"] }
+# `lvgl_adapter`'s checked-handle registries are `Mutex<CriticalSectionRawMutex,
+# ...>` statics (inside `render`, but linked into this crate's own host test
+# binary too, not just `render`'s): the embedded targets get a
+# `critical-section` impl from the board HAL, but a host test binary needs one
+# registered explicitly. `render`'s own `[dev-dependencies]` entry for this
+# doesn't propagate to dependents, so this crate carries the identical entry.
+critical-section = { version = "1.2", features = ["std"] }
+
+[build-dependencies]
+# Compiles Home's heading/caption faces (Ark Pixel, `assets/fonts/`) into
+# LVGL font tables at build time -- see `build.rs`. Cheap and unconditional
+# (mirrors `products/meditamer/build.rs`): the `ui` module that consumes the
+# generated tables is itself gated on the `lvgl` feature, so a plain
+# `cargo build -p medinote` still runs this but nothing reads the output.
+lvgl_font_compiler = { path = "../../tools/lvgl_font_compiler" }

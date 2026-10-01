@@ -1,0 +1,92 @@
+[package]
+name = "ble"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Shared BLE runtime (shared BLE runtime and roles plan,
+# docs/plans/ble/README.md). The eventual owner of
+# BLE session, central/peripheral roles, GATT/HID handling, and telemetry for
+# both firmware targets.
+#
+# Phase 1 exposed only the chip-only `start_stop_probe`. Phase 2
+# (`platform/storage/sdcard`'s host/target split, not `platform/diagnostics/console`'s
+# always-on-target one) adds host-testable scanning, GATT connection
+# lifecycle, HID descriptor/report decoding, telemetry, and product input:
+# `[target.'cfg(target_os = "none")'.dependencies]` holds everything that
+# needs the Xtensa toolchain or the reviewed radio source, `host-tests`
+# builds the rest for `cargo test` on the host, and every host-testable
+# module takes its clock as an explicit caller-supplied tick rather than
+# reading `embassy_time::Instant::now()` (`platform/connectivity/arbitration`'s pattern),
+# so deadline/restart/stale-event behavior is deterministic without a real
+# timer.
+#
+# No chip feature unified implicitly (unlike `platform/diagnostics/console` and
+# `platform/connectivity/netstack`, which lean on some other already-active dependency in
+# the graph to supply it): `targets/medinote-waveshare` has no other
+# chip-selecting `esp-radio`/`esp-hal` consumer today, so this crate forwards
+# its own `esp32`/`esp32s3` features to stay self-sufficient regardless of
+# what else a target enables (ADR-0015 feature-unification pattern).
+[lib]
+
+[features]
+default = []
+host-tests = []
+# Scanning, GATT client, and pairing belong to the central role. Targets
+# select this independently of their chip; peripheral-only consumers retain
+# the shared packet, lifecycle, and diagnostic primitives without this state.
+# Keep eight notification entries for CheerTok's press/release burst during
+# Medinote's panel flush, and legacy pairing for
+# that peer (ADR-0016). These are unchanged central-role requirements.
+central = [
+    "dep:trouble-host",
+    "trouble-host/central",
+    "trouble-host/scan",
+    "trouble-host/default-packet-pool",
+    "trouble-host/gatt-client-notification-queue-size-8",
+    "trouble-host/security",
+    "trouble-host/legacy-pairing",
+]
+# The diagnostic peripheral uses its own bounded packet pool. Select a host
+# role explicitly so chip-only controller probes do not pull in Trouble.
+peripheral = ["dep:trouble-host", "trouble-host/peripheral"]
+esp32 = [
+    "esp-hal/esp32",
+    "esp-radio/esp32",
+    "esp-radio-rtos-driver/esp32",
+]
+esp32s3 = [
+    "esp-hal/esp32s3",
+    "esp-radio/esp32s3",
+    "esp-radio-rtos-driver/esp32s3",
+]
+# Forwarded from the product's own `telemetry-defmt`, same as `console` and
+# `netstack`.
+telemetry-defmt = ["dep:defmt", "esp-radio/defmt"]
+
+[dependencies]
+heapless = "0.9.3"
+defmt = { version = "1.1.1", optional = true }
+
+[target.'cfg(target_os = "none")'.dependencies]
+esp-hal = { version = "=1.2.0", features = ["unstable"] }
+esp-radio-rtos-driver = "=0.4.2"
+# `esp-alloc`: `esp-radio` defaults it on (`default = ["esp-alloc"]`); we
+# disable defaults for the same reason `targets/meditamer-inkplate`'s own
+# direct dependency does (no `wifi`/`coex` weight this crate does not need),
+# but re-request it explicitly -- without any `alloc`-using feature active,
+# `esp-radio`'s unconditional `extern crate alloc;` trips its own
+# `#![deny(rust_2018_idioms)]` as unused, and every target here already runs
+# `esp_alloc` as its global allocator.
+esp-radio = { version = "=1.0.0-beta.1", default-features = false, features = ["ble", "esp-alloc", "log-04", "unstable"] }
+bt-hci = "=0.10.1"
+# Optional GATT/packet types; each role selects its own host capabilities.
+# `central` enables Trouble's security manager (including controller-seeded
+# CSPRNG) and default packet pool. Meditamer's diagnostic peripheral supplies
+# its own bounded packet pool and remains non-pairing/non-bonding (ADR-0011).
+# Cargo still unifies both roles when a target explicitly enables both.
+trouble-host = { version = "=0.8.0", optional = true, default-features = false, features = ["gatt"] }
+embassy-time = "0.5.1"
+embassy-futures = "0.1.2"
+critical-section = "1.2.0"
+static_cell = "2.1.1"

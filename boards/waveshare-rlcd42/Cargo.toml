@@ -1,0 +1,46 @@
+[package]
+name = "waveshare-rlcd42"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Waveshare ESP32-S3-RLCD-4.2: ESP32-S3 (Xtensa LX7), 300x400 reflective LCD.
+#
+# The second board of ADR-0015's `boards/` axis, and the reason the platform
+# crates can be validated against a chip other than the one they grew up on.
+# It selects the chip for everything below it -- the platform crates name no
+# chip themselves.
+#
+# A `[lib]` crate since the product and target axis completion plan's Phase
+# 2, matching `boards/inkplate-tempera`: this used to also be the flashed
+# Medinote prototype binary, but chip startup, task wiring, and product
+# content moved out to `targets/medinote-waveshare` and `products/medinote`
+# respectively. What is left is the ST7305 panel/waveform driver, the
+# USB-Serial-JTAG RX primitive, and the LVGL-to-panel flush bridge -- board
+# hardware, nothing product-shaped.
+#
+# Outside the root workspace: it targets xtensa-esp32s3-none-elf, and a
+# workspace shares one target and one set of `[env]` values across members.
+[lib]
+
+[dependencies]
+esp-hal = { version = "=1.2.0", features = ["esp32s3", "unstable"] }
+# Pinned for the same reason targets/medinote-waveshare pins it: esp-hal
+# 1.2.0 requires esp32s3 ^0.36. See that manifest's comment.
+esp32s3 = "=0.37.0"
+embassy-time = "0.5.1"
+static_cell = "2.1.1"
+
+# The platform layer this board is driven through.
+board = { path = "../../platform/ui/board" }
+
+# LVGL, for the flush bridge in `panel_lvgl.rs`. `targets/medinote-waveshare`
+# is the actual consumer of the C build this triggers; see its own
+# `DEP_LV_CONFIG_PATH`.
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
+
+# No `[patch.crates-io]` here anymore: `xtensa-lx-rt` no longer needs one --
+# esp-hal 1.2.0 pulls in xtensa-lx-rt 0.23.0, which already contains the
+# PS.UM interrupt-vector fix upstream (esp-rs/esp-hal#6027). History:
+# `../../docs/archive/hardware/esp-hal-1.2-migration-completed-2026-09-07.md`.

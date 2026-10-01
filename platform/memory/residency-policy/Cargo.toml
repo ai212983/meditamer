@@ -1,0 +1,15 @@
+[package]
+name = "residency-policy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+# Policy foundation for transactional asset residency (asset-residency track):
+# identity newtypes, generation-checked handles, the prepare/commit
+# participant contract, and the coordinator for exactly two heterogeneous
+# participants. no_std with no dependencies: mechanism crates (arenas, block
+# pools) implement the participant contract; policy never depends on them.
+
+[lib]
+name = "residency_policy"

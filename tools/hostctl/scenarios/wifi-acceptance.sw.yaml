@@ -1,0 +1,212 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "wifi-acceptance"
+  version: "1.0.0"
+do:
+  - prepare_payload:
+      call: "prepare_payload"
+      then: "target_startup_gate"
+  - target_startup_gate:
+      switch:
+        - s3:
+            when: ".target_s3 == true"
+            then: "s3_runtime_ready"
+        - default:
+            then: "wait_runtime_ready"
+  - s3_runtime_ready:
+      call: "s3_runtime_health"
+      then: "start_run"
+  - wait_runtime_ready:
+      call: "wait_runtime_ready"
+      then: "enable_wifi_discovery_logging"
+  - enable_wifi_discovery_logging:
+      call: "set_discovery_log_domain"
+      with:
+        domain: "WIFI"
+      then: "enable_reassoc_discovery_logging"
+  - enable_reassoc_discovery_logging:
+      call: "set_discovery_log_domain"
+      with:
+        domain: "REASSOC"
+      then: "boot_discovery_gate"
+  - boot_discovery_gate:
+      call: "boot_discovery_gate"
+      then: "start_run"
+  - start_run:
+      call: "start_run"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "prepare_measurement"
+  - prepare_measurement:
+      call: "prepare_measurement"
+      then: "cycle_gate"
+  - cycle_gate:
+      switch:
+        - run_cycle:
+            when: ".cycle <= .cycles"
+            then: "target_cycle_gate"
+        - default:
+            then: "target_final_health_gate"
+  - target_cycle_gate:
+      switch:
+        - s3:
+            when: ".target_s3 == true"
+            then: "s3_stop"
+        - default:
+            then: "net_apply_config"
+  - s3_stop:
+      call: "s3_stop"
+      then: "s3_configure"
+  - s3_configure:
+      call: "s3_configure"
+      then: "s3_start"
+  - s3_start:
+      call: "s3_start"
+      then: "net_wait_state"
+  - net_apply_config:
+      call: "net_apply_config"
+      then: "net_start"
+  - net_start:
+      call: "net_start"
+      then: "net_wait_state"
+  - net_wait_state:
+      call: "net_wait_state"
+      then: "init_wait_ready_recovery"
+  - init_wait_ready_recovery:
+      call: "init_wait_ready_recovery"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "net_wait_ready_loop"
+  - net_wait_ready_loop:
+      do:
+        - net_wait_ready_once:
+            call: "net_wait_ready_once"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+            then: "net_wait_ready_gate"
+        - net_wait_ready_gate:
+            switch:
+              - ready_passed:
+                  when: "present(.ip)"
+                  then: "__end__"
+              - retryable_failure:
+                  when: ".net_wait_ready_retryable == true && .net_wait_ready_attempt < .net_wait_ready_recover_retries"
+                  then: "net_recover_once"
+              - default:
+                  then: "fail_upload"
+        - net_recover_once:
+            call: "net_recover_once"
+            then: "net_start"
+        - net_start:
+            call: "net_start"
+            then: "increment_wait_ready_attempt"
+        - increment_wait_ready_attempt:
+            set:
+              net_wait_ready_attempt: "${ .net_wait_ready_attempt + 1 }"
+      metadata:
+        hostctl:
+          repeat:
+            in: ".net_wait_ready_loop_budget"
+            at: "net_wait_ready_loop_index"
+            while: "!present(.ip)"
+      then: "target_discovery_gate"
+  - target_discovery_gate:
+      switch:
+        - s3:
+            when: ".target_s3 == true"
+            then: "s3_assert_discovery"
+        - default:
+            then: "init_upload_attempt"
+  - s3_assert_discovery:
+      call: "s3_assert_discovery"
+      then: "init_upload_attempt"
+  - init_upload_attempt:
+      call: "init_upload_attempt"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "upload_retry_gate"
+  - upload_retry_gate:
+      switch:
+        - upload_attempt_allowed:
+            when: ".upload_attempt <= .operation_retries"
+            then: "net_upload_once"
+        - default:
+            then: "fail_upload"
+  - net_upload_once:
+      call: "net_upload_once"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "upload_result_gate"
+  - upload_result_gate:
+      switch:
+        - upload_done:
+            when: ".upload_done == true"
+            then: "net_verify_once"
+        - default:
+            then: "net_collect_diag"
+  - net_collect_diag:
+      call: "net_collect_diag"
+      then: "net_recover_once"
+  - net_recover_once:
+      call: "net_recover_once"
+      then: "increment_upload_attempt"
+  - increment_upload_attempt:
+      set:
+        upload_attempt: "${ .upload_attempt + 1 }"
+      then: "upload_retry_gate"
+  - fail_upload:
+      call: "net_fail"
+  - net_verify_once:
+      call: "net_verify_once"
+      then: "finalize_cycle"
+  - finalize_cycle:
+      call: "finalize_cycle"
+      then: "target_upload_health_gate"
+  - target_upload_health_gate:
+      switch:
+        - s3:
+            when: ".target_s3 == true"
+            then: "s3_upload_health"
+        - default:
+            then: "assert_upload_metrics"
+  - s3_upload_health:
+      call: "s3_network_health"
+      then: "advance_cycle"
+  - assert_upload_metrics:
+      call: "assert_upload_metrics"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "advance_cycle"
+  - advance_cycle:
+      set:
+        cycle: "${ .cycle + 1 }"
+      then: "cycle_gate"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - target_final_health_gate:
+      switch:
+        - s3:
+            when: ".target_s3 == true"
+            then: "s3_final_health"
+        - default:
+            then: "assert_runtime_health"
+  - s3_final_health:
+      call: "s3_network_health"
+      then: "print_summary"
+  - assert_runtime_health:
+      call: "assert_runtime_health"
+      then: "print_summary"

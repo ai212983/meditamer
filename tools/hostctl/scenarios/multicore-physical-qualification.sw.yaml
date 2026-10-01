@@ -1,0 +1,129 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "multicore-physical-qualification"
+  version: "1.0.0"
+do:
+  - experiment:
+      try:
+        - settle:
+            call: "settle_attachment"
+            with:
+              seconds: 65
+        - attach:
+            call: "verify_attach"
+        - await_input:
+            call: "await_operator"
+        - select_interactive:
+            call: "set_scheduler"
+            with:
+              profile: "INTERACTIVE"
+        - probe_interactive:
+            call: "probe_metrics_control"
+        - reset_interactive:
+            call: "reset_scheduling_metrics"
+        - demand_interactive:
+            call: "acquisition_window"
+        - begin_interactive:
+            call: "begin_phase"
+            with:
+              name: "interactive"
+              paused: false
+        - observe_interactive:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - final_interactive:
+            call: "capture_window"
+            with:
+              seconds: 2
+        - check_interactive:
+            call: "check_scheduling"
+            with:
+              require_touch: true
+              defer_qualification_failure: true
+        - finish_interactive:
+            call: "finish_phase"
+        - select_upload:
+            call: "set_scheduler"
+            with:
+              profile: "UPLOAD"
+        - probe_upload:
+            call: "probe_metrics_control"
+        - reset_upload:
+            call: "reset_scheduling_metrics"
+        - demand_upload:
+            call: "acquisition_window"
+        - begin_upload:
+            call: "begin_phase"
+            with:
+              name: "upload"
+              paused: false
+        - observe_upload:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - final_upload:
+            call: "capture_window"
+            with:
+              seconds: 2
+        - check_upload:
+            call: "check_scheduling"
+            with:
+              require_touch: true
+              defer_qualification_failure: true
+        - finish_upload:
+            call: "finish_phase"
+        - select_diagnostics:
+            call: "set_scheduler"
+            with:
+              profile: "DIAGNOSTICS"
+        - probe_diagnostics:
+            call: "probe_metrics_control"
+        - reset_diagnostics:
+            call: "reset_scheduling_metrics"
+        - demand_diagnostics:
+            call: "acquisition_window"
+        - begin_diagnostics:
+            call: "begin_phase"
+            with:
+              name: "diagnostics"
+              paused: false
+        - observe_diagnostics:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - final_diagnostics:
+            call: "capture_window"
+            with:
+              seconds: 2
+        - check_diagnostics:
+            call: "check_scheduling"
+            with:
+              require_touch: true
+              defer_qualification_failure: true
+        - finish_diagnostics:
+            call: "finish_phase"
+      catch:
+        as: "experiment_error"
+  - restore:
+      try:
+        - automatic:
+            call: "set_scheduler"
+            with:
+              profile: "AUTO"
+      catch:
+        as: "restore_error"
+  - reset_capture_gate:
+      switch:
+        - failed:
+            when: "present(.experiment_error) || present(.restore_error)"
+            then: "capture_reset_trace"
+        - default:
+            then: "finish"
+  - capture_reset_trace:
+      call: "capture_reset_trace"
+      with:
+        seconds: 120
+  - finish:
+      call: "finish"

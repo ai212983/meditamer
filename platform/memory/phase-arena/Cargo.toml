@@ -1,0 +1,20 @@
+[package]
+name = "phase-arena"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+# Caller-owned single-activation phase arena: checked aligned offset
+# allocation with rollback-on-drop staging and a generation-checked backing
+# token. The optional generic BundleBacking acquires physical parts through a
+# caller-supplied allocator; the offset core itself owns no bytes. Bundle
+# declarations come from residency-policy. Target region mapping and the
+# two-participant coordinator integration remain separate.
+
+[lib]
+name = "phase_arena"
+
+[dependencies]
+allocator-api2 = { version = "0.3", default-features = false, features = ["alloc"] }
+residency-policy = { path = "../residency-policy" }

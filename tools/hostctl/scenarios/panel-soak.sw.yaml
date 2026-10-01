@@ -1,0 +1,46 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "panel-soak"
+  version: "1.0.0"
+do:
+  - capture:
+      try:
+        - ready:
+            call: "ready"
+        - cycles:
+            do:
+              - select_mode:
+                  switch:
+                    - paired:
+                        when: ".wait_partial == true"
+                        then: "wait_partial"
+                    - default:
+                        then: "repaint"
+              - wait_partial:
+                  call: "wait_partial"
+              - repaint:
+                  call: "repaint"
+              - progress:
+                  call: "progress"
+            metadata:
+              hostctl:
+                repeat:
+                  in: ".cycles"
+                  at: "cycle_index"
+        - completed:
+            set:
+              capture_complete: true
+      catch:
+        as: "capture_error"
+  - finish:
+      call: "finish"
+  - result:
+      switch:
+        - completed:
+            when: ".capture_complete == true"
+            then: "__end__"
+        - default:
+            then: "fail"
+  - fail:
+      call: "fail"

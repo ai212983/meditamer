@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analog Clock Preview</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 16px; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 340px; } }
+  .stage { overflow: auto; max-height: 78vh; border: 1px solid #ccc; background: #fff; min-width: 0; }
+  img#clock { display: block; background: #fff; }
+  img#clock.fit { width: 100%; height: auto; }
+  img#clock.pixels { image-rendering: pixelated; }
+  fieldset { border: 1px solid #ccc; margin: 0 0 12px; padding: 10px 12px; }
+  legend { font-weight: 600; }
+  label { display: grid; grid-template-columns: 150px 1fr 64px; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
+  label.wide { grid-template-columns: 150px 1fr; }
+  label.wide select { grid-column: 2; }
+  output { text-align: right; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .hint { font-size: 13px; color: #444; margin: 6px 0 0; }
+  #status { font-size: 13px; color: #444; min-height: 1.2em; }
+  details { font-size: 14px; }
+  button { font-size: 14px; }
+  button[aria-pressed="true"] { font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>Analog Clock Preview</h1>
+<p>Every picture is drawn by the shared clock renderer on this computer. Move a control and a fresh picture loads below.</p>
+<div class="layout">
+  <div>
+    <div class="row" role="group" aria-label="Zoom">
+      <span>Zoom:</span>
+      <button data-zoom="fit" aria-pressed="false">Fit</button>
+      <button data-zoom="z100" aria-pressed="true">100%</button>
+      <button data-zoom="z200" aria-pressed="false">200%</button>
+      <span class="hint">100% shows real image pixels; 200% doubles them for dot comparison.</span>
+    </div>
+    <div class="stage"><img id="clock" class="pixels" alt="Analog clock render" src="/render?w=600&amp;h=600&amp;time=10:09&amp;mode=dither"></div>
+  </div>
+  <div>
+    <fieldset><legend>Time</legend>
+      <label>Hour <input id="hours" type="range" min="0" max="23" value="10"><output id="hours_v">10</output></label>
+      <label>Minute <input id="minutes" type="range" min="0" max="59" value="9"><output id="minutes_v">09</output></label>
+      <div class="row">
+        <button id="step_back" aria-label="Step one minute backward">&#8722; 1 min</button>
+        <button id="step_fwd" aria-label="Step one minute forward">+ 1 min</button>
+        <button id="animate">Play motion</button>
+      </div>
+      <p class="hint">Motion sweeps the minute hand. Picture starts paused.</p>
+    </fieldset>
+    <fieldset><legend>Picture</legend>
+      <div class="row">
+        <button data-size="600x600">600 &times; 600</button>
+        <button data-size="400x300">400 &times; 300</button>
+      </div>
+      <label>Hand size <input id="dial" type="range" min="0.5" max="1" step="0.01" value="0.96"><output id="dial_v">0.96</output></label>
+      <label class="wide">Style
+        <select id="mode" aria-label="Picture style">
+          <option value="dither" selected>E-ink dots</option>
+          <option value="gray">Smooth photo</option>
+          <option value="changes">Changed dots</option>
+        </select>
+      </label>
+      <p class="hint">Dot patterns below affect the E-ink dots view only; the smooth photo is unpatterned.</p>
+      <p class="hint">The dial shows the supplied Durer image with its clock marks baked in. Hand size scales the hands only; the native 600&times;600 view shows the image 1:1, the 400&times;300 view centers its 300&times;300 square.</p>
+    </fieldset>
+    <fieldset><legend>Comparison</legend>
+      <label class="wide">Compare method
+        <select id="composition" aria-label="Compare method">
+          <option value="legacy" selected>Current regional</option>
+          <option value="reference">Blue-noise reference</option>
+          <option value="replacement">Static background + replacement</option>
+          <option value="removal">Static background + dot removal</option>
+        </select>
+      </label>
+      <label class="wide">Reference time
+        <input id="compare_time" type="time" value="10:09" aria-label="Reference time, hours and minutes">
+      </label>
+      <div class="row">
+        <button id="use_current_ref">Use current time as reference</button>
+      </div>
+      <p class="hint" id="ref_hint">The reference uses the same light and settings; only the time differs. Matching times show no changes.</p>
+      <p class="hint" id="reference_note" hidden>Full-scene reference draws every dot the same way, so the region patterns below are paused for its output and restored afterwards.</p>
+      <div id="metrics" aria-live="polite">
+        <div class="row"><span>Changed dots: </span><output id="m_changed">unavailable</output></div>
+        <div class="row"><span>Changed outside moving parts: </span><output id="m_outside">unavailable</output></div>
+        <div class="row"><span>Restored background mismatches: </span><output id="m_disocc">unavailable</output></div>
+        <div class="row"><span>Shade error: </span><output id="m_tonemae">unavailable</output></div>
+        <div class="row"><span>Shade bias: </span><output id="m_tonebias">unavailable</output></div>
+        <div class="row"><span>Edge error: </span><output id="m_boundary">unavailable</output></div>
+        <div class="row"><span>Compared at: </span><output id="m_time">unavailable</output></div>
+        <div class="row"><span>Background reused: </span><output id="m_reused">unavailable</output></div>
+      </div>
+      <p class="hint">Changed dots paints changed bits red over the current dots. Counts cover changes outside the moving-content footprint, restored background mismatch count, and local shade error against smooth gray targets. Shade/edge errors compare averages over 16×16 pixel areas; lower is closer to the smooth target. Dot removal is experimental; compare its shadow tone with the blue-noise reference.</p>
+    </fieldset>
+    <fieldset><legend>Scenes</legend>
+      <div class="row" role="group" aria-label="Test scenes">
+        <button data-preset="default">Default</button>
+        <button data-preset="faint">Faint shadow</button>
+        <button data-preset="overlap">Overlapping hands</button>
+        <button data-preset="ticks">Across ticks</button>
+        <button data-preset="uncover">Uncover background</button>
+      </div>
+      <p class="hint">Each scene sets the current and reference times, then redraws once.</p>
+    </fieldset>
+    <fieldset id="dots_box"><legend>Dot patterns</legend>
+      <p class="hint">The dial face is the Background; ticks and the center hub are Clock elements. Choose a dot pattern for each region; lighting stays the same. Background patterns the printed Durer art; Clock elements applies to the generated dial only and has no separate pixels here.</p>
+      <label class="wide">Background
+        <select id="background_dither" aria-label="Background dot pattern">
+          <option value="none">Threshold</option>
+          <option value="gradient" selected>Gradient noise</option>
+          <option value="bayer4">Bayer4x4</option>
+          <option value="bayer8">Bayer8x8</option>
+          <option value="blue-noise">Blue noise</option>
+          <option value="floyd-steinberg">Floyd–Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+        </select>
+      </label>
+      <label class="wide">Clock elements
+        <select id="clock_dither" aria-label="Clock elements dot pattern">
+          <option value="none">Threshold</option>
+          <option value="gradient" selected>Gradient noise</option>
+          <option value="bayer4">Bayer4x4</option>
+          <option value="bayer8">Bayer8x8</option>
+          <option value="blue-noise">Blue noise</option>
+          <option value="floyd-steinberg">Floyd–Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+        </select>
+      </label>
+      <label class="wide">Hands
+        <select id="hands_dither" aria-label="Hands dot pattern">
+          <option value="none">Threshold</option>
+          <option value="gradient" selected>Gradient noise</option>
+          <option value="bayer4">Bayer4x4</option>
+          <option value="bayer8">Bayer8x8</option>
+          <option value="blue-noise">Blue noise</option>
+          <option value="floyd-steinberg">Floyd–Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+        </select>
+      </label>
+      <label class="wide">Shadows
+        <select id="shadows_dither" aria-label="Shadows dot pattern">
+          <option value="none">Threshold</option>
+          <option value="gradient" selected>Gradient noise</option>
+          <option value="bayer4">Bayer4x4</option>
+          <option value="bayer8">Bayer8x8</option>
+          <option value="blue-noise">Blue noise</option>
+          <option value="floyd-steinberg">Floyd–Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+        </select>
+      </label>
+      <div class="row">
+        <select id="set_all" aria-label="Pattern for all regions">
+          <option value="gradient">Gradient noise</option>
+          <option value="none">Threshold</option>
+          <option value="bayer4">Bayer4x4</option>
+          <option value="bayer8">Bayer8x8</option>
+          <option value="blue-noise">Blue noise</option>
+          <option value="floyd-steinberg">Floyd–Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+        </select>
+        <button id="apply_all">Set all regions</button>
+      </div>
+    </fieldset>
+    <fieldset><legend>Light</legend>
+      <label>Left&ndash;right <input id="light_x" type="range" min="-2" max="2" step="0.05" value="0.45"><output id="light_x_v">0.45</output></label>
+      <label>Up&ndash;down <input id="light_y" type="range" min="-2" max="2" step="0.05" value="-0.35"><output id="light_y_v">-0.35</output></label>
+      <label>Height <input id="light_h" type="range" min="0.05" max="4" step="0.05" value="1.2"><output id="light_h_v">1.20</output></label>
+      <label>Softness <input id="light_size" type="range" min="0" max="0.6" step="0.01" value="0.12"><output id="light_size_v">0.12</output></label>
+    </fieldset>
+    <fieldset><legend>Hands</legend>
+      <label>Hour hand lift <input id="hour_h" type="range" min="0" max="0.5" step="0.01" value="0.06"><output id="hour_h_v">0.06</output></label>
+      <label>Minute hand lift <input id="minute_h" type="range" min="0" max="0.5" step="0.01" value="0.12"><output id="minute_h_v">0.12</output></label>
+      <label>Darkness <input id="hand_darkness" type="range" min="0" max="1" step="0.05" value="0.85"><output id="hand_darkness_v">0.85</output></label>
+      <p class="hint">Darkness scales each hand's own shade before compositing (0 original, 1 black); dot patterns stay independent.</p>
+    </fieldset>
+    <fieldset><legend>Shine</legend>
+      <label>Amount <input id="spec" type="range" min="0" max="4" step="0.05" value="1"><output id="spec_v">1.00</output></label>
+      <label>Hour shine <input id="hour_spec" type="range" min="0" max="4" step="0.05" value="1"><output id="hour_spec_v">1.00</output></label>
+      <label>Minute shine <input id="minute_spec" type="range" min="0" max="4" step="0.05" value="1"><output id="minute_spec_v">1.00</output></label>
+      <label>Sharpness <input id="shiny" type="range" min="1" max="256" step="1" value="24"><output id="shiny_v">24</output></label>
+      <label>Shadow quality <input id="samples" type="range" min="1" max="24" step="1" value="8"><output id="samples_v">8</output></label>
+    </fieldset>
+    <details><summary>Rotation centers (rarely needed)</summary>
+      <div class="row">
+        <label>Hour X <input id="hour_px" type="number" min="0" max="245" step="0.1" value="121.5"></label>
+        <label>Hour Y <input id="hour_py" type="number" min="0" max="810" step="0.1" value="687"></label>
+        <label>Minute X <input id="minute_px" type="number" min="0" max="156" step="0.1" value="77.5"></label>
+        <label>Minute Y <input id="minute_py" type="number" min="0" max="1014" step="0.1" value="935.5"></label>
+      </div>
+    </details>
+    <p id="status"></p>
+  </div>
+</div>
+<script>
+const img = document.getElementById('clock');
+const status = document.getElementById('status');
+const fields = ['hours','minutes','dial','light_x','light_y','light_h','light_size','hour_h','minute_h','hand_darkness','spec','hour_spec','minute_spec','shiny','samples'];
+const patterns = ['background_dither','clock_dither','hands_dither','shadows_dither'];
+const DEFAULT_PIVOTS = { hour_px: '121.5', hour_py: '687', minute_px: '77.5', minute_py: '935.5' };
+let size = '600x600', zoom = 'z100', timer = null, refreshing = false, queued = false, animate = false, minutes = 9, hours = 10;
+
+function fmt(id, v) {
+  const decimals = (id === 'shiny' || id === 'samples' || id === 'hours' || id === 'minutes') ? 0 : 2;
+  document.getElementById(id + '_v').textContent = (+v).toFixed(decimals).padStart(id === 'minutes' ? 2 : 0, '0');
+}
+function read(id) { return document.getElementById(id).value; }
+function compareTime() {
+  const raw = read('compare_time').trim();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(raw);
+  if (!m) return null;
+  const hh = +m[1], mm = +m[2];
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+}
+function query() {
+  const [w, h] = size.split('x');
+  const p = new URLSearchParams({
+    w, h,
+    time: String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0'),
+    dial: read('dial'), light_x: read('light_x'), light_y: read('light_y'),
+    light_h: read('light_h'), light_size: read('light_size'),
+    hour_h: read('hour_h'), minute_h: read('minute_h'),
+    hand_darkness: read('hand_darkness'),
+    spec: read('spec'), hour_spec: read('hour_spec'), minute_spec: read('minute_spec'),
+    shiny: read('shiny'), samples: read('samples'),
+    mode: read('mode'),
+    composition: read('composition'),
+    diagnostics: '1',
+  });
+  const ct = compareTime();
+  if (ct) p.set('compare_time', ct);
+  for (const id of patterns) p.set(id, read(id));
+  // Send rotation centers only when edited, so future core corrections can
+  // never be masked again by stale page defaults.
+  for (const id of ['hour_px','hour_py','minute_px','minute_py']) {
+    if (read(id) !== DEFAULT_PIVOTS[id]) p.set(id, read(id));
+  }
+  return p.toString();
+}
+function applyZoom() {
+  const [w] = size.split('x').map(Number);
+  document.querySelectorAll('[data-zoom]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.zoom === zoom)));
+  img.classList.toggle('fit', zoom === 'fit');
+  img.classList.toggle('pixels', zoom !== 'fit');
+  img.style.width = zoom === 'fit' ? '' : (zoom === 'z200' ? (w * 2) + 'px' : w + 'px');
+}
+function syncPatternState() {
+  // Patterns shape the E-ink dots views; the smooth photo is unpatterned,
+  // and the full-scene reference draws every dot the same way for its own
+  // output. Values are kept so returning restores them.
+  const gray = read('mode') === 'gray';
+  const refAllBlue = read('composition') === 'reference';
+  const off = gray || refAllBlue;
+  for (const id of [...patterns, 'set_all']) document.getElementById(id).disabled = off;
+  document.getElementById('apply_all').disabled = off;
+  document.getElementById('dots_box').hidden = gray;
+  document.getElementById('reference_note').hidden = !refAllBlue;
+}
+function setMetric(id, text) { document.getElementById(id).textContent = text; }
+function showMetrics(headers) {
+  const num = (name) => {
+    const v = headers.get(name);
+    if (v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const count = (name, el) => {
+    const n = num(name);
+    setMetric(el, n === null ? 'unavailable' : String(Math.round(n)));
+  };
+  const fixed = (name, el, decimals) => {
+    const n = num(name);
+    setMetric(el, n === null ? 'unavailable' : n.toFixed(decimals));
+  };
+  count('X-Clock-Changed-Total', 'm_changed');
+  count('X-Clock-Changed-Outside', 'm_outside');
+  count('X-Clock-Disocclusion-Mismatches', 'm_disocc');
+  fixed('X-Clock-Tone-MAE', 'm_tonemae', 2);
+  fixed('X-Clock-Tone-Bias', 'm_tonebias', 2);
+  fixed('X-Clock-Boundary-MAE', 'm_boundary', 1);
+  const t = headers.get('X-Clock-Compare-Time');
+  setMetric('m_time', t ? t : 'unavailable');
+  const r = headers.get('X-Clock-Base-Reused');
+  setMetric('m_reused', r === 'true' ? 'yes' : r === 'false' ? 'no' : 'unavailable');
+}
+async function refresh() {
+  // Serialized and coalesced: one render in flight at most; a request that
+  // arrives mid-render runs once right after instead of piling up.
+  if (refreshing) { queued = true; return; }
+  refreshing = true;
+  const started = performance.now();
+  try {
+    const res = await fetch('/render?' + query());
+    if (!res.ok) { status.textContent = 'Could not render: ' + await res.text(); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const ms = res.headers.get('X-Render-Ms') || (performance.now() - started).toFixed(0);
+    showMetrics(res.headers);
+    img.onload = () => URL.revokeObjectURL(url);
+    img.src = url;
+    status.textContent = 'Picture took ' + ms + ' ms on this computer.';
+  } catch (e) {
+    status.textContent = 'Could not render: ' + e;
+  } finally {
+    refreshing = false;
+    if (queued) { queued = false; refresh(); }
+  }
+}
+function schedule() { clearTimeout(timer); timer = setTimeout(refresh, 120); }
+function setTime(h, m) {
+  hours = ((h % 24) + 24) % 24;
+  minutes = ((m % 60) + 60) % 60;
+  document.getElementById('hours').value = hours;
+  document.getElementById('minutes').value = minutes;
+  fmt('hours', hours); fmt('minutes', minutes);
+}
+function stepMinute(delta) {
+  pauseMotion();
+  let total = hours * 60 + minutes + delta;
+  total = ((total % 1440) + 1440) % 1440;
+  setTime(Math.floor(total / 60), total % 60);
+  saveState(); schedule();
+}
+function pauseMotion() {
+  animate = false;
+  document.getElementById('animate').textContent = 'Play motion';
+}
+function setControl(id, v) {
+  const el = document.getElementById(id);
+  el.value = v;
+  if (document.getElementById(id + '_v')) fmt(id, v);
+}
+const STATE_KEY = 'clockPreviewState';
+function saveState() {
+  try {
+    const s = { hours, minutes, size, zoom, animate, compare_time: read('compare_time') };
+    for (const id of [...fields, ...patterns, 'mode', 'composition', 'set_all', 'hour_px', 'hour_py', 'minute_px', 'minute_py']) s[id] = read(id);
+    sessionStorage.setItem(STATE_KEY, JSON.stringify(s));
+  } catch (e) {}
+}
+function loadState() {
+  let s = null;
+  try { s = JSON.parse(sessionStorage.getItem(STATE_KEY) || 'null'); } catch (e) { s = null; }
+  if (!s || typeof s !== 'object') return;
+  try {
+    if (s.size) size = s.size;
+    if (s.zoom) zoom = s.zoom;
+    for (const id of [...fields, ...patterns, 'mode', 'composition', 'set_all', 'hour_px', 'hour_py', 'minute_px', 'minute_py', 'compare_time']) {
+      if (s[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = s[id];
+    }
+    // Stored states from before the darkness control lack the field;
+    // the Hands default (0.85) above already stands in that case.
+    if (s.hand_darkness === undefined) setControl('hand_darkness', '0.85');
+    hours = +read('hours'); minutes = +read('minutes');
+    for (const id of fields) if (document.getElementById(id + '_v')) fmt(id, read(id));
+    animate = !!s.animate;
+    document.getElementById('animate').textContent = animate ? 'Pause motion' : 'Play motion';
+  } catch (e) {}
+}
+const PRESETS = {
+  default: { h: 10, m: 9, ref: '10:08', light_x: '0.45', light_y: '-0.35', light_h: '1.2', light_size: '0.12', hour_h: '0.06', minute_h: '0.12', spec: '1', hour_spec: '1', minute_spec: '1', shiny: '24', samples: '8', dial: '0.96' },
+  faint: { h: 10, m: 9, ref: '10:08', light_x: '0.45', light_y: '-0.35', light_h: '3', light_size: '0.5', hour_h: '0.06', minute_h: '0.12', spec: '0.2', hour_spec: '0.2', minute_spec: '0.2', shiny: '24', samples: '8', dial: '0.96' },
+  overlap: { h: 12, m: 0, ref: '11:59', light_x: '0.45', light_y: '-0.35', light_h: '1.2', light_size: '0.12', hour_h: '0.06', minute_h: '0.12', spec: '1', hour_spec: '1', minute_spec: '1', shiny: '24', samples: '8', dial: '0.96' },
+  ticks: { h: 10, m: 9, ref: '10:08', light_x: '-1.5', light_y: '1.2', light_h: '0.8', light_size: '0.12', hour_h: '0.06', minute_h: '0.12', spec: '1', hour_spec: '1', minute_spec: '1', shiny: '24', samples: '8', dial: '0.96' },
+  uncover: { h: 10, m: 10, ref: '10:09', light_x: '0.45', light_y: '-0.35', light_h: '1.2', light_size: '0.12', hour_h: '0.06', minute_h: '0.12', spec: '1', hour_spec: '1', minute_spec: '1', shiny: '24', samples: '8', dial: '0.96' },
+};
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  pauseMotion();
+  setTime(p.h, p.m);
+  document.getElementById('compare_time').value = p.ref;
+  for (const id of ['dial','light_x','light_y','light_h','light_size','hour_h','minute_h','spec','hour_spec','minute_spec','shiny','samples']) setControl(id, p[id]);
+  saveState(); schedule();
+}
+fields.forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    if (id === 'hours') hours = +el.value;
+    if (id === 'minutes') minutes = +el.value;
+    fmt(id, el.value); saveState(); schedule();
+  });
+  fmt(id, el.value);
+});
+['mode', 'composition', ...patterns].forEach(id => document.getElementById(id).addEventListener('change', () => { syncPatternState(); saveState(); schedule(); }));
+['hour_px','hour_py','minute_px','minute_py'].forEach(id => document.getElementById(id).addEventListener('change', () => { saveState(); schedule(); }));
+document.getElementById('compare_time').addEventListener('change', () => {
+  const ct = compareTime();
+  if (!ct) status.textContent = 'Reference time needs hours 0-23 and minutes 00-59.';
+  saveState(); schedule();
+});
+document.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { size = b.dataset.size; applyZoom(); saveState(); schedule(); }));
+document.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => { zoom = b.dataset.zoom; applyZoom(); saveState(); }));
+document.getElementById('apply_all').addEventListener('click', () => {
+  const v = read('set_all');
+  for (const id of patterns) document.getElementById(id).value = v;
+  saveState(); schedule();
+});
+document.getElementById('use_current_ref').addEventListener('click', () => {
+  document.getElementById('compare_time').value = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+  saveState(); schedule();
+});
+document.getElementById('step_back').addEventListener('click', () => stepMinute(-1));
+document.getElementById('step_fwd').addEventListener('click', () => stepMinute(1));
+document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+document.getElementById('animate').addEventListener('click', (e) => {
+  animate = !animate;
+  e.target.textContent = animate ? 'Pause motion' : 'Play motion';
+  saveState();
+});
+setInterval(() => {
+  if (!animate) return;
+  let total = (hours * 60 + minutes + 1) % 1440;
+  setTime(Math.floor(total / 60), total % 60);
+  saveState(); refresh();
+}, 1000);
+loadState();
+applyZoom();
+syncPatternState();
+refresh();
+</script>
+</body>
+</html>

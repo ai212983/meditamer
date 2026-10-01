@@ -1,0 +1,14 @@
+[package]
+name = "net_status_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["asset-upload-http"]
+asset-upload-http = []
+telemetry-defmt = []
+
+[dependencies]
+# ADR-0015: this harness shadows the observability recorders, which publish the
+# radio's observable service state into the arbiter.
+arbitration = { path = "../../../platform/connectivity/arbitration" }

@@ -1,0 +1,13 @@
+[package]
+name = "cpu-load"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+[features]
+esp32 = ["dep:esp-hal", "esp-hal/esp32", "dep:xtensa-lx", "dep:rtos-trace"]
+
+[dependencies]
+xtensa-lx = { version = "0.13.0", optional = true }
+esp-hal = { version = "=1.2.0", features = ["unstable"], optional = true }
+rtos-trace = { version = "0.2.0", optional = true }

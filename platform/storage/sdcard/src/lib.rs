@@ -1,0 +1,53 @@
+#![no_std]
+
+// The reusable SD package is deliberately UART-neutral. The owning firmware
+// reports correlated SD results; package-local prose must not bypass its UART0
+// reservation from the SD task/core.
+extern crate self as esp_println;
+
+#[macro_export]
+macro_rules! println {
+    ($($argument:tt)*) => {{
+        let _ = ::core::format_args!($($argument)*);
+    }};
+}
+
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod fat;
+#[cfg(target_os = "none")]
+pub mod power;
+#[cfg(target_os = "none")]
+pub mod probe;
+#[cfg(all(not(target_os = "none"), feature = "host-tests"))]
+#[path = "probe_host.rs"]
+pub mod probe;
+#[cfg(target_os = "none")]
+pub mod runtime;
+#[cfg(any(target_os = "none", all(test, feature = "host-tests")))]
+#[path = "probe/wait_policy.rs"]
+mod wait_policy;
+
+#[cfg(target_os = "none")]
+pub use power::{power_off, power_on_for_io, SD_POWER_SETTLE_MS};
+
+pub const SD_PATH_MAX: usize = 64;
+pub const SD_WRITE_MAX: usize = 192;
+
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod command_parser;
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod request;
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod upload;
+
+#[cfg(all(test, not(target_os = "none")))]
+#[path = "probe/crc.rs"]
+mod read_crc_tests;
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod service;
+#[cfg(all(test, feature = "host-tests", not(target_os = "none")))]
+mod service_tests;
+#[cfg(target_os = "none")]
+mod spi_transport;
+#[cfg(any(target_os = "none", feature = "host-tests"))]
+pub mod transport;

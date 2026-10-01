@@ -1,0 +1,43 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "observation-upload"
+  version: "1.0.0"
+do:
+  - run_probe:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - enable_sd_logging:
+            call: "enable_sd_logging"
+        - start_upload:
+            call: "start_upload"
+        - await_upload_begin:
+            call: "await_upload_begin"
+        - await_upload_body:
+            call: "await_upload_body"
+        - request_environment:
+            call: "request_environment"
+        - request_battery:
+            call: "request_battery"
+        - finish_upload:
+            call: "finish_upload"
+        - verify_upload_identity:
+            call: "verify_upload_identity"
+        - verify_readback:
+            call: "verify_readback"
+        - check_health:
+            call: "check_health"
+        - mark_passed:
+            set:
+              passed: true
+      catch:
+        as: "probe_error"
+  - cleanup:
+      try:
+        - cleanup:
+            call: "cleanup"
+        - check_health:
+            call: "check_health"
+      catch:
+        as: "cleanup_error"

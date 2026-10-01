@@ -1,0 +1,24 @@
+[package]
+name = "analog_clock_preview"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Host preview for the shared analog-clock CPU renderer
+# (`platform/ui/visuals/analog-clock`). Outside the root workspace like
+# every other host-only tool under tools/ (see tools/README.md and the
+# root manifest's exclude list): it owns PNG decoding, buffers, CLI, and
+# the localhost preview server, while all lighting lives in the shared
+# core so the browser never re-implements it.
+
+[[bin]]
+name = "analog_clock_preview"
+path = "src/main.rs"
+
+[dependencies]
+analog-clock = { path = "../../platform/ui/visuals/analog-clock" }
+clock-assets = { path = "../../platform/ui/visuals/clock-assets" }
+raster = { path = "../../platform/ui/visuals/raster", features = ["dither"] }
+# PNG decode/encode only. Kept minimal on purpose: no GUI stack, and the
+# HTTP server below is std-only, so this stays a small host binary.
+image = { version = "0.25.9", default-features = false, features = ["png"] }

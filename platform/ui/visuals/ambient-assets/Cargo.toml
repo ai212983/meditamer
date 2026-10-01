@@ -1,0 +1,15 @@
+[package]
+name = "ambient-assets"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Runtime sky/sun pack for Ambient Home: header + borrowed 1-bit planes
+# over the clipped dithered artwork. no_std, no allocation, no large
+# statics; the caller owns every byte. The device composes the static
+# sky, the faint trajectory, and the clipped sun sprite at runtime;
+# nothing here is pre-rendered for a time position.
+
+[lib]
+name = "ambient_assets"

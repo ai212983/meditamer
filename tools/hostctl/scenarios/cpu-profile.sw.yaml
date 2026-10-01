@@ -1,0 +1,67 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "cpu-profile"
+  version: "1.0.0"
+do:
+  - experiment:
+      try:
+        - attach:
+            call: "verify_attach"
+        - reset_scheduling_window:
+            call: "reset_scheduling_metrics"
+        - begin_normal:
+            call: "begin_phase"
+            with:
+              name: "normal"
+              paused: false
+        - normal_0:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - finish_normal:
+            call: "finish_phase"
+        - begin_paused:
+            call: "begin_phase"
+            with:
+              name: "paused"
+              paused: true
+        - paused_0:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - paused_1:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - paused_2:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - paused_3:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - finish_paused:
+            call: "finish_phase"
+        - begin_restored:
+            call: "begin_phase"
+            with:
+              name: "restored"
+              paused: false
+        - restored_0:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - finish_restored:
+            call: "finish_phase"
+      catch:
+        as: "experiment_error"
+  - restore:
+      try:
+        - resume_display:
+            call: "restore"
+      catch:
+        as: "restore_error"
+  - finish:
+      call: "finish"

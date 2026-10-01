@@ -1,0 +1,32 @@
+[package]
+name = "buzzer_preview"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Host WAV previewer for the shared buzzer sequencer. Outside the root workspace like
+# every other host-only tool under tools/ (see tools/README.md and the root
+# manifest's exclude list): it links the shared sequencer and the nominal
+# timing model, never firmware targets.
+#
+# The preview renders nominal square-wave timing only: note/rest boundaries,
+# the power-on default-code blip over the startup interval, and instant
+# power-off stops. Transducer resonance, enclosure filtering, and ring-down
+# are unmeasured on this board and rendered as silence-preserving timing
+# (labelled provisional in the output); the preview assists iteration, and
+# device recordings decide sound selection.
+
+[[bin]]
+name = "buzzer_preview"
+path = "src/main.rs"
+
+[[bin]]
+name = "rtttl_catalogue"
+path = "src/bin/rtttl_catalogue.rs"
+
+[lib]
+name = "buzzer_preview"
+path = "src/lib.rs"
+
+[dependencies]
+buzzer = { path = "../../platform/audio/buzzer" }

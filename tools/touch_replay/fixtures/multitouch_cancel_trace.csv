@@ -1,0 +1,6 @@
+touch_trace,ms,count,x0,y0,x1,y1,raw0,raw1,raw2,raw3,raw4,raw5,raw6,raw7
+touch_trace,0,1,120,120,0,0,0,0,0,0,0,0,0,0
+touch_trace,35,1,120,120,0,0,0,0,0,0,0,0,0,0
+touch_trace,60,2,121,121,220,220,0,0,0,0,0,0,0,0
+touch_trace,100,0,0,0,0,0,0,0,0,0,0,0,0,0
+touch_trace,160,0,0,0,0,0,0,0,0,0,0,0,0,0

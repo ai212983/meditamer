@@ -1,0 +1,166 @@
+//! Workflow task-graph execution.
+//!
+//! One submodule per task family: [`call`], [`repeat`], [`result`], and
+//! [`retry`] with its [`retry_support`] policy helpers, over the shared task
+//! indexing and value plumbing in [`support`].
+
+use crate::scenarios::conditions::eval_condition;
+use crate::scenarios::engine::call::execute_call_task;
+use crate::scenarios::engine::repeat::execute_repeatable_do_task;
+use crate::scenarios::engine::retry::execute_try_task;
+use crate::scenarios::engine::support::index_tasks;
+use crate::scenarios::engine::support::resolve_runtime_value;
+use crate::scenarios::engine::support::set_context_path;
+use crate::scenarios::engine::support::should_run;
+use crate::scenarios::engine::support::task_type_name;
+use crate::scenarios::engine::support::TaskIndex;
+use crate::scenarios::WorkflowRuntime;
+use anyhow::anyhow;
+use anyhow::Result;
+use serde_json::Value;
+use serverless_workflow_core::models::map::Map as WorkflowMap;
+use serverless_workflow_core::models::task::DoTaskDefinition;
+use serverless_workflow_core::models::task::SetTaskDefinition;
+use serverless_workflow_core::models::task::SwitchTaskDefinition;
+use serverless_workflow_core::models::task::TaskDefinition;
+
+pub(crate) mod call;
+pub(crate) mod repeat;
+pub(crate) mod result;
+pub(crate) mod retry;
+pub(crate) mod retry_support;
+pub(crate) mod support;
+
+const WORKFLOW_END_TRANSITION: &str = "__end__";
+
+pub(crate) fn execute_task_map<R: WorkflowRuntime>(
+    tasks: &WorkflowMap<String, TaskDefinition>,
+    runtime: &mut R,
+    context: &mut Value,
+) -> Result<()> {
+    let TaskIndex {
+        tasks_by_name,
+        ordered_names,
+        position,
+    } = index_tasks(tasks)?;
+
+    if ordered_names.is_empty() {
+        return Ok(());
+    }
+
+    let mut current = ordered_names[0].clone();
+    let mut guard = 0usize;
+    loop {
+        guard += 1;
+        if guard > 4096 {
+            return Err(anyhow!("workflow exceeded maximum transition depth"));
+        }
+
+        let task = tasks_by_name
+            .get(&current)
+            .ok_or_else(|| anyhow!("missing task definition for '{current}'"))?;
+
+        let next = match task {
+            TaskDefinition::Call(def) => execute_call_task(def, runtime, context)?,
+            TaskDefinition::Do(def) => execute_do_task(def, runtime, context)?,
+            TaskDefinition::Set(def) => execute_set_task(def, context)?,
+            TaskDefinition::Switch(def) => execute_switch_task(def, context)?,
+            TaskDefinition::Try(def) => execute_try_task(def, runtime, context)?,
+            other => {
+                return Err(anyhow!(
+                    "task '{current}' uses unsupported task type '{}'",
+                    task_type_name(other)
+                ))
+            }
+        };
+
+        if let Some(next_name) = next {
+            if next_name == WORKFLOW_END_TRANSITION {
+                return Ok(());
+            }
+            if tasks_by_name.contains_key(&next_name) {
+                current = next_name;
+                continue;
+            }
+            return Err(anyhow!(
+                "task '{current}' transitions to unknown task '{next_name}'"
+            ));
+        }
+
+        let index = *position
+            .get(&current)
+            .ok_or_else(|| anyhow!("missing task index for '{current}'"))?;
+        if index + 1 >= ordered_names.len() {
+            return Ok(());
+        }
+        current = ordered_names[index + 1].clone();
+    }
+}
+
+fn execute_do_task<R: WorkflowRuntime>(
+    task: &DoTaskDefinition,
+    runtime: &mut R,
+    context: &mut Value,
+) -> Result<Option<String>> {
+    if !should_run(&task.common, context)? {
+        return Ok(task.common.then.clone());
+    }
+    if execute_repeatable_do_task(task, runtime, context)? {
+        return Ok(task.common.then.clone());
+    }
+    execute_task_map(&task.do_, runtime, context)?;
+    Ok(task.common.then.clone())
+}
+
+fn execute_set_task(task: &SetTaskDefinition, context: &mut Value) -> Result<Option<String>> {
+    if !should_run(&task.common, context)? {
+        return Ok(task.common.then.clone());
+    }
+
+    for (key, value) in &task.set {
+        set_context_path(context, key, resolve_runtime_value(value, context)?)?;
+    }
+
+    Ok(task.common.then.clone())
+}
+
+fn execute_switch_task(task: &SwitchTaskDefinition, context: &Value) -> Result<Option<String>> {
+    if !should_run(&task.common, context)? {
+        return Ok(task.common.then.clone());
+    }
+
+    let mut default_then: Option<String> = None;
+    for entry in &task.switch.entries {
+        let Some((name, case)) = entry.iter().next() else {
+            continue;
+        };
+        if name == "default" {
+            if default_then.is_some() {
+                return Err(anyhow!("workflow switch defines multiple default cases"));
+            }
+            default_then = Some(
+                case.then
+                    .clone()
+                    .ok_or_else(|| anyhow!("workflow switch default case requires then"))?,
+            );
+            continue;
+        }
+        let matches = match &case.when {
+            Some(condition) => eval_condition(condition, context)?,
+            None => true,
+        };
+        if matches {
+            return Ok(Some(case.then.clone().ok_or_else(|| {
+                anyhow!("workflow switch case '{name}' requires then")
+            })?));
+        }
+    }
+
+    if let Some(next) = default_then {
+        return Ok(Some(next));
+    }
+
+    Err(anyhow!(
+        "workflow switch had no matching case and no explicit default transition"
+    ))
+}

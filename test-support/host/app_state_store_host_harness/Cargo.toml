@@ -1,0 +1,13 @@
+[package]
+name = "app_state_store_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+asset-upload-http = []
+
+[dependencies]
+heapless = "0.9.3"
+# ADR-0015: the shell is a real crate now; this harness used to reach into
+# `src/firmware/ui/shell/**` with `#[path]`.
+shell = { path = "../../../platform/ui/shell" }

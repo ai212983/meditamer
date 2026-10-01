@@ -1,0 +1,56 @@
+[package]
+name = "netstack"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Shared network runtime, configuration, and telemetry (product/target axis
+# completion plan, Phase 4; see docs/archive/refactors/product-target-axis-phase-4-shared-runtime-completed-2026-09-07.md).
+#
+# The sole owner of network operational truth: Wi-Fi driver/scan/connect/
+# retry/recovery, Embassy networking, the restartable network-owner epoch
+# machine, credential/policy configuration and its persistence protocol, and
+# network telemetry (link, IPv4, listener, admission, pipeline counters).
+# Meditamer and Medinote both consume it through the `host`/`config` ports
+# rather than keeping product copies.
+#
+# No chip feature of its own, following `platform/diagnostics/console`'s existing
+# feature-unification pattern (ADR-0015): `esp-hal`, `esp-radio`, and
+# `esp-rtos` are declared without a chip selection, and the final target
+# (`targets/meditamer-inkplate` selects `esp32`, `targets/medinote-waveshare`
+# selects `esp32s3`) unifies the choice across the dependency graph. The
+# `[target.*.dependencies]` tables below provide the matching
+# `esp-wifi-sys-esp32`/`esp-wifi-sys-esp32s3` alias the lifecycle start/stop
+# boundary needs per chip.
+[lib]
+
+[features]
+default = []
+# Forwarded from the product's own `telemetry-defmt`, same as `console`.
+telemetry-defmt = ["dep:defmt", "console/telemetry-defmt"]
+# Forwarded from the product's own `ble-foundation`: pulls in the exclusive
+# radio-handoff request/ack API (`platform/connectivity/arbitration` is always a
+# dependency; only these two extra symbols are gated).
+ble-foundation = ["esp-radio/ble", "esp-radio/coex"]
+
+[dependencies]
+critical-section = "1.2.0"
+esp-hal = { version = "=1.2.0", features = ["unstable"] }
+esp-radio-rtos-driver = "=0.4.2"
+defmt = { version = "1.1.1", optional = true }
+embassy-time = "0.5.1"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1.2"
+embassy-net = { version = "=0.9.1", features = ["dhcpv4", "medium-ethernet", "tcp"] }
+esp-radio = { version = "=1.0.0-beta.1", default-features = false, features = ["wifi", "log-04", "unstable"] }
+static_cell = "2.1.1"
+heapless = "0.9.3"
+arbitration = { path = "../arbitration" }
+console = { path = "../../diagnostics/console" }
+runtime = { path = "../../diagnostics/runtime" }
+
+[target.xtensa-esp32-none-elf.dependencies]
+esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.3.0", default-features = false }
+
+[target.xtensa-esp32s3-none-elf.dependencies]
+esp-wifi-sys = { package = "esp-wifi-sys-esp32s3", version = "0.3.0", default-features = false }

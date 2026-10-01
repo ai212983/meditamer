@@ -1,0 +1,1749 @@
+#![cfg_attr(docsrs, procmacros::doc_replace(
+    "dma_channel" => {
+        cfg(spi_master_dma_engine = "SPI_DMA") => "DMA_SPI2",
+        cfg(spi_master_dma_engine = "AHB_GDMA") => "DMA_CH0",
+        cfg(spi_master_dma_engine = "AXI_GDMA") => "DMA_AXI_CH0",
+    }
+))]
+//! # Direct Memory Access (DMA)
+//!
+//! ## Overview
+//!
+//! The DMA driver provides an interface to efficiently transfer data between
+//! different memory regions and peripherals within the ESP microcontroller
+//! without involving the CPU. The DMA controller is responsible for managing
+//! these data transfers.
+//!
+//! Notice, that this module is a common version of the DMA driver, `ESP32` and
+//! `ESP32-S2` are using older `PDMA` controller, whenever other chips are using
+//! newer `GDMA` controller.
+//!
+//! ## Examples
+//!
+//! ### Initialize and utilize DMA controller in `SPI`
+//!
+//! ```rust, no_run
+//! # {before_snippet}
+//! # use esp_hal::dma_buffers;
+//! # use esp_hal::spi::{master::{Config, Spi}, Mode};
+//! let sclk = peripherals.GPIO0;
+//! let miso = peripherals.GPIO2;
+//! let mosi = peripherals.GPIO4;
+//! let cs = peripherals.GPIO5;
+//!
+//! let mut spi = Spi::new(
+//!     peripherals.SPI2,
+//!     Config::default()
+//!         .with_frequency(Rate::from_khz(100))
+//!         .with_mode(Mode::_0),
+//! )?
+//! .with_sck(sclk)
+//! .with_mosi(mosi)
+//! .with_miso(miso)
+//! .with_cs(cs)
+//! .with_dma(peripherals.__dma_channel__);
+//! # {after_snippet}
+//! ```
+//!
+//! ⚠️ Note: Descriptors should be sized as `(max_transfer_size + CHUNK_SIZE - 1) / CHUNK_SIZE`.
+//! I.e., to transfer buffers of size `1..=CHUNK_SIZE`, you need 1 descriptor.
+//!
+//! ⚠️ Note: For chips that support DMA to/from PSRAM DMA transfers to/from PSRAM
+//! have extra alignment requirements. The address and size of the buffer pointed to by
+//! each descriptor must be a multiple of the cache line (block) size.
+//!
+//! For convenience you can use the [crate::dma_buffers] macro.
+
+use core::{cmp::min, fmt::Debug, marker::PhantomData, sync::atomic::compiler_fence};
+
+use enumset::{EnumSet, EnumSetType};
+
+pub use self::buffers::*;
+#[cfg(dma_supports_mem2mem)]
+pub use self::m2m::*;
+use crate::{
+    Async,
+    Blocking,
+    DriverMode,
+    dma::aligned::DmaAlignedMut,
+    interrupt::InterruptHandler,
+    system::{Cpu, PeripheralGuard},
+};
+
+pub mod aligned;
+mod buffers;
+#[cfg(dma_supports_mem2mem)]
+mod m2m;
+
+mod engine;
+pub use engine::*;
+
+bitfield::bitfield! {
+    /// DMA descriptor flags.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub struct DmaDescriptorFlags(u32);
+
+    u16;
+
+    /// Specifies the size of the buffer that this descriptor points to.
+    pub size, set_size: 11, 0;
+
+    /// Specifies the number of valid bytes in the buffer that this descriptor points to.
+    ///
+    /// This field in a transmit descriptor is written by software and indicates how many bytes can
+    /// be read from the buffer.
+    ///
+    /// This field in a receive descriptor is written by hardware automatically and indicates how
+    /// many valid bytes have been stored into the buffer.
+    pub length, set_length: 23, 12;
+
+    /// For receive descriptors, software needs to clear this bit to 0, and hardware will set it to 1 after receiving
+    /// data containing the EOF flag.
+    /// For transmit descriptors, software needs to set this bit to 1 as needed.
+    /// If software configures this bit to 1 in a descriptor, the DMA will include the EOF flag in the data sent to
+    /// the corresponding peripheral, indicating to the peripheral that this data segment marks the end of one
+    /// transfer phase.
+    pub suc_eof, set_suc_eof: 30;
+
+    /// Specifies who is allowed to access the buffer that this descriptor points to.
+    /// - 0: CPU can access the buffer;
+    /// - 1: The GDMA controller can access the buffer.
+    pub owner, set_owner: 31;
+}
+
+impl Debug for DmaDescriptorFlags {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DmaDescriptorFlags")
+            .field("size", &self.size())
+            .field("length", &self.length())
+            .field("suc_eof", &self.suc_eof())
+            .field("owner", &(if self.owner() { "DMA" } else { "CPU" }))
+            .finish()
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for DmaDescriptorFlags {
+    fn format(&self, fmt: defmt::Formatter<'_>) {
+        defmt::write!(
+            fmt,
+            "DmaDescriptorFlags {{ size: {}, length: {}, suc_eof: {}, owner: {} }}",
+            self.size(),
+            self.length(),
+            self.suc_eof(),
+            if self.owner() { "DMA" } else { "CPU" }
+        );
+    }
+}
+
+/// A DMA transfer descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[cfg_attr(soc_has_axi_gdma, repr(C, align(8)))]
+#[cfg_attr(not(soc_has_axi_gdma), repr(C, align(4)))]
+pub struct DmaDescriptor {
+    /// Descriptor flags.
+    pub flags: DmaDescriptorFlags,
+
+    /// Address of the buffer.
+    pub buffer: *mut u8,
+
+    /// Address of the next descriptor.
+    /// If the current descriptor is the last one, this value is 0.
+    /// This field can only point to internal RAM.
+    pub next: *mut DmaDescriptor,
+}
+
+impl DmaDescriptor {
+    /// An empty DMA descriptor used to initialize the descriptor list.
+    pub const EMPTY: Self = Self {
+        flags: DmaDescriptorFlags(0),
+        buffer: core::ptr::null_mut(),
+        next: core::ptr::null_mut(),
+    };
+
+    /// Resets the descriptor for a new receive transfer.
+    pub fn reset_for_rx(&mut self) {
+        // Give ownership to the DMA
+        self.set_owner(Owner::Dma);
+
+        // Clear this to allow hardware to set it when the peripheral returns an EOF
+        // bit.
+        self.set_suc_eof(false);
+
+        // Clear this to allow hardware to set it when it's
+        // done receiving data for this descriptor.
+        self.set_length(0);
+    }
+
+    /// Resets the descriptor for a new transmit transfer. See
+    /// [DmaDescriptorFlags::suc_eof] for more details on the `set_eof`
+    /// parameter.
+    pub fn reset_for_tx(&mut self, set_eof: bool) {
+        // Give ownership to the DMA
+        self.set_owner(Owner::Dma);
+
+        // The `suc_eof` bit doesn't affect the transfer itself, but signals when the
+        // hardware should trigger an interrupt request.
+        self.set_suc_eof(set_eof);
+    }
+
+    /// Sets the size of the buffer. See [DmaDescriptorFlags::size].
+    pub fn set_size(&mut self, len: usize) {
+        self.flags.set_size(len as u16)
+    }
+
+    /// Sets the length of the descriptor. See [DmaDescriptorFlags::length].
+    pub fn set_length(&mut self, len: usize) {
+        self.flags.set_length(len as u16)
+    }
+
+    /// Returns the size of the buffer. See [DmaDescriptorFlags::size].
+    pub fn size(&self) -> usize {
+        self.flags.size() as usize
+    }
+
+    /// Returns the length of the descriptor. See [DmaDescriptorFlags::length].
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.flags.length() as usize
+    }
+
+    /// Sets the suc_eof bit. See [DmaDescriptorFlags::suc_eof].
+    pub fn set_suc_eof(&mut self, suc_eof: bool) {
+        self.flags.set_suc_eof(suc_eof)
+    }
+
+    /// Sets the owner. See [DmaDescriptorFlags::owner].
+    pub fn set_owner(&mut self, owner: Owner) {
+        let owner = match owner {
+            Owner::Cpu => false,
+            Owner::Dma => true,
+        };
+        self.flags.set_owner(owner)
+    }
+
+    /// Returns the owner. See [DmaDescriptorFlags::owner].
+    pub fn owner(&self) -> Owner {
+        match self.flags.owner() {
+            false => Owner::Cpu,
+            true => Owner::Dma,
+        }
+    }
+}
+
+// The pointers in the descriptor can be Sent.
+// Marking this Send also allows DmaBuffer implementations to automatically be
+// Send (where the compiler sees fit).
+unsafe impl Send for DmaDescriptor {}
+
+/// Kinds of interrupt to listen to.
+#[derive(Debug, EnumSetType)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DmaInterrupt {
+    /// RX is done.
+    RxDone,
+    /// TX is done.
+    TxDone,
+}
+
+/// Types of interrupts emitted by the TX channel.
+#[derive(Debug, EnumSetType)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DmaTxInterrupt {
+    /// Triggered when all data corresponding to a linked list (including
+    /// multiple descriptors) have been sent via transmit channel.
+    TotalEof,
+
+    /// Triggered when an error is detected in a transmit descriptor on transmit
+    /// channel.
+    DescriptorError,
+
+    /// Triggered when EOF in a transmit descriptor is true and data
+    /// corresponding to this descriptor have been sent via transmit
+    /// channel.
+    Eof,
+
+    /// Triggered when all data corresponding to a transmit descriptor have been
+    /// sent via transmit channel.
+    Done,
+}
+
+/// Types of interrupts emitted by the RX channel.
+#[derive(Debug, EnumSetType)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DmaRxInterrupt {
+    /// Triggered when the size of the buffer pointed by receive descriptors
+    /// is smaller than the length of data to be received via receive channel.
+    DescriptorEmpty,
+
+    /// Triggered when an error is detected in a receive descriptor on receive
+    /// channel.
+    DescriptorError,
+
+    /// Triggered when an error is detected in the data segment corresponding to
+    /// a descriptor received via receive channel n.
+    /// This interrupt is used only for UHCI0 peripheral (UART0 or UART1).
+    ErrorEof,
+
+    /// Triggered when the suc_eof bit in a receive descriptor is 1 and the data
+    /// corresponding to this receive descriptor has been received via receive
+    /// channel.
+    SuccessfulEof,
+
+    /// Triggered when all data corresponding to a receive descriptor have been
+    /// received via receive channel.
+    Done,
+}
+
+/// The default chunk size used for DMA transfers.
+pub const CHUNK_SIZE: usize = 4092;
+
+#[procmacros::doc_replace]
+/// Convenience macro to create DMA buffers and descriptors.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_buffers;
+///
+/// // RX and TX buffers are 32000 bytes - passing only one parameter makes RX
+/// // and TX the same size.
+/// let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000, 32000);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_buffers {
+    ($rx_size:expr, $tx_size:expr) => {
+        $crate::dma_buffers_chunk_size!($rx_size, $tx_size, $crate::dma::CHUNK_SIZE)
+    };
+    ($size:expr) => {
+        $crate::dma_buffers!($size, $size)
+    };
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create DMA descriptors.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_descriptors;
+///
+/// // Create RX and TX descriptors for transactions up to 32000 bytes - passing
+/// // only one parameter assumes RX and TX are the same size.
+/// let (rx_descriptors, tx_descriptors) = dma_descriptors!(32000, 32000);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_descriptors {
+    ($rx_size:expr, $tx_size:expr) => {
+        $crate::dma_descriptors_chunk_size!($rx_size, $tx_size, $crate::dma::CHUNK_SIZE)
+    };
+
+    ($size:expr) => {
+        $crate::dma_descriptors!($size, $size)
+    };
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create DMA buffers and descriptors with specific chunk
+/// size.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_buffers_chunk_size;
+///
+/// // TX and RX buffers are 32000 bytes - passing only one parameter makes TX
+/// // and RX the same size.
+/// let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) =
+///     dma_buffers_chunk_size!(32000, 32000, 4032);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_buffers_chunk_size {
+    ($rx_size:expr, $tx_size:expr, $chunk_size:expr) => {{
+        let (rx_buf, rx_desc, tx_buf, tx_desc) =
+            $crate::dma_buffers_impl!($rx_size, $tx_size, $chunk_size);
+        (
+            rx_buf.into_inner(),
+            rx_desc.into_inner(),
+            tx_buf.into_inner(),
+            tx_desc.into_inner(),
+        )
+    }};
+
+    ($size:expr, $chunk_size:expr) => {
+        $crate::dma_buffers_chunk_size!($size, $size, $chunk_size)
+    };
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create DMA descriptors with specific chunk size.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_descriptors_chunk_size;
+///
+/// // Create RX and TX descriptors for transactions up to 32000 bytes - passing
+/// // only one parameter assumes RX and TX are the same size.
+/// let (rx_descriptors, tx_descriptors) = dma_descriptors_chunk_size!(32000, 32000, 4032);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_descriptors_chunk_size {
+    ($rx_size:expr, $tx_size:expr, $chunk_size:expr) => {{
+        let (rx, tx) = $crate::dma_descriptors_impl!($rx_size, $tx_size, $chunk_size);
+        (rx.into_inner(), tx.into_inner())
+    }};
+
+    ($size:expr, $chunk_size:expr) => {
+        $crate::dma_descriptors_chunk_size!($size, $size, $chunk_size)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_buffers_impl {
+    ($rx_size:expr, $tx_size:expr, $chunk_size:expr) => {{
+        let rx = $crate::dma_buffers_impl!($rx_size, $chunk_size);
+        let tx = $crate::dma_buffers_impl!($tx_size, $chunk_size);
+        (rx.0, rx.1, tx.0, tx.1)
+    }};
+
+    ($size:expr, $chunk_size:expr) => {{
+        unsafe {
+            (
+                {
+                    #[allow(unused_braces)]
+                    static mut BUFFER: $crate::dma::aligned::InternalMemory<[u8; { $size }]> =
+                        $crate::dma::aligned::InternalMemory::new([0; $size]);
+                    // SAFETY: The ConstStaticCell in the descriptor part ensures there will only
+                    // be a single mutable reference to this buffer.
+                    unsafe { BUFFER.get_mut().unsize() }
+                },
+                $crate::dma_descriptors_impl!($size, $chunk_size),
+            )
+        }
+    }};
+
+    ($size:expr) => {
+        $crate::dma_buffers_impl!(
+            $size,
+            $crate::dma::BurstConfig::DEFAULT.max_compatible_chunk_size()
+        )
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_descriptors_impl {
+    ($rx_size:expr, $tx_size:expr, $chunk_size:expr) => {{
+        let rx = $crate::dma_descriptors_impl!($rx_size, $chunk_size);
+        let tx = $crate::dma_descriptors_impl!($tx_size, $chunk_size);
+        (rx, tx)
+    }};
+
+    ($size:expr, $chunk_size:expr) => {{
+        use $crate::{
+            __macro_implementation::static_cell::ConstStaticCell,
+            dma::{DmaDescriptor, aligned::InternalMemory},
+        };
+
+        const __DMA_DESCRIPTOR_COUNT: usize = $crate::dma_descriptor_count!($size, $chunk_size);
+        static DESCRIPTORS: ConstStaticCell<
+            InternalMemory<[DmaDescriptor; __DMA_DESCRIPTOR_COUNT]>,
+        > = ConstStaticCell::new(InternalMemory::new(
+            [DmaDescriptor::EMPTY; __DMA_DESCRIPTOR_COUNT],
+        ));
+
+        DESCRIPTORS.take().get_mut().unsize()
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_descriptor_count {
+    ($size:expr, $chunk_size:expr) => {{
+        const {
+            ::core::assert!($chunk_size <= 4095, "chunk size must be <= 4095");
+            ::core::assert!($chunk_size > 0, "chunk size must be > 0");
+        }
+
+        // We allow 0 in the macros as a "not needed" case.
+        if $size == 0 {
+            0
+        } else {
+            $crate::dma::descriptor_count($size, $chunk_size)
+        }
+    }};
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create a DmaRxBuf from buffer size. The buffer and
+/// descriptors are statically allocated and used to create the `DmaRxBuf`.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_rx_buffer;
+///
+/// let rx_buf = dma_rx_buffer!(32000)?;
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_rx_buffer {
+    ($rx_size:expr) => {{
+        let (rx_buffer, rx_descriptors) = $crate::dma_buffers_impl!($rx_size);
+
+        // TODO: this macro should be infallible
+        $crate::dma::DmaRxBuf::new(rx_descriptors, rx_buffer)
+    }};
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create a DmaTxBuf from buffer size. The buffer and
+/// descriptors are statically allocated and used to create the `DmaTxBuf`.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_tx_buffer;
+///
+/// let tx_buf = dma_tx_buffer!(32000)?;
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_tx_buffer {
+    ($tx_size:expr) => {{
+        let (tx_buffer, tx_descriptors) = $crate::dma_buffers_impl!($tx_size);
+
+        // TODO: this macro should be infallible
+        $crate::dma::DmaTxBuf::new(tx_descriptors, tx_buffer)
+    }};
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create a [DmaRxStreamBuf] from buffer size and
+/// optional chunk size (uses max if unspecified).
+/// The buffer and descriptors are statically allocated and
+/// used to create the [DmaRxStreamBuf].
+///
+/// Smaller chunk sizes are recommended for lower latency.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_rx_stream_buffer;
+///
+/// let buf = dma_rx_stream_buffer!(32000);
+/// let buf = dma_rx_stream_buffer!(32000, 1000);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_rx_stream_buffer {
+    ($rx_size:expr) => {
+        $crate::dma_rx_stream_buffer!($rx_size, 4095)
+    };
+    ($rx_size:expr, $chunk_size:expr) => {{
+        let (buffer, descriptors) = $crate::dma_buffers_impl!($rx_size, $chunk_size);
+
+        $crate::dma::DmaRxStreamBuf::new(descriptors, buffer).unwrap()
+    }};
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create a [DmaTxStreamBuf] from buffer size and
+/// optional chunk size (uses max if unspecified).
+/// The buffer and descriptors are statically allocated and
+/// used to create the [DmaTxStreamBuf].
+///
+/// Smaller chunk sizes are recommended for lower latency.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_tx_stream_buffer;
+///
+/// let buf = dma_tx_stream_buffer!(32000);
+/// let buf = dma_tx_stream_buffer!(32000, 1000);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_tx_stream_buffer {
+    ($tx_size:expr) => {
+        $crate::dma_tx_stream_buffer!($tx_size, 4095)
+    };
+    ($tx_size:expr, $chunk_size:expr) => {{
+        let (buffer, descriptors) = $crate::dma_buffers_impl!($tx_size, $chunk_size);
+
+        $crate::dma::DmaTxStreamBuf::new(descriptors, buffer).unwrap()
+    }};
+}
+
+#[procmacros::doc_replace]
+/// Convenience macro to create a [DmaLoopBuf] from a buffer size.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # {before_snippet}
+/// use esp_hal::dma_loop_buffer;
+///
+/// let buf = dma_loop_buffer!(2000);
+/// # {after_snippet}
+/// ```
+#[macro_export]
+#[cfg(feature = "unstable")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+macro_rules! dma_loop_buffer {
+    ($size:expr) => {{
+        const {
+            ::core::assert!($size <= 4095, "size must be <= 4095");
+            ::core::assert!($size > 0, "size must be > 0");
+        }
+
+        let (buffer, descriptors) = $crate::dma_buffers_impl!($size, $size);
+
+        $crate::dma::DmaLoopBuf::new(descriptors, buffer).unwrap()
+    }};
+}
+
+/// DMA Errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DmaError {
+    /// The alignment of data is invalid.
+    InvalidAlignment(DmaAlignmentError),
+    /// More descriptors are needed for the buffer size.
+    OutOfDescriptors,
+    /// DescriptorError the DMA rejected the descriptor configuration. This
+    /// could be because the source address of the data is not in RAM. Ensure
+    /// the source data is in a valid address space.
+    DescriptorError,
+    /// The available free buffer is less than the amount of data to push.
+    Overflow,
+    /// The given buffer is too small.
+    BufferTooSmall,
+    /// Descriptors or buffers are not located in a supported memory region.
+    UnsupportedMemoryRegion,
+    /// Invalid DMA chunk size.
+    InvalidChunkSize,
+}
+
+impl From<DmaBufError> for DmaError {
+    fn from(error: DmaBufError) -> Self {
+        // FIXME: use nested errors
+        match error {
+            DmaBufError::InsufficientDescriptors => DmaError::OutOfDescriptors,
+            DmaBufError::UnsupportedMemoryRegion => DmaError::UnsupportedMemoryRegion,
+            DmaBufError::InvalidAlignment(err) => DmaError::InvalidAlignment(err),
+            DmaBufError::InvalidChunkSize => DmaError::InvalidChunkSize,
+            DmaBufError::BufferTooSmall => DmaError::BufferTooSmall,
+        }
+    }
+}
+
+/// DMA Priorities.
+#[cfg(dma_max_priority_is_set)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum DmaPriority {
+    /// The lowest priority level (Priority 0).
+    Priority0  = 0,
+    /// Priority level 1.
+    Priority1  = 1,
+    /// Priority level 2.
+    Priority2  = 2,
+    /// Priority level 3.
+    Priority3  = 3,
+    /// Priority level 4.
+    Priority4  = 4,
+    /// Priority level 5.
+    Priority5  = 5,
+    /// Priority level 6.
+    #[cfg(any(dma_max_priority = "9", dma_max_priority = "15"))]
+    Priority6  = 6,
+    /// Priority level 7.
+    #[cfg(any(dma_max_priority = "9", dma_max_priority = "15"))]
+    Priority7  = 7,
+    /// Priority level 8.
+    #[cfg(any(dma_max_priority = "9", dma_max_priority = "15"))]
+    Priority8  = 8,
+    /// Priority level 9.
+    #[cfg(any(dma_max_priority = "9", dma_max_priority = "15"))]
+    Priority9  = 9,
+    /// Priority level 10.
+    #[cfg(dma_max_priority = "15")]
+    Priority10 = 10,
+    /// Priority level 11.
+    #[cfg(dma_max_priority = "15")]
+    Priority11 = 11,
+    /// Priority level 12.
+    #[cfg(dma_max_priority = "15")]
+    Priority12 = 12,
+    /// Priority level 13.
+    #[cfg(dma_max_priority = "15")]
+    Priority13 = 13,
+    /// Priority level 14.
+    #[cfg(dma_max_priority = "15")]
+    Priority14 = 14,
+    /// Priority level 15.
+    #[cfg(dma_max_priority = "15")]
+    Priority15 = 15,
+}
+
+/// The owner bit of a DMA descriptor.
+#[derive(PartialEq, PartialOrd)]
+pub enum Owner {
+    /// Owned by CPU.
+    Cpu = 0,
+    /// Owned by DMA.
+    Dma = 1,
+}
+
+impl From<u32> for Owner {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Owner::Cpu,
+            _ => Owner::Dma,
+        }
+    }
+}
+
+/// Computes the number of descriptors required for a given buffer size with
+/// a given chunk size.
+pub const fn descriptor_count(buffer_size: usize, chunk_size: usize) -> usize {
+    if buffer_size < chunk_size {
+        // At least one descriptor is always required.
+        return 1;
+    }
+
+    // TODO: we could round up to cacheline size to reduce memory waste on
+    // soc_internal_memory_cached devices.
+    buffer_size.div_ceil(chunk_size)
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+struct DescriptorSet<'a> {
+    descriptors: DmaAlignedMut<'a, [DmaDescriptor]>,
+}
+
+impl<'a> DescriptorSet<'a> {
+    /// Creates a new `DescriptorSet` from a slice of descriptors and associates
+    /// them with the given buffer.
+    fn new(descriptors: DmaAlignedMut<'a, [DmaDescriptor]>) -> Result<Self, DmaBufError> {
+        #[cfg(not(esp32p4))] // P4 can read descriptors from PSRAM
+        if !crate::soc::is_slice_in_dram(&descriptors) {
+            return Err(DmaBufError::UnsupportedMemoryRegion);
+        }
+
+        Ok(unsafe { Self::new_unchecked(descriptors.into_inner()) })
+    }
+
+    /// Creates a new `DescriptorSet` from a slice of descriptors and associates
+    /// them with the given buffer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the descriptors are located in a supported
+    /// memory region.
+    unsafe fn new_unchecked(descriptors: &'a mut [DmaDescriptor]) -> Self {
+        descriptors.fill(DmaDescriptor::EMPTY);
+        Self {
+            descriptors: unsafe { DmaAlignedMut::new_unchecked(descriptors) },
+        }
+    }
+
+    /// Consumes the `DescriptorSet` and returns the inner slice of descriptors.
+    fn into_inner(self) -> DmaAlignedMut<'a, [DmaDescriptor]> {
+        self.descriptors
+    }
+
+    /// Returns a pointer to the first descriptor in the chain.
+    fn head(&mut self) -> *mut DmaDescriptor {
+        self.descriptors.as_mut_ptr()
+    }
+
+    /// Returns an iterator over the linked descriptors.
+    fn linked_iter(&self) -> impl Iterator<Item = &DmaDescriptor> {
+        let mut was_last = false;
+        self.descriptors.iter().take_while(move |d| {
+            if was_last {
+                false
+            } else {
+                was_last = d.next.is_null();
+                true
+            }
+        })
+    }
+
+    /// Returns an iterator over the linked descriptors.
+    fn linked_iter_mut(&mut self) -> impl Iterator<Item = &mut DmaDescriptor> + use<'_> {
+        let mut was_last = false;
+        self.descriptors.iter_mut().take_while(move |d| {
+            if was_last {
+                false
+            } else {
+                was_last = d.next.is_null();
+                true
+            }
+        })
+    }
+
+    /// Associates each descriptor with a chunk of the buffer.
+    ///
+    /// Checks the alignment and location of the buffer.
+    ///
+    /// See [`Self::set_up_buffer_ptrs`] for more details.
+    fn link_with_buffer(
+        &mut self,
+        buffer: &mut [u8],
+        chunk_size: usize,
+    ) -> Result<(), DmaBufError> {
+        Self::set_up_buffer_ptrs(buffer, &mut self.descriptors, chunk_size)
+    }
+
+    /// Prepares descriptors for transferring `len` bytes of data.
+    ///
+    /// See [`Self::set_up_descriptors`] for more details.
+    fn set_length(
+        &mut self,
+        len: usize,
+        chunk_size: usize,
+        prepare: fn(&mut DmaDescriptor, usize),
+    ) -> Result<(), DmaBufError> {
+        Self::set_up_descriptors(&mut self.descriptors, len, chunk_size, prepare)
+    }
+
+    /// Prepares descriptors for reading `len` bytes of data.
+    ///
+    /// See [`Self::set_up_descriptors`] for more details.
+    fn set_rx_length(&mut self, len: usize, chunk_size: usize) -> Result<(), DmaBufError> {
+        self.set_length(len, chunk_size, |desc, chunk_size| {
+            desc.set_size(chunk_size);
+        })
+    }
+
+    /// Prepares descriptors for writing `len` bytes of data.
+    ///
+    /// See [`Self::set_up_descriptors`] for more details.
+    fn set_tx_length(&mut self, len: usize, chunk_size: usize) -> Result<(), DmaBufError> {
+        self.set_length(len, chunk_size, |desc, chunk_size| {
+            desc.set_length(chunk_size);
+        })
+    }
+
+    /// Returns a slice of descriptors that can cover a buffer of length `len`.
+    fn descriptors_for_buffer_len(
+        descriptors: &mut [DmaDescriptor],
+        len: usize,
+        chunk_size: usize,
+    ) -> Result<&mut [DmaDescriptor], DmaBufError> {
+        // First, pick enough descriptors to cover the buffer.
+        let required_descriptors = descriptor_count(len, chunk_size);
+        if descriptors.len() < required_descriptors {
+            return Err(DmaBufError::InsufficientDescriptors);
+        }
+        Ok(&mut descriptors[..required_descriptors])
+    }
+
+    /// Prepares descriptors for transferring `len` bytes of data.
+    ///
+    /// `Prepare` means setting up the descriptor lengths and flags, as well as
+    /// linking the descriptors into a linked list.
+    ///
+    /// The actual descriptor setup is done in a callback, because different
+    /// transfer directions require different descriptor setup.
+    fn set_up_descriptors(
+        descriptors: &mut [DmaDescriptor],
+        len: usize,
+        chunk_size: usize,
+        prepare: impl Fn(&mut DmaDescriptor, usize),
+    ) -> Result<(), DmaBufError> {
+        let descriptors = Self::descriptors_for_buffer_len(descriptors, len, chunk_size)?;
+
+        // Link up the descriptors.
+        let mut next = core::ptr::null_mut();
+        for desc in descriptors.iter_mut().rev() {
+            desc.next = next;
+            next = desc;
+        }
+
+        // Prepare each descriptor.
+        let mut remaining_length = len;
+        for desc in descriptors.iter_mut() {
+            let chunk_size = min(chunk_size, remaining_length);
+            prepare(desc, chunk_size);
+            remaining_length -= chunk_size;
+        }
+        debug_assert_eq!(remaining_length, 0);
+
+        Ok(())
+    }
+
+    /// Associates each descriptor with a chunk of the buffer.
+    ///
+    /// Does not check the alignment and location of the buffer, because some
+    /// callers may not have enough information currently.
+    ///
+    /// Does not set up descriptor lengths or states.
+    ///
+    /// Does not link descriptors into a linked list. This is intentional, because it is done in
+    /// `set_up_descriptors` to support changing length without requiring buffer pointers to be set
+    /// repeatedly.
+    fn set_up_buffer_ptrs(
+        buffer: &mut [u8],
+        descriptors: &mut [DmaDescriptor],
+        chunk_size: usize,
+    ) -> Result<(), DmaBufError> {
+        let descriptors = Self::descriptors_for_buffer_len(descriptors, buffer.len(), chunk_size)?;
+
+        let chunks = buffer.chunks_mut(chunk_size);
+        for (desc, chunk) in descriptors.iter_mut().zip(chunks) {
+            desc.set_size(chunk.len());
+            desc.buffer = chunk.as_mut_ptr();
+        }
+
+        Ok(())
+    }
+}
+
+/// Blocks size for transfers to/from PSRAM.
+#[cfg(dma_ext_mem_configurable_block_size)]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum DmaExtMemBKSize {
+    /// External memory block size of 16 bytes.
+    Size16 = 0,
+    /// External memory block size of 32 bytes.
+    Size32 = 1,
+    /// External memory block size of 64 bytes.
+    Size64 = 2,
+}
+
+#[cfg(dma_ext_mem_configurable_block_size)]
+impl From<ExternalBurstConfig> for DmaExtMemBKSize {
+    fn from(size: ExternalBurstConfig) -> Self {
+        match size {
+            ExternalBurstConfig::Size16 => DmaExtMemBKSize::Size16,
+            ExternalBurstConfig::Size32 => DmaExtMemBKSize::Size32,
+            // TODO: investigate why ext_mem_bk_size = 2 causes corruption on S2
+            #[cfg(not(esp32s2))]
+            ExternalBurstConfig::Size64 => DmaExtMemBKSize::Size64,
+        }
+    }
+}
+
+// DMA receive channel
+#[non_exhaustive]
+#[doc(hidden)]
+pub struct ChannelRx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaRxChannel,
+{
+    pub(crate) rx_impl: CH,
+    pub(crate) _phantom: PhantomData<Dm>,
+    pub(crate) _guard: Option<PeripheralGuard>,
+}
+
+impl<CH> ChannelRx<Blocking, CH>
+where
+    CH: DmaRxChannel,
+{
+    /// Creates a new RX channel half.
+    pub fn new(rx_impl: CH) -> Self {
+        let _guard = rx_impl.enable();
+
+        // clear the mem2mem mode to avoid failed DMA if this
+        // channel was previously used for a mem2mem transfer.
+        #[cfg(dma_supports_mem2mem)]
+        rx_impl.set_mem2mem_mode(false);
+
+        if let Some(interrupt) = rx_impl.peripheral_interrupt() {
+            for cpu in Cpu::all() {
+                crate::interrupt::disable(cpu, interrupt);
+            }
+        }
+        rx_impl.set_async(false);
+
+        Self {
+            rx_impl,
+            _phantom: PhantomData,
+            _guard,
+        }
+    }
+
+    /// Converts a blocking channel to an async channel.
+    pub(crate) fn into_async(mut self) -> ChannelRx<Async, CH> {
+        if let Some(handler) = self.rx_impl.async_handler() {
+            self.set_interrupt_handler(handler);
+        }
+        self.rx_impl.set_async(true);
+        ChannelRx {
+            rx_impl: self.rx_impl,
+            _phantom: PhantomData,
+            _guard: self._guard,
+        }
+    }
+
+    fn set_interrupt_handler(&mut self, handler: InterruptHandler) {
+        self.unlisten_in(EnumSet::all());
+        self.clear_in(EnumSet::all());
+
+        if let Some(interrupt) = self.rx_impl.peripheral_interrupt() {
+            for core in Cpu::other() {
+                crate::interrupt::disable(core, interrupt);
+            }
+            crate::interrupt::bind_handler(interrupt, handler);
+        }
+    }
+}
+
+impl<CH> ChannelRx<Async, CH>
+where
+    CH: DmaRxChannel,
+{
+    /// Converts an async channel into a blocking channel.
+    pub(crate) fn into_blocking(self) -> ChannelRx<Blocking, CH> {
+        if let Some(interrupt) = self.rx_impl.peripheral_interrupt() {
+            crate::interrupt::disable(Cpu::current(), interrupt);
+        }
+        self.rx_impl.set_async(false);
+        ChannelRx {
+            rx_impl: self.rx_impl,
+            _phantom: PhantomData,
+            _guard: self._guard,
+        }
+    }
+}
+
+impl<Dm, CH> ChannelRx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaRxChannel,
+{
+    /// Configures the channel.
+    #[cfg(dma_max_priority_is_set)]
+    pub fn set_priority(&mut self, priority: DmaPriority) {
+        self.rx_impl.set_priority(priority);
+    }
+
+    fn do_prepare(
+        &mut self,
+        preparation: Preparation,
+        peri: DmaPeripheral,
+    ) -> Result<(), DmaError> {
+        debug!("Preparing RX transfer {:?}", preparation);
+        trace!("First descriptor {:?}", unsafe { &*preparation.start });
+
+        #[cfg(dma_can_access_psram)]
+        if preparation.accesses_psram && !self.rx_impl.can_access_psram() {
+            return Err(DmaError::UnsupportedMemoryRegion);
+        }
+
+        #[cfg(dma_ext_mem_configurable_block_size)]
+        self.rx_impl
+            .set_ext_mem_block_size(preparation.burst_transfer.external_memory.into());
+        self.rx_impl.set_burst_mode(preparation.burst_transfer);
+        self.rx_impl.set_descr_burst_mode(true);
+        self.rx_impl.set_check_owner(preparation.check_owner);
+
+        compiler_fence(core::sync::atomic::Ordering::SeqCst);
+
+        self.rx_impl.clear_all();
+        self.rx_impl.reset();
+        self.rx_impl.set_link_addr(preparation.start as u32);
+        self.rx_impl.set_peripheral(peri.0);
+
+        Ok(())
+    }
+}
+
+impl<Dm, CH> crate::private::Sealed for ChannelRx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaRxChannel,
+{
+}
+
+#[allow(unused)]
+impl<Dm, CH> ChannelRx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaRxChannel,
+{
+    /// Asserts that the channel is compatible with the given peripheral.
+    #[allow(dead_code)]
+    pub(crate) fn runtime_ensure_compatible(&self, peripheral: DmaPeripheral) {
+        self.rx_impl.runtime_ensure_compatible(peripheral);
+    }
+
+    pub(crate) unsafe fn prepare_transfer<BUF: DmaRxBuffer>(
+        &mut self,
+        peri: DmaPeripheral,
+        buffer: &mut BUF,
+    ) -> Result<(), DmaError> {
+        let preparation = buffer.prepare();
+        self.do_prepare(preparation, peri)
+    }
+
+    pub(crate) fn start_transfer(&mut self) -> Result<(), DmaError> {
+        self.rx_impl.start();
+
+        if self
+            .pending_in_interrupts()
+            .contains(DmaRxInterrupt::DescriptorError)
+        {
+            Err(DmaError::DescriptorError)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn stop_transfer(&mut self) {
+        self.rx_impl.stop()
+    }
+
+    #[cfg(dma_supports_mem2mem)]
+    pub(crate) fn set_mem2mem_mode(&mut self, value: bool) {
+        self.rx_impl.set_mem2mem_mode(value);
+    }
+
+    pub(crate) fn listen_in(&self, interrupts: impl Into<EnumSet<DmaRxInterrupt>>) {
+        self.rx_impl.listen(interrupts);
+    }
+
+    pub(crate) fn unlisten_in(&self, interrupts: impl Into<EnumSet<DmaRxInterrupt>>) {
+        self.rx_impl.unlisten(interrupts);
+    }
+
+    pub(crate) fn is_listening_in(&self) -> EnumSet<DmaRxInterrupt> {
+        self.rx_impl.is_listening()
+    }
+
+    pub(crate) fn clear_in(&self, interrupts: impl Into<EnumSet<DmaRxInterrupt>>) {
+        self.rx_impl.clear(interrupts);
+    }
+
+    pub(crate) fn pending_in_interrupts(&self) -> EnumSet<DmaRxInterrupt> {
+        self.rx_impl.pending_interrupts()
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
+        self.pending_in_interrupts()
+            .contains(DmaRxInterrupt::SuccessfulEof)
+    }
+
+    pub(crate) fn clear_interrupts(&self) {
+        self.rx_impl.clear_all();
+    }
+
+    pub(crate) fn waker(&self) -> &'static crate::asynch::AtomicWaker {
+        self.rx_impl.waker()
+    }
+
+    pub(crate) fn has_error(&self) -> bool {
+        self.pending_in_interrupts()
+            .contains(DmaRxInterrupt::DescriptorError)
+    }
+
+    pub(crate) fn has_dscr_empty_error(&self) -> bool {
+        self.pending_in_interrupts()
+            .contains(DmaRxInterrupt::DescriptorEmpty)
+    }
+
+    pub(crate) fn has_eof_error(&self) -> bool {
+        self.pending_in_interrupts()
+            .contains(DmaRxInterrupt::ErrorEof)
+    }
+}
+
+/// DMA transmit channel.
+#[doc(hidden)]
+pub struct ChannelTx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaTxChannel,
+{
+    pub(crate) tx_impl: CH,
+    pub(crate) _phantom: PhantomData<Dm>,
+    pub(crate) _guard: Option<PeripheralGuard>,
+}
+
+impl<CH> ChannelTx<Blocking, CH>
+where
+    CH: DmaTxChannel,
+{
+    /// Creates a new TX channel half.
+    pub fn new(tx_impl: CH) -> Self {
+        let _guard = tx_impl.enable();
+
+        if let Some(interrupt) = tx_impl.peripheral_interrupt() {
+            for cpu in Cpu::all() {
+                crate::interrupt::disable(cpu, interrupt);
+            }
+        }
+        tx_impl.set_async(false);
+        Self {
+            tx_impl,
+            _phantom: PhantomData,
+            _guard,
+        }
+    }
+
+    /// Converts a blocking channel to an async channel.
+    pub(crate) fn into_async(mut self) -> ChannelTx<Async, CH> {
+        if let Some(handler) = self.tx_impl.async_handler() {
+            self.set_interrupt_handler(handler);
+        }
+        self.tx_impl.set_async(true);
+        ChannelTx {
+            tx_impl: self.tx_impl,
+            _phantom: PhantomData,
+            _guard: self._guard,
+        }
+    }
+
+    fn set_interrupt_handler(&mut self, handler: InterruptHandler) {
+        self.unlisten_out(EnumSet::all());
+        self.clear_out(EnumSet::all());
+
+        if let Some(interrupt) = self.tx_impl.peripheral_interrupt() {
+            for core in Cpu::other() {
+                crate::interrupt::disable(core, interrupt);
+            }
+            crate::interrupt::bind_handler(interrupt, handler);
+        }
+    }
+}
+
+impl<CH> ChannelTx<Async, CH>
+where
+    CH: DmaTxChannel,
+{
+    /// Converts an async channel into a blocking channel.
+    pub(crate) fn into_blocking(self) -> ChannelTx<Blocking, CH> {
+        if let Some(interrupt) = self.tx_impl.peripheral_interrupt() {
+            crate::interrupt::disable(Cpu::current(), interrupt);
+        }
+        self.tx_impl.set_async(false);
+        ChannelTx {
+            tx_impl: self.tx_impl,
+            _phantom: PhantomData,
+            _guard: self._guard,
+        }
+    }
+}
+
+impl<Dm, CH> ChannelTx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaTxChannel,
+{
+    /// Asserts that the channel is compatible with the given peripheral.
+    #[allow(dead_code)]
+    pub(crate) fn runtime_ensure_compatible(&self, peripheral: DmaPeripheral) {
+        self.tx_impl.runtime_ensure_compatible(peripheral);
+    }
+
+    /// Configures the channel priority.
+    #[cfg(dma_max_priority_is_set)]
+    pub fn set_priority(&mut self, priority: DmaPriority) {
+        self.tx_impl.set_priority(priority);
+    }
+
+    fn do_prepare(
+        &mut self,
+        preparation: Preparation,
+        peri: DmaPeripheral,
+    ) -> Result<(), DmaError> {
+        debug!("Preparing TX transfer {:?}", preparation);
+        trace!("First descriptor {:?}", unsafe { &*preparation.start });
+
+        #[cfg(dma_can_access_psram)]
+        if preparation.accesses_psram && !self.tx_impl.can_access_psram() {
+            return Err(DmaError::UnsupportedMemoryRegion);
+        }
+
+        #[cfg(dma_ext_mem_configurable_block_size)]
+        self.tx_impl
+            .set_ext_mem_block_size(preparation.burst_transfer.external_memory.into());
+        self.tx_impl.set_burst_mode(preparation.burst_transfer);
+        self.tx_impl.set_descr_burst_mode(true);
+        self.tx_impl.set_check_owner(preparation.check_owner);
+        self.tx_impl
+            .set_auto_write_back(preparation.auto_write_back);
+
+        compiler_fence(core::sync::atomic::Ordering::SeqCst);
+
+        self.tx_impl.clear_all();
+        self.tx_impl.reset();
+        self.tx_impl.set_link_addr(preparation.start as u32);
+        self.tx_impl.set_peripheral(peri.0);
+
+        Ok(())
+    }
+}
+
+impl<Dm, CH> crate::private::Sealed for ChannelTx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaTxChannel,
+{
+}
+
+#[allow(unused)]
+impl<Dm, CH> ChannelTx<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaTxChannel,
+{
+    pub(crate) unsafe fn prepare_transfer<BUF: DmaTxBuffer>(
+        &mut self,
+        peri: DmaPeripheral,
+        buffer: &mut BUF,
+    ) -> Result<(), DmaError> {
+        let preparation = buffer.prepare();
+
+        self.do_prepare(preparation, peri)
+    }
+
+    pub(crate) fn start_transfer(&mut self) -> Result<(), DmaError> {
+        self.tx_impl.start();
+        while self.tx_impl.is_fifo_empty() && self.pending_out_interrupts().is_empty() {}
+
+        if self
+            .pending_out_interrupts()
+            .contains(DmaTxInterrupt::DescriptorError)
+        {
+            Err(DmaError::DescriptorError)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn stop_transfer(&mut self) {
+        self.tx_impl.stop()
+    }
+
+    pub(crate) fn listen_out(&self, interrupts: impl Into<EnumSet<DmaTxInterrupt>>) {
+        self.tx_impl.listen(interrupts);
+    }
+
+    pub(crate) fn unlisten_out(&self, interrupts: impl Into<EnumSet<DmaTxInterrupt>>) {
+        self.tx_impl.unlisten(interrupts);
+    }
+
+    pub(crate) fn is_listening_out(&self) -> EnumSet<DmaTxInterrupt> {
+        self.tx_impl.is_listening()
+    }
+
+    pub(crate) fn clear_out(&self, interrupts: impl Into<EnumSet<DmaTxInterrupt>>) {
+        self.tx_impl.clear(interrupts);
+    }
+
+    pub(crate) fn pending_out_interrupts(&self) -> EnumSet<DmaTxInterrupt> {
+        self.tx_impl.pending_interrupts()
+    }
+
+    pub(crate) fn waker(&self) -> &'static crate::asynch::AtomicWaker {
+        self.tx_impl.waker()
+    }
+
+    pub(crate) fn clear_interrupts(&self) {
+        self.tx_impl.clear_all();
+    }
+
+    pub(crate) fn last_out_dscr_address(&self) -> usize {
+        self.tx_impl.last_dscr_address()
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
+        self.pending_out_interrupts()
+            .contains(DmaTxInterrupt::TotalEof)
+    }
+
+    pub(crate) fn has_error(&self) -> bool {
+        self.pending_out_interrupts()
+            .contains(DmaTxInterrupt::DescriptorError)
+    }
+}
+
+/// DMA Channel.
+#[non_exhaustive]
+pub struct Channel<Dm, CH>
+where
+    Dm: DriverMode,
+    CH: DmaChannel,
+{
+    /// RX half of the channel.
+    pub rx: ChannelRx<Dm, CH::Rx>,
+    /// TX half of the channel.
+    pub tx: ChannelTx<Dm, CH::Tx>,
+}
+
+impl<CH> Channel<Blocking, CH>
+where
+    CH: DmaChannel,
+{
+    /// Creates a new DMA channel driver.
+    #[instability::unstable]
+    pub fn new(channel: CH) -> Self {
+        let (rx, tx) = unsafe { channel.split_internal(crate::private::Internal) };
+        Self {
+            rx: ChannelRx::new(rx),
+            tx: ChannelTx::new(tx),
+        }
+    }
+
+    /// Sets the interrupt handler for RX and TX interrupts.
+    ///
+    /// Interrupts are not enabled at the peripheral level here.
+    #[instability::unstable]
+    pub fn set_interrupt_handler(&mut self, handler: InterruptHandler) {
+        self.rx.set_interrupt_handler(handler);
+        self.tx.set_interrupt_handler(handler);
+    }
+
+    /// Listens for the given interrupts.
+    pub fn listen(&mut self, interrupts: impl Into<EnumSet<DmaInterrupt>>) {
+        for interrupt in interrupts.into() {
+            match interrupt {
+                DmaInterrupt::RxDone => self.rx.listen_in(DmaRxInterrupt::Done),
+                DmaInterrupt::TxDone => self.tx.listen_out(DmaTxInterrupt::Done),
+            }
+        }
+    }
+
+    /// Unlistens from the given interrupts.
+    pub fn unlisten(&mut self, interrupts: impl Into<EnumSet<DmaInterrupt>>) {
+        for interrupt in interrupts.into() {
+            match interrupt {
+                DmaInterrupt::RxDone => self.rx.unlisten_in(DmaRxInterrupt::Done),
+                DmaInterrupt::TxDone => self.tx.unlisten_out(DmaTxInterrupt::Done),
+            }
+        }
+    }
+
+    /// Returns the asserted interrupts.
+    pub fn interrupts(&mut self) -> EnumSet<DmaInterrupt> {
+        let mut res = EnumSet::new();
+        if self.rx.is_done() {
+            res.insert(DmaInterrupt::RxDone);
+        }
+        if self.tx.is_done() {
+            res.insert(DmaInterrupt::TxDone);
+        }
+        res
+    }
+
+    /// Resets asserted interrupts.
+    pub fn clear_interrupts(&mut self, interrupts: impl Into<EnumSet<DmaInterrupt>>) {
+        for interrupt in interrupts.into() {
+            match interrupt {
+                DmaInterrupt::RxDone => self.rx.clear_in(DmaRxInterrupt::Done),
+                DmaInterrupt::TxDone => self.tx.clear_out(DmaTxInterrupt::Done),
+            }
+        }
+    }
+
+    /// Configures the channel priorities.
+    #[cfg(dma_max_priority_is_set)]
+    pub fn set_priority(&mut self, priority: DmaPriority) {
+        self.tx.set_priority(priority);
+        self.rx.set_priority(priority);
+    }
+
+    /// Converts a blocking channel to an async channel.
+    pub fn into_async(self) -> Channel<Async, CH> {
+        Channel {
+            rx: self.rx.into_async(),
+            tx: self.tx.into_async(),
+        }
+    }
+}
+
+impl<CH, Dm> Channel<Dm, CH>
+where
+    CH: DmaChannel,
+    Dm: DriverMode,
+{
+    /// Asserts that the channel is compatible with the given peripheral.
+    #[instability::unstable]
+    pub fn runtime_ensure_compatible(&self, peripheral: DmaPeripheral) {
+        self.rx.runtime_ensure_compatible(peripheral);
+    }
+}
+
+impl<CH> Channel<Async, CH>
+where
+    CH: DmaChannel,
+{
+    /// Converts an async channel to a blocking channel.
+    pub fn into_blocking(self) -> Channel<Blocking, CH> {
+        Channel {
+            rx: self.rx.into_blocking(),
+            tx: self.tx.into_blocking(),
+        }
+    }
+}
+
+impl<CH: DmaChannel> From<Channel<Blocking, CH>> for Channel<Async, CH> {
+    fn from(channel: Channel<Blocking, CH>) -> Self {
+        channel.into_async()
+    }
+}
+
+impl<CH: DmaChannel> From<Channel<Async, CH>> for Channel<Blocking, CH> {
+    fn from(channel: Channel<Async, CH>) -> Self {
+        channel.into_blocking()
+    }
+}
+
+pub(crate) mod asynch {
+    use core::task::Poll;
+
+    use enumset::enum_set;
+
+    use super::*;
+    use crate::rtc_cntl::WakeLock;
+
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct DmaTxFuture<'a, CH>
+    where
+        CH: DmaTxChannel,
+    {
+        pub(crate) tx: &'a mut ChannelTx<Async, CH>,
+        success_interrupts: EnumSet<DmaTxInterrupt>,
+        failure_interrupts: EnumSet<DmaTxInterrupt>,
+        _wake_lock: WakeLock,
+    }
+
+    impl<'a, CH> DmaTxFuture<'a, CH>
+    where
+        CH: DmaTxChannel,
+    {
+        #[cfg_attr(
+            not(any(i2s_driver_supported, uhci_driver_supported)),
+            expect(dead_code)
+        )]
+        pub fn new(tx: &'a mut ChannelTx<Async, CH>) -> Self {
+            Self {
+                tx,
+                success_interrupts: enum_set!(DmaTxInterrupt::TotalEof),
+                failure_interrupts: enum_set!(DmaTxInterrupt::DescriptorError),
+                _wake_lock: WakeLock::new(),
+            }
+        }
+
+        #[cfg_attr(not(i2s_driver_supported), expect(dead_code))]
+        pub fn new_with_config(
+            tx: &'a mut ChannelTx<Async, CH>,
+            success_interrupts: EnumSet<DmaTxInterrupt>,
+            failure_interrupts: EnumSet<DmaTxInterrupt>,
+        ) -> Self {
+            Self {
+                tx,
+                success_interrupts,
+                failure_interrupts,
+                _wake_lock: WakeLock::new(),
+            }
+        }
+    }
+
+    impl<CH> core::future::Future for DmaTxFuture<'_, CH>
+    where
+        CH: DmaTxChannel,
+    {
+        type Output = Result<(), DmaError>;
+
+        fn poll(
+            self: core::pin::Pin<&mut Self>,
+            cx: &mut core::task::Context<'_>,
+        ) -> Poll<Self::Output> {
+            let interrupts = self.tx.pending_out_interrupts();
+            let result = if !interrupts.is_disjoint(self.failure_interrupts) {
+                Err(DmaError::DescriptorError)
+            } else if !interrupts.is_disjoint(self.success_interrupts) {
+                Ok(())
+            } else {
+                // The interrupt may become pending before we register the waker and start
+                // listening, but that should just trigger the interrupt handler. The only
+                // constraint we have is that the waker must be registered before we start
+                // listening.
+                self.tx.waker().register(cx.waker());
+                self.tx
+                    .listen_out(self.success_interrupts | self.failure_interrupts);
+
+                return Poll::Pending;
+            };
+
+            self.tx.clear_interrupts();
+
+            Poll::Ready(result)
+        }
+    }
+
+    impl<CH> Drop for DmaTxFuture<'_, CH>
+    where
+        CH: DmaTxChannel,
+    {
+        fn drop(&mut self) {
+            self.tx
+                .unlisten_out(self.success_interrupts | self.failure_interrupts);
+        }
+    }
+
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct DmaRxFuture<'a, CH>
+    where
+        CH: DmaRxChannel,
+    {
+        pub(crate) rx: &'a mut ChannelRx<Async, CH>,
+        success_interrupts: EnumSet<DmaRxInterrupt>,
+        failure_interrupts: EnumSet<DmaRxInterrupt>,
+        _wake_lock: WakeLock,
+    }
+
+    impl<'a, CH> DmaRxFuture<'a, CH>
+    where
+        CH: DmaRxChannel,
+    {
+        pub fn new(rx: &'a mut ChannelRx<Async, CH>) -> Self {
+            Self {
+                rx,
+                success_interrupts: enum_set!(DmaRxInterrupt::SuccessfulEof),
+                failure_interrupts: enum_set!(
+                    DmaRxInterrupt::DescriptorError
+                        | DmaRxInterrupt::DescriptorEmpty
+                        | DmaRxInterrupt::ErrorEof
+                ),
+                _wake_lock: WakeLock::new(),
+            }
+        }
+
+        #[cfg_attr(not(i2s_driver_supported), expect(unused))]
+        pub fn new_with_config(
+            rx: &'a mut ChannelRx<Async, CH>,
+            success_interrupts: EnumSet<DmaRxInterrupt>,
+            failure_interrupts: EnumSet<DmaRxInterrupt>,
+        ) -> Self {
+            Self {
+                rx,
+                success_interrupts,
+                failure_interrupts,
+                _wake_lock: WakeLock::new(),
+            }
+        }
+    }
+
+    impl<CH> core::future::Future for DmaRxFuture<'_, CH>
+    where
+        CH: DmaRxChannel,
+    {
+        type Output = Result<(), DmaError>;
+
+        fn poll(
+            self: core::pin::Pin<&mut Self>,
+            cx: &mut core::task::Context<'_>,
+        ) -> Poll<Self::Output> {
+            let interrupts = self.rx.pending_in_interrupts();
+            let result = if !interrupts.is_disjoint(self.failure_interrupts) {
+                Err(DmaError::DescriptorError)
+            } else if !interrupts.is_disjoint(self.success_interrupts) {
+                Ok(())
+            } else {
+                // The interrupt may become pending before we register the waker and start
+                // listening, but that should just trigger the interrupt handler. The only
+                // constraint we have is that the waker must be registered before we start
+                // listening.
+                self.rx.waker().register(cx.waker());
+                self.rx
+                    .listen_in(self.success_interrupts | self.failure_interrupts);
+
+                return Poll::Pending;
+            };
+
+            self.rx.clear_interrupts();
+
+            Poll::Ready(result)
+        }
+    }
+
+    impl<CH> Drop for DmaRxFuture<'_, CH>
+    where
+        CH: DmaRxChannel,
+    {
+        fn drop(&mut self) {
+            self.rx
+                .unlisten_in(self.success_interrupts | self.failure_interrupts);
+        }
+    }
+
+    pub(super) fn handle_in_interrupt<CH: DmaChannelExt>() {
+        let rx = CH::rx_interrupts();
+
+        if !rx.is_async() {
+            return;
+        }
+
+        let pending = rx.pending_interrupts();
+        let enabled = rx.is_listening();
+
+        if !pending.is_disjoint(enabled) {
+            rx.unlisten(EnumSet::all());
+            rx.waker().wake()
+        }
+    }
+
+    pub(super) fn handle_out_interrupt<CH: DmaChannelExt>() {
+        let tx = CH::tx_interrupts();
+
+        if !tx.is_async() {
+            return;
+        }
+
+        let pending = tx.pending_interrupts();
+        let enabled = tx.is_listening();
+
+        if !pending.is_disjoint(enabled) {
+            tx.unlisten(EnumSet::all());
+
+            tx.waker().wake()
+        }
+    }
+}

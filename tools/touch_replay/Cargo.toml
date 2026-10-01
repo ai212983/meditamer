@@ -1,0 +1,54 @@
+[package]
+name = "touch_replay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+statig = "0.4.1"
+# tests/pipeline_replay_probe.rs exercises the real touch-protocol decode the
+# board crate now tests itself (inkplate-tempera board extraction plan).
+inkplate-tempera = { path = "../../boards/inkplate-tempera" }
+# tests/bounded_control.rs path-includes products/meditamer's
+# `firmware::bounded_control` (ADR-0018 plan, Phase 2/4's "bound command
+# admission, acknowledgement, and resume"), which builds on real
+# `embassy-sync` `Channel`/`Signal` and `embassy-futures::select` -- both
+# already `no_std`, host-buildable, and version-pinned identically in
+# `platform/sensing/observation`'s Cargo.toml.
+embassy-sync = "0.8.0"
+embassy-futures = "0.1.2"
+# tests/battery_driver.rs path-includes products/meditamer's
+# `firmware::battery::{driver, types}` (ADR-0018 plan, Phase 5's battery
+# diagnostic coverage gap), exercising the real, generic `BqDriver` against
+# `platform/sensing/observation`'s real `ProviderLoop`, with a fake I2C device and
+# a fake wake operation -- version-pinned identically to
+# `boards/inkplate-tempera`'s and `products/meditamer`'s own dependency.
+observation = { path = "../../platform/sensing/observation" }
+embedded-hal-async = "1.0.0"
+
+[dev-dependencies]
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority", "platform-std", "executor-thread"] }
+heapless = "0.9.3"
+shell = { path = "../../platform/ui/shell" }
+# The target providers run unchanged with a manually advanced Embassy clock;
+# only the I2C device and ADC conversion boundary are substituted in tests.
+shtc3 = { path = "../../boards/waveshare-rlcd42/shtc3" }
+medinote = { path = "../../products/medinote", default-features = false }
+nb = "1.1"
+embassy-time = { version = "0.5.1", features = ["mock-driver", "generic-queue-8"] }
+critical-section = { version = "1.2", features = ["std"] }
+
+[features]
+default = []
+firmware-trace = []
+ui-interaction-trace = ["firmware-trace"]
+
+[patch.crates-io]
+proc-macro-error2 = { path = "../../vendor/proc-macro-error2-2.0.1-public-proc-macro" }
+
+[[test]]
+name = "medinote_drivers"
+path = "tests/medinote_drivers.rs"
+
+[[test]]
+name = "environment_presentation"
+path = "tests/environment_presentation.rs"

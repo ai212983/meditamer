@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "thresholds": {
+    "max_file_sloc": 1000,
+    "warn_file_sloc": 600,
+    "max_fn_cognitive": 40,
+    "max_fn_cyclomatic": 32,
+    "max_fn_nargs": 8
+  },
+  "offenders": {
+    "file_sloc": {},
+    "fn_cognitive": {},
+    "fn_cyclomatic": {},
+    "fn_nargs": {}
+  }
+}

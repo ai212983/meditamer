@@ -1,0 +1,330 @@
+[package]
+name = "meditamer-inkplate"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+[[bin]]
+name = "bus-owner-probe"
+path = "src/bin/bus_owner_probe.rs"
+required-features = ["bus-owner-probe"]
+
+# Meditamer + Inkplate Tempera firmware (Product and target axis completion
+# plan, Phase 3).
+#
+# Outside the root workspace, like `boards/waveshare-rlcd42`: it targets
+# `xtensa-esp32-none-elf`, and a workspace shares one target and one set of
+# `[env]` values across members.
+#
+# The real firmware, not the Phase 1 bring-up binary this manifest described
+# before: `src/main.rs` and `src/system/` are the root package's former
+# `src/firmware/system{,.rs}` (chip startup and Embassy task wiring),
+# unchanged in substance; `src/updater/` and `src/bin/updater.rs` are the
+# root package's former factory updater, also unchanged in substance --
+# both moved here because they are firmware artifacts, not product content.
+# `meditamer-product` (`products/meditamer`) supplies everything else:
+# meditation state, scheduling, screens, catalogue, settings. The root
+# package no longer builds firmware at all; it is a virtual workspace
+# manifest now.
+# Stage 1 image gallery: streams pre-rendered full-panel frames off SD and
+# shows them, advancing on swipe. Exists so font specimens can be judged on
+# the real glass without a reflash per tweak.
+# No required features -- it
+# reuses the updater's own self-contained `fat_io`/`sd_power` helpers.
+[[bin]]
+name = "gallery"
+path = "src/bin/gallery.rs"
+test = false
+harness = false
+
+[[bin]]
+name = "meditamer"
+path = "src/main.rs"
+harness = false
+test = false
+
+[[bin]]
+name = "cpu-load-probe"
+path = "src/bin/cpu_load_probe.rs"
+required-features = ["cpu-load-probe"]
+test = false
+harness = false
+
+[[bin]]
+name = "buzzer-probe"
+path = "src/bin/buzzer_probe.rs"
+required-features = ["buzzer-probe"]
+test = false
+harness = false
+
+# A separate release artifact from the `meditamer` binary above;
+# `required-features` keeps it out of a plain `cargo build` and out of the
+# default feature set's wifi/BLE/upload weight, so its size reflects only
+# what it needs measured (ADR-0014).
+[[bin]]
+name = "updater"
+path = "src/bin/updater.rs"
+harness = false
+test = false
+required-features = ["factory-updater"]
+
+# Shared BLE runtime and roles plan, Phase 1: proves the reviewed vendor BLE
+# controller source builds and survives one start/stop cycle through
+# `platform/connectivity/ble`. A separate release artifact for the same reason as
+# `updater` above -- it stays out of a plain `cargo build` and out of the
+# default feature set, and its own build/serial evidence must not be
+# conflated with `meditamer`'s existing `ble-foundation` diagnostic probe.
+[[bin]]
+name = "ble-shared-runtime-probe"
+path = "src/bin/ble_shared_runtime_probe.rs"
+harness = false
+test = false
+required-features = ["shared-ble-runtime"]
+
+# Shared BLE runtime and roles plan, Phase 3: real scanning against actual
+# advertising traffic through `platform/connectivity/ble`'s `run_live_scan`. Separate
+# from `ble-shared-runtime-probe` for the same reason that binary is
+# separate from `ble-foundation`'s probe: distinct build/serial evidence.
+[[bin]]
+name = "ble-scan-probe"
+path = "src/bin/ble_scan_probe.rs"
+harness = false
+test = false
+required-features = ["shared-ble-runtime"]
+
+# Shared BLE runtime and roles plan, Phase 4: real central connection to a
+# user-designated device through `platform/connectivity/ble`'s `run_live_connect` --
+# name scan, connect, GATT client MTU exchange, service/characteristic
+# discovery, one read, disconnect.
+[[bin]]
+name = "ble-connect-probe"
+path = "src/bin/ble_connect_probe.rs"
+harness = false
+test = false
+required-features = ["shared-ble-runtime"]
+
+# Isolated HTTPS PSRAM memory probe: sequential authenticated GETs through
+# mbedtls-rs with the MbedTLS heap forced to PSRAM. A separate release
+# artifact gated on `https-memory-probe`, out of a plain `cargo build` and
+# out of the default feature set like the other probes above.
+[[bin]]
+name = "https-memory-probe"
+path = "src/bin/https_memory_probe.rs"
+harness = false
+test = false
+required-features = ["https-memory-probe"]
+
+# Stand-alone panel timing qualification app. It initializes only the panel,
+# PSRAM-backed partial buffers, and the executor; product UI and service tasks
+# are not linked into its runtime path. Each timing candidate is a separate
+# release ELF selected by compile-time environment variables.
+[[bin]]
+name = "panel-refresh-probe"
+path = "../../tools/rendering/refresh-probe/panel/main.rs"
+harness = false
+test = false
+required-features = ["panel-refresh-probe"]
+
+# Moved from the root package's manifest along with everything else: profiles
+# are workspace-scoped, and this crate is excluded from the root workspace
+# (own toolchain, own target triple), so the root's `[profile.*]` cannot
+# reach it -- it needs its own copy of the tuning the real firmware relies
+# on, unlike the Phase 1 bring-up binary that used plain `release`.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+
+[profile.release.package.esp-radio]
+opt-level = 3
+
+[profile.release.package.esp-storage]
+opt-level = 2
+
+[profile.dev]
+debug = true
+opt-level = "z"
+# The pinned Xtensa compiler rejects EXCCAUSE in the target's first-fault
+# global assembly with multiple codegen units. Keep debug builds linkable
+# without changing the exception recorder or enabling release LTO.
+codegen-units = 1
+
+[profile.dev.package.esp-storage]
+opt-level = 2
+
+[profile.dev.package.esp-radio]
+opt-level = 3
+
+# Keep the retained radio IPC implementation within the vendor task stacks.
+# Min-size optimization (`z`) makes its task-context wait loop exceed the
+# debug stack cushion and overwrite the adjacent RTOS wait-queue control word.
+[profile.dev.package.esp-radio-rtos-driver]
+opt-level = "s"
+codegen-units = 1
+
+[features]
+firmware-trace = ["cpu-load", "meditamer-product/firmware-trace"]
+ui-interaction-trace = ["firmware-trace", "meditamer-product/ui-interaction-trace"]
+cpu-load-probe = ["cpu-load"]
+context-probe = ["esp-rtos/context-probe", "esp-radio?/meditamer-connect-phase-probe"]
+buzzer-probe = []
+bus-owner-probe = ["cpu-load"]
+cpu-load = ["esp-hal/cpu-profile", "embassy-executor/trace", "dep:cpu-load", "esp-rtos/rtos-trace", "meditamer-product/cpu-load", "context-probe"]
+default = [
+    "cpu-load",
+    "asset-upload-http",
+    "asset-upload-http-pipeline",
+    "ble-foundation",
+]
+telemetry-defmt = [
+    "dep:defmt",
+    "console/telemetry-defmt",
+    "meditamer-product/telemetry-defmt",
+]
+ui-provider-fixture = ["meditamer-product/ui-provider-fixture"]
+sd-runner-allocation-fixture = ["meditamer-product/sd-runner-allocation-fixture"]
+ui-initialization-fixture = ["meditamer-product/ui-initialization-fixture"]
+# Diagnostic-only early boot path. It renders a fixed Gray4 pattern by default,
+# or a fixed 1-bit pattern with the documented environment selector, before
+# product tasks start. It records power/waveform timing and then parks so the
+# physical image can be inspected. Never enable in production.
+panel-waveform-fixture = []
+panel-refresh-probe = []
+wifi-debug-slim-app = ["asset-upload-http"]
+ble-foundation = [
+    "asset-upload-http",
+    "dep:bt-hci",
+    "dep:trouble-host",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "meditamer-product/ble-foundation",
+]
+# Shared BLE runtime and roles plan, Phase 1 (`ble-shared-runtime-probe`
+# binary only): proves `esp-radio/ble` builds and runs stand-alone, without
+# `asset-upload-http`'s wifi feature or the existing `ble-foundation` probe's
+# `trouble-host` GATT stack. Deliberately independent of `ble-foundation` --
+# the plan keeps Meditamer's current diagnostic-peripheral behavior until its
+# own Phase 4 adapts it to `platform/connectivity/ble`.
+shared-ble-runtime = [
+    "dep:ble",
+    "ble/esp32",
+    "ble/central",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "meditamer-product/classic-bt-memory-reclaim",
+]
+asset-upload-http = [
+    "dep:embassy-net",
+    "dep:embedded-io-async",
+    "dep:netstack",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "wifi-backend-esp-radio",
+    "meditamer-product/asset-upload-http",
+]
+asset-upload-http-pipeline = [
+    "asset-upload-http",
+    "meditamer-product/asset-upload-http-pipeline",
+]
+wifi-backend-esp-radio = ["dep:esp-radio"]
+# Selects the `updater` binary target. Build with --no-default-features so
+# the wifi/BLE/upload dependency tree stays out of the measured size.
+factory-updater = []
+# Bench/qualification-only build variant of the `updater` binary (ADR-0014
+# Phase 4): replaces the normal verify/install flow with a serial bundle
+# receiver, so hostctl can stage a signed bundle onto a bench board's SD
+# card without disassembling the device. Never the shipped updater -- see
+# src/updater/sd_push.rs's module doc.
+sd-qual-push = ["factory-updater"]
+# Isolated HTTPS PSRAM memory probe (`https-memory-probe` binary only):
+# Wi-Fi station plus Embassy TCP/DNS plus mbedtls-rs TLS with the MbedTLS
+# heap forced to PSRAM. Lean on purpose: no product upload serving, no BLE,
+# no UI. `meditamer-product/asset-upload-http` is the product-half flash
+# credential store only (stored Wi-Fi load); the target half stays minimal.
+https-memory-probe = [
+    "dep:embassy-net",
+    "embassy-net/dns",
+    "embassy-net/udp",
+    "dep:embedded-io-async",
+    "dep:netstack",
+    "dep:mbedtls-rs",
+    "dep:rand_core",
+    "dep:allocator-api2",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "wifi-backend-esp-radio",
+    "meditamer-product/asset-upload-http",
+]
+
+[dependencies]
+buzzer = { path = "../../platform/audio/buzzer" }
+cpu-load = { path = "../../platform/diagnostics/cpu-load", features = ["esp32"], optional = true }
+critical-section = "1.2.0"
+esp-hal = { version = "=1.2.0", features = ["esp32", "unstable"] }
+esp-sync = "0.3.0"
+esp-rtos = { version = "0.4.0", features = ["esp32", "embassy"] }
+esp-radio-rtos-driver = "=0.4.2"
+esp32 = "0.42.0"
+esp-alloc = { version = "=0.11.0", default-features = false, features = ["alloc-hooks", "compat", "esp32", "global-allocator"] }
+esp-backtrace = { version = "0.20.0", default-features = false, features = ["esp32", "panic-handler", "println", "custom-pre-backtrace"] }
+defmt = { version = "1.1.1", optional = true }
+esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.3.0", default-features = false }
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
+embassy-time = "0.5.1"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1.2"
+bt-hci = { version = "=0.10.1", optional = true }
+embassy-embedded-hal = "0.6.0"
+embassy-net = { version = "=0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embedded-hal-async = "1.0.0"
+embedded-io-async = { version = "0.7.0", optional = true }
+mbedtls-rs = { version = "=0.3.0", default-features = false, optional = true, features = ["esp32", "alg-rsa", "alg-rsa-pss", "alg-sha512", "curve-secp384r1", "hook-wall-clock", "embassy-time", "nohook", "use-gcc", "ssl-in-content-len-16384", "ssl-out-content-len-4096"] }
+rand_core = { version = "0.10", default-features = false, optional = true }
+allocator-api2 = { version = "=0.3.1", default-features = false, features = ["alloc"], optional = true }
+enumset = { version = "1.1.14", default-features = false }
+esp-radio = { version = "=1.0.0-beta.1", optional = true, default-features = false, features = ["esp32", "wifi", "log-04", "unstable", "meditamer-allocation-provenance"] }
+trouble-host = { version = "=0.8.0", optional = true, default-features = false, features = ["connection-event-queue-size-2", "derive", "gatt", "l2cap-rx-queue-size-2", "l2cap-tx-queue-size-2", "peripheral"] }
+static_cell = "2.1.1"
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
+
+heapless = "0.9.3"
+statig = "0.4.1"
+esp-storage = { version = "0.10.0", features = ["esp32", "embedded-storage"] }
+embedded-storage = "0.3.1"
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32", "embedded-storage"] }
+sha2 = { version = "0.10.9", default-features = false }
+ed25519-dalek = { version = "2.2.0", default-features = false }
+arbitration = { path = "../../platform/connectivity/arbitration" }
+ble = { path = "../../platform/connectivity/ble", optional = true }
+# Not referenced in code: it selects the chip and console transport for the
+# `console` crate, which names neither (ADR-0015).
+esp-println-upstream = { package = "esp-println", version = "0.18.0", default-features = false, features = ["esp32", "log-04", "uart"] }
+console = { path = "../../platform/diagnostics/console" }
+netstack = { path = "../../platform/connectivity/netstack", optional = true }
+render = { path = "../../platform/ui/render" }
+shell = { path = "../../platform/ui/shell" }
+sdcard = { path = "../../platform/storage/sdcard" }
+rtc = { path = "../../platform/time/rtc" }
+wall-clock = { path = "../../platform/time/wall-clock" }
+bundle = { path = "../../platform/update/bundle" }
+otadata = { path = "../../platform/update/otadata" }
+
+# The board and product this target composes (ADR-0015).
+inkplate-tempera = { path = "../../boards/inkplate-tempera" }
+# `default-features = false`: without it, `meditamer-product`'s own
+# `default = ["asset-upload-http", ...]` stays enabled regardless of this
+# crate's `--no-default-features`, since dependency default features are
+# independent unless explicitly disabled -- the `minimal` build preset
+# would silently stop shrinking the product half of the binary.
+meditamer-product = { path = "../../products/meditamer", default-features = false }
+
+[patch.crates-io]
+proc-macro-error2 = { path = "../../vendor/proc-macro-error2-2.0.1-public-proc-macro" }
+esp-hal = { path = "../../vendor/esp-hal-1.2.0-cpu-profile" }
+trouble-host = { path = "../../vendor/trouble-host-0.8.0-restartable" }
+embassy-net = { path = "../../vendor/embassy-net-0.9.1-restartable" }
+esp-alloc = { path = "../../vendor/esp-alloc-0.11.0-provenance" }
+esp-backtrace = { path = "../../vendor/esp-backtrace-0.20.0-custom-pre-backtrace-info" }
+esp-radio = { path = "../../vendor/esp-radio-1.0.0-beta.1-bounded" }
+esp-radio-rtos-driver = { path = "../../vendor/esp-radio-rtos-driver-0.4.2-retained" }
+esp-rtos = { path = "../../vendor/esp-rtos-0.4.0-context-probe" }

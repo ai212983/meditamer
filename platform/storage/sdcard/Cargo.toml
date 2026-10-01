@@ -1,0 +1,25 @@
+[package]
+name = "sdcard"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+
+[features]
+default = []
+host-tests = ["embassy-time/std"]
+
+[dependencies]
+embassy-time = "0.5.1"
+
+[target.'cfg(target_os = "none")'.dependencies]
+embassy-embedded-hal = "0.6.0"
+embassy-futures = "0.1.2"
+embedded-hal-async = "1.0.0"
+# No chip feature here on purpose, matching platform/diagnostics/console's pattern
+# (ADR-0015): the chip is a property of the final binary, and the only
+# current consumer (targets/meditamer-inkplate) already selects esp32 on its
+# own direct esp-hal dependency, which feature unification carries here.
+# Naming a chip here would also block this crate from ever being used by an
+# esp32s3 target without a conflicting feature request.
+esp-hal = { version = "=1.2.0", features = ["unstable"] }
+embedded-hal = "1.0.0"

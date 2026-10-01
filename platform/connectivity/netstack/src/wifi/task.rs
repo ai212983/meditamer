@@ -1,0 +1,18 @@
+use console::println;
+use embassy_time::Instant;
+
+use super::state::NetState;
+
+pub(super) fn emit_net_event(from: NetState, to: NetState, trigger: &str, started_at: Instant) {
+    if !runtime::log_filter_enabled(runtime::LOG_DOMAIN_WIFI) {
+        return;
+    }
+    let at_ms = started_at.elapsed().as_millis() as u32;
+    println!(
+        "NET_EVENT {{\"from\":\"{}\",\"to\":\"{}\",\"trigger\":\"{}\",\"at_ms\":{}}}",
+        from.as_str(),
+        to.as_str(),
+        trigger,
+        at_ms
+    );
+}

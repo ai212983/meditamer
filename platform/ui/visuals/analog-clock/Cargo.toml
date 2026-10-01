@@ -1,0 +1,32 @@
+[package]
+name = "analog-clock"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# First analog-clock host prototype: the shared CPU renderer intended for
+# Meditamer and Medinote. A pure, chip-neutral visual model: dial, two
+# sprite hands with normal/specular maps, height-ordered soft shadows, and
+# grayscale output for the one-bit panel path. Names no product, no board,
+# and no hardware type. PNG decoding lives in the host preview tool only;
+# this crate takes borrowed decoded maps. Float/libm is the accepted first
+# prototype; device fixed-point optimization waits on later measurements.
+
+[lib]
+name = "analog_clock"
+
+[dependencies]
+# Canvas contract plus the ordered-dither thresholds the final grayscale
+# resolves through. `dither` is off by default in `raster` so the
+# integer-only `flipclock`/`hourglass` canvases stay float-free; this crate
+# resolves continuous tone, so it opts in like `enso` does.
+raster = { path = "../raster", features = ["dither"] }
+# Pure-software float math, so host preview and device agree bit for bit.
+# Already in the workspace lockfile.
+libm = { version = "0.2.16", default-features = false }
+# Full-screen void-and-cluster threshold maps. Both map features are on for
+# this host prototype (600x600 + 400x300 = 480000 B of read-only data, not a
+# DRAM-fit claim); other apps enable only their own map. Device-side feature
+# gating is later work, outside this prototype.
+blue-noise = { path = "../blue-noise", features = ["map-600x600", "map-400x300"] }

@@ -1,0 +1,20 @@
+[package]
+name = "psram-store"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+# Reusable bounded chunked byte store for PSRAM-backed bulk assets
+# (bounded PSRAM chunk-store plan). no_std, fallible allocation only: the
+# caller supplies a target-owned PSRAM allocator (Meditamer passes its
+# `esp_alloc::ExternalMemory` capability), so this crate depends on no
+# product, board, target, SD, asset-format, or screen-lifetime code. All
+# data and chunk metadata allocate through that single allocator instance.
+
+[lib]
+name = "psram_store"
+
+[dependencies]
+allocator-api2 = { version = "0.3", default-features = false, features = ["alloc"] }
+asset-source = { version = "0.1.0", path = "../asset-source" }

@@ -1,0 +1,19 @@
+[package]
+name = "blue-noise"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+# Shared full-screen blue-noise threshold maps (void-and-cluster).
+# Default features embed nothing; each app enables only its own map so no
+# image pays for a resolution it never shows.
+
+[lib]
+name = "blue_noise"
+path = "src/lib.rs"
+
+[features]
+default = []
+map-600x600 = []
+map-400x300 = []

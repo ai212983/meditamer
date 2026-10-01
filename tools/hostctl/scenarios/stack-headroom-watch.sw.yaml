@@ -1,0 +1,82 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "stack-headroom-watch"
+  version: "1.0.0"
+do:
+  # Ambient-soak `METRICS` headroom watch for the stack-overflow hunt.
+  # Resets already-flashed firmware, waits for Ambient adoption as proof the
+  # device is alive, then samples both stack minima on a 30 s grid x30
+  # (~16 min, past the observed 347 s stack-guard window). The
+  # result_gate below is EXPECTED to fail: mountain/clock checkpoints never
+  # apply here. The verdict is the `metrics_sample` trend in the raw serial
+  # log and the report's state lines, read manually: shrinking main_minimum
+  # fingers the main task; flat minima point at another task (radio timer
+  # thread, blob task, second core). A missing reply records
+  # `minimum=missing`, not a run error — but a hung device must not burn
+  # the whole grid: the marker wait aborts early on 45 s of total serial
+  # silence, and 3 consecutive unanswered samples short-circuit to the
+  # report (the error names the hang; the trend so far is the evidence).
+  # Each grid point also TCP-handshakes the firmware upload listener
+  # (`net_liveness`, target snooped from `listening on`, never hardcoded):
+  # serial silence + net up means the UART path died with the CPU alive,
+  # silence + net down means a full stall. Never flashes firmware and
+  # sends no upload bytes (the handshake carries no HTTP).
+  - measurement:
+      try:
+        - init_run:
+            call: "init_run"
+        - preflight_state:
+            call: "state_probe"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - await_ambient_assets:
+            call: "await_marker"
+            with:
+              key: "ambient_assets_adopted"
+              checkpoint: "ambient_assets_adopted"
+              from: "run"
+              silence_limit_secs: 45
+        - poll_loop:
+            do:
+              - sample:
+                  call: "metrics_sample"
+                  with:
+                    settle_secs: 30
+                    abort_after_consecutive_misses: 3
+              - net_probe:
+                  call: "net_liveness"
+                  with:
+                    timeout_secs: 5
+            metadata:
+              hostctl:
+                repeat:
+                  in: 30
+                  at: "sample_index"
+      catch:
+        as: "measurement_error"
+      then: "cleanup_upload"
+  - cleanup_upload:
+      call: "cleanup_upload_off"
+      then: "finalize"
+  - finalize:
+      call: "finalize_report"
+      metadata:
+        hostctl:
+          result:
+            merge: true
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".run_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_evidence"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_evidence:
+      call: "fail_evidence"

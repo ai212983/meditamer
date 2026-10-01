@@ -1,0 +1,13 @@
+[package]
+name = "event_engine_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+statig = "0.4.1"
+
+[build-dependencies]
+event_config_compiler = { path = "../../../tools/event_config_compiler" }
+
+[patch.crates-io]
+proc-macro-error2 = { path = "../../../vendor/proc-macro-error2-2.0.1-public-proc-macro" }

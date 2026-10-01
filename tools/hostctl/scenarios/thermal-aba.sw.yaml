@@ -1,0 +1,96 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "thermal-aba"
+  version: "1.0.0"
+do:
+  - experiment:
+      try:
+        - attach:
+            call: "verify_attach"
+        - qualify_pause:
+            call: "begin_phase"
+            with:
+              name: "qualification"
+              paused: true
+        - qualify_window_1:
+            call: "capture_window"
+            with:
+              seconds: 45
+        - qualify_window_2:
+            call: "capture_window"
+            with:
+              seconds: 45
+        - begin_A1:
+            call: "begin_phase"
+            with:
+              name: "A1"
+              paused: false
+        - capture_A1:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - settle_A1:
+            switch:
+              - minimum:
+                  when: ".phase_elapsed_s < 1500"
+                  then: "capture_A1"
+              - extend:
+                  when: ".phase_stable == false && .phase_elapsed_s < 2700"
+                  then: "capture_A1"
+              - default:
+                  then: "finish_A1"
+        - finish_A1:
+            call: "finish_phase"
+        - begin_B:
+            call: "begin_phase"
+            with:
+              name: "B"
+              paused: true
+        - capture_B:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - settle_B:
+            switch:
+              - minimum:
+                  when: ".phase_elapsed_s < 1500"
+                  then: "capture_B"
+              - extend:
+                  when: ".phase_stable == false && .phase_elapsed_s < 2700"
+                  then: "capture_B"
+              - default:
+                  then: "finish_B"
+        - finish_B:
+            call: "finish_phase"
+        - begin_A2:
+            call: "begin_phase"
+            with:
+              name: "A2"
+              paused: false
+        - capture_A2:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - settle_A2:
+            switch:
+              - minimum:
+                  when: ".phase_elapsed_s < 1500"
+                  then: "capture_A2"
+              - extend:
+                  when: ".phase_stable == false && .phase_elapsed_s < 2700"
+                  then: "capture_A2"
+              - default:
+                  then: "finish_A2"
+        - finish_A2:
+            call: "finish_phase"
+      catch:
+        as: "experiment_error"
+  - restore:
+      try:
+        - resume_display:
+            call: "restore"
+      catch:
+        as: "restore_error"
+  - finish:
+      call: "finish"

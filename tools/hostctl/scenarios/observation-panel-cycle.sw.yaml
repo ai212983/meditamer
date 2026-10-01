@@ -1,0 +1,55 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "observation-panel-cycle"
+  version: "1.0.0"
+do:
+  - run_fixture:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - readiness_gate:
+            switch:
+              - live_pong:
+                  when: ".ping_confirmed == true"
+                  then: "lifecycle_preflight"
+              - default:
+                  then: "confirm_ready"
+        - confirm_ready:
+            call: "confirm_ready"
+        - lifecycle_preflight:
+            call: "lifecycle_preflight"
+        - lifecycle_await_preflight:
+            call: "lifecycle_await_preflight"
+        - submit_request:
+            call: "submit_request"
+        - lifecycle_await_panel:
+            call: "lifecycle_await_panel"
+        - lifecycle_await_fresh:
+            call: "lifecycle_await_fresh"
+        - verified:
+            set:
+              sample_verified: true
+        - observe_window:
+            call: "observe_window"
+        - mark_passed:
+            set:
+              fixture_passed: true
+      catch:
+        as: "fixture_error"
+      then: "write_report"
+  - write_report:
+      call: "write_report"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".fixture_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_fixture"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_fixture:
+      call: "fail_fixture"

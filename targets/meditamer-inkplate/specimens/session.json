@@ -1,0 +1,165 @@
+{
+  "panel": "inkplate",
+  "pages": [
+    {
+      "id": "roboto-inkplate-caption-w400-b1-t128",
+      "font": "Roboto",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 28,
+        "axes": {
+          "wght": 400,
+          "wdth": 100
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "roboto-inkplate-caption-w400-b1-t128.png",
+      "frame": "roboto-inkplate-caption-w400-b1-t128.bin",
+      "frame_sha256": "edb281b13a456619fa367d15730b7ab432d5697927d20c3afa8a81db4710103f",
+      "artifact_sha256": "9b618bbafaedb788530e649b0edc6af9dffda77a20845876b2c371dbe76a7e1a"
+    },
+    {
+      "id": "literata-inkplate-caption-w400-b1-t128",
+      "font": "Literata",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 30,
+        "axes": {
+          "wght": 400,
+          "opsz": 30
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "literata-inkplate-caption-w400-b1-t128.png",
+      "frame": "literata-inkplate-caption-w400-b1-t128.bin",
+      "frame_sha256": "25dff01b4a4df4cd8f4e6fb6ceae5daba27b16571707db1dd01958d817cb556a",
+      "artifact_sha256": "954c37c24ac49e6479806cce133ee5aa78991a2c7a4d63541dd4e8cd84c9c108"
+    },
+    {
+      "id": "sourcesans3-inkplate-caption-w400-b1-t128",
+      "font": "SourceSans3",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 32,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "sourcesans3-inkplate-caption-w400-b1-t128.png",
+      "frame": "sourcesans3-inkplate-caption-w400-b1-t128.bin",
+      "frame_sha256": "3ca5ad8714efa4c2cd9166a2a509897f8d6c6748a8175dcd04014d0d97477cd1",
+      "artifact_sha256": "7a36b76ef16abb05b1d823707eca6c67aaa356133eedf4599f742a9b84978b5d"
+    },
+    {
+      "id": "roboto-inkplate-caption-w400-b3-t128",
+      "font": "Roboto",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 28,
+        "axes": {
+          "wght": 400,
+          "wdth": 100
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 3,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "roboto-inkplate-caption-w400-b3-t128.png",
+      "frame": "roboto-inkplate-caption-w400-b3-t128.bin",
+      "frame_sha256": "c3c2fe04c83c32c3ee7fbfc195bffc4137e2fdcb5cc1337de614f6f1acfff687",
+      "artifact_sha256": "c8011321b490e4d5e233d40021481967ca7751922e01aaf331e961ddc0fde43b"
+    },
+    {
+      "id": "literata-inkplate-caption-w400-b3-t128",
+      "font": "Literata",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 30,
+        "axes": {
+          "wght": 400,
+          "opsz": 30
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 3,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "literata-inkplate-caption-w400-b3-t128.png",
+      "frame": "literata-inkplate-caption-w400-b3-t128.bin",
+      "frame_sha256": "f356bc17cdc40d08bc5e28a993a14cc43d9b358e1682f2e157d7a5eeabe41ddf",
+      "artifact_sha256": "80235b2502e39aa18be50cca095e67c2f200468c1bfe5209e3a7e892090df53d"
+    },
+    {
+      "id": "sourcesans3-inkplate-caption-w400-b3-t128",
+      "font": "SourceSans3",
+      "panel": "inkplate",
+      "settings": {
+        "size_px": 32,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 3,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 600,
+      "height": 600,
+      "png": "sourcesans3-inkplate-caption-w400-b3-t128.png",
+      "frame": "sourcesans3-inkplate-caption-w400-b3-t128.bin",
+      "frame_sha256": "be5ed831fb197caf1084e4606f7acf2f7875f9e90a77894cbd90dff939b7dedf",
+      "artifact_sha256": "ec59459b90b2112e9833cab30bebe7536a6b158aefbde0adeaa767a4f34b6364"
+    }
+  ]
+}

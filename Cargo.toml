@@ -1,0 +1,96 @@
+# ADR-0015: the workspace the platform/board/product split lands in.
+#
+# A virtual workspace manifest since the product and target axis completion
+# plan's Phase 3 -- there is no root package anymore. Before Phase 3, this
+# file also described the Meditamer product plus its board code, built from
+# `src/` into the `meditamer`/`updater` binaries; that content moved to
+# `products/meditamer` (product) and `targets/meditamer-inkplate` (chip
+# startup, task wiring, firmware artifacts), the same split
+# `boards/inkplate-tempera` had already drawn for hardware in an earlier
+# plan. Members are the crates under `platform/` -- the former `packages/*`
+# crates among them, relocated unchanged by the packages-directory
+# retirement plan -- and the two `products/*` library roots: the shared
+# workspace hosts platform and product libraries used by host tests, while
+# each `targets/*` firmware build root stays out of it, same as `boards/*`.
+#
+# `exclude` is load-bearing rather than cosmetic. Cargo makes every path
+# dependency inside the workspace directory a member automatically, which would
+# otherwise pull in `vendor/*` (the `[patch.crates-io]` trees, which carry their
+# own patch sections and must not be linted or resolved as first-party code),
+# the `tools/*` build-dependency crates (host-only; ADR-0015 keeps `tools/`
+# outside the workspace), and `.scratch/*` scratch crates. `boards/*` and
+# `targets/*` are excluded for the same reason as each other: each is an
+# independent firmware build root with its own target triple, and a workspace
+# shares one target and one set of `[env]` values across members.
+[workspace]
+# Explicit, not inherited -- a virtual workspace has no `[package]` to fall
+# back to, but resolver 2 is still worth stating: it is what keeps
+# `platform/update/bundle`'s dev-dependency on ed25519-dalek (default features, std)
+# from unifying into `products/meditamer`'s verify-only
+# `default-features = false` build.
+resolver = "2"
+members = [
+    "platform/audio/buzzer",
+    "platform/connectivity/arbitration",
+    "platform/connectivity/ble",
+    "platform/connectivity/http-upload",
+    "platform/connectivity/netstack",
+    "platform/diagnostics/console",
+    "platform/diagnostics/cpu-load",
+    "platform/diagnostics/firmware-trace",
+    "platform/diagnostics/runtime",
+    "platform/memory/asset-source",
+    "platform/memory/phase-arena",
+    "platform/memory/psram-store",
+    "platform/memory/residency-policy",
+    "platform/memory/transfer-cache-block-pool",
+    "platform/sensing/observation",
+    "platform/storage/sdcard",
+    "platform/time/rtc",
+    "platform/time/wall-clock",
+    "platform/ui/board",
+    "platform/ui/render",
+    "platform/ui/shell",
+    "platform/ui/visuals/analog-clock",
+    "platform/ui/visuals/ambient-assets",
+    "platform/ui/visuals/clock-assets",
+    "platform/ui/visuals/blue-noise",
+    "platform/ui/visuals/enso",
+    "platform/ui/visuals/flipclock",
+    "platform/ui/visuals/hourglass",
+    "platform/ui/visuals/mountain-snow",
+    "platform/ui/visuals/raster",
+    "platform/update/bundle",
+    "platform/update/otadata",
+    "products/medinote",
+    "products/meditamer",
+]
+exclude = [
+    ".scratch",
+    "boards",
+    "targets",
+    "test-support",
+    "tools",
+    "vendor",
+]
+
+# No `[package]`, `[[bin]]`, `[lib]`, `[dependencies]`, `[features]`, or
+# `[profile.*]` here anymore -- there is no root package. All of it moved to
+# `products/meditamer/Cargo.toml` (dependencies, features) and
+# `targets/meditamer-inkplate/Cargo.toml` (binaries, dependencies, features,
+# profiles): `targets/*` is excluded from this workspace (see above), so
+# `[profile.*]` defined here would not even have reached it. `[patch]`
+# sections are workspace-scoped and only the workspace root's is honored, so
+# it stays here for platform crate builds; `targets/meditamer-inkplate`,
+# being its own separate implicit workspace, carries an identical copy of
+# what it needs.
+
+[patch.crates-io]
+proc-macro-error2 = { path = "vendor/proc-macro-error2-2.0.1-public-proc-macro" }
+trouble-host = { path = "vendor/trouble-host-0.8.0-restartable" }
+embassy-net = { path = "vendor/embassy-net-0.9.1-restartable" }
+esp-alloc = { path = "vendor/esp-alloc-0.11.0-provenance" }
+esp-backtrace = { path = "vendor/esp-backtrace-0.20.0-custom-pre-backtrace-info" }
+esp-radio = { path = "vendor/esp-radio-1.0.0-beta.1-bounded" }
+esp-radio-rtos-driver = { path = "vendor/esp-radio-rtos-driver-0.4.2-retained" }
+esp-rtos = { path = "vendor/esp-rtos-0.4.0-context-probe" }

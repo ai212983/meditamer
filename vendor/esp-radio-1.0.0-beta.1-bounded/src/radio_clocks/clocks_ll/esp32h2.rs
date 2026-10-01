@@ -1,0 +1,89 @@
+fn ble_ieee802154_clock_enable(en: bool) {
+    regs!(MODEM_SYSCON).clk_conf().modify(|_, w| {
+        w.clk_zb_apb_en().bit(en);
+        w.clk_zb_mac_en().bit(en);
+        // Modem security engine (AES-ECB/CCM) clocks — required by the BLE
+        // controller's hardware `r_ble_hw_encrypt_block` for link-layer
+        // encryption, and by 802.15.4 frame security. Mirrors esp32c6.
+        w.clk_etm_en().bit(en);
+        w.clk_modem_sec_en().bit(en);
+        w.clk_modem_sec_ecb_en().bit(en);
+        w.clk_modem_sec_ccm_en().bit(en);
+        w.clk_modem_sec_bah_en().bit(en);
+        w.clk_modem_sec_apb_en().bit(en);
+        w.clk_ble_timer_en().bit(en)
+    });
+
+    regs!(MODEM_SYSCON).clk_conf1().modify(|_, w| {
+        w.clk_bt_apb_en().bit(en);
+        w.clk_bt_en().bit(en);
+        w.clk_fe_16m_en().bit(en);
+        w.clk_fe_32m_en().bit(en);
+        w.clk_fe_adc_en().bit(en);
+        w.clk_fe_apb_en().bit(en);
+        w.clk_fe_sdm_en().bit(en)
+    });
+
+    regs!(MODEM_LPCON)
+        .clk_conf()
+        .modify(|_, w| w.clk_coex_en().bit(en));
+}
+
+pub(crate) fn enable_bt(en: bool) {
+    ble_ieee802154_clock_enable(en);
+}
+
+pub(crate) fn enable_ieee802154(en: bool) {
+    ble_ieee802154_clock_enable(en);
+}
+
+pub(crate) fn init_clocks() {
+    let pmu = regs!(PMU);
+
+    pmu.hp_sleep_icg_modem()
+        .modify(|_, w| unsafe { w.hp_sleep_dig_icg_modem_code().bits(0) });
+    pmu.hp_modem_icg_modem()
+        .modify(|_, w| unsafe { w.hp_modem_dig_icg_modem_code().bits(1) });
+    pmu.hp_active_icg_modem()
+        .modify(|_, w| unsafe { w.hp_active_dig_icg_modem_code().bits(2) });
+    pmu.imm_modem_icg()
+        .write(|w| w.update_dig_icg_modem_en().set_bit());
+    pmu.imm_sleep_sysclk()
+        .write(|w| w.update_dig_icg_switch().set_bit());
+
+    regs!(MODEM_LPCON).clk_conf().modify(|_, w| {
+        w.clk_i2c_mst_en().set_bit();
+        w.clk_coex_en().set_bit();
+        w.clk_fe_mem_en().set_bit()
+    });
+}
+
+pub(crate) fn deinit_clocks() {
+    let pmu = regs!(PMU);
+
+    // Restore ESP-IDF's `pmu_init` defaults for the modem clock-gating codes
+    // (`PMU_HP_*_CLOCK_CONFIG_DEFAULT` in `pmu_param.c`): IDF configures them
+    // once at startup and does not touch them on radio deinit.
+    pmu.hp_sleep_icg_modem()
+        .modify(|_, w| unsafe { w.hp_sleep_dig_icg_modem_code().bits(2) });
+    pmu.hp_modem_icg_modem()
+        .modify(|_, w| unsafe { w.hp_modem_dig_icg_modem_code().bits(0) });
+    pmu.hp_active_icg_modem()
+        .modify(|_, w| unsafe { w.hp_active_dig_icg_modem_code().bits(0) });
+    pmu.imm_modem_icg()
+        .write(|w| w.update_dig_icg_modem_en().set_bit());
+
+    regs!(MODEM_LPCON).clk_conf().modify(|_, w| {
+        w.clk_i2c_mst_en().clear_bit();
+        w.clk_coex_en().clear_bit();
+        w.clk_fe_mem_en().clear_bit()
+    });
+}
+
+pub(crate) fn ble_rtc_clk_init() {
+    // nothing for this target (yet)
+}
+
+pub(crate) fn reset_rpa() {
+    // nothing for this target (yet)
+}

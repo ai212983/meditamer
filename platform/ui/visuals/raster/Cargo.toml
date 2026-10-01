@@ -1,0 +1,37 @@
+[package]
+name = "raster"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# The one-bit destination `enso`, `flipclock` and `hourglass` draw into, and the
+# ordered-dither thresholds that resolve continuous coverage onto it.
+#
+# Scoped by what those three genuinely share, which turned out to be less than
+# it first appeared: `flipclock` and `hourglass` are entirely integer, with
+# their own fixed-point trig tables and their own spatial hashes. So a seeded
+# PRNG and float helpers live in `enso`, their only consumer, and move up here
+# if a second one ever appears. What all three do share is a canvas and the
+# hardware constraint on how tone reaches it.
+#
+# The dither module is behind the `dither` feature for the same reason: it is
+# the one part of this crate that needs `libm`, and `flipclock`/`hourglass`
+# never dither -- both are entirely integer -- so the default build stays
+# float-free for them. `enso`, the one consumer that resolves continuous
+# coverage onto this canvas, enables the feature explicitly.
+#
+# Deliberately no trait spanning the three. A stepped cellular automaton, a
+# keyframed card flip and a monotone brush stroke have different temporal
+# contracts, and one trait over them would describe all three worse than the
+# three separate APIs do.
+
+[features]
+default = []
+dither = ["dep:libm"]
+
+[dependencies]
+# For `floorf` in the gradient-noise hash. Already in the workspace lockfile, and
+# a pure-software implementation, so host and device agree bit for bit -- which
+# is exactly why a hand-rolled substitute would be a step backwards. Optional:
+# only the `dither` feature's gradient-noise mode needs it.
+libm = { version = "0.2.16", default-features = false, optional = true }

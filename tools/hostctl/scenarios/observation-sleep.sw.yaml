@@ -1,0 +1,90 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "observation-sleep"
+  version: "1.0.0"
+do:
+  - qualify:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - periodic_gate:
+            switch:
+              - armed:
+                  when: ".periodic == true"
+                  then: "start_environment"
+              - default:
+                  then: "submit"
+        - start_environment:
+            call: "start_periodic"
+            with:
+              provider: 1
+        - await_environment:
+            call: "await_periodic"
+            with:
+              provider: 1
+        - start_battery:
+            call: "start_periodic"
+            with:
+              provider: 2
+        - await_battery:
+            call: "await_periodic"
+            with:
+              provider: 2
+        - submit:
+            call: "submit"
+        - await_transition:
+            call: "await_transition"
+        - mode_gate:
+            switch:
+              - deep:
+                  when: ".deep == true"
+                  then: "disconnect"
+              - default:
+                  then: "await_recovery"
+        - disconnect:
+            call: "disconnect"
+        - check_disconnected:
+            call: "check_disconnected"
+        - disconnected_gate:
+            switch:
+              - gone:
+                  when: ".disconnected == true"
+                  then: "reconnect_once"
+              - default:
+                  then: "wait_disconnect"
+        - wait_disconnect:
+            call: "poll_interval"
+            then: "check_disconnected"
+        - reconnect_once:
+            call: "reconnect_once"
+        - connected_gate:
+            switch:
+              - connected:
+                  when: ".connected == true"
+                  then: "await_recovery"
+              - default:
+                  then: "wait_reconnect"
+        - wait_reconnect:
+            call: "poll_interval"
+            then: "reconnect_once"
+        - await_recovery:
+            call: "await_recovery"
+        - passed:
+            set:
+              passed: true
+      catch:
+        as: "error"
+      then: "write_report"
+  - write_report:
+      call: "write_report"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".passed == true"
+            then: "__end__"
+        - default:
+            then: "fail"
+  - fail:
+      call: "fail"

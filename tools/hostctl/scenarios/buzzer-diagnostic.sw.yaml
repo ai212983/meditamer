@@ -1,0 +1,101 @@
+# Buzzer diagnostic playback orchestration (docs/plans/inkplate-buzzer-firmware.md).
+# Captures the intended measurement flow so the diagnostic image and
+# its hostctl primitive actions can land underneath it without reshaping the
+# orchestration.
+#
+# STATUS: pending. Requires the diagnostic firmware image (bounded BUZZ
+# operations over the serial service pattern) and the matching hostctl
+# primitive actions (`check_buzz_ready`, `submit_buzz_op`, `await_buzz_trace`,
+# `assert_buzz_trace`, `capture_buzz_audio`). Do not run before both exist;
+# the engine will reject the unknown calls.
+#
+# Session order follows the plan's early feasibility probe: steady pitch at
+# codes 0, 5, 63, 127 plus mapped requests; power-on delay, default pitch,
+# first write, power-off tail, and code restoration after short and long
+# rests; powered two-tone switching at 50/100/200/400 updates per second
+# (no power cycling inside pitch switches); stop and recoverable-fault
+# behavior. Each step records board identity/revision, build, settings, and
+# artifact paths; gain and geometry stay fixed with AGC disabled.
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "buzzer-diagnostic"
+  version: "1.0.0"
+do:
+  - run_session:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - readiness_gate:
+            switch:
+              - live_pong:
+                  when: ".ping_confirmed == true"
+                  then: "confirm_buzz_ready"
+              - default:
+                  then: "confirm_ready"
+        - confirm_ready:
+            call: "confirm_ready"
+        - confirm_buzz_ready:
+            call: "check_buzz_ready"
+        - steady_codes:
+            call: "submit_buzz_op"
+            metadata:
+              hostctl:
+                op: "sweep"
+                from_code: 0
+                to_code: 127
+                dwell_ms: 250
+        - await_steady:
+            call: "await_buzz_trace"
+        - assert_steady:
+            call: "assert_buzz_trace"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - power_cycle_probe:
+            call: "submit_buzz_op"
+            metadata:
+              hostctl:
+                op: "power_cycle_sequence"
+                rests_ms: [20, 200, 2000]
+        - await_power_cycle:
+            call: "await_buzz_trace"
+        - switching_rates:
+            call: "submit_buzz_op"
+            metadata:
+              hostctl:
+                op: "switching_rates"
+                rates_per_second: [50, 100, 200, 400]
+        - await_switching:
+            call: "await_buzz_trace"
+        - stop_probe:
+            call: "submit_buzz_op"
+            metadata:
+              hostctl:
+                op: "stop"
+        - await_stop:
+            call: "await_buzz_trace"
+        - capture_audio:
+            call: "capture_buzz_audio"
+        - mark_passed:
+            set:
+              buzz_passed: true
+      catch:
+        as: "buzz_error"
+      then: "write_report"
+  - write_report:
+      call: "write_report"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".buzz_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_fixture"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_fixture:
+      call: "fail_fixture"

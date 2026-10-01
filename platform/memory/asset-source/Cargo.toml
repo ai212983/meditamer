@@ -1,0 +1,16 @@
+[package]
+name = "asset-source"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+# Generic checked read/borrow access core for bulk asset bytes: a read-only
+# random-access contract over one logical byte string plus contiguous-slice
+# and fragmented-span adapters. no_std with no dependencies. No backing
+# bytes are allocated here; adapters borrow caller-owned memory. Policy
+# integration (handles, leases, generations), codecs, format metadata, SD,
+# caches, writes, and prefetch are all deferred to other crates.
+
+[lib]
+name = "asset_source"

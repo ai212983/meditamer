@@ -1,0 +1,28 @@
+//! # Inter-Integrated Circuit (I2C)
+//!
+//! I2C is a serial, synchronous, multi-device, half-duplex communication
+//! protocol that allows co-existence of multiple masters and slaves on the
+//! same bus. I2C uses two bidirectional open-drain lines: serial data line
+//! (SDA) and serial clock line (SCL), pulled up by resistors.
+//!
+//! For more information, see
+#![doc = crate::trm_markdown_link!("i2c")]
+
+#[cfg(i2c_master_driver_supported)]
+pub mod master;
+
+crate::unstable_driver! {
+    #[cfg(i2c_slave_driver_supported)]
+    pub mod slave;
+
+    #[cfg(lp_i2c_master_driver_supported)]
+    pub mod lp_i2c;
+}
+
+#[cfg_attr(i2c_master_version = "1", path = "clocks/v1.rs")]
+#[cfg_attr(i2c_master_version = "2", path = "clocks/v2.rs")]
+#[cfg_attr(i2c_master_version = "3", path = "clocks/v3.rs")]
+#[cfg_attr(soc_has_pcr, path = "clocks/v4_pcr.rs")]
+#[cfg_attr(esp32p4, path = "clocks/v4_esp32p4.rs")]
+#[cfg_attr(esp32s31, path = "clocks/v4_esp32s31.rs")]
+mod clocks;

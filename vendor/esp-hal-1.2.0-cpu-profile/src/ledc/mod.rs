@@ -1,0 +1,155 @@
+#![cfg_attr(docsrs, procmacros::doc_replace)]
+//! # LED Controller (LEDC)
+//!
+//! ## Overview
+//!
+//! The LEDC peripheral is primarily designed to control the intensity of LEDs,
+//! although it can also be used to generate PWM signals for other purposes. It
+//! has multiple channels which can generate independent waveforms that can be
+//! used, for example, to drive RGB LED devices.
+//!
+//! The PWM controller can automatically increase or decrease the duty cycle
+//! gradually, allowing for fades without any processor interference.
+//!
+//! ## Configuration
+//! Currently only supports fixed-frequency output. High Speed channels are
+//! available for the ESP32 only, while Low Speed channels are available for all
+//! supported chips.
+//!
+//! ## Examples
+//!
+//! ### Low Speed Channel
+//!
+//! The following example will configure the Low Speed Channel0 to 24 kHz output
+//! with 10% duty using the ABPClock and turn on LED with the option to change
+//! LED intensity depending on `duty` value. Possible values (`u32`) are in
+//! range 0..100.
+//!
+//! ```rust, no_run
+//! # {before_snippet}
+//! # use esp_hal::ledc::Ledc;
+//! # use esp_hal::ledc::LSGlobalClkSource;
+//! # use esp_hal::ledc::timer::{self, TimerIFace};
+//! # use esp_hal::ledc::LowSpeed;
+//! # use esp_hal::ledc::channel::{self, ChannelIFace};
+//! # use esp_hal::gpio::DriveMode;
+//! # let led = peripherals.GPIO0;
+//!
+//! let mut ledc = Ledc::new(peripherals.LEDC);
+//! ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
+//!
+//! let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
+//! lstimer0.configure(timer::config::Config {
+//!     duty: timer::config::Duty::Duty5Bit,
+//!     clock_source: timer::LSClockSource::APBClk,
+//!     frequency: Rate::from_khz(24),
+//! })?;
+//!
+//! let mut channel0 = ledc.channel(channel::Number::Channel0, led);
+//! channel0.configure(channel::config::Config {
+//!     timer: &lstimer0,
+//!     duty_pct: 10,
+//!     drive_mode: DriveMode::PushPull,
+//! })?;
+//!
+//! loop {
+//!     // Set up a breathing LED: fade from off to on over a second, then
+//!     // from on back off over the next second.  Then loop.
+//!     channel0.start_duty_fade(0, 100, 1000)?;
+//!     while channel0.is_duty_fade_running() {}
+//!     channel0.start_duty_fade(100, 0, 1000)?;
+//!     while channel0.is_duty_fade_running() {}
+//! }
+//! # }
+//! ```
+//!
+//! ## Implementation State
+//! - Source clock selection is not supported
+//! - Interrupts are not supported
+
+use self::{
+    channel::Channel,
+    timer::{Timer, TimerSpeed},
+};
+use crate::{
+    gpio::interconnect::PeripheralOutput,
+    pac,
+    peripherals::LEDC,
+    system::{Peripheral as PeripheralEnable, PeripheralClockControl},
+};
+
+pub mod channel;
+mod low_level;
+pub mod timer;
+
+/// Global slow clock source
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum LSGlobalClkSource {
+    /// APB clock.
+    APBClk,
+}
+
+/// LEDC (LED PWM Controller)
+pub struct Ledc<'d> {
+    _instance: LEDC<'d>,
+    ledc: &'d pac::ledc::RegisterBlock,
+}
+
+#[cfg(ledc_version = "1")]
+#[derive(Clone, Copy)]
+/// Used to specify HighSpeed Timer/Channel
+pub struct HighSpeed {}
+
+#[derive(Clone, Copy)]
+/// Used to specify LowSpeed Timer/Channel
+pub struct LowSpeed {}
+
+/// Trait representing the speed mode of a clock or peripheral.
+pub trait Speed {
+    /// Boolean constant indicating whether the speed is high-speed.
+    const IS_HS: bool;
+}
+
+#[cfg(ledc_version = "1")]
+impl Speed for HighSpeed {
+    const IS_HS: bool = true;
+}
+
+impl Speed for LowSpeed {
+    const IS_HS: bool = false;
+}
+
+impl<'d> Ledc<'d> {
+    /// Returns a new LEDC.
+    pub fn new(_instance: LEDC<'d>) -> Self {
+        if PeripheralClockControl::enable(PeripheralEnable::Ledc) {
+            PeripheralClockControl::reset(PeripheralEnable::Ledc);
+        } else {
+            // Refcount was more than 0. Decrement to avoid overflow because we don't handle
+            // dropping the driver.
+            PeripheralClockControl::disable(PeripheralEnable::Ledc);
+        }
+
+        let ledc = LEDC::regs();
+        Ledc { _instance, ledc }
+    }
+
+    /// Sets global slow clock source.
+    pub fn set_global_slow_clock(&mut self, clock_source: LSGlobalClkSource) {
+        low_level::set_global_slow_clock(self.ledc, clock_source);
+    }
+
+    /// Returns a new timer.
+    pub fn timer<S: TimerSpeed>(&self, number: timer::Number) -> Timer<'d, S> {
+        Timer::new(self.ledc, number)
+    }
+
+    /// Returns a new channel.
+    pub fn channel<S: TimerSpeed>(
+        &self,
+        number: channel::Number,
+        output_pin: impl PeripheralOutput<'d>,
+    ) -> Channel<'d, S> {
+        Channel::new(number, output_pin)
+    }
+}

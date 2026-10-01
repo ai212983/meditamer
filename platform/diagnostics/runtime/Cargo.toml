@@ -1,0 +1,16 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Shared log-domain filtering (product/target axis completion plan, Phase 4).
+#
+# Network diagnostics (`platform/connectivity/netstack`) and product diagnostics (SD, HTTP
+# body handling) share one mask and one set of domain bits so a single serial
+# `TELEM`/`TELEMSET` command surface controls both, instead of each owning a
+# private copy that a caller has to know to keep in sync. No dependencies:
+# this is plain atomics and constants, `no_std`, buildable on host.
+[lib]
+
+[dependencies]

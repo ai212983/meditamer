@@ -1,0 +1,253 @@
+# esp-hal
+
+[![Crates.io](https://img.shields.io/crates/v/esp-hal?labelColor=1C2C2E&color=C96329&logo=Rust&style=flat-square)](https://crates.io/crates/esp-hal)
+[![docs.rs](https://img.shields.io/docsrs/esp-hal?labelColor=1C2C2E&color=C96329&logo=rust&style=flat-square)](https://docs.espressif.com/projects/rust/esp-hal/latest/)
+![MSRV](https://img.shields.io/badge/MSRV-1.95.0-blue?labelColor=1C2C2E&style=flat-square)
+![Crates.io](https://img.shields.io/crates/l/esp-hal?labelColor=1C2C2E&style=flat-square)
+[![Matrix](https://img.shields.io/matrix/esp-rs:matrix.org?label=join%20matrix&labelColor=1C2C2E&color=BEC5C9&logo=matrix&style=flat-square)](https://matrix.to/#/#esp-rs:matrix.org)
+
+Bare-metal (`no_std`) hardware abstraction layer for Espressif devices.
+
+Implements a number of blocking and, where applicable, async traits from the various packages in the [embedded-hal] repository.
+
+For help getting started with this HAL, please refer to [The Rust on ESP Book] and the [documentation].
+
+[embedded-hal]: https://github.com/rust-embedded/embedded-hal
+[the rust on esp book]: https://docs.espressif.com/projects/rust/book/
+
+## [Documentation]
+
+[documentation]: https://docs.espressif.com/projects/rust/
+
+## Supported Devices
+
+<!-- The following table is machine generated. Do not edit the comments and the table by hand! -->
+<!-- start supported devices table -->
+| Chip  | Documentation | Target | Note  |
+| :---: | :-----------: | :----: | :---: |
+| ESP32 | [Datasheet][esp32-datasheet] [TRM][esp32-trm] | `xtensa-esp32-none-elf` | Revisions below v3.0 are not supported. |
+| ESP32-C2 | [Datasheet][esp32c2-datasheet] [TRM][esp32c2-trm] | `riscv32imc-unknown-none-elf` |  |
+| ESP32-C3 | [Datasheet][esp32c3-datasheet] [TRM][esp32c3-trm] | `riscv32imc-unknown-none-elf` |  |
+| ESP32-C5 | [Datasheet][esp32c5-datasheet] [TRM][esp32c5-trm] | `riscv32imac-unknown-none-elf` |  |
+| ESP32-C6 | [Datasheet][esp32c6-datasheet] [TRM][esp32c6-trm] | `riscv32imac-unknown-none-elf` |  |
+| ESP32-C61 | [Datasheet][esp32c61-datasheet] [TRM][esp32c61-trm] | `riscv32imac-unknown-none-elf` |  |
+| ESP32-H2 | [Datasheet][esp32h2-datasheet] [TRM][esp32h2-trm] | `riscv32imac-unknown-none-elf` |  |
+| ESP32-P4 | [Datasheet][esp32p4-datasheet] [TRM][esp32p4-trm] | `riscv32imafc-unknown-none-elf` | Revisions below v3.0 are not supported. |
+| ESP32-S2 | [Datasheet][esp32s2-datasheet] [TRM][esp32s2-trm] | `xtensa-esp32s2-none-elf` |  |
+| ESP32-S3 | [Datasheet][esp32s3-datasheet] [TRM][esp32s3-trm] | `xtensa-esp32s3-none-elf` |  |
+| ESP32-S31 | [Datasheet][esp32s31-datasheet] [TRM][esp32s31-trm] | `riscv32imafc-unknown-none-elf` | In early stages of development. |
+
+[esp32-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32_datasheet_en.pdf
+[esp32-trm]: https://www.espressif.com/sites/default/files/documentation/esp32_technical_reference_manual_en.pdf
+[esp32c2-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp8684_datasheet_en.pdf
+[esp32c2-trm]: https://www.espressif.com/sites/default/files/documentation/esp8684_technical_reference_manual_en.pdf
+[esp32c3-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-c3_datasheet_en.pdf
+[esp32c3-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-c3_technical_reference_manual_en.pdf
+[esp32c5-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-c5_datasheet_en.pdf
+[esp32c5-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-c5_technical_reference_manual_en.pdf
+[esp32c6-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-c6_datasheet_en.pdf
+[esp32c6-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-c6_technical_reference_manual_en.pdf
+[esp32c61-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-c61_datasheet_en.pdf
+[esp32c61-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-c61_technical_reference_manual_en.pdf
+[esp32h2-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-h2_datasheet_en.pdf
+[esp32h2-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-h2_technical_reference_manual_en.pdf
+[esp32p4-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-p4_datasheet_en.pdf
+[esp32p4-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-p4_technical_reference_manual_en.pdf
+[esp32s2-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-s2_datasheet_en.pdf
+[esp32s2-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-s2_technical_reference_manual_en.pdf
+[esp32s3-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-s3_datasheet_en.pdf
+[esp32s3-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf
+[esp32s31-datasheet]: https://www.espressif.com/sites/default/files/documentation/esp32-s31_datasheet_en.pdf
+[esp32s31-trm]: https://www.espressif.com/sites/default/files/documentation/esp32-s31_technical_reference_manual_en.pdf
+<!-- end supported devices table -->
+
+## Peripheral support
+
+<!-- The following table is machine generated. Do not edit the comments and the table by hand! -->
+<!-- start chip support table -->
+ * Empty cell: Not available
+ * ❌: Not supported
+ * ⚒️: Partial support
+ * ✔️: Supported
+
+### GPIO
+
+| Driver         | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| -------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| GPIO           | ✔️   | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       |
+| Dedicated GPIO |       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| IOMUX          | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| LP IO          | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ❌        |
+
+### Serial interfaces
+
+| Driver          | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| --------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| UART            | [✔️][6138] [^1] | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       |
+| LP UART         |       |          |          | [❌][5155] [^1] | ⚒️      |           |          | ❌       |          |          | ❌        |
+| UHCI            | ❌    |          | ⚒️      | ⚒️      | ⚒️      |           | ⚒️      | ⚒️      | ❌       | ⚒️      | ⚒️       |
+| I2C master      | ✔️   | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       |
+| LP I2C master   | ❌    |          |          | ⚒️      | ⚒️      |           |          | ⚒️      | ❌       | ⚒️      | ❌        |
+| I2C slave       | [❌][1909] [^1] |          | ⚒️      | [❌][1909] [^1] | ⚒️      | [❌][1909] [^1] | [❌][1909] [^1] | ❌       | [❌][1909] [^1] | [❌][1909] [^1] | ❌        |
+| I3C master      |       |          |          |          |          |           |          | ❌       |          |          |           |
+| I3C slave       |       |          |          |          |          |           |          | ❌       |          |          |           |
+| SPI master      | ✔️   | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       | ✔️      | ✔️      | ✔️      | ✔️      | ✔️       |
+| SPI slave       | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| LP SPI master   |       |          |          |          |          |           |          | ❌       |          |          |           |
+| LP SPI slave    |       |          |          |          |          |           |          | ❌       |          |          |           |
+| I2S             | ⚒️   |          | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ❌        |
+| LP I2S          |       |          |          |          |          |           |          | ❌       |          |          |           |
+| PARL_IO         |       |          |          | ⚒️      | ⚒️      |           | ⚒️      | ❌       |          |          | ❌        |
+| RMT             | ⚒️   |          | ⚒️      | ⚒️      | ⚒️      |           | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| SDMMC/SDIO host | ⚒️   |          |          |          |          |           |          | ⚒️      |          | ⚒️      | ⚒️       |
+| SDIO slave      | ❌    |          |          | [❌][5169] [^1] | ❌       | [❌][5417] [^1] |          |          |          |          |           |
+| TWAI            | ⚒️   |          | ⚒️      |          | ⚒️      |           | ⚒️      | ❌       | ⚒️      | ⚒️      |           |
+| CANFD           |       |          |          | [❌][5163] [^1] |          |           |          |          |          |          | ❌        |
+| USB OTG FS      |       |          |          |          |          |           |          | ⚒️      | ⚒️      | ⚒️      |           |
+| USB OTG HS      |       |          |          |          |          |           |          | ⚒️      |          |          | ⚒️       |
+| USB Serial/JTAG |       |          | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      |          | ⚒️      | ⚒️       |
+
+### Wireless and networking
+
+| Driver        | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| Bluetooth     | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      |          |          | ⚒️      | ❌        |
+| WIFI          | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |          |          | ⚒️      | ⚒️      | ❌        |
+| IEEE 802.15.4 |       |          |          | ⚒️      | ⚒️      |           | ⚒️      |          |          |          | ❌        |
+| Ethernet      | ⚒️   |          |          |          |          |           |          | ⚒️      |          |          | ❌        |
+
+### Display and camera
+
+| Driver            | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ----------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| Camera interface  | ❌    |          |          |          |          |           |          | ❌       | ❌       | ⚒️      | ❌        |
+| MIPI-CSI          |       |          |          |          |          |           |          | ❌       |          |          |           |
+| MIPI-DSI          |       |          |          |          |          |           |          | ⚒️      |          |          |           |
+| RGB display       | ⚒️   |          |          |          |          |           |          | ❌       | ❌       | ⚒️      | ❌        |
+| SPI LCD interface |       |          |          |          |          |           |          |          | [❌][5374] [^1] |          |           |
+
+### Signal processing
+
+| Driver                       | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ---------------------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| Bit Scrambler                |       |          |          | [❌][5170] [^1] |          |           |          | ❌       |          |          | ❌        |
+| Image Signal Processor       |       |          |          |          |          |           |          | ❌       |          |          |           |
+| Pixel Processing Accelerator |       |          |          |          |          |           |          | ❌       |          |          | ❌        |
+| JPEG Codec                   |       |          |          |          |          |           |          | ❌       |          |          | ❌        |
+| H.264 encoder                |       |          |          |          |          |           |          | ❌       |          |          |           |
+| Audio Sample Rate Converter  |       |          |          |          |          |           |          |          |          |          | ❌        |
+| CORDIC accelerator           |       |          |          |          |          |           |          |          |          |          | ❌        |
+| Voice Activity Detection     |       |          |          |          |          |           |          | ❌       |          |          |           |
+
+### Analog
+
+| Driver                    | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ------------------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| ADC                       | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| Analog Voltage Comparator |       |          |          | [❌][5168] [^1] |          | [❌][5423] [^1] | ❌       | ❌       |          |          | ❌        |
+| DAC                       | ⚒️   |          |          |          |          |           |          |          | ⚒️      |          | ❌        |
+| Temperature sensor        | ⚒️   | ⚒️      | ⚒️      | [❌][5153] [^1] | ⚒️      | [❌][5421] [^1] | ⚒️      | ❌       | ⚒️      | ⚒️      | ❌        |
+| Touch                     | ⚒️   |          |          | [❌][5164] [^1] |          |           |          | ❌       | [❌][1905] [^1] | [❌][1905] [^1] | ❌        |
+
+### Timers and motor control
+
+| Driver          | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| --------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| LEDC            | ⚒️   | ⚒️      | ⚒️      | [❌][5161] [^1] | ⚒️      | [❌][5418] [^1] | ⚒️      | ❌       | ⚒️      | ⚒️      | ❌        |
+| MCPWM           | ⚒️   |          |          | [❌][5154] [^1] | ⚒️      |           | ⚒️      | ❌       |          | ⚒️      | ❌        |
+| PCNT            | ⚒️   |          |          | ⚒️      | ⚒️      |           | ⚒️      | ❌       | ⚒️      | ⚒️      | ❌        |
+| RTC Timekeeping | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| SDM             | ⚒️   |          | ⚒️      | ⚒️      | ⚒️      |           | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| SYSTIMER        |       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| Timers          | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+
+### Cryptography and security
+
+| Driver                  | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ----------------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| AES                     | ⚒️   |          | ⚒️      | ⚒️      | ⚒️      |           | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| RSA Digital Signature   |       |          | [❌][884] [^1] | [❌][884] [^1] | [❌][884] [^1] |           | [❌][884] [^1] | ❌       | [❌][884] [^1] | [❌][884] [^1] | ❌        |
+| ECDSA Digital Signature |       |          |          | [❌][5444] [^1] |          | [❌][5444] [^1] | [❌][5444] [^1] | ❌       |          |          | ❌        |
+| ECC                     |       | ⚒️      |          | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      |          |          | [⚒️][5972] [^1] |
+| HMAC                    |       |          | ⚒️      | [❌][5166] [^1] | ⚒️      |           | ⚒️      | ❌       | ⚒️      | ⚒️      | ❌        |
+| Key Manager             |       |          |          | [❌][5171] [^1] |          |           |          | ❌       |          |          | ❌        |
+| RNG                     | [⚒️][5979] [^1] | [⚒️][5979] [^1] | [⚒️][5979] [^1] | [⚒️][5980] [^1] | [⚒️][5979] [^1] | [⚒️][5981] [^1] | [⚒️][5979] [^1] | [⚒️][5982] [^1] | [⚒️][5979] [^1] | [⚒️][5979] [^1] | [⚒️][5977] [^1] |
+| RSA                     | ⚒️   |          | ⚒️      | ⚒️      | ⚒️      |           | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| SHA                     | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | [⚒️][5973] [^1] |
+
+### Low power
+
+| Driver           | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ---------------- |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| Light/deep sleep | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ❌        |
+| ULP (FSM)        | [❌][376] [^1] |          |          |          |          |           |          |          | [❌][376] [^1] | [❌][376] [^1] |           |
+| ULP (RISC-V)     |       |          |          | [❌][5160] [^1] | ⚒️      |           |          | ❌       | ⚒️      | ⚒️      | ❌        |
+
+### System
+
+| Driver       | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 | ESP32-S31 |
+| ------------ |:-----:|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|:--------:|:---------:|
+| ASSIST_DEBUG |       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ❌       |          | ⚒️      | ❌        |
+| DMA          | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| ETM          |       |          |          | [❌][5167] [^1] | ⚒️      | [❌][5419] [^1] | ⚒️      | ❌       |          |          | ❌        |
+| Interrupts   | ⚒️   | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       | ⚒️      | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+| PSRAM        | ⚒️   |          |          | ⚒️      |          | ⚒️       |          | ⚒️      | ⚒️      | ⚒️      | ⚒️       |
+
+[^1]: This cell is clickable and will open the peripheral's issue on GitHub
+
+[376]: https://github.com/esp-rs/esp-hal/issues/376
+[884]: https://github.com/esp-rs/esp-hal/issues/884
+[1905]: https://github.com/esp-rs/esp-hal/issues/1905
+[1909]: https://github.com/esp-rs/esp-hal/issues/1909
+[5153]: https://github.com/esp-rs/esp-hal/issues/5153
+[5154]: https://github.com/esp-rs/esp-hal/issues/5154
+[5155]: https://github.com/esp-rs/esp-hal/issues/5155
+[5160]: https://github.com/esp-rs/esp-hal/issues/5160
+[5161]: https://github.com/esp-rs/esp-hal/issues/5161
+[5163]: https://github.com/esp-rs/esp-hal/issues/5163
+[5164]: https://github.com/esp-rs/esp-hal/issues/5164
+[5166]: https://github.com/esp-rs/esp-hal/issues/5166
+[5167]: https://github.com/esp-rs/esp-hal/issues/5167
+[5168]: https://github.com/esp-rs/esp-hal/issues/5168
+[5169]: https://github.com/esp-rs/esp-hal/issues/5169
+[5170]: https://github.com/esp-rs/esp-hal/issues/5170
+[5171]: https://github.com/esp-rs/esp-hal/issues/5171
+[5374]: https://github.com/esp-rs/esp-hal/issues/5374
+[5417]: https://github.com/esp-rs/esp-hal/issues/5417
+[5418]: https://github.com/esp-rs/esp-hal/issues/5418
+[5419]: https://github.com/esp-rs/esp-hal/issues/5419
+[5421]: https://github.com/esp-rs/esp-hal/issues/5421
+[5423]: https://github.com/esp-rs/esp-hal/issues/5423
+[5444]: https://github.com/esp-rs/esp-hal/issues/5444
+[5972]: https://github.com/esp-rs/esp-hal/issues/5972
+[5973]: https://github.com/esp-rs/esp-hal/issues/5973
+[5977]: https://github.com/esp-rs/esp-hal/issues/5977
+[5979]: https://github.com/esp-rs/esp-hal/issues/5979
+[5980]: https://github.com/esp-rs/esp-hal/issues/5980
+[5981]: https://github.com/esp-rs/esp-hal/issues/5981
+[5982]: https://github.com/esp-rs/esp-hal/issues/5982
+[6138]: https://github.com/esp-rs/esp-hal/issues/6138
+<!-- end chip support table -->
+
+## `unstable` feature
+
+The stable feature set is designed to remain consistent and reliable. Other parts guarded by the `unstable` feature, however, are still under active development and may undergo breaking changes and are disabled by default.
+
+## Minimum Supported Rust Version (MSRV)
+
+This crate is guaranteed to compile when using the latest stable Rust version at the time of the crate's release. It _might_ compile with older versions, but that may change in any new release, including patches.
+
+## License
+
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](../LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](../LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without
+any additional terms or conditions.

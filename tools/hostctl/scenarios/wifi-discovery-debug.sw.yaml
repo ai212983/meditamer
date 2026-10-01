@@ -1,0 +1,72 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "wifi-discovery-debug"
+  version: "1.0.0"
+do:
+  - discovery:
+      try:
+        - start_run:
+            call: "start_run"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - enable_upload:
+            call: "state_command"
+            with:
+              command: "STATE SET upload=on"
+        - clear_diagnostics:
+            call: "state_command"
+            with:
+              command: "STATE DIAG kind=NONE targets=NONE"
+        - net_apply_config:
+            call: "net_apply_config"
+        - round_loop:
+            do:
+              - probe_round:
+                  call: "probe_round"
+                  metadata:
+                    hostctl:
+                      result:
+                        merge: true
+            metadata:
+              hostctl:
+                repeat:
+                  in: ".rounds"
+                  at: "round_index"
+        - evaluate_results:
+            call: "evaluate_results"
+            metadata:
+              hostctl:
+                result:
+                  merge: true
+        - print_summary:
+            call: "print_summary"
+      catch:
+        as: "discovery_error"
+      then: "capture_gate"
+  - capture_gate:
+      switch:
+        - retain_reset:
+            when: "present(.discovery_error) && .retain_reset_capture_secs > 0"
+            then: "capture_reset_trace"
+        - default:
+            then: "result_gate"
+  - capture_reset_trace:
+      call: "capture_reset_trace"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - error:
+            when: "present(.discovery_error)"
+            then: "fail_captured"
+        - fail:
+            when: ".run_passed != true"
+            then: "fail_run"
+        - default:
+            then: "__end__"
+  - fail_captured:
+      call: "fail_captured"
+  - fail_run:
+      call: "fail_run"

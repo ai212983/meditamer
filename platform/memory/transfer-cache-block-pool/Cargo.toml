@@ -1,0 +1,19 @@
+[package]
+name = "transfer-cache-block-pool"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+
+# Fixed-block host core for the transfer cache: bitmap slots with
+# epoch-checked handles, staged prepare/commit through the
+# residency-policy participant contract, and release with permanent
+# retirement at the maximum epoch. no_std with one dependency
+# (residency-policy). No backing bytes live here; the caller maps
+# committed block handles onto its own store.
+
+[lib]
+name = "transfer_cache_block_pool"
+
+[dependencies]
+residency-policy = { path = "../residency-policy" }

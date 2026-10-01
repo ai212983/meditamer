@@ -1,0 +1,249 @@
+[package]
+name = "medinote-waveshare"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Medinote + Waveshare firmware. This target stays outside the root workspace
+# because it uses `xtensa-esp32s3-none-elf` and target-specific environment
+# values. It composes the board and product crates and owns chip startup,
+# peripheral wiring, and task spawning.
+[[bin]]
+name = "medinote-waveshare"
+path = "src/main.rs"
+test = false
+harness = false
+
+# Shared BLE runtime and roles plan, Phase 1
+# (docs/plans/ble/README.md): proves the reviewed
+# vendor BLE controller source builds and survives one start/stop cycle on
+# this chip through `platform/connectivity/ble`, before scanning, GATT, or HID land in
+# later phases. A separate release artifact for the same reason
+# `targets/meditamer-inkplate`'s identically named binary is -- it stays out
+# of a plain `cargo build` and out of the default feature set, and it has no
+# LVGL/panel/sensor weight to carry.
+[[bin]]
+name = "ble-shared-runtime-probe"
+path = "src/bin/ble_shared_runtime_probe.rs"
+test = false
+harness = false
+required-features = ["shared-ble-runtime"]
+
+# Shared BLE runtime and roles plan, Phase 3: real scanning against actual
+# advertising traffic through `platform/connectivity/ble`'s `run_live_scan` -- two
+# sequential fixed windows with a restart between them, a bounded result
+# set, and recognition of one chosen device by address if
+# `SCAN_TARGET_ADDRESS` is set at build time. Separate from
+# `ble-shared-runtime-probe` for the same reason that binary is separate
+# from `ble-foundation`'s probe: distinct build/serial evidence.
+[[bin]]
+name = "ble-scan-probe"
+path = "src/bin/ble_scan_probe.rs"
+test = false
+harness = false
+required-features = ["shared-ble-runtime"]
+
+# Shared BLE runtime and roles plan, Phase 4: real central connection to a
+# user-designated device through `platform/connectivity/ble`'s `run_live_connect` --
+# name scan, connect, GATT client MTU exchange, service/characteristic
+# discovery, one read, disconnect.
+[[bin]]
+name = "ble-connect-probe"
+path = "src/bin/ble_connect_probe.rs"
+test = false
+harness = false
+required-features = ["shared-ble-runtime"]
+
+# Shared BLE runtime and roles plan, Phase 4 increment 6: the fake client
+# ("Test the server with a fake client, then a phone or computer") --
+# `platform/connectivity/ble`'s `run_diagnostic_client` against ADR-0011's diagnostic
+# peripheral specifically (Build Info read, Echo write/read-back,
+# Lifecycle Status subscribe/notify), not `ble-connect-probe`'s generic
+# any-device connection proof.
+# Settles the ST7305-or-ST7306 question in
+# `docs/references/hardware/waveshare-rlcd42/panel.md` by reading the panel
+# controller's ID registers. Needs no features and no radio: it bit-bangs
+# GPIO11/GPIO12 directly, because reading requires turning SDA around and the
+# product's SPI2 is configured write-only. Separate binary rather than a
+# debug path in the firmware -- it drives the panel pins in a way the product
+# must never do.
+# Font specimen viewer: cycles pre-rendered 1-bit frames of the candidate
+# typefaces so they can be judged on the real glass at the real viewing
+# distance. No required
+# features -- it uses only the panel driver, like `panel-id-probe`.
+[[bin]]
+name = "specimen-probe"
+path = "src/bin/specimen_probe.rs"
+test = false
+harness = false
+
+[[bin]]
+name = "panel-id-probe"
+path = "src/bin/panel_id_probe.rs"
+test = false
+harness = false
+
+[[bin]]
+name = "ble-diagnostic-client-probe"
+path = "src/bin/ble_diagnostic_client_probe.rs"
+test = false
+harness = false
+required-features = ["shared-ble-runtime"]
+
+# Guru-Meditation-screen investigation: can the panel be redrawn from inside
+# the panic handler itself, no reboot? Draws a known pattern, panics on
+# purpose, and re-initialises the panel driver over freshly `unsafe`-stolen
+# peripherals from `esp-backtrace`'s `custom-pre-backtrace` hook. See the
+# binary's module doc for what a pass/fail/hang each mean. Shares the
+# `crash-screen` feature with the production binary's own hook (below) --
+# hardware-confirmed working 2026-09-03.
+[[bin]]
+name = "panic-screen-probe"
+path = "src/bin/panic_screen_probe.rs"
+test = false
+harness = false
+required-features = ["crash-screen"]
+
+[[bin]]
+name = "sd-transport-probe"
+path = "src/bin/sd_transport_probe.rs"
+test = false
+harness = false
+required-features = ["sd-transport-probe"]
+
+[[bin]]
+name = "wifi-probe"
+path = "src/bin/wifi_probe.rs"
+test = false
+bench = false
+required-features = ["wifi-storage"]
+
+[features]
+wifi-storage = ["medinote/network-controls", "sd-storage", "dep:http-upload", "http-upload/asset-upload-http-pipeline", "netstack/ble-foundation", "dep:esp-bootloader-esp-idf", "dep:esp-radio", "dep:netstack", "dep:embassy-net", "dep:esp-alloc", "dep:esp-storage", "dep:embedded-storage", "dep:critical-section", "esp-rtos/esp-radio", "esp-rtos/esp-alloc"]
+default = ["cheertok-controls", "hourglass-block-gravity", "sd-storage"]
+sd-storage = ["dep:sdio", "dep:aligned", "dep:block-device-driver", "dep:sdcard"]
+sd-transport-probe = ["dep:sdio", "dep:aligned", "dep:block-device-driver"]
+# Retained A/B control; the default dependency feature set uses cellular sand.
+hourglass-pbd = ["medinote/hourglass-pbd"]
+# Production arbitrary-angle scheduler. Each shared-phase Margolus block uses
+# one cardinal transition selected from the full local gravity vector.
+hourglass-block-gravity = ["medinote/hourglass-block-gravity"]
+# Phase 6 Medinote integration: the production target composes its BT
+# peripheral with the shared central/HID runtime and the CheerTok product
+# adapter. Kept as a named feature so no-radio baselines remain buildable.
+cheertok-controls = ["shared-ble-runtime"]
+# See the `ble-shared-runtime-probe` binary above. `dep:esp-alloc`: this
+# target has no allocator otherwise (B-003 in the plan's ledger) -- the
+# probe brings up a bare internal-SRAM heap sized only for BLE controller
+# bring-up, not a product-wide budget; see the probe binary's module doc.
+shared-ble-runtime = [
+    "dep:ble",
+    "ble/esp32s3",
+    "ble/central",
+    "dep:esp-alloc",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+]
+# The Guru Meditation crash screen (`src/crash_screen.rs`) and the
+# `panic-screen-probe` binary that validated it both hook esp-backtrace's
+# `custom-pre-backtrace` extension point, which our vendor patch
+# (`vendor/esp-backtrace-0.20.0-custom-pre-backtrace-info/MEDITAMER_PATCH.md`, "Second
+# delta") extends to pass `&PanicInfo` through. Deliberately NOT in
+# `default`: every OTHER binary here (`panel-id-probe`, the `ble-*-probe`s)
+# also links esp-backtrace and none of them define the `custom_pre_backtrace`
+# symbol, so turning this on crate-wide would break their builds. The
+# production binary's own build commands (`flash.sh`,
+# `scripts/ci/check_software_baseline.sh`) pass `--features crash-screen`
+# explicitly instead.
+crash-screen = ["esp-backtrace/custom-pre-backtrace"]
+
+[dependencies]
+arbitration = { path = "../../platform/connectivity/arbitration" }
+http-upload = { path = "../../platform/connectivity/http-upload", optional = true }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"], optional = true }
+esp-radio = { version = "=1.0.0-beta.1", default-features = false, features = ["esp32s3", "wifi", "unstable"], optional = true }
+netstack = { path = "../../platform/connectivity/netstack", optional = true }
+embassy-net = { version = "=0.9.1", features = ["dhcpv4", "medium-ethernet", "tcp"], optional = true }
+esp-storage = { version = "0.10.0", features = ["esp32s3", "embedded-storage"], optional = true }
+embedded-storage = { version = "0.3.1", optional = true }
+critical-section = { version = "1.2.0", optional = true }
+sdio = { version = "=0.5.1", optional = true }
+aligned = { version = "0.4.3", optional = true }
+block-device-driver = { version = "0.2.0", optional = true }
+sdcard = { path = "../../platform/storage/sdcard", optional = true }
+esp-hal = { version = "=1.2.0", features = ["esp32s3", "unstable"] }
+# Pinned, not left to the resolver: esp-hal 1.2.0 requires esp32s3 ^0.36, and
+# 0.36.0 is (as of this pin) the only published version satisfying that --
+# same requirement `boards/waveshare-rlcd42` pins to independently.
+esp32s3 = "=0.37.0"
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+esp-backtrace = { version = "0.20.0", default-features = false, features = [
+    "esp32s3",
+    "panic-handler",
+    "println",
+] }
+esp-println = { version = "0.18.0", default-features = false, features = [
+    "esp32s3",
+    "jtag-serial",
+] }
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
+embassy-time = "0.5.1"
+# `select`/`select3` for the environment provider's demand/suspend/deadline race.
+embassy-futures = "0.1.2"
+# The RTC and sensor borrow one shared bus owner per transaction.
+embassy-sync = "0.8.0"
+embassy-embedded-hal = "0.6.0"
+static_cell = "2.1.1"
+embedded-hal-async = "1.0.0"
+heapless = "0.9.3"
+# `read_oneshot`'s `nb::Result`; version matched to esp-hal's dependency.
+nb = "1.1"
+
+# The platform layer this firmware composes.
+board = { path = "../../platform/ui/board" }
+console = { path = "../../platform/diagnostics/console" }
+shell = { path = "../../platform/ui/shell" }
+# The target issues `UiAccessToken` immediately after `PanelLvglSession::init`
+# and owns the checked screen/overlay runtime. `default-features = false` +
+# `lvgl` matches the product dependency: no `font-32` (this board's `lv_conf.h`
+# does not enable `LV_FONT_MONTSERRAT_32`).
+render = { path = "../../platform/ui/render", default-features = false, features = ["lvgl"] }
+# Already shipping on the Inkplate; the S3 carries the same PCF85063A.
+rtc = { path = "../../platform/time/rtc" }
+# Shared cross-board synchronization coordinator (docs/references/runtime/serial-control.md#time-synchronization).
+wall-clock = { path = "../../platform/time/wall-clock" }
+# The environmental provider and Home communicate through typed observations.
+observation = { path = "../../platform/sensing/observation" }
+# The runtime tasks read the hourglass physics model and the flip-clock
+# tuning constants directly (tick cadence, `HourglassModel`), not only
+# through `medinote`'s own screen adapters.
+hourglass = { path = "../../platform/ui/visuals/hourglass" }
+flipclock = { path = "../../platform/ui/visuals/flipclock" }
+
+# The board and product this target composes (ADR-0015).
+waveshare-rlcd42 = { path = "../../boards/waveshare-rlcd42" }
+medinote = { path = "../../products/medinote", features = ["lvgl"] }
+# The board's only consumer for this sensor (packages-directory retirement
+# plan); reached directly here rather than through the board crate.
+shtc3 = { path = "../../boards/waveshare-rlcd42/shtc3" }
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
+
+# Shared BLE runtime and roles plan, Phase 1. `ble` self-forwards the chip
+# selection (`ble/esp32s3` above), so no direct `esp-radio`/
+# `esp-radio-rtos-driver` dependency is needed here -- see
+# `platform/connectivity/ble/Cargo.toml`'s module doc.
+ble = { path = "../../platform/connectivity/ble", optional = true }
+# This target's only allocator (B-003): used by the BLE probes and by the
+# production CheerTok-controls composition.
+esp-alloc = { version = "=0.11.0", optional = true, default-features = false, features = ["compat", "esp32s3", "global-allocator", "internal-heap-stats"] }
+
+[patch.crates-io]
+proc-macro-error2 = { path = "../../vendor/proc-macro-error2-2.0.1-public-proc-macro" }
+esp-hal = { path = "../../vendor/esp-hal-1.2.0-cpu-profile" }
+trouble-host = { path = "../../vendor/trouble-host-0.8.0-restartable" }
+embassy-net = { path = "../../vendor/embassy-net-0.9.1-restartable" }
+esp-alloc = { path = "../../vendor/esp-alloc-0.11.0-provenance" }
+esp-backtrace = { path = "../../vendor/esp-backtrace-0.20.0-custom-pre-backtrace-info" }
+esp-radio = { path = "../../vendor/esp-radio-1.0.0-beta.1-bounded" }
+esp-radio-rtos-driver = { path = "../../vendor/esp-radio-rtos-driver-0.4.2-retained" }

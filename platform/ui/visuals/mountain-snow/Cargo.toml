@@ -1,0 +1,31 @@
+[package]
+name = "mountain-snow"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+# Runtime crate for the Ambient Home mountain.
+# Fanger PMV heat balance plus a PMV-to-percentage policy and a streaming
+# one-bit composer. Pure functions over caller-owned buffers: no heap, no
+# statics (float transcendental ops via libm), so host and device agree
+# bit for bit.
+
+[lib]
+name = "mountain_snow"
+path = "src/lib.rs"
+
+[dependencies]
+# Pure-software float math, so host preview and device agree bit for bit.
+# Same precedent as the sibling `analog-clock` crate; already in the
+# workspace lockfile. Needed for the PMV heat balance (`exp`, `pow`,
+# `sqrt`, clothing `cos`).
+libm = { version = "0.2.16", default-features = false }
+# Streaming row access over the existing no_std `asset-source` access
+# contract (itself dependency-free). Path dependency inside the workspace;
+# already a workspace member, so only the dependency edge is new.
+asset-source = { version = "0.1.0", path = "../../../memory/asset-source" }
+
+[dev-dependencies]
+allocator-api2 = { version = "0.3", default-features = false, features = ["alloc"] }
+psram-store = { path = "../../../memory/psram-store" }

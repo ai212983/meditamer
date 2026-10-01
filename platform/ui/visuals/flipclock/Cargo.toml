@@ -1,0 +1,31 @@
+[package]
+name = "flipclock"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# Split-flap ("flip clock") digit rendering: a pure, chip-neutral visual
+# model, not product-specific code. It named no LVGL type and no hardware
+# type on day one, and landed under `products/medinote` only because
+# Medinote was the first product to use it; a second product wanting the
+# same split-flap presentation should depend on this crate directly rather
+# than reaching into another product's source tree.
+[lib]
+
+[dependencies]
+# The one-bit canvas contract shared with `enso` and `hourglass`. Flip-clock
+# rendering is entirely integer, so the default build (no `dither` feature)
+# is all this crate needs -- see `platform/ui/visuals/raster`'s manifest.
+raster = { path = "../raster" }
+
+[build-dependencies]
+# Rasterizes the flip-clock digit cards into `OUT_DIR` at build time (see
+# `build.rs`). Host-only, and outside the workspace for the reason ADR-0015
+# keeps every `tools/*` crate there.
+flip_digit_compiler = { path = "../../../../tools/flip_digit_compiler" }
+
+[dev-dependencies]
+# Host-only preview encoding for `examples/flipclock_preview.rs`. Keeping
+# this in dev-dependencies means the no_std crate itself links no encoder.
+image = { version = "0.25.9", default-features = false, features = ["gif", "png"] }

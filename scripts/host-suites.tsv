@@ -1,0 +1,42 @@
+name	test	lint	coverage	mode	manifest	description
+code-analysis-guard	yes	no	no	self-test	-	Self-tests code-analysis enforcement and ratcheting (scripts/tests/host/test_code_analysis_guard.sh).
+include-usage	yes	no	no	self-test	-	Self-tests the generated-only include! policy (scripts/tests/host/test_include_usage.sh).
+orphan-modules	yes	no	no	self-test	-	Self-tests Rust source reachability detection (scripts/tests/host/test_orphan_modules.sh).
+event-config	yes	yes	yes	crate	tools/event_config_compiler/Cargo.toml	Event configuration compiler tests, strict Clippy, and coverage.
+lvgl-font	yes	yes	yes	crate	tools/lvgl_font_compiler/Cargo.toml	LVGL font compiler tests (generated `lv_font_fmt_txt` tables), strict Clippy, and coverage.
+event-engine	yes	yes	yes	crate	test-support/host/event_engine_host_harness/Cargo.toml	Event-engine host harness tests, strict Clippy, and coverage.
+app-state	yes	yes	yes	crate	test-support/host/app_state_store_host_harness/Cargo.toml	App-state/store host harness tests, strict Clippy, and coverage.
+net-status	yes	yes	no	crate	test-support/host/net_status_host_harness/Cargo.toml	Network/DHCP status ownership tests and strict Clippy.
+ui-shell	yes	yes	yes	crate-lvgl	test-support/host/ui_shell_host_harness/Cargo.toml	UI-shell/LVGL host harness tests, strict Clippy, and coverage (DEP_LV_CONFIG_PATH).
+ble-transport	yes	no	no	crate-ephemeral	test-support/host/ble_transport_host_harness/Cargo.toml	Bounded BLE transport host harness tests (ephemeral CARGO_TARGET_DIR).
+touch-core	yes	no	no	crate	tools/touch_replay/Cargo.toml	Touch-core tests through the touch-replay crate.
+touch-replay	yes	yes	yes	fixture-script	tools/touch_replay/Cargo.toml	Bundled touch-replay fixtures (test via run_fixtures.sh); crate Clippy and coverage.
+hostctl	yes	yes	yes	crate-hostctl	tools/hostctl/Cargo.toml	Hostctl native tests (env-sanitized, dedicated toolchain/target dir), strict Clippy, and coverage.
+sdcard	yes	yes	no	crate-feature	platform/storage/sdcard/Cargo.toml	Host-feature SD-card FAT-engine tests and strict Clippy (--features host-tests).
+sd-upload-fence	yes	yes	no	crate	test-support/host/sd_upload_fence_host_harness/Cargo.toml	Production upload Abort routing and cleanup tests with fake power/FAT transport, plus strict Clippy.
+rtc	yes	yes	no	crate-feature	platform/time/rtc/Cargo.toml	Host-feature PCF85063A calendar/offset/mock-I2C driver tests and strict Clippy (--features host-tests).
+wall-clock	yes	yes	no	crate-feature	platform/time/wall-clock/Cargo.toml	Clock apply/readback verification and RTC diagnostic integration tests, plus strict Clippy (--features host-tests).
+ble	yes	yes	no	crate-feature	platform/connectivity/ble/Cargo.toml	Shared BLE runtime host-testable scan window, GATT connection lifecycle, HID descriptor/report decoding, telemetry counters, and product input tests, plus strict Clippy (--features host-tests; shared BLE runtime and roles plan, Phase 2).
+bundle	yes	yes	no	crate	platform/update/bundle/Cargo.toml	Shared signed-bundle-format header/digest/signature tests (ADR-0014 Phase 1) and strict Clippy.
+observation	yes	yes	yes	crate	platform/sensing/observation/Cargo.toml	Typed observation subscription core (book/demand/schedule/delivery/observe-now) and the generic Embassy provider loop, strict Clippy, and coverage (ADR-0018, typed observation subscriptions plan Phases 1-2).
+otadata	yes	yes	no	crate	platform/update/otadata/Cargo.toml	Host-testable ESP-IDF otadata record CRC tests (ADR-0014 Phase 5) and strict Clippy.
+shell	yes	yes	yes	crate	platform/ui/shell/Cargo.toml	Application-shell crate tests (surface registry, navigator, catalogue, lifecycle), strict Clippy, and coverage (ADR-0015).
+render	yes	yes	no	crate-lvgl	platform/ui/render/Cargo.toml	Rendering-support crate tests (grayscale dither, LVGL intent bridge) and strict Clippy (DEP_LV_CONFIG_PATH; ADR-0015).
+arbitration	yes	yes	yes	crate	platform/connectivity/arbitration/Cargo.toml	Exclusive-radio arbitration: handoff state machine and claim registry, strict Clippy, and coverage (ADR-0015).
+runtime	yes	yes	yes	crate	platform/diagnostics/runtime/Cargo.toml	Shared log-domain filter mask and its read/write operations, strict Clippy, and coverage (product/target axis completion plan, Phase 4).
+console	yes	yes	no	crate	test-support/host/console_host_harness/Cargo.toml	Production console drop-cause accounting, bounded deferred queue and snapshot coherence, plus strict Clippy.
+shtc3	yes	yes	no	crate	boards/waveshare-rlcd42/shtc3/Cargo.toml	SHTC3 temperature/humidity CRC and fixed-point conversion tests and strict Clippy.
+medinote	yes	yes	no	crate-lvgl-medinote	products/medinote/Cargo.toml	Medinote product library: observation owner/delivery adapters, presentation, compiled catalogue, checked-adapter screen construction, and deterministic hourglass model tests plus strict Clippy (own lv_conf.h via DEP_LV_CONFIG_PATH, not config/lvgl; ui-runtime-finalization plan, Phase 2).
+inkplate-tempera	yes	yes	no	crate	boards/inkplate-tempera/Cargo.toml	Inkplate 4 TEMPERA board crate: panel L8-blit, panel-power lifecycle, partial-transition waveform math, and touch-protocol/decode tests (hardware modules stay cfg(target_os = "none")-gated out of the host build), strict Clippy (inkplate-tempera board extraction plan).
+buzzer	yes	yes	no	crate	platform/audio/buzzer/Cargo.toml	Shared single-oscillator buzzer sequencer tests (score/runner/model/diag) and strict Clippy.
+buzzer-preview	yes	yes	no	crate-workdir	tools/buzzer_preview/Cargo.toml	Nominal square-wave buzzer previewer tests and strict Clippy.
+analog-clock	yes	yes	no	crate	platform/ui/visuals/analog-clock/Cargo.toml	Shared analog-clock lighting, shadow visibility, sprite rotation, and monochrome rendering tests and strict Clippy.
+analog-clock-preview	yes	yes	no	crate-workdir	tools/analog_clock_preview/Cargo.toml	Analog-clock host asset loading, preview controls, and export tests and strict Clippy.
+blue-noise	yes	yes	no	crate	platform/ui/visuals/blue-noise/Cargo.toml	Shared full-screen blue-noise asset and API feature-selection tests and strict Clippy.
+mountain-snow	yes	yes	no	crate	platform/ui/visuals/mountain-snow/Cargo.toml	Mountain-snow temperature policy and streaming one-bit composer tests and strict Clippy.
+psram-store	yes	yes	no	crate	platform/memory/psram-store/Cargo.toml	Bounded chunked PSRAM byte store and sequential-writer tests and strict Clippy.
+residency-policy	yes	yes	no	crate	platform/memory/residency-policy/Cargo.toml	Transactional residency policy foundation (identities, handles, prepare/commit contract, two-participant coordinator) tests and strict Clippy.
+phase-arena	yes	yes	no	crate	platform/memory/phase-arena/Cargo.toml	Caller-owned single-activation phase arena (checked aligned spans, rollback-on-drop staging, token release) tests and strict Clippy.
+transfer-cache-block-pool	yes	yes	no	crate	platform/memory/transfer-cache-block-pool/Cargo.toml	Fixed-block transfer-cache pool (bitmap slots, staged prepare/commit, epoch-checked handles) tests and strict Clippy.
+asset-source	yes	yes	no	crate	platform/memory/asset-source/Cargo.toml	Generic checked read/borrow access core (contiguous-slice and fragmented-span adapters) tests and strict Clippy.
+http-accept	yes	yes	no	crate	test-support/host/http_accept_host_harness/Cargo.toml	HTTP accept-wait host harness tests (retained handshake across gate ticks, cancellation, and error propagation) and strict Clippy.

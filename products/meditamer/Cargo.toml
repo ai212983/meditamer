@@ -1,0 +1,143 @@
+[package]
+name = "meditamer-product"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Meditamer product library root (Product and target axis completion plan,
+# Phase 1 scaffold, Phase 3 content). Named `meditamer-product` rather than
+# `meditamer` because the root package kept that name for the duration of the
+# migration (ADR-0015's accepted "repository keeps a product name while
+# housing two products" wart).
+#
+# `firmware` -- meditation state, scheduling policy, screens, catalogue,
+# settings, and product assets -- moved here from the root package's
+# `src/firmware` wholesale. It is not chip-neutral: task functions throughout
+# take concrete `esp_hal` peripheral types, so this crate builds only against
+# the real `xtensa-esp32-none-elf` target, the same as the root package did
+# before it. `[lib] test = false` on the root package meant this tree was
+# never host-testable as a whole either; the existing host coverage for
+# specific host-safe leaves (`event_engine`, `imu::scheduler`,
+# `app_state::{snapshot,store,types}`, `observability::*`,
+# `ui::screen::ambient_view::{model,clock_font}`, `touch::*`,
+# `display::panel::{lease,refresh_tracking}`,
+# `storage::upload::sd_bridge::correlation`,
+# `serial::io::netcfg_persistence`) stays exactly as it was: separate
+# `test-support/host/*_harness` crates and `tools/touch_replay` tests
+# `#[path]`-shadow those specific files rather than depending on this crate
+# directly, now pointed at this crate's location instead of the old one.
+# Making the crate itself host-buildable via `cfg(target_os = "none")` gating
+# throughout -- the `boards/inkplate-tempera`/`platform/storage/sdcard` pattern -- is
+# real future work, not attempted here.
+[lib]
+
+[features]
+firmware-trace = ["dep:firmware-trace", "dep:tracing", "cpu-load"]
+ui-interaction-trace = ["firmware-trace", "render/ui-interaction-trace"]
+cpu-load = ["dep:cpu-load"]
+default = [
+    "asset-upload-http",
+    "asset-upload-http-pipeline",
+]
+telemetry-defmt = [
+    "dep:defmt",
+    "console/telemetry-defmt",
+    "netstack?/telemetry-defmt",
+]
+ui-provider-fixture = ["render/ui-provider-fixture"]
+sd-runner-allocation-fixture = []
+ui-initialization-fixture = []
+wifi-debug-slim-app = ["asset-upload-http"]
+ble-foundation = [
+    "asset-upload-http",
+    "classic-bt-memory-reclaim",
+    "dep:ble",
+    "ble/esp32",
+    "ble/peripheral",
+    "dep:bt-hci",
+    "dep:trouble-host",
+    "esp-radio/coex",
+    "netstack?/ble-foundation",
+]
+classic-bt-memory-reclaim = ["dep:esp-radio", "esp-radio/ble"]
+asset-upload-http = [
+    "dep:embassy-net",
+    "dep:embedded-io-async",
+    "dep:netstack",
+    "esp-rtos/esp-radio",
+    "esp-rtos/esp-alloc",
+    "wifi-backend-esp-radio",
+]
+asset-upload-http-pipeline = ["asset-upload-http", "http-upload/asset-upload-http-pipeline"]
+wifi-backend-esp-radio = ["dep:esp-radio", "esp-radio/wifi"]
+
+[dependencies]
+firmware-trace = { path = "../../platform/diagnostics/firmware-trace", optional = true }
+tracing = { version = "=0.1.44", default-features = false, optional = true }
+cpu-load = { path = "../../platform/diagnostics/cpu-load", features = ["esp32"], optional = true }
+allocator-api2 = { version = "=0.3.1", default-features = false, features = ["alloc"] }
+critical-section = "1.2.0"
+esp-hal = { version = "=1.2.0", features = ["esp32", "unstable"] }
+esp-sync = "0.3.0"
+esp-rtos = { version = "0.4.0", features = ["esp32", "embassy"] }
+esp-radio-rtos-driver = "=0.4.2"
+esp32 = "0.42.0"
+esp-alloc = { version = "=0.11.0", default-features = false, features = ["alloc-hooks", "compat", "esp32", "global-allocator"] }
+esp-backtrace = { version = "0.20.0", default-features = false, features = ["esp32", "panic-handler", "println"] }
+defmt = { version = "1.1.1", optional = true }
+esp-wifi-sys = { package = "esp-wifi-sys-esp32", version = "0.3.0", default-features = false }
+embassy-executor = { version = "0.10.0", features = ["scheduler-priority"] }
+embassy-time = "0.5.1"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1.2"
+bt-hci = { version = "=0.10.1", optional = true }
+embassy-embedded-hal = "0.6.0"
+embassy-net = { version = "=0.9.1", optional = true, features = ["dhcpv4", "medium-ethernet", "tcp"] }
+embedded-hal-async = "1.0.0"
+embedded-io-async = { version = "0.7.0", optional = true }
+enumset = { version = "1.1.14", default-features = false }
+esp-radio = { version = "=1.0.0-beta.1", optional = true, default-features = false, features = ["esp32", "log-04", "unstable", "meditamer-allocation-provenance"] }
+trouble-host = { version = "=0.8.0", optional = true, default-features = false, features = ["connection-event-queue-size-2", "derive", "gatt", "l2cap-rx-queue-size-2", "l2cap-tx-queue-size-2", "peripheral"] }
+static_cell = "2.1.1"
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = ["library", "raw-bindings"] }
+
+heapless = "0.9.3"
+statig = "0.4.1"
+esp-storage = { version = "0.10.0", features = ["esp32", "embedded-storage"] }
+embedded-storage = "0.3.1"
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32", "embedded-storage"] }
+sha2 = { version = "0.10.9", default-features = false }
+ed25519-dalek = { version = "2.2.0", default-features = false }
+arbitration = { path = "../../platform/connectivity/arbitration" }
+ble = { path = "../../platform/connectivity/ble", optional = true }
+console = { path = "../../platform/diagnostics/console", features = ["deferred-logs"] }
+http-upload = { path = "../../platform/connectivity/http-upload" }
+inkplate-tempera = { path = "../../boards/inkplate-tempera" }
+netstack = { path = "../../platform/connectivity/netstack", optional = true }
+# Typed observation subscriptions (ADR-0018, typed observation subscriptions
+# plan, Phase 4): the environmental provider task and Ambient Home's
+# subscription adapter build on this rather than reading the BME688 inline
+# from `display`'s `BatteryTick` handling.
+observation = { path = "../../platform/sensing/observation" }
+analog-clock = { path = "../../platform/ui/visuals/analog-clock" }
+ambient-assets = { path = "../../platform/ui/visuals/ambient-assets" }
+# Fanger PMV heat balance + PMV-to-snow policy for the Ambient Home
+# mountain. Pure `no_std` math over caller-owned state; the screen owns
+# the policy state and composition cursor below.
+mountain-snow = { path = "../../platform/ui/visuals/mountain-snow" }
+psram-store = { path = "../../platform/memory/psram-store" }
+phase-arena = { path = "../../platform/memory/phase-arena" }
+residency-policy = { path = "../../platform/memory/residency-policy" }
+clock-assets = { path = "../../platform/ui/visuals/clock-assets" }
+render = { path = "../../platform/ui/render", features = ["lvgl-gestures"] }
+runtime = { path = "../../platform/diagnostics/runtime" }
+shell = { path = "../../platform/ui/shell" }
+sdcard = { path = "../../platform/storage/sdcard" }
+rtc = { path = "../../platform/time/rtc" }
+wall-clock = { path = "../../platform/time/wall-clock" }
+bundle = { path = "../../platform/update/bundle" }
+otadata = { path = "../../platform/update/otadata" }
+
+[build-dependencies]
+event_config_compiler = { path = "../../tools/event_config_compiler" }
+lvgl_font_compiler = { path = "../../tools/lvgl_font_compiler" }

@@ -1,0 +1,108 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "trace-capture"
+  version: "1.0.0"
+do:
+  - capture:
+      try:
+        - settle:
+            call: "settle_attachment"
+            with:
+              seconds: 65
+        - ready:
+            call: "verify_ready"
+        - mode:
+            switch:
+              - self_test:
+                  when: ".self_test == true"
+                  then: "run_self_test"
+              - timed:
+                  when: ".timed_mode == true"
+                  then: "arm"
+              - default:
+                  then: "arm"
+        - run_self_test:
+            call: "self_test"
+            then: "capture_done"
+        - arm:
+            call: "arm_trace"
+        - ready_marker:
+            call: "mark_ready"
+        - armed_mode:
+            switch:
+              - timed:
+                  when: ".timed_mode == true"
+                  then: "timed_window"
+              - default:
+                  then: "action_wait"
+        - timed_window:
+            call: "capture_window"
+            then: "capture_done"
+        - action_wait:
+            metadata:
+              hostctl:
+                repeat:
+                  while: '.stop_requested == false && .trace_state != "full"'
+            do:
+              - status:
+                  call: "poll_status"
+              - state:
+                  switch:
+                    - full:
+                        when: '.trace_state == "full"'
+                        then: "frozen_marker"
+                    - stop:
+                        when: ".stop_requested == true"
+                        then: "__end__"
+                    - first_recording:
+                        when: '.trace_state == "capturing" && .recording_seen == false'
+                        then: "recording_marker"
+                    - default:
+                        then: "poll_wait"
+              - recording_marker:
+                  call: "mark_recording"
+                  then: "poll_wait"
+              - frozen_marker:
+                  call: "mark_frozen"
+                  then: "__end__"
+              - poll_wait:
+                  call: "wait_poll"
+        - capture_done:
+            call: "capture_done"
+      catch:
+        as: "capture_error"
+  - started_gate:
+      switch:
+        - started:
+            when: ".trace_started == true"
+            then: "stop"
+        - default:
+            then: "finish"
+  - stop:
+      try:
+        - freeze:
+            call: "stop_trace"
+      catch:
+        as: "stop_error"
+  - dump:
+      try:
+        - preserve:
+            call: "dump_trace"
+      catch:
+        as: "dump_error"
+  - verification_gate:
+      switch:
+        - self_test:
+            when: ".self_test == true"
+            then: "verify"
+        - default:
+            then: "finish"
+  - verify:
+      try:
+        - probe_matrix:
+            call: "verify_probe"
+      catch:
+        as: "verify_error"
+  - finish:
+      call: "finish"

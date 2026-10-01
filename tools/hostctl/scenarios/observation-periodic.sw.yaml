@@ -1,0 +1,60 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "observation-periodic"
+  version: "1.0.0"
+do:
+  - run_fixture:
+      try:
+        - check_ready:
+            call: "check_ready"
+        - readiness_gate:
+            switch:
+              - live_pong:
+                  when: ".ping_confirmed == true"
+                  then: "submit_request"
+              - default:
+                  then: "confirm_ready"
+        - confirm_ready:
+            call: "confirm_ready"
+        - submit_request:
+            call: "submit_request"
+        - cancellation_gate:
+            switch:
+              - requested:
+                  when: ".cancel_requested == true"
+                  then: "await_periodic_samples"
+              - default:
+                  then: "await_periodic_result"
+        - await_periodic_samples:
+            call: "await_periodic_samples"
+        - cancel_periodic:
+            call: "cancel_periodic"
+        - await_periodic_result:
+            call: "await_periodic_result"
+        - verified:
+            set:
+              sample_verified: true
+        - observe_window:
+            call: "observe_window"
+        - mark_passed:
+            set:
+              fixture_passed: true
+      catch:
+        as: "fixture_error"
+      then: "write_report"
+  - write_report:
+      call: "write_report"
+      then: "result_gate"
+  - result_gate:
+      switch:
+        - passed:
+            when: ".fixture_passed == true"
+            then: "print_summary"
+        - default:
+            then: "fail_fixture"
+  - print_summary:
+      call: "print_summary"
+      then: "__end__"
+  - fail_fixture:
+      call: "fail_fixture"

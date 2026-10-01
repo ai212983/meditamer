@@ -1,0 +1,217 @@
+{
+  "panel": "waveshare",
+  "pages": [
+    {
+      "id": "roboto-waveshare-caption-w400-b1-t128",
+      "font": "Roboto",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400,
+          "wdth": 100
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "roboto-waveshare-caption-w400-b1-t128.png",
+      "frame": "roboto-waveshare-caption-w400-b1-t128.bin",
+      "frame_sha256": "b042f63843816f6508135da52192fd418aeb80d8e8de5105a245584afd07cb69",
+      "artifact_sha256": "8d3494ccdd58bdf7c1b91740c439a1cf81332f28381a9efcf59fe7a787092658"
+    },
+    {
+      "id": "roboto-waveshare-caption-w400-b1-t96",
+      "font": "Roboto",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400,
+          "wdth": 100
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 96,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "roboto-waveshare-caption-w400-b1-t96.png",
+      "frame": "roboto-waveshare-caption-w400-b1-t96.bin",
+      "frame_sha256": "efe3bf38af06ba1603b60389aecb22735f1c346642c3f9a5ee60a71531966a64",
+      "artifact_sha256": "f8b0913e76ae00db4e0befaa215745a21cc7a11e5cbc49c0eefe99a4f5cac7ee"
+    },
+    {
+      "id": "literata-waveshare-caption-w400-b1-t128",
+      "font": "Literata",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400,
+          "opsz": 16
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "literata-waveshare-caption-w400-b1-t128.png",
+      "frame": "literata-waveshare-caption-w400-b1-t128.bin",
+      "frame_sha256": "ed883c8a22609fa6e61ad5c4e766e3523c6fb5b938c9f2ecdd0bdeb3d79fd76b",
+      "artifact_sha256": "a71c80f592a3f7eddc0bf9ba649fc2dad176d1c1e59be46ae3b7ebacc355a6da"
+    },
+    {
+      "id": "literata-waveshare-caption-w400-b1-t96",
+      "font": "Literata",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400,
+          "opsz": 16
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 96,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "literata-waveshare-caption-w400-b1-t96.png",
+      "frame": "literata-waveshare-caption-w400-b1-t96.bin",
+      "frame_sha256": "74aefe94544fb8284623f31b163e96837a66fd4f41db386151934ae13524a558",
+      "artifact_sha256": "512deeee184b2d07dc51795e835bc62834451589d2d5857300b6a3b62b747fed"
+    },
+    {
+      "id": "sourcesans3-waveshare-caption-w400-b1-t128",
+      "font": "SourceSans3",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "sourcesans3-waveshare-caption-w400-b1-t128.png",
+      "frame": "sourcesans3-waveshare-caption-w400-b1-t128.bin",
+      "frame_sha256": "35e04713dfdafe38062cc52fce63341826ec1f2bd97dfcf7e0b6a2d1b9230d11",
+      "artifact_sha256": "2f95232a382845871f26318988667cc882e10c49010faf0a52b4814e67202c55"
+    },
+    {
+      "id": "sourcesans3-waveshare-caption-w400-b1-t96",
+      "font": "SourceSans3",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 16,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 96,
+        "gray_gamma": 1.0,
+        "characters": " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?%\u00b0+-/()",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "Il1 O0 8B bhmnp\n23\u00b0C 45% / 12:34",
+      "width": 400,
+      "height": 300,
+      "png": "sourcesans3-waveshare-caption-w400-b1-t96.png",
+      "frame": "sourcesans3-waveshare-caption-w400-b1-t96.bin",
+      "frame_sha256": "f89649cebe3e4302047014f1e3e3a425b13d72a5e375c5c38b0dd2accf49bb82",
+      "artifact_sha256": "fde19a8c09f305d7bdac2571263918880b5c485a328329ea9105b67d2128ab7b"
+    },
+    {
+      "id": "sourcesans3-waveshare-ambient_secondary-w400-b1-t128",
+      "font": "SourceSans3",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 40,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 128,
+        "gray_gamma": 1.0,
+        "characters": " 0123456789:.,%\u00b0+-/Chmnbox",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "08hmn\n23\u00b0C 45%",
+      "width": 400,
+      "height": 300,
+      "png": "sourcesans3-waveshare-ambient_secondary-w400-b1-t128.png",
+      "frame": "sourcesans3-waveshare-ambient_secondary-w400-b1-t128.bin",
+      "frame_sha256": "b38fd14687828f8f7e3987c3a9382c2f56c8c6af7474538ab1bb787a25aaf57b",
+      "artifact_sha256": "ecdee0907e97ba5918801be9886d3662037369fef95f3d73a0364800adf7396c"
+    },
+    {
+      "id": "sourcesans3-waveshare-ambient_secondary-w400-b1-t112",
+      "font": "SourceSans3",
+      "panel": "waveshare",
+      "settings": {
+        "size_px": 40,
+        "axes": {
+          "wght": 400
+        },
+        "hinting": "auto_fallback",
+        "output_bits": 1,
+        "mono_threshold": 112,
+        "gray_gamma": 1.0,
+        "characters": " 0123456789:.,%\u00b0+-/Chmnbox",
+        "missing_glyphs": "error",
+        "kerning": true,
+        "metric_rounding": "subpixel"
+      },
+      "sample": "08hmn\n23\u00b0C 45%",
+      "width": 400,
+      "height": 300,
+      "png": "sourcesans3-waveshare-ambient_secondary-w400-b1-t112.png",
+      "frame": "sourcesans3-waveshare-ambient_secondary-w400-b1-t112.bin",
+      "frame_sha256": "9c023d9f1f215b9b9a1feec5855ad2b168089ebf96f26c47abe9e958518ad2a0",
+      "artifact_sha256": "61d5c41a003050d5e8b80bb1fee40387a457367b481eae3becae740bae5d9d3b"
+    }
+  ]
+}

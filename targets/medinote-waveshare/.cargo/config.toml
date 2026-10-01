@@ -1,0 +1,21 @@
+[target.xtensa-esp32s3-none-elf]
+rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x"]
+
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["core", "alloc"]
+
+[env]
+# The repo root's env selects esp32-only linker hooks, and Cargo merges `[env]`
+# from ancestor configs, so these have to be overridden rather than inherited
+# (same override `boards/waveshare-rlcd42/.cargo/config.toml` makes, and for
+# the same reason).
+ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "false"
+ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "true"
+# lightvgl-sys resolves lv_conf.h through this. A local copy of
+# `boards/waveshare-rlcd42/lvgl/lv_conf.h` (Phase 2) rather than a relative
+# reach across directories -- every other build root here owns its own copy
+# the same way (root's `config/lvgl`, the board's `lvgl/`).
+DEP_LV_CONFIG_PATH = { value = "lvgl", relative = true }

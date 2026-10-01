@@ -1,0 +1,159 @@
+//! Wi-Fi access point.
+
+use procmacros::BuilderLite;
+
+#[cfg(feature = "unstable")]
+use super::CountryInfo;
+use super::{AuthenticationMethod, DisconnectReason, Protocols, SecondaryChannel, Ssid};
+use crate::{WifiError, sys::include::wifi_ap_record_t, wifi::AuthenticationMethodConfig};
+
+/// Information about a detected Wi-Fi access point.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[non_exhaustive]
+pub struct AccessPointInfo {
+    /// The SSID of the access point.
+    pub ssid: Ssid,
+    /// The BSSID (MAC address) of the access point.
+    pub bssid: [u8; 6],
+    /// The channel the access point is operating on.
+    pub channel: u8,
+    /// The secondary channel configuration of the access point.
+    pub secondary_channel: SecondaryChannel,
+    /// The signal strength of the access point (RSSI).
+    pub signal_strength: i8,
+    /// The authentication method used by the access point.
+    pub auth_method: Option<AuthenticationMethod>,
+    #[cfg(feature = "unstable")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "unstable")))]
+    /// The country information of the access point (if available from beacon frames).
+    pub country: Option<CountryInfo>,
+}
+
+/// Configuration for a Wi-Fi access point.
+#[derive(Clone, PartialEq, Eq, BuilderLite, Hash, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AccessPointConfig {
+    /// The SSID of the access point.
+    pub(crate) ssid: Ssid,
+    /// Whether the SSID is hidden or visible.
+    pub(crate) ssid_hidden: bool,
+    /// The channel the access point will operate on.
+    pub(crate) channel: u8,
+    /// The secondary channel configuration.
+    pub(crate) secondary_channel: Option<SecondaryChannel>,
+    /// The set of protocols supported by the access point.
+    pub(crate) protocols: Protocols,
+    /// The authentication method to be used by the access point.
+    pub(crate) authentication: AuthenticationMethodConfig,
+    /// The maximum number of connections allowed on the access point.
+    /// When set, this number can be clipped to a true upper limit because
+    /// ESPNow and access point connections share a common pool of hardware
+    /// encryption keys.
+    #[builder_lite(unstable)]
+    pub(crate) max_connections: u16,
+    /// Dtim period of the access point (Range: 1 ~ 10).
+    #[builder_lite(unstable)]
+    pub(crate) dtim_period: u8,
+    /// Time to force deauth the station if the Soft-AccessPoint doesn't receive any data.
+    #[builder_lite(unstable)]
+    pub(crate) beacon_timeout: u16,
+}
+
+impl AccessPointConfig {
+    pub(crate) fn validate(&self) -> Result<(), WifiError> {
+        // Soft-AP doesn't support WEP (nor WAPI/OWE, which
+        // `AuthenticationMethodConfig` doesn't include).
+        if matches!(self.authentication, AuthenticationMethodConfig::Wep(_)) {
+            warn!("WEP is not supported in access point mode.");
+            return Err(WifiError::Unsupported);
+        }
+
+        if let Some(password) = self.authentication.password()
+            && password.is_empty()
+        {
+            warn!("Access point password is empty.");
+            return Err(WifiError::InvalidPassword);
+        }
+
+        if !(1..=10).contains(&self.dtim_period) {
+            return Err(WifiError::InvalidArguments);
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for AccessPointConfig {
+    fn default() -> Self {
+        Self {
+            ssid: "iot-device".try_into().expect("SSID length is valid"),
+            ssid_hidden: false,
+            channel: 1,
+            secondary_channel: None,
+            protocols: Protocols::default(),
+            authentication: AuthenticationMethodConfig::Open,
+            max_connections: 255,
+            dtim_period: 2,
+            beacon_timeout: 300,
+        }
+    }
+}
+
+/// Information about a station connected to the access point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[non_exhaustive]
+pub struct ConnectedInfo {
+    /// The MAC address.
+    pub mac: [u8; 6],
+    /// The Association ID (AID) of the connected station.
+    pub aid: u16,
+    /// If this is a mesh child.
+    pub is_mesh_child: bool,
+}
+
+/// Information about a station disconnected from the access point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[non_exhaustive]
+pub struct DisconnectedInfo {
+    /// The MAC address.
+    pub mac: [u8; 6],
+    /// The Association ID (AID) of the connected station.
+    pub aid: u16,
+    /// If this is a mesh child.
+    pub is_mesh_child: bool,
+    /// The disconnect reason.
+    pub reason: DisconnectReason,
+}
+
+/// Either the [ConnectedInfo] or [DisconnectedInfo].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum EventInfo {
+    /// Information about a station connected to the access point.
+    Connected(ConnectedInfo),
+    /// Information about a station disconnected from the access point.
+    Disconnected(DisconnectedInfo),
+}
+
+#[allow(non_upper_case_globals)]
+pub(crate) fn convert_ap_info(record: &wifi_ap_record_t) -> AccessPointInfo {
+    // `record.ssid` is 33 bytes to always fit the NUL terminator of a
+    // maximum-length SSID - clamp to 32 in case the driver ever hands us one
+    // without it.
+    let str_len = record.ssid.iter().position(|&c| c == 0).unwrap_or(32);
+    let ssid = Ssid::try_from(&record.ssid[..str_len]).expect("SSID length is valid");
+
+    AccessPointInfo {
+        ssid,
+        bssid: record.bssid,
+        channel: record.primary,
+        secondary_channel: SecondaryChannel::from_raw(record.second),
+        signal_strength: record.rssi,
+        auth_method: Some(AuthenticationMethod::from_raw(record.authmode)),
+        #[cfg(feature = "unstable")]
+        country: CountryInfo::try_from_c(&record.country),
+    }
+}

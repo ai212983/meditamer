@@ -1,0 +1,56 @@
+[package]
+name = "render"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Product- and board-neutral checked rendering support.
+
+[dependencies]
+board = { path = "../board" }
+embassy-sync = { version = "0.8.0", optional = true }
+heapless = { version = "0.9.3", optional = true }
+lightvgl-sys = { version = "=9.5.4", default-features = false, features = [
+    "library",
+    "raw-bindings",
+], optional = true }
+shell = { path = "../shell", optional = true }
+
+# Host tests exercise the `CriticalSectionRawMutex` statics in
+# `intent_bridge`/`lvgl_adapter` directly, which link against a registered
+# `critical-section` implementation. The embedded targets get theirs from the
+# board HAL; on host, `critical-section`'s own `std` feature registers one
+# backed by `std::sync::Mutex`. A dev-dependency keeps that feature (and the
+# `std` linkage it implies) out of the no_std firmware build, which never
+# activates this crate's dev-dependencies.
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }
+
+[features]
+ui-interaction-trace = []
+default = ["lvgl", "font-20", "font-32"]
+# `geometry` is plain arithmetic and must stay reachable without dragging LVGL
+# in: board code and host harnesses want the rectangle type on its own.
+lvgl = ["dep:embassy-sync", "dep:heapless", "dep:lightvgl-sys", "dep:shell"]
+# Forwarded from the product. `intent_bridge` gates the fixture callback routes
+# on it, so the flag has to exist on this side of the boundary too.
+ui-provider-fixture = []
+# Meditamer's LVGL configuration enables the optional multi-touch recognizer
+# API. Medinote's smaller configuration does not compile those C symbols.
+lvgl-gestures = []
+# `Font::Size20`/`Size32` (`lv_font_montserrat_20`/`_32`) need
+# `LV_FONT_MONTSERRAT_20`/`_32` set in the consumer's own `lv_conf.h` -- true
+# for Meditamer's and for this crate's own host tests (both build against
+# `config/lvgl`), but not for Medinote's
+# (`targets/medinote-waveshare/lvgl/lv_conf.h` only enables 14/18/24 -- the
+# rest of `Font` stays available to it). Unlike `lvgl` itself, this is *not*
+# something a consumer can discover is missing until link time: an unwanted
+# reference to an undeclared font symbol fails the final link, not the
+# `render` crate's own compile, since `lightvgl-sys`'s bindings are generated
+# per final build from whichever `lv_conf.h` `DEP_LV_CONFIG_PATH` names. A
+# consumer whose `lv_conf.h` lacks a font this default set assumes must
+# disable default features and re-enable `lvgl` (and `font-20`/`font-32`, for
+# whichever it has) explicitly -- exactly what Medinote's own `Cargo.toml`
+# does.
+font-20 = []
+font-32 = []

@@ -1,0 +1,11 @@
+[package]
+name = "sd_upload_fence_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["asset-upload-http"]
+asset-upload-http = []
+
+[dependencies]
+sdcard = { path = "../../../platform/storage/sdcard", features = ["host-tests"] }

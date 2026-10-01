@@ -1,0 +1,37 @@
+version = 1
+cpu_hz = 240000000
+width = 600
+height = 600
+refresh_interval_ms = 250
+partial_samples = 100
+partial_profile_samples = 20
+partial_span_samples = 20
+full_performance_samples = 100
+full_profile_samples = 20
+full_soak_cycles = 500
+reference_cold_partial_samples = 5
+reference_gray_partial_contract_samples = 20
+reference_gray_full_samples = 5
+band_width = 50
+marker_scale = 14
+marker_digits = 3
+digit_width = 5
+digit_height = 7
+marker_padding = 16
+gray_band_height = 200
+gray_checker_tile = 25
+gray_expected_fnv1a = 0x19d5b489
+partial_scan_rows = [60, 300, 600]
+
+digit_rows = [
+  [14, 17, 19, 21, 25, 17, 14],
+  [4, 12, 4, 4, 4, 4, 14],
+  [14, 17, 1, 2, 4, 8, 31],
+  [30, 1, 1, 14, 1, 1, 30],
+  [2, 6, 10, 18, 31, 2, 2],
+  [31, 16, 16, 30, 1, 1, 30],
+  [14, 16, 16, 30, 17, 17, 14],
+  [31, 1, 2, 4, 8, 8, 8],
+  [14, 17, 17, 14, 17, 17, 14],
+  [14, 17, 17, 15, 1, 1, 14],
+]

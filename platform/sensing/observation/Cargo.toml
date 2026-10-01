@@ -1,0 +1,33 @@
+[package]
+name = "observation"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+
+# Product-neutral typed observation subscriptions (ADR-0018;
+# docs/architecture/0018-typed-observation-subscriptions.md).
+#
+# The default feature set is the host-testable subscription/demand/
+# delivery core: pure logic over provider-defined field and snapshot types,
+# with monotonic time passed explicitly by the caller rather than read from
+# `embassy_time::Instant::now()` -- `platform/connectivity/arbitration`'s and
+# `platform/connectivity/ble`'s pattern -- so scheduling and lifetime behavior stay
+# deterministic on host without a real timer. No target-specific code lives
+# here: board drivers keep hardware operations and conversion timing, and
+# targets keep provider tasks, runtime storage, and resource arbitration
+# (the plan's Ownership section).
+#
+# `runtime` is the generic Embassy provider loop (provider-owned demand control,
+# observe-now `Channel`, state `Watch`, and the reactive step that drives a
+# caller-supplied acquisition driver), over `embassy-sync`. `embassy-sync`
+# and `embassy-futures` are architecture-agnostic `no_std` crates already in
+# this workspace's dependency graph (`platform/connectivity/netstack`, `platform/ui/render`,
+# `platform/connectivity/ble`), so unlike `platform/ui/render`'s optional embassy-sync
+# behind its `lvgl` feature, there is no heavier transitive dependency to
+# keep out of a plain host build -- `runtime` is always compiled.
+[lib]
+
+[dependencies]
+heapless = "0.9.3"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1.2"

@@ -1,0 +1,59 @@
+use alloc::vec::Vec;
+
+use ieee802154::mac::{FrameContent, Header};
+
+pub(crate) const FRAME_SIZE: usize = 129;
+pub(crate) const FRAME_VERSION_1: u8 = 0x10; // IEEE 802.15.4 - 2006 & 2011
+pub(crate) const FRAME_VERSION_2: u8 = 0x20; // IEEE 802.15.4 - 2015
+
+// These offsets index the length-stripped PSDU that every caller passes in:
+// frames are built from a pointer one byte past the PHY length byte (`.add(1)`)
+// and the RX path reads `RX_BUFFER[1..]`, so byte 0 is the first FCF octet. The
+// IEEE 802.15.4 FCF carries the AR (ack-request) bit in FCF octet 0 and the
+// frame-version field in FCF octet 1.
+const FRAME_AR_OFFSET: usize = 0;
+const FRAME_AR_BIT: u8 = 0x20;
+const FRAME_VERSION_OFFSET: usize = 1;
+const FRAME_VERSION_MASK: u8 = 0x30;
+
+/// IEEE 802.15.4 MAC frame
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[instability::unstable]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct Frame {
+    /// Header
+    pub header: Header,
+    /// Content
+    pub content: FrameContent,
+    /// Payload
+    pub payload: Vec<u8>,
+    /// This is a 2-byte CRC checksum
+    pub footer: [u8; 2],
+}
+
+/// IEEE 802.15.4 MAC frame which has been received
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[instability::unstable]
+pub struct ReceivedFrame {
+    /// Frame
+    pub frame: Frame,
+    /// Receiver channel
+    pub channel: u8,
+    /// Received Signal Strength Indicator (RSSI)
+    pub rssi: i8,
+    /// Link Quality Indication (LQI)
+    pub lqi: u8,
+}
+
+pub(crate) fn frame_is_ack_required(frame: &[u8]) -> bool {
+    frame
+        .get(FRAME_AR_OFFSET)
+        .is_some_and(|fcf| fcf & FRAME_AR_BIT != 0)
+}
+
+pub(crate) fn frame_get_version(frame: &[u8]) -> u8 {
+    frame
+        .get(FRAME_VERSION_OFFSET)
+        .map_or(0, |fcf| fcf & FRAME_VERSION_MASK)
+}

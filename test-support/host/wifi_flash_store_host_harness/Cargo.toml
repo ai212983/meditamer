@@ -1,0 +1,7 @@
+[package]
+name = "wifi_flash_store_host_harness"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"

@@ -1,0 +1,43 @@
+[package]
+name = "hourglass"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+
+# The hourglass sand-simulation, presentation model, and monochrome frame
+# rasterizer: a pure, chip-neutral visual model, not product-specific code.
+# Nothing here names LVGL, a product, or a hardware type; it landed under
+# `products/medinote` only because Medinote was the first product to use it.
+# Medinote kept only its own app-registration glue
+# (`apps::hourglass::descriptor`) and canvas storage/token handling behind,
+# and depends on this crate for the model, presentation types, and the
+# `frame::render_frame` glass/grain/tracer rasterizer that glue adapts onto
+# its own LVGL canvas.
+[lib]
+
+[features]
+default = []
+# A/B control. The paper cellular model is the default device backend;
+# enabling this restores the retained position-based dynamics
+# implementation instead. Declared here (not in a consuming product's
+# manifest) because both `backend.rs` and `paper_backend.rs`, the only two
+# files that read this feature, live in this crate.
+hourglass-pbd = []
+# Host-only visual experiment. Disjoint blocks share the production
+# Margolus phase but select neighboring cardinal transition rules from
+# local gravity.
+hourglass-block-gravity = []
+
+[dependencies]
+# The one-bit canvas contract `frame::render_frame` draws into -- shared with
+# `enso` and `flipclock`. Hourglass rendering is entirely integer, so the
+# default build (no `dither` feature) is all this crate needs -- see
+# `platform/ui/visuals/raster`'s manifest.
+raster = { path = "../raster" }
+
+[dev-dependencies]
+# Host-only Hourglass preview encoding (`examples/hourglass_preview.rs`,
+# `examples/hourglass_paper_preview.rs`). Keeping this in dev-dependencies
+# means the no_std crate itself links no encoder.
+image = { version = "0.25.9", default-features = false, features = ["gif", "png"] }

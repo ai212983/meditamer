@@ -1,0 +1,33 @@
+document:
+  dsl: "1.0.0"
+  namespace: "hostctl"
+  name: "cpu-profile-control"
+  version: "1.0.0"
+do:
+  - experiment:
+      try:
+        - attach:
+            call: "verify_attach"
+        - metrics_control:
+            call: "probe_metrics_control"
+        - reset_window:
+            call: "reset_scheduling_metrics"
+        - begin_normal:
+            call: "begin_phase"
+            with:
+              name: "normal"
+              paused: false
+        - observe:
+            call: "capture_window"
+            with:
+              seconds: 60
+        - final_snapshot:
+            call: "capture_window"
+            with:
+              seconds: 2
+        - finish_normal:
+            call: "finish_phase"
+      catch:
+        as: "experiment_error"
+  - finish:
+      call: "finish"

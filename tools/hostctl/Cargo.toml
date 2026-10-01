@@ -1,0 +1,49 @@
+[package]
+name = "hostctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4.5", features = ["derive"] }
+fs2 = "0.4"
+glob = "0.3"
+regex = "1.11"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+serialport = "4.8"
+serverless_workflow_core = "=1.0.0-alpha6.3"
+toml = "0.8"
+urlencoding = "2.1"
+sha2 = "0.10.9"
+ed25519-dalek = "2.2.0"
+# "std" swaps its CRC32/MD5 for pure-software implementations instead of the
+# ESP32 ROM's, so the same otadata-reading logic used on-device
+# (esp_bootloader_esp_idf::ota::Ota) runs host-side byte-for-byte identically
+# — no chip feature enabled, so esp-hal never enters this build.
+# "embedded-storage": esp-bootloader-esp-idf 0.6.0's own `MockFlash` (used
+# under "std") calls `Self::SECTOR_SIZE` from its unconditional inherent
+# read/write/erase methods, but that associated const is only defined on the
+# `embedded-storage`-gated half of its `FlashAccess` impl -- an upstream
+# feature-flag mismatch that fails to compile without this feature, whether
+# or not the embedded-storage traits themselves are used here.
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["std", "embedded-storage"] }
+# Same version esp-bootloader-esp-idf's own "std" CRC32 uses (verified against
+# the pinned ESP-IDF v5.5.2 esp_rom_crc32_le reference implementation — see
+# tools/hostctl/src/workflows/single_production/otadata.rs).
+crc = "3.3.0"
+# Shared bundle-header format (ADR-0014) — one implementation of the header
+# layout/signing message/validation rules compiled into both the updater and
+# this host tooling, so they can't drift apart.
+bundle = { path = "../../platform/update/bundle" }
+# Shared wall-clock synchronization messages and wire codec
+# (docs/references/runtime/serial-control.md#time-synchronization) — one implementation of the
+# TIME_REQUEST/TIME_REPLY/TIME_SYNC grammar compiled into both boards and
+# this host tooling.
+wall-clock = { path = "../../platform/time/wall-clock" }
+
+[dev-dependencies]
+tempfile = "3.15"

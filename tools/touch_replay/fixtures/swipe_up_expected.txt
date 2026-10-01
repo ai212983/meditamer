@@ -1,0 +1,5 @@
+down
+move
+move
+up
+swipe_up

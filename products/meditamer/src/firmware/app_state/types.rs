@@ -1,0 +1,107 @@
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Phase {
+    Initializing,
+    Operating,
+    DiagnosticsExclusive,
+}
+
+impl Phase {
+    pub(crate) const fn as_u8(self) -> u8 {
+        match self {
+            Self::Initializing => 0,
+            Self::Operating => 1,
+            Self::DiagnosticsExclusive => 2,
+        }
+    }
+
+    pub(crate) const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Initializing),
+            1 => Some(Self::Operating),
+            2 => Some(Self::DiagnosticsExclusive),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DiagKind {
+    None,
+    Debug,
+    Test,
+}
+
+impl DiagKind {
+    pub(crate) const fn as_u8(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Debug => 1,
+            Self::Test => 2,
+        }
+    }
+
+    pub(crate) const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::None),
+            1 => Some(Self::Debug),
+            2 => Some(Self::Test),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DiagTargets {
+    bits: u8,
+}
+
+impl DiagTargets {
+    const SD_BIT: u8 = 1 << 0;
+    const WIFI_BIT: u8 = 1 << 1;
+    const DISPLAY_BIT: u8 = 1 << 2;
+    const TOUCH_BIT: u8 = 1 << 3;
+    const IMU_BIT: u8 = 1 << 4;
+    const SUPPORTED_MASK: u8 =
+        Self::SD_BIT | Self::WIFI_BIT | Self::DISPLAY_BIT | Self::TOUCH_BIT | Self::IMU_BIT;
+
+    pub(crate) const fn none() -> Self {
+        Self { bits: 0 }
+    }
+
+    pub(crate) const fn from_persisted(bits: u8) -> Self {
+        Self {
+            bits: bits & Self::SUPPORTED_MASK,
+        }
+    }
+
+    pub(crate) const fn as_persisted(self) -> u8 {
+        self.bits
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ServiceFlags {
+    pub upload_enabled: bool,
+}
+
+impl ServiceFlags {
+    pub(crate) const fn normal() -> Self {
+        Self {
+            upload_enabled: false,
+        }
+    }
+
+    pub(crate) const fn as_bits(self) -> u8 {
+        if self.upload_enabled {
+            1
+        } else {
+            0
+        }
+    }
+
+    pub(crate) const fn from_bits(bits: u8) -> Self {
+        Self {
+            upload_enabled: (bits & 1) != 0,
+        }
+    }
+}

@@ -1,0 +1,33 @@
+# IDE
+/.idea
+/.vscode
+.DS_Store
+
+**/.embuild/
+/platform/**/Cargo.lock
+!/platform/storage/sdcard/Cargo.lock
+/products/*/Cargo.lock
+/.*_target_*/
+/tools/scene_maker/assets
+# Generated runtime evidence and compiler output at every nesting level.
+**/logs/
+**/target/
+**/out/
+*.log
+*.elf
+*.o
+*.a
+*.rlib
+*.rmeta
+*.profraw
+*.lcov
+*.dSYM/
+**/__pycache__/
+*.py[cod]
+# Unused failed HTTP download, not a font.
+/assets/fonts/IBMPlexSans-SemiBold.ttf
+.env.local
+.env.*.local
+.env
+.scannerwork/
+**/.scratch/
